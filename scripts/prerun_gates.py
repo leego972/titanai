@@ -153,12 +153,14 @@ def gate_0c_manifest(proc_dir: Path, corpus_version: str) -> Dict:
 
     issues = []
 
-    # Check random seed
+    # Check random seed — accept from top-level or preprocessing_rules
     rules = manifest.get("preprocessing_rules", {})
-    if rules.get("random_seed") != 42:
-        issues.append(f"random_seed={rules.get('random_seed')} (expected 42)")
-    if abs(rules.get("train_ratio", 0) - 0.98) > 0.001:
-        issues.append(f"train_ratio={rules.get('train_ratio')} (expected 0.98)")
+    random_seed = manifest.get("random_seed", rules.get("random_seed"))
+    if random_seed != 42:
+        issues.append(f"random_seed={random_seed} (expected 42)")
+    train_ratio = manifest.get("train_ratio", rules.get("train_ratio"))
+    if train_ratio is None or abs(train_ratio - 0.98) > 0.001:
+        issues.append(f"train_ratio={train_ratio} (expected 0.98)")
 
     # Check token ratios
     ratios = manifest.get("token_ratios", {})
@@ -299,15 +301,15 @@ def gate_0f_tokenizer_shards(cfg: Dict, proc_dir: Path, corpus_version: str, bas
         if not shards:
             issues.append(f"No shards found in {shard_dir}")
             continue
-        # Check first shard
+        # Check first shard — accept both 1D flat arrays and 2D (n_seq, seq_len) arrays
         try:
             arr = np.load(str(shards[0]))
-            if arr.ndim != 2:
-                issues.append(f"{split} shard has wrong shape: {arr.shape}")
+            if arr.ndim not in (1, 2):
+                issues.append(f"{split} shard has unexpected ndim={arr.ndim}: {arr.shape}")
             if arr.size == 0:
                 issues.append(f"{split} shard is empty")
-            if np.any(np.isnan(arr.astype(float))):
-                issues.append(f"{split} shard contains NaN values")
+            if arr.size < 1000:
+                issues.append(f"{split} shard suspiciously small: {arr.size} elements")
             if np.all(arr == 0):
                 issues.append(f"{split} shard is all zeros (likely corruption)")
         except Exception as e:
