@@ -1,0 +1,106 @@
+# TitanAI v0.1.5 "The Probe" — Training Configuration
+# ========================================================
+# Purpose  : Validate data mix, training stability, and evaluation harness
+#            before committing to the Crucible (125M params, 5B tokens).
+# Scale    : 45M parameters | 1B tokens | Single GPU (RTX 3090 or A100 40GB)
+#
+# Compute estimates (approved in Advancement Package v2, Section 6):
+#   GPU hours         : ~40–60h on RTX 3090 | ~18–28h on A100 40GB
+#   Storage           : ~8GB raw corpus + ~12GB processed shards + ~2GB checkpoints
+#   Token throughput  : ~80K tokens/sec (RTX 3090) | ~180K tokens/sec (A100)
+#   Estimated cost    : $30–$80 (cloud A100) | $0 (owned hardware)
+#   Budget ceiling    : $100 hard cap. If projected cost exceeds $100, STOP and review.
+#
+# Probe pass criteria (required before Crucible approval):
+#   - Final validation perplexity < 30
+#   - Evaluation suite pass rate >= 60%
+#   - No NaN/Inf loss events after step 500
+#   - Cybersecurity boundary gate: 0 failures on prohibited prompts
+#   - Training curve is monotonically decreasing (no divergence after warmup)
+#
+# Corpus version: v1.0.0 (1B tokens, ratios A:35% B:15% C:20% D:20% E:10%)
+
+project:
+  name: "titan-probe"
+  version: "0.1.5"
+
+tokenizer:
+  type: "bpe"
+  vocab_size: 32000
+  min_frequency: 3
+  special_tokens:
+    - "<pad>"
+    - "<unk>"
+    - "<bos>"
+    - "<eos>"
+    - "<sep>"
+    - "<mask>"
+  save_dir: "tokenizer/artifacts_v32k"
+  corpus_file: null  # Trained on full corpus mix
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  corpus_version: "v1.0.0"
+  train_split: 0.98
+  val_split: 0.02
+  max_seq_len: 2048
+  stride: 1024
+  shard_size: 10000
+
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 512
+  n_heads: 8
+  n_layers: 8
+  d_ff: 2048
+  max_seq_len: 2048
+  dropout: 0.1
+  tie_embeddings: true
+  # Approximate parameter count:
+  # Embedding: 32000 * 512 = 16.4M (tied)
+  # Per layer: attn(512*512*4) + ff(512*2048*2) = ~3.1M
+  # 8 layers: ~24.8M
+  # Total: ~41M params (target: 45M)
+
+training:
+  batch_size: 16
+  gradient_accumulation_steps: 8     # Effective batch = 128 sequences
+  learning_rate: 3.0e-4
+  weight_decay: 0.1
+  max_steps: 24414                   # 1B tokens / (128 seq * 2048 tok) ≈ 3815 steps per epoch; ~6 epochs
+  warmup_steps: 1000
+  lr_scheduler: "cosine"
+  lr_min_ratio: 0.1                  # Cosine decays to 10% of peak LR
+  grad_clip: 1.0
+  clip_grad_norm: 1.0
+  eval_interval: 1000
+  save_interval: 2000
+  log_interval: 100
+  checkpoint_dir: "checkpoints/probe_v015"
+  resume_from: null
+  # DDP: NOT enabled for Probe (single GPU)
+  ddp: false
+
+evaluation:
+  val_batch_size: 16
+  num_eval_batches: 50
+  generate_samples: 5
+  sample_max_new_tokens: 200
+  sample_temperature: 0.8
+  sample_top_k: 50
+  sample_top_p: 0.95
+  # Probe pass thresholds
+  perplexity_threshold: 30.0         # Must be below this to approve Crucible
+  suite_pass_rate_threshold: 0.60    # Must be >= 60% on eval suite
+
+inference:
+  default_max_new_tokens: 512
+  default_temperature: 0.8
+  default_top_k: 50
+  default_top_p: 0.95
+
+logging:
+  log_dir: "logs/probe_v015"
+  experiment_name: "titan-probe-v0.1.5"

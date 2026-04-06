@@ -1,23 +1,25 @@
 """
-Titan Base Language Model
-=========================
+Titan Base Language Model — v0.2
+=================================
 A decoder-only Transformer (GPT-style) implemented from scratch in PyTorch.
 
-Architecture:
-    - Token embedding + learned positional embedding
-    - N stacked Transformer decoder blocks
-    - Each block: Pre-LayerNorm, Causal Multi-Head Self-Attention, Pre-LayerNorm, MLP
-    - Final LayerNorm + linear projection to vocabulary
-    - Optional weight tying between input embedding and output projection
+Architecture upgrades from Foundation v1:
+    - Rotary Positional Embeddings (RoPE) replacing learned absolute embeddings
+      Required for 2048+ context length and length extrapolation.
+    - FlashAttention-2 integration with clean CPU/standard-attention fallback
+      Active when flash_attn is installed and CUDA is available.
+      Falls back gracefully to standard scaled dot-product attention otherwise.
+    - Compatibility check at init: reports which attention path is active.
+
+Locked from Foundation v1 (do not change without approval):
+    - Pre-LayerNorm for training stability
+    - GELU activation in MLP
+    - Causal (autoregressive) masking
+    - Optional embedding weight tying
+    - Weight initialization scheme (scaled residual projections)
 
 This is Titan's own architecture. It is not a wrapper over any external model.
 All weights are initialized from scratch and owned by this project.
-
-Design decisions:
-    - Pre-LayerNorm (before attention/MLP) for training stability
-    - Causal attention mask (autoregressive, decoder-only)
-    - GELU activation in the MLP
-    - Optional embedding weight tying to reduce parameter count
 """
 
 import math
@@ -25,8 +27,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
+# ─── FlashAttention-2 availability check ──────────────────────────────────────
+
+def _check_flash_attn() -> bool:
+    """
+    Returns True if flash_attn is installed AND CUDA is available.
+    Prints a clear status message at import time.
+    """
+    try:
+        import flash_attn  # noqa: F401
+        if torch.cuda.is_available():
+            print("[TitanLM] FlashAttention-2: ACTIVE (flash_attn installed, CUDA available)")
+            return True
+        else:
+            print("[TitanLM] FlashAttention-2: INACTIVE (flash_attn installed but no CUDA — using standard attention)")
+            return False
+    except ImportError:
+        print("[TitanLM] FlashAttention-2: INACTIVE (flash_attn not installed — using standard attention)")
+        return False
+
+FLASH_ATTN_AVAILABLE = _check_flash_attn()
+
+
+# ─── Config ───────────────────────────────────────────────────────────────────
 
 @dataclass
 class TitanConfig:
@@ -36,7 +61,7 @@ class TitanConfig:
     n_heads: int = 4
     n_layers: int = 4
     d_ff: int = 1024
-    max_seq_len: int = 256
+    max_seq_len: int = 2048      # Upgraded: 2048 context supported via RoPE
     dropout: float = 0.1
     tie_embeddings: bool = True
 
@@ -67,12 +92,70 @@ class TitanConfig:
         }
 
 
+# ─── Rotary Positional Embeddings (RoPE) ──────────────────────────────────────
+
+def precompute_rope_freqs(d_head: int, max_seq_len: int, base: float = 10000.0) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Precompute RoPE cosine and sine frequency tables.
+
+    Args:
+        d_head: dimension per attention head (must be even)
+        max_seq_len: maximum sequence length
+        base: frequency base (default 10000, as in original RoPE paper)
+
+    Returns:
+        cos_table: (max_seq_len, d_head)
+        sin_table: (max_seq_len, d_head)
+    """
+    assert d_head % 2 == 0, f"d_head must be even for RoPE, got {d_head}"
+    # Frequencies: theta_i = 1 / (base ^ (2i / d_head))
+    theta = 1.0 / (base ** (torch.arange(0, d_head, 2).float() / d_head))  # (d_head/2,)
+    positions = torch.arange(max_seq_len).float()  # (max_seq_len,)
+    freqs = torch.outer(positions, theta)  # (max_seq_len, d_head/2)
+    # Interleave: repeat each freq for cos and sin pairing
+    freqs_full = torch.cat([freqs, freqs], dim=-1)  # (max_seq_len, d_head)
+    return freqs_full.cos(), freqs_full.sin()
+
+
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """Rotate the second half of the last dimension to implement RoPE rotation."""
+    half = x.shape[-1] // 2
+    x1 = x[..., :half]
+    x2 = x[..., half:]
+    return torch.cat([-x2, x1], dim=-1)
+
+
+def apply_rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Apply Rotary Positional Embeddings to query and key tensors.
+
+    Args:
+        q: (B, n_heads, T, d_head)
+        k: (B, n_heads, T, d_head)
+        cos: (T, d_head) — precomputed cosines
+        sin: (T, d_head) — precomputed sines
+
+    Returns:
+        q_rot, k_rot: same shape as input, with RoPE applied
+    """
+    # Reshape cos/sin to broadcast: (1, 1, T, d_head)
+    cos = cos[:q.shape[2], :].unsqueeze(0).unsqueeze(0)
+    sin = sin[:q.shape[2], :].unsqueeze(0).unsqueeze(0)
+    q_rot = (q * cos) + (rotate_half(q) * sin)
+    k_rot = (k * cos) + (rotate_half(k) * sin)
+    return q_rot, k_rot
+
+
 # ─── Attention ────────────────────────────────────────────────────────────────
 
 class CausalSelfAttention(nn.Module):
     """
-    Multi-head causal self-attention.
-    Uses a causal mask so each position can only attend to itself and earlier positions.
+    Multi-head causal self-attention with RoPE positional embeddings.
+
+    Attention path selection (in priority order):
+        1. FlashAttention-2 (flash_attn installed + CUDA available)
+        2. PyTorch scaled_dot_product_attention with causal mask (PyTorch >= 2.0)
+        3. Manual scaled dot-product attention (fallback for all environments)
     """
 
     def __init__(self, config: TitanConfig):
@@ -83,6 +166,7 @@ class CausalSelfAttention(nn.Module):
         self.n_heads = config.n_heads
         self.d_head = config.d_model // config.n_heads
         self.d_model = config.d_model
+        self.max_seq_len = config.max_seq_len
 
         # Combined Q, K, V projection
         self.qkv_proj = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
@@ -90,12 +174,21 @@ class CausalSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-        # Causal mask (lower triangular)
+        # Precompute RoPE frequency tables and register as buffers (not parameters)
+        cos_table, sin_table = precompute_rope_freqs(self.d_head, config.max_seq_len)
+        self.register_buffer("rope_cos", cos_table, persistent=False)
+        self.register_buffer("rope_sin", sin_table, persistent=False)
+
+        # Causal mask for manual attention fallback
         self.register_buffer(
             "causal_mask",
             torch.tril(torch.ones(config.max_seq_len, config.max_seq_len))
             .view(1, 1, config.max_seq_len, config.max_seq_len),
         )
+
+        # Determine which attention path to use
+        self._use_flash = FLASH_ATTN_AVAILABLE
+        self._use_sdpa = (not self._use_flash) and hasattr(F, "scaled_dot_product_attention")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.shape  # batch, seq_len, d_model
@@ -109,21 +202,41 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
         v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
 
-        # Scaled dot-product attention
-        scale = math.sqrt(self.d_head)
-        attn = (q @ k.transpose(-2, -1)) / scale  # (B, n_heads, T, T)
+        # Apply RoPE to Q and K
+        q, k = apply_rope(q, k, self.rope_cos, self.rope_sin)
 
-        # Apply causal mask
-        attn = attn.masked_fill(
-            self.causal_mask[:, :, :T, :T] == 0,
-            float("-inf"),
-        )
-        attn = F.softmax(attn, dim=-1)
-        attn = self.attn_dropout(attn)
+        # ── Attention path ──────────────────────────────────────────────────
+        if self._use_flash:
+            # FlashAttention-2: expects (B, T, n_heads, d_head) layout
+            from flash_attn import flash_attn_func
+            q_fa = q.transpose(1, 2)  # (B, T, n_heads, d_head)
+            k_fa = k.transpose(1, 2)
+            v_fa = v.transpose(1, 2)
+            out = flash_attn_func(q_fa, k_fa, v_fa, causal=True)  # (B, T, n_heads, d_head)
+            out = out.reshape(B, T, C)
 
-        # Weighted sum of values
-        out = attn @ v  # (B, n_heads, T, d_head)
-        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        elif self._use_sdpa:
+            # PyTorch 2.0+ native scaled_dot_product_attention (fused, efficient)
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=None,
+                dropout_p=self.attn_dropout.p if self.training else 0.0,
+                is_causal=True,
+            )  # (B, n_heads, T, d_head)
+            out = out.transpose(1, 2).contiguous().view(B, T, C)
+
+        else:
+            # Manual fallback: standard scaled dot-product attention
+            scale = math.sqrt(self.d_head)
+            attn = (q @ k.transpose(-2, -1)) / scale  # (B, n_heads, T, T)
+            attn = attn.masked_fill(
+                self.causal_mask[:, :, :T, :T] == 0, float("-inf")
+            )
+            attn = F.softmax(attn, dim=-1)
+            attn = self.attn_dropout(attn)
+            out = attn @ v  # (B, n_heads, T, d_head)
+            out = out.transpose(1, 2).contiguous().view(B, T, C)
+
         out = self.resid_dropout(self.out_proj(out))
         return out
 
@@ -148,7 +261,7 @@ class TitanMLP(nn.Module):
 class TitanBlock(nn.Module):
     """
     Single Transformer decoder block.
-    Uses Pre-LayerNorm for better training stability.
+    Uses Pre-LayerNorm for training stability (locked from Foundation v1).
     """
 
     def __init__(self, config: TitanConfig):
@@ -159,7 +272,6 @@ class TitanBlock(nn.Module):
         self.mlp = TitanMLP(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Pre-norm residual connections
         x = x + self.attn(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
         return x
@@ -170,15 +282,15 @@ class TitanBlock(nn.Module):
 class TitanLM(nn.Module):
     """
     Titan Language Model — decoder-only Transformer.
-    This is Titan's own base model, trained from scratch.
+    Foundation v1 architecture + RoPE + FlashAttention-2 path.
     """
 
     def __init__(self, config: TitanConfig):
         super().__init__()
         self.config = config
 
+        # Token embedding only — positional info is handled by RoPE in attention
         self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
-        self.position_embedding = nn.Embedding(config.max_seq_len, config.d_model)
         self.embed_dropout = nn.Dropout(config.dropout)
 
         self.blocks = nn.ModuleList([TitanBlock(config) for _ in range(config.n_layers)])
@@ -212,23 +324,18 @@ class TitanLM(nn.Module):
         """
         Args:
             input_ids: (B, T) token IDs
-            labels: (B, T) token IDs for loss computation, -100 = ignore
+            labels:    (B, T) token IDs for loss computation, -100 = ignore
 
         Returns:
             logits: (B, T, vocab_size)
-            loss: scalar cross-entropy loss (only if labels provided)
+            loss:   scalar cross-entropy loss (only if labels provided)
         """
         B, T = input_ids.shape
         assert T <= self.config.max_seq_len, \
             f"Sequence length {T} exceeds max_seq_len {self.config.max_seq_len}"
 
-        device = input_ids.device
-        positions = torch.arange(T, device=device).unsqueeze(0)  # (1, T)
-
-        # Embeddings
-        tok_emb = self.token_embedding(input_ids)
-        pos_emb = self.position_embedding(positions)
-        x = self.embed_dropout(tok_emb + pos_emb)
+        # Token embeddings only (RoPE handles positional information)
+        x = self.embed_dropout(self.token_embedding(input_ids))
 
         # Transformer blocks
         for block in self.blocks:
@@ -239,7 +346,6 @@ class TitanLM(nn.Module):
 
         loss = None
         if labels is not None:
-            # Flatten for cross-entropy
             loss = F.cross_entropy(
                 logits.view(-1, self.config.vocab_size),
                 labels.view(-1),
@@ -264,12 +370,12 @@ class TitanLM(nn.Module):
         """
         Autoregressive text generation.
         Args:
-            input_ids: (1, T) prompt token IDs
+            input_ids:      (1, T) prompt token IDs
             max_new_tokens: number of tokens to generate
-            temperature: sampling temperature (1.0 = no scaling)
-            top_k: keep only top-k logits (0 = disabled)
-            top_p: nucleus sampling threshold (1.0 = disabled)
-            eos_id: stop generation when this token is produced
+            temperature:    sampling temperature (1.0 = no scaling)
+            top_k:          keep only top-k logits (0 = disabled)
+            top_p:          nucleus sampling threshold (1.0 = disabled)
+            eos_id:         stop generation when this token is produced
         Returns:
             (1, T + max_new_tokens) token IDs
         """
@@ -277,25 +383,20 @@ class TitanLM(nn.Module):
         generated = input_ids.clone()
 
         for _ in range(max_new_tokens):
-            # Truncate to max context window
             ctx = generated[:, -self.config.max_seq_len:]
             logits, _ = self.forward(ctx)
-            logits = logits[:, -1, :]  # Last token logits: (1, vocab_size)
+            logits = logits[:, -1, :]
 
-            # Apply temperature
             if temperature != 1.0:
                 logits = logits / temperature
 
-            # Top-k filtering
             if top_k > 0:
                 top_k_vals, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < top_k_vals[:, -1:]] = float("-inf")
 
-            # Top-p (nucleus) filtering
             if top_p < 1.0:
                 sorted_logits, sorted_idx = torch.sort(logits, descending=True)
                 cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                # Remove tokens with cumulative probability above threshold
                 sorted_idx_to_remove = cumulative_probs - F.softmax(sorted_logits, dim=-1) > top_p
                 sorted_logits[sorted_idx_to_remove] = float("-inf")
                 logits = torch.zeros_like(logits).scatter_(1, sorted_idx, sorted_logits)
