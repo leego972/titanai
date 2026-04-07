@@ -2,11 +2,25 @@
 TitanAI API — Configuration
 ============================
 All settings are read from environment variables with sensible defaults.
+
+PRE-FLIGHT SECURITY FIX:
+    TITAN_REQUIRE_AUTH now defaults to "true" (was "false").
+    If REQUIRE_AUTH is true and API_KEY is empty, the server logs a loud
+    warning at startup. start_api.sh enforces the key length check before
+    the Python process even starts.
+
+    To run in dev mode (local only, no auth):
+        export TITAN_REQUIRE_AUTH=false
+    Never set this on Vast.AI or any public-facing instance.
 """
 import os
+import logging
 from pathlib import Path
 
+log = logging.getLogger("titan.config")
+
 BASE_DIR = Path(__file__).parent.parent.parent  # titanai/ root
+
 
 class APIConfig:
     # Server
@@ -31,9 +45,12 @@ class APIConfig:
     BASE_DIR: str = str(BASE_DIR)
     DEVICE: str = os.getenv("TITAN_DEVICE", "auto")  # auto | cuda | cpu
 
-    # Auth
-    API_KEY: str = os.getenv("TITAN_API_KEY", "")  # Empty = no auth (dev mode)
-    REQUIRE_AUTH: bool = os.getenv("TITAN_REQUIRE_AUTH", "false").lower() == "true"
+    # Auth (PRE-FLIGHT SECURITY FIX)
+    # Default is now "true" — auth is on unless explicitly disabled for local dev.
+    # start_api.sh enforces TITAN_REQUIRE_AUTH=true and key length >= 32 chars
+    # before this process starts, so this default is a belt-and-suspenders guard.
+    API_KEY: str = os.getenv("TITAN_API_KEY", "")
+    REQUIRE_AUTH: bool = os.getenv("TITAN_REQUIRE_AUTH", "true").lower() == "true"
 
     # Generation defaults (can be overridden per request)
     DEFAULT_MAX_NEW_TOKENS: int = int(os.getenv("TITAN_DEFAULT_MAX_TOKENS", "512"))
@@ -51,4 +68,15 @@ class APIConfig:
         str(BASE_DIR / "logs" / "probe_v015" / "run_summary.json")
     )
 
+
 config = APIConfig()
+
+# ── Startup auth validation ───────────────────────────────────────────────────
+# Warn loudly if auth is enabled but no key is set. This can happen if
+# start_api.sh is bypassed and the server is started directly.
+if config.REQUIRE_AUTH and not config.API_KEY:
+    log.warning(
+        "SECURITY WARNING: TITAN_REQUIRE_AUTH=true but TITAN_API_KEY is empty. "
+        "All requests will be rejected with 401. "
+        "Set TITAN_API_KEY to a strong random key (openssl rand -hex 32)."
+    )

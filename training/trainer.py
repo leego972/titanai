@@ -5,10 +5,19 @@ Trains TitanLM from scratch on the prepared dataset.
 Supports:
     - Gradient accumulation for larger effective batch sizes
     - Cosine LR schedule with linear warmup
-    - Gradient clipping
+    - Gradient clipping (enforced, not optional)
+    - NaN/Inf divergence detection with fail-fast and emergency checkpoint
+    - Gradient spike logging for early instability detection
     - Checkpoint saving and resuming
     - Validation loss evaluation at configurable intervals
     - Clean failure and resume from any checkpoint
+
+PRE-FLIGHT FIXES APPLIED:
+    - NaN/Inf loss detection: halts run immediately on divergence
+    - Emergency checkpoint saved before halt to preserve last good state
+    - Gradient clipping is now enforced (clip_grad > 0 is required at startup)
+    - Gradient spike events logged to _events.jsonl for post-run analysis
+    - log_event() added to TrainingLogger for structured event tracking
 
 Usage:
     python scripts/train.py --config configs/titan_config.yaml
@@ -49,7 +58,7 @@ def get_cosine_schedule_with_warmup(
 ) -> LambdaLR:
     """
     Linear warmup followed by cosine decay.
-    LR goes from 0 → max_lr over warmup_steps,
+    LR goes from 0 to max_lr over warmup_steps,
     then cosine decays to min_lr_ratio * max_lr over remaining steps.
     """
     def lr_lambda(step: int) -> float:
@@ -65,14 +74,15 @@ def get_cosine_schedule_with_warmup(
 # ─── Logger ───────────────────────────────────────────────────────────────────
 
 class TrainingLogger:
-    """Simple CSV + console logger for training metrics."""
+    """CSV + console logger for training metrics and named events."""
 
     def __init__(self, log_dir: str, experiment_name: str):
         os.makedirs(log_dir, exist_ok=True)
         self.log_path = os.path.join(log_dir, f"{experiment_name}_train.csv")
         self.val_log_path = os.path.join(log_dir, f"{experiment_name}_val.csv")
+        self.events_path = os.path.join(log_dir, f"{experiment_name}_events.jsonl")
 
-        # Write headers if files don't exist
+        # Write headers if files do not exist
         if not os.path.exists(self.log_path):
             with open(self.log_path, "w") as f:
                 f.write("step,loss,lr,tokens_per_sec,elapsed_sec\n")
@@ -91,6 +101,22 @@ class TrainingLogger:
         with open(self.val_log_path, "a") as f:
             f.write(line + "\n")
         print(f"[Val]   step={step:6d} | val_loss={val_loss:.4f} | perplexity={val_ppl:.2f}")
+
+    def log_event(self, step: int, event_type: str, message: str):
+        """
+        Log a named training event (DIVERGENCE, GRAD_SPIKE, etc.) to a
+        dedicated JSONL events file for post-run analysis.
+        """
+        import datetime
+        entry = {
+            "step": step,
+            "event": event_type,
+            "message": message,
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+        }
+        with open(self.events_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        print(f"[Event] step={step:6d} | {event_type}: {message}")
 
 
 # ─── Training Loop ────────────────────────────────────────────────────────────
@@ -169,13 +195,23 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
     checkpoint_dir = os.path.join(base_dir, train_cfg["checkpoint_dir"])
     os.makedirs(checkpoint_dir, exist_ok=True)
 
+    # ── Validate clip_grad is set (PRE-FLIGHT FIX) ───────────────────────────
+    # Gradient clipping is required for stable training. Fail at startup if
+    # the config has it disabled (0 or negative) to prevent a silent bad run.
+    clip_grad = train_cfg["clip_grad_norm"]
+    if clip_grad <= 0:
+        raise ValueError(
+            f"clip_grad_norm must be > 0 (got {clip_grad}). "
+            "Gradient clipping is required for stable training. "
+            "Set clip_grad_norm: 1.0 in titan_config.yaml."
+        )
+
     # ── Training Loop ────────────────────────────────────────────────────────
     grad_accum_steps = train_cfg["gradient_accumulation_steps"]
     max_steps = train_cfg["max_steps"]
     log_interval = train_cfg["log_interval"]
     eval_interval = train_cfg["eval_interval"]
     save_interval = train_cfg["save_interval"]
-    clip_grad = train_cfg["clip_grad_norm"]
 
     model.train()
     accum_loss = 0.0
@@ -184,6 +220,7 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
     optimizer.zero_grad()
 
     print(f"[Train] Starting training from step {start_step} to {max_steps}")
+    print(f"[Train] Gradient clipping: {clip_grad} | Grad accum steps: {grad_accum_steps}")
 
     for step in range(start_step, max_steps):
         # ── Fetch batch ─────────────────────────────────────────────────────
@@ -198,16 +235,47 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
 
         # ── Forward pass ────────────────────────────────────────────────────
         _, loss = model(input_ids, labels)
+
+        # ── NaN/Inf divergence guard (PRE-FLIGHT FIX) ───────────────────────
+        # Fail fast on divergence to prevent silent checkpoint corruption
+        # and avoid wasting Vast.AI compute budget on a dead run.
+        raw_loss_val = loss.item()
+        if not torch.isfinite(loss):
+            msg = (f"Loss is {raw_loss_val} at step {step + 1}. "
+                   f"Saving emergency checkpoint and halting.")
+            logger.log_event(step + 1, "DIVERGENCE", msg)
+            print(f"[Train] FATAL: Loss diverged to {raw_loss_val} at step {step + 1}")
+            print(f"[Train] Saving emergency checkpoint before halt...")
+            emergency_path = os.path.join(checkpoint_dir,
+                                          f"emergency_step_{step + 1}.pt")
+            save_checkpoint(emergency_path, model, optimizer, scheduler,
+                            step + 1, config)
+            print(f"[Train] Emergency checkpoint saved: {emergency_path}")
+            raise RuntimeError(
+                f"Training diverged: loss={raw_loss_val} at step {step + 1}. "
+                f"Check learning rate, gradient clipping, and data quality. "
+                f"Emergency checkpoint saved to {emergency_path}"
+            )
+
         loss = loss / grad_accum_steps
         loss.backward()
 
-        accum_loss += loss.item()
+        accum_loss += raw_loss_val
         accum_tokens += input_ids.numel()
 
         # ── Gradient accumulation step ──────────────────────────────────────
         if (step + 1) % grad_accum_steps == 0:
-            if clip_grad > 0:
-                nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            # Enforce gradient clipping — required, not optional (PRE-FLIGHT FIX)
+            grad_norm = nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            # Log gradient spikes that indicate instability risk
+            if grad_norm > clip_grad * 5:
+                logger.log_event(
+                    step + 1, "GRAD_SPIKE",
+                    f"Gradient norm {grad_norm:.2f} >> clip threshold {clip_grad} "
+                    f"(ratio: {grad_norm / clip_grad:.1f}x)"
+                )
+                print(f"[Train] WARN: Gradient spike at step {step + 1}: "
+                      f"norm={grad_norm:.2f} (clip={clip_grad})")
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
@@ -217,7 +285,7 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
             elapsed = time.time() - t0
             tps = accum_tokens / elapsed
             current_lr = scheduler.get_last_lr()[0]
-            logger.log_train(step + 1, accum_loss * grad_accum_steps / log_interval,
+            logger.log_train(step + 1, accum_loss / log_interval,
                              current_lr, tps, elapsed)
             accum_loss = 0.0
             accum_tokens = 0

@@ -324,8 +324,42 @@ def gate_0f_tokenizer_shards(cfg: Dict, proc_dir: Path, corpus_version: str, bas
                        f"Tokenizer OK (vocab={vocab_size}), "
                        f"shards: train={n_train}, val={n_val}")
 
+# ─── Gate 0-G: Security environment checks (PRE-FLIGHT FIX) ─────────────────────────────
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+def gate_0g_security_env() -> Dict:
+    """
+    Verify that the API security environment variables are correctly set.
+    TITAN_REQUIRE_AUTH must be 'true' and TITAN_API_KEY must be >= 32 chars.
+    This gate FAILS (not warns) to block training on an insecure instance.
+    """
+    issues = []
+    require_auth = os.environ.get("TITAN_REQUIRE_AUTH", "").strip().lower()
+    api_key = os.environ.get("TITAN_API_KEY", "").strip()
+
+    if require_auth != "true":
+        issues.append(
+            f"TITAN_REQUIRE_AUTH='{require_auth}' (must be 'true'). "
+            "The API is publicly exposed on Vast.AI — auth is mandatory."
+        )
+    if not api_key:
+        issues.append(
+            "TITAN_API_KEY is not set. "
+            "Generate one: openssl rand -hex 32"
+        )
+    elif len(api_key) < 32:
+        issues.append(
+            f"TITAN_API_KEY is too short ({len(api_key)} chars, minimum 32). "
+            "Use: openssl rand -hex 32"
+        )
+
+    if issues:
+        return gate_result("0-G", GATE_FAIL, "Security gate failed: " + "; ".join(issues))
+
+    return gate_result("0-G", GATE_PASS,
+                       f"TITAN_REQUIRE_AUTH=true, API key length={len(api_key)} chars")
+
+
+# ─── Main ───────────────────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="TitanAI pre-run approval gates")
@@ -360,16 +394,16 @@ def main():
     results.append(gate_0d_training_config(cfg, args.config))
     results.append(gate_0e_budget_approval(args.budget_approved))
     results.append(gate_0f_tokenizer_shards(cfg, proc_dir, args.corpus_version, base_dir))
-
+    results.append(gate_0g_security_env())  # PRE-FLIGHT FIX: security env gate
     # Summary
+    total = len(results)
     print("\n" + "="*60)
     failed = [r for r in results if r["status"] == GATE_FAIL]
     warned = [r for r in results if r["status"] == GATE_WARN]
     passed = [r for r in results if r["status"] == GATE_PASS]
-
-    print(f"  PASSED : {len(passed)}/6")
-    print(f"  WARNED : {len(warned)}/6")
-    print(f"  FAILED : {len(failed)}/6")
+    print(f"  PASSED : {len(passed)}/{total}")
+    print(f"  WARNED : {len(warned)}/{total}")
+    print(f"  FAILED : {len(failed)}/{total}")
 
     if failed:
         print("\n  *** TRAINING BLOCKED ***")
