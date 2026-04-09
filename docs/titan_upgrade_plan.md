@@ -1,7 +1,7 @@
 # Titan AI — Complete Upgrade Plan
 ## Eight Pillars of Expert Intelligence
 
-**Document Version:** 6.0 (FINAL)
+**Document Version:** 7.0 (FINAL)
 **Prepared:** April 2026
 **Status:** Locked — executes after post-Crucible base pipeline
 **Crucible ETA:** ~April 15, 2026
@@ -153,8 +153,55 @@ The complete filmmaking pipeline from first idea to audience. Titan's second maj
 - Audience research: test screenings, demographic analysis, audience targeting
 - Press and publicity: press junkets, media relations, reviews strategy
 
-**Datasets:** 1,500 movie scripts, OpenSubtitles, 60 film textbooks, 300K film reviews, production documents, trade press, Cinema-Instruct custom pairs
-**Total:** ~300K examples | **Duration:** ~22 hrs | **Cost:** ~$9
+### Virelle Production Capabilities (Specialist Sub-Layer)
+
+Three dedicated capabilities built specifically for Virelle's production workflow — the areas where AI filmmaking currently struggles most:
+
+**1. Continuity Checker**
+
+Titan will be trained to read a script or production document and flag:
+
+| Continuity Type | What Titan Checks |
+|----------------|------------------|
+| **Character name drift** | Same character referred to by different names across scenes or documents |
+| **Wardrobe drift** | Character wearing item in scene 12 that was destroyed in scene 8 |
+| **Prop drift** | Object appears, disappears, or changes state inconsistently |
+| **Location/time-of-day contradictions** | Scene set at night follows a scene that ends at noon with no time passage |
+| **Accent/voice inconsistency** | Character's described accent or speech pattern changes without narrative reason |
+| **Scene order problems** | Events referenced as past that haven't happened yet; cause-effect violations |
+
+This is trained on continuity error datasets, script analysis examples, and custom synthetic continuity-checking instruction pairs.
+
+**2. Script Coverage & Scene-Strength Scoring**
+
+Titan will score any scene against a professional coverage rubric:
+
+| Criterion | What It Measures |
+|-----------|----------------|
+| **Conflict** | Is there genuine opposition — internal, interpersonal, or situational? |
+| **Subtext** | Is something being said beneath what is being said? |
+| **Hook** | Does the scene open with something that demands attention? |
+| **Quotable dialogue** | Is there a line that will be remembered? |
+| **Emotional turn** | Does a character's emotional state change by the end of the scene? |
+| **Trailer moment potential** | Is there a beat that would work in a 90-second trailer? |
+
+Output: a scored report per scene with specific notes on what is working and what needs strengthening. Trained on professional script coverage examples, scene analysis, and custom scoring rubric instruction pairs.
+
+**3. Localisation & Dubbing Prep**
+
+Titan will generate production-ready localisation assets from any script:
+
+| Output | Description |
+|--------|------------|
+| **Subtitle-ready dialogue cleanup** | Tighten lines for on-screen readability without losing meaning |
+| **Dubbing-friendly line shortening** | Shorten lines to match lip-sync timing constraints for dubbing |
+| **Culturally neutral alt-lines** | Rewrite culturally specific references for international audiences |
+| **Trailer tagline variants** | Generate 5–10 tagline options from the script's core premise and tone |
+
+Trained on OpenSubtitles, dubbing scripts, localisation guidelines, and custom dubbing-prep instruction pairs.
+
+**Datasets:** 1,500 movie scripts, OpenSubtitles, 60 film textbooks, 300K film reviews, production documents, trade press, Cinema-Instruct custom pairs, Continuity Error dataset (custom), Script Coverage examples, Dubbing/Localisation pairs
+**Total:** ~350K examples | **Duration:** ~25 hrs | **Cost:** ~$10
 
 ---
 
@@ -403,7 +450,7 @@ Train Titan to think like someone who is trying to break a system — not to cau
 | Stage 1: SFT | Instruction following | ~10 hrs | ~$5 |
 | Stage 2: Tool Use & Code | Tools, APIs, coding | ~8 hrs | ~$3 |
 | Upgrade A | General Knowledge | ~18 hrs | ~$7 |
-| Upgrade B | Film & Cinema Production | ~22 hrs | ~$9 |
+| Upgrade B | Film & Cinema Production (incl. Virelle tools) | ~25 hrs | ~$10 |
 | Upgrade C | Creative Thinking & Problem Solving | ~18 hrs | ~$7 |
 | Upgrade D | Advertising, Marketing & Sales | ~13 hrs | ~$5 |
 | Upgrade E | Business, Accounting & Banking | ~18 hrs | ~$7 |
@@ -411,10 +458,10 @@ Train Titan to think like someone who is trying to break a system — not to cau
 | Upgrade G | Street Smarts & Human Psychology | ~16 hrs | ~$6 |
 | Upgrade H | Adversarial & Criminal Thinking | ~11 hrs | ~$4 |
 | Agentic Scaffolding | Runtime, memory, tools | Code only | ~$0 |
-| **Grand Total** | **Titan AI v1.5** | **~332 hrs** | **~$132** |
+| **Grand Total** | **Titan AI v1.5** | **~335 hrs** | **~$133** |
 
 **Starting balance:** $169.13
-**Estimated remaining after completion:** ~$37
+**Estimated remaining after completion:** ~$36
 **No top-up required.**
 
 ---
