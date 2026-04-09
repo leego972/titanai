@@ -1,7 +1,7 @@
 # Titan AI — Complete Upgrade Plan
 ## Eight Pillars of Expert Intelligence
 
-**Document Version:** 7.0 (FINAL)
+**Document Version:** 8.0 (FINAL)
 **Prepared:** April 2026
 **Status:** Locked — executes after post-Crucible base pipeline
 **Crucible ETA:** ~April 15, 2026
@@ -457,7 +457,7 @@ Train Titan to think like someone who is trying to break a system — not to cau
 | Upgrade F | Cybersecurity (extended) | ~25 hrs | ~$10 |
 | Upgrade G | Street Smarts & Human Psychology | ~16 hrs | ~$6 |
 | Upgrade H | Adversarial & Criminal Thinking | ~11 hrs | ~$4 |
-| Agentic Scaffolding | Runtime, memory, tools | Code only | ~$0 |
+| Agentic Scaffolding | Runtime, memory, tools, web navigation | Code only | ~$0 |
 | **Grand Total** | **Titan AI v1.5** | **~335 hrs** | **~$133** |
 
 **Starting balance:** $169.13
@@ -482,6 +482,68 @@ Train Titan to think like someone who is trying to break a system — not to cau
 - **Always efficient** — finds the shortest path to the goal
 - **Always honest** — tells you when something won't work and why, before you waste time on it
 - **Always cost-conscious** — never recommends an expensive solution when a cheaper one works
+- **Navigates the web** — searches, reads, interacts with websites, and retrieves live information autonomously
+
+---
+
+## Agentic Scaffolding — Web Navigation & Internet Interaction
+
+This is not a training stage — it is the runtime layer that gives Titan its hands. Once the model is trained, the agentic scaffolding wraps it in a loop that lets it act in the world rather than just respond to prompts.
+
+### Web Navigation Capabilities
+
+| Capability | What Titan Can Do |
+|-----------|------------------|
+| **Web search** | Query search engines (Google, Bing, DuckDuckGo) and retrieve live results |
+| **Page reading** | Navigate to any URL and extract the full text content of the page |
+| **Site interaction** | Fill forms, click buttons, navigate multi-page flows, log into services |
+| **Research synthesis** | Visit multiple sources, cross-reference information, and produce a synthesised answer |
+| **Live data retrieval** | Pull current prices, news, weather, stock data, public records — anything publicly accessible |
+| **File downloading** | Download documents, PDFs, images, and data files from the web |
+| **OSINT operations** | Conduct open-source intelligence gathering across public web sources |
+| **Monitoring** | Periodically check a URL or search query for changes and report back |
+| **Form submission** | Submit data to web forms, APIs, and online services on your behalf |
+| **Screenshot capture** | Take a screenshot of any webpage for visual inspection |
+
+### How It Works
+
+Titan's agentic runtime uses a **ReAct loop** (Reason + Act):
+
+```
+User gives Titan a task
+        ↓
+Titan reasons: what do I need to know or do?
+        ↓
+Titan selects a tool: search / navigate / read / interact
+        ↓
+Titan executes the action and observes the result
+        ↓
+Titan reasons again: is the task done? What next?
+        ↓
+Repeat until task complete
+        ↓
+Titan delivers the result
+```
+
+### Tools Available to Titan at Runtime
+
+| Tool | Function |
+|------|---------|
+| `web_search(query)` | Search the web and return top results |
+| `navigate(url)` | Open a URL and return the page content |
+| `click(element)` | Click a button or link on a loaded page |
+| `fill_form(fields)` | Fill and submit a web form |
+| `download_file(url)` | Download a file from a URL |
+| `screenshot(url)` | Capture a screenshot of a webpage |
+| `run_code(script)` | Execute Python code and return the output |
+| `read_file(path)` | Read a local file |
+| `write_file(path, content)` | Write content to a local file |
+| `remember(key, value)` | Store information in persistent memory |
+| `recall(key)` | Retrieve stored information |
+
+### Implementation
+
+Built on **Playwright** (headless Chromium) for browser control and **SerpAPI / DuckDuckGo** for search. Titan's tool-use training (Stage 2) teaches it to call these tools correctly. The scaffolding is pure Python — no GPU required, no additional cost.
 
 ---
 
