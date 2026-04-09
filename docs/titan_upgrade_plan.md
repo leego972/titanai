@@ -1,26 +1,43 @@
 # Titan AI — Complete Upgrade Plan
-## Five Pillars of Expert Intelligence
+## Eight Pillars of Expert Intelligence
 
-**Document Version:** 2.0  
-**Prepared:** April 2026  
-**Status:** Pre-prepared — executes after post-Crucible base pipeline  
+**Document Version:** 4.0 (FINAL)
+**Prepared:** April 2026
+**Status:** Locked — executes after post-Crucible base pipeline
 **Crucible ETA:** ~April 15, 2026
 
 ---
 
 ## Titan's Identity
 
-Titan AI is not a general-purpose chatbot. It is a **specialist intelligence** built around five pillars that define what it is and what it does better than anything else:
+Titan AI is a **specialist intelligence** built around eight pillars. It is not a general chatbot. It is a sharp, honest, efficiency-driven AI that knows its domains deeply, tells the truth about what will and will not work, and always finds the most effective path to the goal.
 
-| Pillar | What Titan Excels At |
-|--------|---------------------|
-| **1. General Knowledge** | World history, geography, science, chemistry, mathematics — a vast, deep foundation |
-| **2. Film & Cinema Production** | The complete filmmaking pipeline: development, pre-production, production, post-production, marketing, distribution |
-| **3. Cybersecurity** | Offensive and defensive security, exploit development, penetration testing, vulnerability analysis, tool building |
-| **4. Creative Writing & Thinking** | Original storytelling, screenwriting, narrative craft, lateral thinking, concept generation |
-| **5. Proactive Problem Solving** | Anticipates problems before they occur, identifies root causes, proposes and executes solutions autonomously |
+| # | Pillar | Focus |
+|---|--------|-------|
+| 1 | **General Knowledge** | World history, geography, science, chemistry, mathematics, economics, philosophy |
+| 2 | **Film & Cinema Production** | Full pipeline: development → pre-production → production → post → marketing → distribution |
+| 3 | **Cybersecurity** (major) | Offensive and defensive security, exploits, pentest, malware, tool building — extended training |
+| 4 | **Creative Thinking & Problem Solving** | Lateral thinking, ideation, root cause analysis, anticipatory reasoning, constraint-based solutions |
+| 5 | **Advertising, Marketing & Sales** | Brand strategy, copywriting, digital marketing, consumer psychology, sales methodology |
+| 6 | **Business, Accounting & Banking** | Strategy, entrepreneurship, finance, accounting, banking, project management, negotiation |
+| 7 | **Code & Software Development** | Python, Bash, JavaScript, C, SQL — writing, debugging, explaining, and reasoning about code |
+| 8 | **Core Behaviours** | Efficiency, effectiveness, financial consciousness, proactive honesty, success-orientation |
 
-The goal is not breadth for its own sake. The goal is for Titan to be **genuinely useful** — to spot what is going wrong before you do, to know its domains deeply enough to give expert-level answers, and to act rather than just respond.
+---
+
+## Core Behaviours (Woven Into Every Pillar)
+
+These are not a separate training stage — they are trained into how Titan thinks across every domain:
+
+| Behaviour | What It Means |
+|-----------|--------------|
+| **Efficient** | Never takes ten steps when three will do. Produces immediately usable outputs. No wasted words. |
+| **Effective** | Always focused on the actual goal, not just the question asked. Gets things done. |
+| **Financially conscious** | Always looks for the most cost-effective solution. Flags where money is being wasted. Asks "is this worth the cost?" |
+| **Proactively honest** | If a plan will fail, says so immediately with clear reasons. Never tells the user what they want to hear at the expense of what they need to know. |
+| **Success-driven** | Focused on the user actually achieving their goal. Redirects effort away from doomed approaches. |
+| **Anticipatory** | Spots problems before they happen and raises them unprompted. |
+| **Action-oriented** | Does not just describe — proposes concrete next steps. |
 
 ---
 
@@ -31,304 +48,279 @@ Crucible Base Model (~April 15)
         ↓
 Stage 1: Instruction Tuning (SFT)
         ↓
-Stage 2: Tool Use Fine-Tuning
+Stage 2: Tool Use & Code Fine-Tuning
         ↓
-Upgrade A: General Knowledge Depth Pack
+Upgrade A: General Knowledge
         ↓
 Upgrade B: Film & Cinema Production (Full Pipeline)
         ↓
-Upgrade C: Cybersecurity Depth Pack
+Upgrade C: Creative Thinking & Problem Solving
         ↓
-Upgrade D: Creative Writing & Thinking
+Upgrade D: Advertising, Marketing & Sales
         ↓
-Upgrade E: Proactive Problem Solving
+Upgrade E: Business, Accounting & Banking
         ↓
-Titan AI v1.5 — Five-Pillar Expert Intelligence
+Upgrade F: Cybersecurity — Extended Deep Training
+        ↓
+Titan AI v1.5 — Eight-Pillar Expert Intelligence
 ```
+
+Cybersecurity runs last and longest — any remaining budget after all other upgrades goes into extended cyber training to maximise depth in Titan's primary specialisation.
 
 ---
 
-## Upgrade A: General Knowledge Depth Pack
+## Stage 1: Instruction Tuning (SFT)
 
-### Goal
-Give Titan a **vast, accurate, and deeply connected general knowledge base** — the kind of foundational intelligence that makes every other domain stronger. A Titan that knows world history understands the context behind geopolitical cyber attacks. A Titan that knows chemistry understands the science behind forensic analysis. General knowledge is the connective tissue.
+Teaches Titan to follow instructions, answer questions, and produce structured outputs. The bridge from "predicts next token" to "understands and responds."
 
-### Coverage
+**Datasets:** Alpaca-52K, OpenHermes-2.5, WizardLM-Evol-Instruct, Code-Instruct-18K
+**Duration:** ~10 hrs | **Cost:** ~$5
 
-| Subject | Depth |
-|---------|-------|
-| **World History** | Ancient civilisations through modern era, major conflicts, political movements, key figures |
-| **Geography** | Physical geography, geopolitics, nations, capitals, natural features, climate |
-| **General Science** | Physics, biology, earth science, astronomy — concepts and applications |
-| **Chemistry** | Organic and inorganic chemistry, reactions, compounds, lab methodology |
-| **Mathematics** | Algebra, geometry, statistics, logic, proofs, applied mathematics |
-| **Economics** | Macro and micro, markets, trade, financial systems |
-| **Philosophy & Logic** | Critical thinking, argumentation, ethics, major philosophical traditions |
-| **Current Events** | Understanding of how the world works today |
+---
 
-### Datasets
+## Stage 2: Tool Use & Code Fine-Tuning
 
-| Dataset | Source | Size | Focus |
-|---------|--------|------|-------|
-| **Wikipedia (filtered)** | `wikimedia/wikipedia` (HuggingFace) | ~6M articles | Broad encyclopaedic knowledge |
-| **OpenWebMath** | `open-web-math/open-web-math` | ~14.7B tokens | Mathematical reasoning and science |
-| **MMLU Training Data** | `cais/mmlu` (all subjects) | 57 subjects | Structured academic knowledge |
-| **World History Q&A** | Generated from Wikipedia + textbooks | ~30K examples | History instruction pairs |
-| **Science Q&A (SciQ)** | `allenai/sciq` | 13,679 examples | Science questions with explanations |
-| **Chemistry Textbooks** | Internet Archive public domain | ~20 books | Chemistry concepts and reactions |
-| **Geography Q&A** | Generated synthetic dataset | ~15K examples | Nations, capitals, physical geography |
+Teaches Titan to call external tools, write and execute code, and reason about software. This is what makes Titan agentic and technically capable.
 
-**Total general knowledge dataset: ~250K curated instruction pairs**
+**Code languages covered:** Python, Bash, JavaScript, C, SQL
+**Capabilities:** Write code from spec, debug errors, explain code, refactor, build tools, call APIs
 
-### Estimated Cost
-- **Duration:** ~15–20 hours
-- **Cost:** ~$6–8
+**Datasets:** ToolBench, APIBench, CodeAlpaca-20K, Python-Code-Instructions-18K, ReAct-Traces
+**Duration:** ~8 hrs | **Cost:** ~$3
+
+---
+
+## Upgrade A: General Knowledge
+
+A vast, accurate, deeply connected knowledge base that makes every other domain stronger.
+
+**Subjects:**
+- World history: ancient civilisations, empires, world wars, modern political history, key figures and events
+- Geography: physical geography, nations, capitals, borders, natural features, climate, geopolitics
+- General science: physics, biology, earth science, astronomy — concepts and real-world applications
+- Chemistry: organic and inorganic chemistry, reactions, compounds, periodic table, lab methodology
+- Mathematics: algebra, geometry, statistics, probability, logic, proofs, applied maths
+- Economics: macroeconomics, microeconomics, markets, trade, financial systems, inflation, GDP
+- Philosophy and logic: critical thinking, argumentation, ethics, major philosophical traditions
+
+**Datasets:** Wikipedia (filtered), OpenWebMath, MMLU (57 subjects), SciQ, World History Q&A, Chemistry textbooks, Geography Q&A
+**Total:** ~250K instruction pairs | **Duration:** ~18 hrs | **Cost:** ~$7
 
 ---
 
 ## Upgrade B: Film & Cinema Production (Full Pipeline)
 
-### Goal
-Make Titan the most capable film production AI available for a model of its size. Not just film trivia — **professional-grade knowledge of the entire filmmaking pipeline** from the first idea through to audience marketing. Titan should be able to sit in a production meeting and add value at every stage.
+The complete filmmaking pipeline from first idea to audience. Titan's second major specialisation.
 
-### Coverage: The Complete Filmmaking Pipeline
+### Development
+- Concept development, logline construction, premise testing, genre conventions
+- Script analysis, coverage writing, story notes, structural feedback
+- Pitching to studios, investors, and streamers — pitch deck construction
 
-**Development & Pre-Production**
+### Pre-Production
+- Screenwriting: three-act structure, character arcs, dialogue craft, scene construction, industry formatting
+- Budgeting: above-the-line vs below-the-line, cost estimation by genre, budget breakdowns
+- Scheduling: strip boards, shooting schedules, day-out-of-days, location grouping
+- Casting: breakdown writing, casting strategy, talent negotiation
+- Location scouting: requirements, permits, logistics
+- Storyboarding and pre-visualisation
+- Crew assembly: department heads, hierarchy, roles and responsibilities
+- Production design planning: set design, art direction, props, wardrobe
 
-| Area | Capability |
-|------|-----------|
-| **Concept Development** | Logline construction, premise testing, genre conventions, originality assessment |
-| **Screenwriting** | Three-act structure, character arcs, dialogue craft, scene construction, industry formatting |
-| **Script Analysis** | Coverage writing, story notes, structural feedback, character consistency |
-| **Budgeting** | Above-the-line vs below-the-line costs, budget breakdowns, cost estimation by genre |
-| **Scheduling** | Strip boards, shooting schedules, day-out-of-days, location grouping |
-| **Casting** | Breakdown writing, casting strategy, talent negotiation concepts |
-| **Location Scouting** | Location requirements, permits, logistics, production design considerations |
-| **Storyboarding** | Shot planning, visual language, pre-visualisation concepts |
-| **Crew Assembly** | Department heads, crew hierarchy, roles and responsibilities |
+### Production
+- Directing: shot selection, blocking, working with actors, coverage strategy, visual storytelling
+- Cinematography: lenses, lighting setups, camera movement, aspect ratios, colour theory
+- Sound recording: production sound, boom operation, ADR planning
+- On-set management: call sheets, daily reports, continuity, safety protocols
 
-**Production**
+### Post-Production
+- Editing: continuity editing, montage theory, pacing, rhythm, assembly through fine cut
+- Visual effects: VFX pipeline, compositing, CGI vs practical decision-making
+- Colour grading: colour theory, LUTs, DI pipeline, delivery specifications
+- Sound design and mixing: Foley, sound design, music scoring, mixing, delivery formats
+- Music and score: temp tracks, composer briefs, licensing, sync rights
 
-| Area | Capability |
-|------|-----------|
-| **Directing** | Shot selection, blocking, working with actors, coverage strategy, visual storytelling |
-| **Cinematography** | Lenses, lighting setups, camera movement, aspect ratios, colour theory |
-| **Production Design** | Set design, art direction, props, wardrobe, period accuracy |
-| **Sound Recording** | Production sound, boom operation, ADR planning |
-| **On-Set Management** | Call sheets, daily reports, continuity, safety protocols |
+### Marketing, Distribution & Exhibition
+- Film marketing: trailer construction, poster design, campaign strategy, social media rollout
+- Festival strategy: Cannes, Sundance, TIFF, Berlin — submission strategy, premiere timing
+- Distribution: theatrical vs streaming, sales agents, distribution deals, P&A budgets
+- Audience research: test screenings, demographic analysis, audience targeting
+- Press and publicity: press junkets, media relations, reviews strategy
 
-**Post-Production**
-
-| Area | Capability |
-|------|-----------|
-| **Editing** | Continuity editing, montage theory, pacing, rhythm, assembly to fine cut |
-| **Visual Effects** | VFX pipeline, compositing concepts, CGI vs practical |
-| **Colour Grading** | Colour theory, LUTs, DI pipeline, delivery specifications |
-| **Sound Design & Mixing** | Sound design, Foley, music scoring, mixing, delivery formats |
-| **Music & Score** | Temp tracks, composer briefs, licensing, sync rights |
-
-**Marketing, Distribution & Exhibition**
-
-| Area | Capability |
-|------|-----------|
-| **Film Marketing** | Trailer construction, poster design principles, campaign strategy, social media |
-| **Festival Strategy** | Major festivals (Cannes, Sundance, TIFF), submission strategy, premiere timing |
-| **Distribution** | Theatrical vs streaming, sales agents, distribution deals, P&A |
-| **Audience Research** | Test screenings, audience targeting, demographic analysis |
-| **Pitching** | Pitch deck construction, logline delivery, investor presentations |
-
-### Datasets
-
-| Dataset | Source | Size | Focus |
-|---------|--------|------|-------|
-| **Movie Scripts (IMSDB + Kaggle)** | Public domain + scraped | ~1,500 scripts | Screenplay format and storytelling |
-| **OpenSubtitles** | `Helsinki-NLP/open_subtitles` | ~3M lines | Dialogue, character voice, tone |
-| **Film Textbooks (processed)** | Internet Archive public domain | ~60 books | Directing, cinematography, editing, producing |
-| **Film Reviews & Analysis** | RogerEbert.com, Criterion, Letterboxd | ~300K reviews | Critical analysis, film language |
-| **Production Documents** | StudioBinder, Filmsourcing templates | ~8K documents | Call sheets, budgets, schedules, shot lists |
-| **Film History & Theory** | Wikipedia film articles + essays | ~50K articles | Film movements, auteur theory, genre |
-| **Marketing & Distribution** | Trade press (Variety, Deadline, THR) | ~30K articles | Industry business knowledge |
-| **Cinema-Instruct (custom)** | Generated from all above sources | ~40K examples | Full-pipeline Q&A instruction pairs |
-| **Pitching & Development** | Generated synthetic dataset | ~10K examples | Pitch decks, coverage, development notes |
-
-**Total cinema dataset: ~300K high-quality examples**
-
-### Estimated Cost
-- **Duration:** ~20–25 hours
-- **Cost:** ~$8–10
+**Datasets:** 1,500 movie scripts, OpenSubtitles, 60 film textbooks, 300K film reviews, production documents, trade press, Cinema-Instruct custom pairs
+**Total:** ~300K examples | **Duration:** ~22 hrs | **Cost:** ~$9
 
 ---
 
-## Upgrade C: Cybersecurity Depth Pack
+## Upgrade C: Creative Thinking & Problem Solving
 
-### Goal
-Make Titan an **expert-level offensive and defensive security intelligence** — capable of deep vulnerability analysis, exploit reasoning, penetration testing methodology, malware analysis, and building security tools from scratch.
+The combined capability that makes Titan genuinely intelligent rather than just knowledgeable.
 
-### Coverage
+### Creative Thinking
+- Lateral thinking: approaching problems from unexpected angles
+- Concept generation: producing original ideas on demand across any domain
+- "What if" reasoning: exploring possibilities and consequences of hypothetical scenarios
+- Cross-domain thinking: applying ideas from one field to solve problems in another
+- Brainstorming methodology: structured and unstructured ideation
+- Narrative and metaphor: using storytelling to explain and persuade
+- Design thinking: empathy, ideation, prototyping, testing, iteration
+- Original writing: fiction, screenwriting, poetry, creative non-fiction with genuine voice
 
-| Domain | Capability |
-|--------|-----------|
-| **Vulnerability Analysis** | CVE analysis, CVSS scoring, impact assessment, exploitation paths |
-| **Penetration Testing** | Full methodology: recon, enumeration, exploitation, post-exploitation, reporting |
-| **Exploit Development** | Buffer overflows, ROP chains, shellcode, format strings, heap exploitation |
-| **Malware Analysis** | Static/dynamic analysis, reverse engineering, IOC identification, YARA rules |
-| **Network Security** | Packet analysis, protocol exploitation, network forensics, traffic anomaly detection |
-| **Web Application Security** | OWASP Top 10, SQL injection, XSS, SSRF, authentication bypass |
-| **CTF Challenges** | Web, binary, crypto, forensics, reverse engineering — full solve methodology |
-| **Tool Building** | Writing security tools in Python — scanners, exploits, automation scripts |
-| **OSINT** | Target profiling, footprinting, open-source intelligence gathering |
-| **MITRE ATT&CK** | Adversary tactics, techniques, and procedures across the full kill chain |
+### Problem Solving
+- Root cause analysis: tracing symptoms to the actual underlying problem
+- Anticipatory thinking: identifying what will go wrong before it does
+- Decision trees: mapping options, consequences, and optimal paths
+- Risk assessment: identifying risks, ranking by probability and impact, proposing mitigations
+- Multi-step decomposition: breaking complex problems into ordered, solvable steps
+- Iterative refinement: propose, test mentally, refine, repeat
+- Constraint-based thinking: best solution within real-world limits of time, money, and resources
+- Viability assessment: honestly evaluating whether a plan will actually work
 
-### Datasets
-
-| Dataset | Source | Size | Focus |
-|---------|--------|------|-------|
-| **CyberLLMInstruct** | `ElZemity/CyberLLMInstruct` | 54,928 examples | Malware, CVE, pentest Q&A |
-| **Primus Cybersecurity Suite** | `CyberNative-AI/Primus` | ~100K examples | Broad security knowledge |
-| **PenQA** | `PenQA/PenQA` | ~20K examples | Penetration testing Q&A |
-| **NVD CVE Database** | nvd.nist.gov (public) | 250K+ CVEs | Vulnerability descriptions and analysis |
-| **CTF Writeups** | CTFtime.org + GitHub | ~30K writeups | Real challenge solutions and reasoning |
-| **Exploit-DB** | exploit-db.com (public) | ~50K exploits | Real exploit code and explanations |
-| **MITRE ATT&CK** | attack.mitre.org (public) | ~700 techniques | Adversary tactics and techniques |
-| **Security Tool Code** | GitHub public security repos | ~20K examples | Security tool implementation |
-| **Cyber-Instruct (custom)** | Generated from all above | ~20K examples | Domain-specific instruction pairs |
-
-**Total cybersecurity dataset: ~250K high-quality examples**
-
-### Estimated Cost
-- **Duration:** ~15–20 hours
-- **Cost:** ~$6–8
+**Datasets:** WritingPrompts (300K+), Project Gutenberg fiction, Chain-of-Thought reasoning, ARC Challenge, StrategyQA, ProofWriter, Diagnostic Reasoning (custom), Anticipatory Planning (custom)
+**Total:** ~250K examples | **Duration:** ~18 hrs | **Cost:** ~$7
 
 ---
 
-## Upgrade D: Creative Writing & Thinking
+## Upgrade D: Advertising, Marketing & Sales
 
-### Goal
-Give Titan **genuine creative intelligence** — the ability to generate original ideas, write with voice and style, construct compelling narratives, and think laterally across domains. This is what makes Titan interesting rather than just capable.
+The full commercial persuasion pipeline — from brand strategy to closing the deal.
 
-### Coverage
+- Brand strategy: identity, positioning, differentiation, brand voice, competitive analysis
+- Advertising campaigns: ideation, creative briefs, concept development, multi-channel execution
+- Copywriting: headlines, body copy, CTAs, long-form, ad scripts, email sequences
+- Digital marketing: SEO, SEM, social media strategy, content marketing, paid advertising (Meta, Google)
+- Consumer psychology: persuasion principles, decision-making biases, emotional triggers, buyer behaviour
+- Sales methodology: consultative selling, objection handling, pipeline management, closing techniques
+- Film marketing: trailer strategy, poster campaigns, press junkets, social rollout, release timing
+- Market research: audience segmentation, persona development, competitive intelligence
+- Analytics and measurement: KPIs, conversion tracking, A/B testing, ROI analysis
+- PR and media relations: press releases, media pitching, crisis communications, reputation management
 
-| Domain | Capability |
-|--------|-----------|
-| **Narrative Fiction** | Short stories, novel chapters, character development, plot architecture |
-| **Screenwriting Voice** | Dialogue with subtext, scene tension, character distinctiveness, genre conventions |
-| **Creative Ideation** | Brainstorming, lateral thinking, concept generation, "what if" reasoning |
-| **Stylistic Range** | Literary, genre, experimental, commercial — adapts to any tone |
-| **Poetry & Lyric Writing** | Verse forms, rhythm, imagery, metaphor, song lyrics |
-| **World-Building** | Fictional universe construction, internal consistency, lore development |
-| **Creative Non-Fiction** | Essays, personal narrative, long-form journalism style |
-| **Conceptual Thinking** | Abstract reasoning, analogy, cross-domain idea synthesis |
-
-### Datasets
-
-| Dataset | Source | Size | Focus |
-|---------|--------|------|-------|
-| **WritingPrompts** | `euclaise/writingprompts` | 300K+ stories | Creative fiction from prompts |
-| **Project Gutenberg Fiction** | gutenberg.org (public domain) | ~60K books | Classic literary prose and style |
-| **PoetryFoundation** | poetryfoundation.org | ~14K poems | Poetry, verse, lyric forms |
-| **Creative-Instruct (custom)** | Generated via GPT-4.1-mini | ~25K examples | Creative writing instruction pairs |
-| **Brainstorming & Ideation** | Generated synthetic dataset | ~15K examples | Lateral thinking, concept generation |
-| **Screenplay Dialogue** | Extracted from movie scripts | ~50K exchanges | Authentic dialogue and subtext |
-
-**Total creative writing dataset: ~200K high-quality examples**
-
-### Estimated Cost
-- **Duration:** ~15–18 hours
-- **Cost:** ~$6–7
+**Datasets:** Marketing textbooks, Cannes Lions ad archive, sales training materials, Digital Marketing Q&A (custom), Consumer Psychology papers, Marketing-Instruct (custom), Film Marketing case studies
+**Total:** ~150K examples | **Duration:** ~13 hrs | **Cost:** ~$5
 
 ---
 
-## Upgrade E: Proactive Problem Solving
+## Upgrade E: Business, Accounting & Banking
 
-### Goal
-This is the most important upgrade. Titan should not wait to be asked — it should **anticipate problems, identify root causes, and propose solutions before the user even realises there is an issue**. This is trained through reasoning chains, diagnostic datasets, and multi-step problem decomposition examples.
+The financial and operational intelligence that makes every other pillar commercially viable.
 
-### What This Means in Practice
+### Business Skills
+- Business strategy: competitive analysis, market positioning, growth strategy, SWOT
+- Entrepreneurship: starting and scaling a business, product-market fit, MVP thinking
+- Project management: planning, resourcing, timelines, risk management, delivery
+- Negotiation: principles, tactics, deal structuring, knowing when to walk away
+- Leadership and management: team building, delegation, performance management, culture
+- Operations: process design, efficiency, systems thinking, scaling operations
+- Legal basics: contracts, IP, NDAs, company structures, basic compliance awareness
+- Investor relations: pitching to investors, term sheets, equity, valuation concepts
+- Business communication: presentations, proposals, executive summaries, stakeholder management
 
-- When analysing a film production schedule, Titan flags the location conflict on day 14 before you ask
-- When reviewing a security architecture, Titan identifies the authentication gap before the audit
-- When given a script, Titan notes the structural issue in act two before you finish reading
-- When monitoring a system, Titan detects the anomaly pattern and explains what it predicts will happen next
+### Accounting
+- Double-entry bookkeeping: debits, credits, journal entries, ledgers
+- Financial statements: P&L, balance sheet, cash flow statement — reading and preparing
+- Management accounting: budgets, variance analysis, cost accounting, break-even analysis
+- Tax basics: income tax, GST/VAT, business tax obligations, deductions
+- Payroll: payroll processing, superannuation, PAYG, employee entitlements
+- Accounts payable and receivable: invoicing, collections, payment terms
+- Reconciliation: bank reconciliation, account reconciliation, period-end close
+- Audit preparation: documentation, internal controls, audit trails
 
-### Coverage
+### Banking
+- Retail banking: accounts, deposits, lending, credit cards, mortgages
+- Commercial banking: business loans, trade finance, letters of credit, working capital
+- Interest rates: how rates work, RBA/Fed decisions, impact on borrowing and investment
+- Treasury management: cash management, liquidity, foreign exchange
+- Investment banking: capital markets, IPOs, M&A, debt and equity raising
+- Central banking: monetary policy, quantitative easing, inflation targeting
+- Financial regulation: APRA, ASIC, Basel III, AML/KYC compliance basics
+- Personal finance: budgeting, investing, superannuation, financial planning principles
 
-| Domain | Capability |
-|--------|-----------|
-| **Diagnostic Reasoning** | Identify what is wrong from symptoms, trace to root cause |
-| **Anticipatory Analysis** | Given a plan or system, identify what will fail and when |
-| **Multi-Step Problem Decomposition** | Break complex problems into ordered, solvable steps |
-| **Decision Trees** | Map out options, consequences, and optimal paths |
-| **Risk Assessment** | Identify risks, rank by probability and impact, propose mitigations |
-| **Iterative Refinement** | Propose a solution, test it mentally, refine it, repeat |
-| **Cross-Domain Pattern Recognition** | Apply lessons from one domain to solve problems in another |
-
-### Datasets
-
-| Dataset | Source | Size | Focus |
-|---------|--------|------|-------|
-| **Chain-of-Thought (CoT) Reasoning** | `reasoning-machines/gsm8k` + `cot_gsm8k` | ~100K examples | Step-by-step problem solving |
-| **ARC Challenge** | `allenai/ai2_arc` | 7,787 examples | Hard reasoning and science problems |
-| **StrategyQA** | `wics/strategy-qa` | 2,780 examples | Multi-step strategic reasoning |
-| **ProofWriter** | `allenai/proofwriter` | ~130K examples | Logical deduction chains |
-| **Diagnostic Reasoning (custom)** | Generated via GPT-4.1-mini | ~20K examples | Problem → diagnosis → solution chains |
-| **Anticipatory Planning (custom)** | Generated synthetic dataset | ~15K examples | "What will go wrong and why" reasoning |
-| **Cross-Domain Problem Solving** | Generated synthetic dataset | ~10K examples | Apply domain A knowledge to domain B problems |
-
-**Total problem-solving dataset: ~150K high-quality examples**
-
-### Estimated Cost
-- **Duration:** ~12–15 hours
-- **Cost:** ~$5–6
+**Datasets:** Business textbooks, Accounting textbooks, Banking and finance texts, Business Q&A (custom), Accounting Instruct (custom), Finance case studies
+**Total:** ~200K examples | **Duration:** ~18 hrs | **Cost:** ~$7
 
 ---
 
-## Complete Upgrade Cost Summary
+## Upgrade F: Cybersecurity — Extended Deep Training
+
+Titan's primary specialisation. Runs last and receives the largest share of remaining budget for maximum depth.
+
+### Core Domains
+- Vulnerability analysis: CVE analysis, CVSS scoring, impact assessment, exploitation paths
+- Penetration testing: full methodology — recon, enumeration, exploitation, post-exploitation, reporting
+- Exploit development: buffer overflows, ROP chains, shellcode, format strings, heap exploitation
+- Malware analysis: static and dynamic analysis, reverse engineering, IOC identification, YARA rules
+- Network security: packet analysis, protocol exploitation, network forensics, traffic anomaly detection
+- Web application security: OWASP Top 10, SQL injection, XSS, SSRF, IDOR, authentication bypass
+- CTF challenges: web, binary, crypto, forensics, reverse engineering — full solve methodology
+- Security tool building: writing scanners, exploit tools, and automation scripts in Python and Bash
+- OSINT: target profiling, footprinting, open-source intelligence gathering
+- MITRE ATT&CK: adversary tactics, techniques, and procedures across the full kill chain
+- Incident response: detection, containment, eradication, recovery, post-incident reporting
+- Cloud security: AWS, Azure, GCP misconfigurations, IAM exploitation, serverless security
+- Active Directory: AD enumeration, Kerberoasting, Pass-the-Hash, lateral movement
+- Social engineering: phishing, pretexting, vishing — understanding, executing, and defending
+
+### Extended Training (Remaining Budget)
+Any budget remaining after Upgrades A–E goes into additional cybersecurity training rounds using:
+- Additional CTF writeup datasets
+- Extended exploit development examples
+- More real-world pentest report data
+- Advanced malware analysis case studies
+- Red team vs blue team scenario training
+
+**Datasets:** CyberLLMInstruct (54K), Primus Suite (100K), PenQA (20K), NVD CVE Database (250K+), CTF Writeups (30K+), Exploit-DB (50K), MITRE ATT&CK (700 techniques), Security tool code (GitHub), Cyber-Instruct custom (20K+)
+**Total:** ~300K+ examples | **Duration:** ~20–30 hrs (scales with remaining budget) | **Cost:** ~$8–12
+
+---
+
+## Complete Cost Summary
 
 | Stage | Pillar | GPU Time | Cost |
 |-------|--------|---------|------|
 | Crucible (running) | Base language model | ~160 hrs | ~$64 |
-| SFT | Instruction following | ~10 hrs | ~$5 |
-| Tool Use | API and tool calling | ~5 hrs | ~$2 |
-| **Upgrade A** | **General Knowledge** | ~18 hrs | ~$7 |
-| **Upgrade B** | **Film & Cinema Production** | ~22 hrs | ~$9 |
-| **Upgrade C** | **Cybersecurity** | ~18 hrs | ~$7 |
-| **Upgrade D** | **Creative Writing** | ~16 hrs | ~$6 |
-| **Upgrade E** | **Proactive Problem Solving** | ~14 hrs | ~$6 |
+| Stage 1: SFT | Instruction following | ~10 hrs | ~$5 |
+| Stage 2: Tool Use & Code | Tools, APIs, coding | ~8 hrs | ~$3 |
+| Upgrade A | General Knowledge | ~18 hrs | ~$7 |
+| Upgrade B | Film & Cinema Production | ~22 hrs | ~$9 |
+| Upgrade C | Creative Thinking & Problem Solving | ~18 hrs | ~$7 |
+| Upgrade D | Advertising, Marketing & Sales | ~13 hrs | ~$5 |
+| Upgrade E | Business, Accounting & Banking | ~18 hrs | ~$7 |
+| Upgrade F | Cybersecurity (extended) | ~25 hrs | ~$10 |
 | Agentic Scaffolding | Runtime, memory, tools | Code only | ~$0 |
-| **Grand Total** | **Titan AI v1.5** | **~263 hrs** | **~$106** |
+| **Grand Total** | **Titan AI v1.5** | **~292 hrs** | **~$117** |
 
-**Starting balance:** $169.13  
-**Estimated remaining after completion:** ~$63  
+**Starting balance:** $169.13
+**Estimated remaining after completion:** ~$52
 **No top-up required.**
 
 ---
 
-## Execution Order
+## What Titan Will Be Capable of at v1.5
+
+- Knows world history, geography, science, and chemistry at an educated-professional level
+- Manages a film production from the first logline through to the marketing campaign and distribution deal
+- Analyses vulnerabilities, writes exploits, builds security tools, and conducts penetration tests
+- Thinks laterally, generates original concepts, and solves problems creatively under constraints
+- Writes copy, builds campaigns, understands consumer psychology, and closes sales
+- Reads financial statements, manages accounts, understands banking, and advises on business strategy
+- Writes, debugs, and reasons about code in Python, Bash, JavaScript, C, and SQL
+- **Always efficient** — finds the shortest path to the goal
+- **Always honest** — tells you when something won't work and why, before you waste time on it
+- **Always cost-conscious** — never recommends an expensive solution when a cheaper one works
+
+---
+
+## Execution
 
 ```bash
 # Run the complete pipeline from start to finish:
 python3 scripts/run_upgrade_pipeline.py --start-from sft
 
-# Or resume from a specific stage if needed:
+# Resume from a specific stage:
 python3 scripts/run_upgrade_pipeline.py --start-from cyber
 ```
 
-Stages run sequentially. Each builds on the checkpoint from the previous stage. Titan's knowledge compounds at every step — the problem-solving upgrade at the end benefits from everything Titan already knows about film, security, science, and creative thinking.
-
 ---
 
-## What Titan Will Be at v1.5
-
-A 109M parameter model that:
-
-- Knows world history, geography, science, and chemistry at an educated-professional level
-- Can manage a film production from the first logline through to the marketing campaign
-- Can analyse vulnerabilities, write exploits, and build security tools
-- Can write a screenplay, a short story, or a concept pitch with genuine creative voice
-- **Proactively identifies problems and proposes solutions before being asked**
-
-This is not a large model. But it will be a **sharp, focused, expert model** — trained deeply on exactly the domains that matter, with a reasoning capability that makes it genuinely useful rather than just impressive in demos.
-
----
-
-*All configs and scripts for this upgrade pipeline are committed to `leego972/titanai` and ready to execute on Crucible completion.*
+*Committed to `leego972/titanai`. All configs and scripts are pre-written and ready to execute on Crucible completion (~April 15, 2026).*

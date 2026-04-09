@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
-Titan AI — Complete Upgrade Pipeline
-Runs all five expert domain depth-packs sequentially:
+Titan AI — Complete Upgrade Pipeline (v4.0 FINAL)
 
-  Base:      SFT (Instruction Tuning)
-  Base:      Tool Use Fine-Tuning
-  Upgrade A: General Knowledge Depth Pack
+Eight-pillar expert intelligence training pipeline:
+
+  Base:      Stage 1 — Instruction Tuning (SFT)
+  Base:      Stage 2 — Tool Use & Code Fine-Tuning
+  Upgrade A: General Knowledge
   Upgrade B: Film & Cinema Production (Full Pipeline)
-  Upgrade C: Cybersecurity Depth Pack
-  Upgrade D: Creative Writing & Thinking
-  Upgrade E: Proactive Problem Solving
+  Upgrade C: Creative Thinking & Problem Solving
+  Upgrade D: Advertising, Marketing & Sales
+  Upgrade E: Business, Accounting & Banking
+  Upgrade F: Cybersecurity — Extended Deep Training
 
-Run after Crucible completes. Each stage builds on the previous checkpoint.
+Core behaviours trained throughout:
+  - Efficient and effective
+  - Financially conscious
+  - Proactively honest (flags doomed plans before wasting time)
+  - Success-driven and action-oriented
+
+Run after Crucible completes (~April 15). Each stage builds on the previous checkpoint.
 """
 
 import sys
@@ -22,13 +30,14 @@ from pathlib import Path
 BASE = Path(__file__).parent.parent
 
 STAGES = [
-    ("sft",       "run_sft.py",          "titan_sft_v01.yaml",              "Instruction Tuning (SFT)"),
-    ("tool",      "run_tool_tuning.py",   "titan_tool_v01.yaml",             "Tool Use Fine-Tuning"),
+    ("sft",       "run_sft.py",          "titan_sft_v01.yaml",              "Stage 1: Instruction Tuning (SFT)"),
+    ("tool",      "run_tool_tuning.py",   "titan_tool_v01.yaml",             "Stage 2: Tool Use & Code Fine-Tuning"),
     ("general",   "run_domain_depth.py",  "titan_general_depth_v01.yaml",    "Upgrade A: General Knowledge"),
     ("cinema",    "run_domain_depth.py",  "titan_cinema_depth_v01.yaml",     "Upgrade B: Film & Cinema Production"),
-    ("cyber",     "run_domain_depth.py",  "titan_cyber_depth_v01.yaml",      "Upgrade C: Cybersecurity"),
-    ("creative",  "run_domain_depth.py",  "titan_creative_depth_v01.yaml",   "Upgrade D: Creative Writing & Thinking"),
-    ("prosolve",  "run_domain_depth.py",  "titan_prosolve_depth_v01.yaml",   "Upgrade E: Proactive Problem Solving"),
+    ("creative",  "run_domain_depth.py",  "titan_creative_depth_v01.yaml",   "Upgrade C: Creative Thinking & Problem Solving"),
+    ("marketing", "run_domain_depth.py",  "titan_marketing_depth_v01.yaml",  "Upgrade D: Advertising, Marketing & Sales"),
+    ("business",  "run_domain_depth.py",  "titan_business_depth_v01.yaml",   "Upgrade E: Business, Accounting & Banking"),
+    ("cyber",     "run_domain_depth.py",  "titan_cyber_depth_v01.yaml",      "Upgrade F: Cybersecurity — Extended Deep Training"),
 ]
 
 def run_stage(script_name, config_path, stage_name):
@@ -70,7 +79,7 @@ def main():
     remaining = STAGES[start_idx:]
 
     print(f"\n{'='*65}")
-    print(f"  TITAN AI — COMPLETE UPGRADE PIPELINE")
+    print(f"  TITAN AI — COMPLETE UPGRADE PIPELINE v4.0")
     print(f"  Starting from: {remaining[0][3]}")
     print(f"  Stages to run: {len(remaining)}")
     print(f"{'='*65}")
@@ -79,14 +88,17 @@ def main():
         run_stage(script_name, config_path, display_name)
 
     print(f"\n{'='*65}")
-    print(f"  TITAN AI v1.5 — UPGRADE PIPELINE COMPLETE")
+    print(f"  TITAN AI v1.5 — PIPELINE COMPLETE")
     print(f"")
-    print(f"  Five pillars trained:")
+    print(f"  Eight pillars trained:")
     print(f"    General Knowledge")
     print(f"    Film & Cinema Production (full pipeline)")
-    print(f"    Cybersecurity")
-    print(f"    Creative Writing & Thinking")
-    print(f"    Proactive Problem Solving")
+    print(f"    Creative Thinking & Problem Solving")
+    print(f"    Advertising, Marketing & Sales")
+    print(f"    Business, Accounting & Banking")
+    print(f"    Cybersecurity (extended deep training)")
+    print(f"    Code & Software Development")
+    print(f"    Core Behaviours: efficient, honest, cost-conscious, success-driven")
     print(f"")
     print(f"  Next: deploy agentic scaffolding (agent/runtime.py)")
     print(f"{'='*65}\n")
