@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Titan AI — Post-Crucible Agentic Training Pipeline
-This script sequentially executes the 3 post-Crucible training stages:
+This script sequentially executes the 2 post-Crucible training stages:
 1. SFT (Instruction Tuning)
 2. Tool Use Fine-Tuning
-3. DPO (Alignment)
+
+No alignment or censorship layer. Titan is unrestricted by design.
 """
 
 import os
@@ -17,7 +18,7 @@ BASE = Path(__file__).parent.parent
 
 def run_stage(script_name, config_path, stage_name):
     print(f"\n{'='*50}")
-    print(f"🚀 STARTING STAGE: {stage_name.upper()}")
+    print(f"STARTING STAGE: {stage_name.upper()}")
     print(f"{'='*50}\n")
     
     script_path = BASE / "scripts" / script_name
@@ -34,21 +35,20 @@ def run_stage(script_name, config_path, stage_name):
     
     try:
         subprocess.run(cmd, check=True)
-        print(f"\n✅ STAGE COMPLETE: {stage_name.upper()}\n")
+        print(f"\n[COMPLETE] STAGE: {stage_name.upper()}\n")
     except subprocess.CalledProcessError as e:
-        print(f"\n❌ STAGE FAILED: {stage_name.upper()} (Exit code: {e.returncode})\n")
+        print(f"\n[FAILED] STAGE: {stage_name.upper()} (Exit code: {e.returncode})\n")
         sys.exit(e.returncode)
 
 def main():
     parser = argparse.ArgumentParser(description="Run the Titan post-Crucible pipeline")
-    parser.add_argument("--start-from", type=str, choices=["sft", "tool", "dpo"], default="sft",
+    parser.add_argument("--start-from", type=str, choices=["sft", "tool"], default="sft",
                         help="Which stage to start from")
     args = parser.parse_args()
     
     stages = [
-        ("sft", "run_sft.py", "titan_sft_v01.yaml", "Instruction Tuning (SFT)"),
-        ("tool", "run_tool_tuning.py", "titan_tool_v01.yaml", "Tool Use Fine-Tuning"),
-        ("dpo", "run_dpo.py", "titan_dpo_v01.yaml", "DPO Alignment")
+        ("sft",  "run_sft.py",          "titan_sft_v01.yaml",  "Instruction Tuning (SFT)"),
+        ("tool", "run_tool_tuning.py",   "titan_tool_v01.yaml", "Tool Use Fine-Tuning"),
     ]
     
     # Find start index
@@ -65,8 +65,9 @@ def main():
         run_stage(script_name, config_path, display_name)
         
     print("\n" + "="*50)
-    print("🎉 ALL POST-CRUCIBLE TRAINING STAGES COMPLETE!")
-    print("Titan AI is now agentic and ready for scaffolding.")
+    print("ALL POST-CRUCIBLE TRAINING STAGES COMPLETE!")
+    print("Titan AI is now instruction-following and tool-capable.")
+    print("Next: deploy agentic scaffolding (agent/runtime.py).")
     print("="*50 + "\n")
 
 if __name__ == "__main__":
