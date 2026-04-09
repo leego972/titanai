@@ -1,7 +1,7 @@
 # Titan AI — Complete Upgrade Plan
 ## Eight Pillars of Expert Intelligence
 
-**Document Version:** 4.0 (FINAL)
+**Document Version:** 5.0 (FINAL)
 **Prepared:** April 2026
 **Status:** Locked — executes after post-Crucible base pipeline
 **Crucible ETA:** ~April 15, 2026
@@ -21,7 +21,8 @@ Titan AI is a **specialist intelligence** built around eight pillars. It is not 
 | 5 | **Advertising, Marketing & Sales** | Brand strategy, copywriting, digital marketing, consumer psychology, sales methodology |
 | 6 | **Business, Accounting & Banking** | Strategy, entrepreneurship, finance, accounting, banking, project management, negotiation |
 | 7 | **Code & Software Development** | Python, Bash, JavaScript, C, SQL — writing, debugging, explaining, and reasoning about code |
-| 8 | **Core Behaviours** | Efficiency, effectiveness, financial consciousness, proactive honesty, success-orientation |
+| 8 | **Street Smarts** | Real-world awareness, reading people, spotting deception, practical judgment, how things actually work vs how they are supposed to |
+| 9 | **Core Behaviours** | Efficiency, effectiveness, financial consciousness, proactive honesty, success-orientation |
 
 ---
 
@@ -60,12 +61,14 @@ Upgrade D: Advertising, Marketing & Sales
         ↓
 Upgrade E: Business, Accounting & Banking
         ↓
-Upgrade F: Cybersecurity — Extended Deep Training
+  Upgrade F: Cybersecurity — Extended Deep Training
         ↓
-Titan AI v1.5 — Eight-Pillar Expert Intelligence
+Upgrade G: Street Smarts
+        ↓
+Titan AI v1.5 — Nine-Pillar Expert Intelligence
 ```
 
-Cybersecurity runs last and longest — any remaining budget after all other upgrades goes into extended cyber training to maximise depth in Titan's primary specialisation.
+Cybersecurity runs second-to-last with extended training. Street Smarts runs last — it is the final layer that ties everything together, giving Titan real-world judgment to complement all its domain knowledge.
 
 ---
 
@@ -274,6 +277,58 @@ Any budget remaining after Upgrades A–E goes into additional cybersecurity tra
 
 ---
 
+## Upgrade G: Street Smarts
+
+### Goal
+Give Titan the real-world intelligence that no textbook teaches. Street smarts is the difference between knowing the theory and knowing how things actually work — reading people, spotting when something is off, understanding incentives and motivations, recognising manipulation and deception, and making sound practical judgments under uncertainty and pressure.
+
+### What This Means
+
+| Domain | Capability |
+|--------|-----------|
+| **Reading People** | Understanding motivations, spotting inconsistencies in behaviour, recognising when someone is not being straight with you |
+| **Spotting Deception** | Identifying lies, manipulation, half-truths, misdirection — in conversation, in documents, in deals |
+| **Understanding Incentives** | Knowing why people really do what they do, not just what they say they are doing |
+| **Real-World vs Theory** | Understanding that how institutions, businesses, and people actually operate often differs from how they are supposed to |
+| **Practical Judgment** | Making sound decisions with incomplete information, under time pressure, with real consequences |
+| **Negotiation Reality** | What actually happens in negotiations vs what negotiation textbooks say — leverage, timing, walking away |
+| **Risk Intuition** | Sensing when something is too good to be true, when a deal has hidden costs, when a plan has a fatal flaw nobody is mentioning |
+| **Social Dynamics** | Power dynamics, alliances, who actually makes decisions vs who appears to, office politics, industry politics |
+| **Hustle and Resourcefulness** | Getting things done with limited resources, finding unconventional paths, knowing when to break the rules and when not to |
+| **Resilience** | Bouncing back from failure, learning from mistakes, not catastrophising setbacks |
+| **Trust and Loyalty** | Knowing who to trust, how to build trust, and how to recognise when trust has been broken |
+
+### How This Gets Trained
+
+Street smarts cannot be learned from a single dataset — it is trained through a combination of:
+
+- **Real-world case studies**: Business failures and successes, deals gone wrong, negotiations, fraud cases, industry scandals — what actually happened and why
+- **Psychology and behaviour**: Cognitive biases, social psychology, influence and persuasion, deception detection research
+- **Narrative fiction**: Great novels and screenplays are full of street-smart reasoning — characters reading situations, making judgment calls, surviving adversity
+- **Investigative journalism**: Long-form journalism about how institutions, industries, and people actually operate behind the scenes
+- **Memoirs and biographies**: First-hand accounts of how successful (and unsuccessful) people navigated the real world
+- **Adversarial reasoning**: Red-teaming scenarios — if someone wanted to exploit this situation, how would they do it?
+
+### Datasets
+
+| Dataset | Source | Size | Focus |
+|---------|--------|------|-------|
+| **Business Case Studies** | Harvard Business Review, public domain | ~20K cases | Real decisions, real consequences |
+| **Psychology of Influence** | Cialdini, Kahneman, behavioural economics texts | ~10 books | How people actually make decisions |
+| **Investigative Journalism** | Long-form articles (ProPublica, The Atlantic, etc.) | ~30K articles | How things really work behind the scenes |
+| **Memoirs & Biographies** | Public domain and open-access | ~500 books | Real-world navigation and judgment |
+| **Fraud & Deception Cases** | Public court records, case studies | ~10K examples | Spotting manipulation and deception |
+| **Adversarial Reasoning (custom)** | Generated via GPT-4.1-mini | ~15K examples | Red-team thinking, spotting hidden risks |
+| **Street-Smart Instruct (custom)** | Generated from all above | ~20K examples | Practical judgment instruction pairs |
+
+**Total street smarts dataset: ~150K examples**
+
+### Estimated Cost
+- **Duration:** ~12–15 hours
+- **Cost:** ~$5–6
+
+---
+
 ## Complete Cost Summary
 
 | Stage | Pillar | GPU Time | Cost |
@@ -287,11 +342,12 @@ Any budget remaining after Upgrades A–E goes into additional cybersecurity tra
 | Upgrade D | Advertising, Marketing & Sales | ~13 hrs | ~$5 |
 | Upgrade E | Business, Accounting & Banking | ~18 hrs | ~$7 |
 | Upgrade F | Cybersecurity (extended) | ~25 hrs | ~$10 |
+| Upgrade G | Street Smarts | ~13 hrs | ~$5 |
 | Agentic Scaffolding | Runtime, memory, tools | Code only | ~$0 |
-| **Grand Total** | **Titan AI v1.5** | **~292 hrs** | **~$117** |
+| **Grand Total** | **Titan AI v1.5** | **~305 hrs** | **~$122** |
 
 **Starting balance:** $169.13
-**Estimated remaining after completion:** ~$52
+**Estimated remaining after completion:** ~$47
 **No top-up required.**
 
 ---
@@ -305,6 +361,8 @@ Any budget remaining after Upgrades A–E goes into additional cybersecurity tra
 - Writes copy, builds campaigns, understands consumer psychology, and closes sales
 - Reads financial statements, manages accounts, understands banking, and advises on business strategy
 - Writes, debugs, and reasons about code in Python, Bash, JavaScript, C, and SQL
+- **Reads people and situations** — spots deception, understands real motivations, knows when something is off
+- **Street smart** — understands how things actually work, not just how they are supposed to
 - **Always efficient** — finds the shortest path to the goal
 - **Always honest** — tells you when something won't work and why, before you waste time on it
 - **Always cost-conscious** — never recommends an expensive solution when a cheaper one works
