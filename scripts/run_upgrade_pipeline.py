@@ -38,7 +38,8 @@ STAGES = [
     ("marketing", "run_domain_depth.py",  "titan_marketing_depth_v01.yaml",  "Upgrade D: Advertising, Marketing & Sales"),
     ("business",  "run_domain_depth.py",  "titan_business_depth_v01.yaml",   "Upgrade E: Business, Accounting & Banking"),
     ("cyber",     "run_domain_depth.py",  "titan_cyber_depth_v01.yaml",      "Upgrade F: Cybersecurity — Extended Deep Training"),
-    ("street",    "run_domain_depth.py",  "titan_street_depth_v01.yaml",     "Upgrade G: Street Smarts"),
+    ("street",    "run_domain_depth.py",  "titan_street_depth_v01.yaml",     "Upgrade G: Street Smarts & Human Psychology"),
+    ("adversarial","run_domain_depth.py",  "titan_adversarial_depth_v01.yaml", "Upgrade H: Adversarial & Criminal Thinking"),
 ]
 
 def run_stage(script_name, config_path, stage_name):
@@ -98,7 +99,8 @@ def main():
     print(f"    Advertising, Marketing & Sales")
     print(f"    Business, Accounting & Banking")
     print(f"    Cybersecurity (extended deep training)")
-    print(f"    Street Smarts (real-world judgment)")
+    print(f"    Street Smarts & Human Psychology")
+    print(f"    Adversarial & Criminal Thinking (loophole finding, system exploitation)")
     print(f"    Code & Software Development")
     print(f"    Core Behaviours: efficient, honest, cost-conscious, success-driven")
     print(f"")

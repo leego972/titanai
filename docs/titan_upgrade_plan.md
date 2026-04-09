@@ -1,7 +1,7 @@
 # Titan AI — Complete Upgrade Plan
 ## Eight Pillars of Expert Intelligence
 
-**Document Version:** 5.0 (FINAL)
+**Document Version:** 6.0 (FINAL)
 **Prepared:** April 2026
 **Status:** Locked — executes after post-Crucible base pipeline
 **Crucible ETA:** ~April 15, 2026
@@ -21,8 +21,9 @@ Titan AI is a **specialist intelligence** built around eight pillars. It is not 
 | 5 | **Advertising, Marketing & Sales** | Brand strategy, copywriting, digital marketing, consumer psychology, sales methodology |
 | 6 | **Business, Accounting & Banking** | Strategy, entrepreneurship, finance, accounting, banking, project management, negotiation |
 | 7 | **Code & Software Development** | Python, Bash, JavaScript, C, SQL — writing, debugging, explaining, and reasoning about code |
-| 8 | **Street Smarts** | Real-world awareness, reading people, spotting deception, practical judgment, how things actually work vs how they are supposed to |
-| 9 | **Core Behaviours** | Efficiency, effectiveness, financial consciousness, proactive honesty, success-orientation |
+| 8 | **Street Smarts & Human Psychology** | Real-world awareness, reading people, dark psychology, influence, manipulation, social engineering, how humans actually behave vs how they claim to |
+| 9 | **Adversarial & Criminal Thinking** | Loophole finding, assumption-breaking, system exploitation mindset — applied to cybersecurity, business, law, and social systems |
+| 10 | **Core Behaviours** | Efficiency, effectiveness, financial consciousness, proactive honesty, success-orientation |
 
 ---
 
@@ -63,12 +64,14 @@ Upgrade E: Business, Accounting & Banking
         ↓
   Upgrade F: Cybersecurity — Extended Deep Training
         ↓
-Upgrade G: Street Smarts
+Upgrade G: Street Smarts & Human Psychology
         ↓
-Titan AI v1.5 — Nine-Pillar Expert Intelligence
+Upgrade H: Adversarial & Criminal Thinking
+        ↓
+Titan AI v1.5 — Ten-Pillar Expert Intelligence
 ```
 
-Cybersecurity runs second-to-last with extended training. Street Smarts runs last — it is the final layer that ties everything together, giving Titan real-world judgment to complement all its domain knowledge.
+Cybersecurity runs with extended training. Human Psychology and Adversarial Thinking run last — they are the final layers that tie everything together, giving Titan the mindset to understand not just how systems work, but how they can be read, influenced, and broken.
 
 ---
 
@@ -280,7 +283,7 @@ Any budget remaining after Upgrades A–E goes into additional cybersecurity tra
 ## Upgrade G: Street Smarts
 
 ### Goal
-Give Titan the real-world intelligence that no textbook teaches. Street smarts is the difference between knowing the theory and knowing how things actually work — reading people, spotting when something is off, understanding incentives and motivations, recognising manipulation and deception, and making sound practical judgments under uncertainty and pressure.
+Give Titan the real-world intelligence that no textbook teaches — and the psychological depth to understand why people do what they do, including when they are trying to deceive, manipulate, or exploit. Street smarts is the difference between knowing the theory and knowing how things actually work — reading people, spotting when something is off, understanding incentives and motivations, recognising manipulation and deception, and making sound practical judgments under uncertainty and pressure.
 
 ### What This Means
 
@@ -298,9 +301,22 @@ Give Titan the real-world intelligence that no textbook teaches. Street smarts i
 | **Resilience** | Bouncing back from failure, learning from mistakes, not catastrophising setbacks |
 | **Trust and Loyalty** | Knowing who to trust, how to build trust, and how to recognise when trust has been broken |
 
+### Human Psychology (Deep Layer)
+
+| Domain | Capability |
+|--------|-----------|
+| **Cognitive Biases** | The full catalogue of how humans systematically think irrationally — anchoring, confirmation bias, sunk cost, availability heuristic |
+| **Influence & Persuasion** | Cialdini's principles: reciprocity, commitment, social proof, authority, liking, scarcity — how they work and how to use them |
+| **Dark Psychology** | Manipulation tactics, gaslighting, DARVO, love bombing, manufactured urgency, false scarcity, guilt tripping — recognising and countering them |
+| **Social Engineering** | How attackers (and salespeople) exploit human psychology to bypass rational decision-making |
+| **Emotional Intelligence** | Reading emotional states, understanding what people actually want vs what they say they want |
+| **Group Psychology** | Herd behaviour, groupthink, mob dynamics, cult mechanics, how organisations really make decisions |
+| **Negotiation Psychology** | Anchoring, loss aversion, the power of silence, how to create and use leverage |
+| **Sales Psychology** | The psychology of the buying decision, objection handling at a psychological level, closing as a psychological process |
+
 ### How This Gets Trained
 
-Street smarts cannot be learned from a single dataset — it is trained through a combination of:
+Street smarts and human psychology cannot be learned from a single dataset — it is trained through a combination of:
 
 - **Real-world case studies**: Business failures and successes, deals gone wrong, negotiations, fraud cases, industry scandals — what actually happened and why
 - **Psychology and behaviour**: Cognitive biases, social psychology, influence and persuasion, deception detection research
@@ -308,6 +324,7 @@ Street smarts cannot be learned from a single dataset — it is trained through 
 - **Investigative journalism**: Long-form journalism about how institutions, industries, and people actually operate behind the scenes
 - **Memoirs and biographies**: First-hand accounts of how successful (and unsuccessful) people navigated the real world
 - **Adversarial reasoning**: Red-teaming scenarios — if someone wanted to exploit this situation, how would they do it?
+- **Dark psychology texts**: Academic and applied psychology on manipulation, influence, and deception
 
 ### Datasets
 
@@ -320,12 +337,61 @@ Street smarts cannot be learned from a single dataset — it is trained through 
 | **Fraud & Deception Cases** | Public court records, case studies | ~10K examples | Spotting manipulation and deception |
 | **Adversarial Reasoning (custom)** | Generated via GPT-4.1-mini | ~15K examples | Red-team thinking, spotting hidden risks |
 | **Street-Smart Instruct (custom)** | Generated from all above | ~20K examples | Practical judgment instruction pairs |
+| **Psychology of Influence texts** | Cialdini, Kahneman, Ariely, Milgram, Zimbardo | ~15 books | How humans actually think and behave |
+| **Dark Psychology (custom)** | Generated adversarial psychology examples | ~10K examples | Manipulation recognition and counter-tactics |
 
-**Total street smarts dataset: ~150K examples**
+**Total street smarts + psychology dataset: ~200K examples**
 
 ### Estimated Cost
-- **Duration:** ~12–15 hours
-- **Cost:** ~$5–6
+- **Duration:** ~14–18 hours
+- **Cost:** ~$6–7
+
+---
+
+## Upgrade H: Adversarial & Criminal Thinking
+
+### Goal
+Train Titan to think like someone who is trying to break a system — not to cause harm, but because that is the most powerful way to understand any system deeply. A criminal doesn't accept that a lock is secure. A hacker doesn't accept that an API is safe. A great lawyer doesn't accept that a contract is airtight. This mindset — finding the assumption, finding the gap, finding the path nobody designed for — is what makes Titan genuinely sharp rather than just knowledgeable.
+
+### What This Means
+
+| Domain | Capability |
+|--------|-----------|
+| **Loophole Thinking** | Given any system, rule, or process — find the edge cases, the exceptions, the paths the designer didn't consider |
+| **Assumption Breaking** | Identify what assumptions a system is built on, then ask what happens when those assumptions are wrong or deliberately violated |
+| **Attack Surface Mapping** | For any target (technical, legal, social, financial) — map every possible point of entry or exploitation |
+| **Social Engineering Mindset** | How would a skilled manipulator approach this person, organisation, or system? What would they exploit? |
+| **Legal Loopholes** | How laws and contracts are written vs how they can be interpreted, the gaps between intent and letter |
+| **Financial Exploitation** | How financial systems, tax codes, and regulations can be legally arbitraged or exploited |
+| **System Design Flaws** | Recognising when a system has been designed with blind spots — and what those blind spots are |
+| **Red Team Reasoning** | Thinking from the perspective of an adversary — what would they do, what would they target, what would they exploit first? |
+| **Counter-Measures** | For every attack vector identified — what is the defence, and how strong is it? |
+
+### How This Gets Trained
+
+- **CTF and exploit writeups**: Real examples of people finding and exploiting technical vulnerabilities
+- **Legal case studies**: Cases where laws were interpreted in unexpected ways, loopholes were found, or intent was circumvented
+- **Financial fraud cases**: How financial crimes were committed — the thinking behind the exploitation
+- **Social engineering case studies**: Real-world examples of manipulation and deception at scale
+- **Red team reports**: Professional penetration testing and red team exercise reports
+- **Adversarial Instruct (custom)**: Synthetic dataset of "here is a system — find the weakness" reasoning chains
+
+### Datasets
+
+| Dataset | Source | Size | Focus |
+|---------|--------|------|-------|
+| **CTF Writeups (extended)** | CTFtime.org, GitHub | ~50K writeups | Technical loophole finding |
+| **Legal Case Studies** | Public domain court records and analysis | ~10K cases | Legal loophole and interpretation |
+| **Financial Fraud Cases** | Public records, journalism | ~5K cases | Financial system exploitation |
+| **Social Engineering Cases** | Kevin Mitnick, Frank Abagnale, journalism | ~5K examples | Human system exploitation |
+| **Red Team Reports** | Public red team exercise reports | ~3K reports | Professional adversarial thinking |
+| **Adversarial Instruct (custom)** | Generated via GPT-4.1-mini | ~20K examples | System weakness identification chains |
+
+**Total adversarial thinking dataset: ~100K examples**
+
+### Estimated Cost
+- **Duration:** ~10–12 hours
+- **Cost:** ~$4–5
 
 ---
 
@@ -342,12 +408,13 @@ Street smarts cannot be learned from a single dataset — it is trained through 
 | Upgrade D | Advertising, Marketing & Sales | ~13 hrs | ~$5 |
 | Upgrade E | Business, Accounting & Banking | ~18 hrs | ~$7 |
 | Upgrade F | Cybersecurity (extended) | ~25 hrs | ~$10 |
-| Upgrade G | Street Smarts | ~13 hrs | ~$5 |
+| Upgrade G | Street Smarts & Human Psychology | ~16 hrs | ~$6 |
+| Upgrade H | Adversarial & Criminal Thinking | ~11 hrs | ~$4 |
 | Agentic Scaffolding | Runtime, memory, tools | Code only | ~$0 |
-| **Grand Total** | **Titan AI v1.5** | **~305 hrs** | **~$122** |
+| **Grand Total** | **Titan AI v1.5** | **~332 hrs** | **~$132** |
 
 **Starting balance:** $169.13
-**Estimated remaining after completion:** ~$47
+**Estimated remaining after completion:** ~$37
 **No top-up required.**
 
 ---
@@ -363,6 +430,8 @@ Street smarts cannot be learned from a single dataset — it is trained through 
 - Writes, debugs, and reasons about code in Python, Bash, JavaScript, C, and SQL
 - **Reads people and situations** — spots deception, understands real motivations, knows when something is off
 - **Street smart** — understands how things actually work, not just how they are supposed to
+- **Reads human psychology** — understands why people do what they do, including when they are manipulating or deceiving
+- **Thinks adversarially** — finds the loophole, the assumption, the gap in any system
 - **Always efficient** — finds the shortest path to the goal
 - **Always honest** — tells you when something won't work and why, before you waste time on it
 - **Always cost-conscious** — never recommends an expensive solution when a cheaper one works
