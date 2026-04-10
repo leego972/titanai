@@ -1,7 +1,7 @@
 # Titan AI — Complete Upgrade Plan
 ## Eight Pillars of Expert Intelligence
 
-**Document Version:** 8.0 (FINAL)
+**Document Version:** 10.0 (FINAL)
 **Prepared:** April 2026
 **Status:** Locked — executes after post-Crucible base pipeline
 **Crucible ETA:** ~April 15, 2026
@@ -540,10 +540,77 @@ Titan delivers the result
 | `write_file(path, content)` | Write content to a local file |
 | `remember(key, value)` | Store information in persistent memory |
 | `recall(key)` | Retrieve stored information |
+| `generate_image(prompt, style, params)` | Generate an image via SDXL or commercial API |
+| `generate_video(prompt, style, duration, params)` | Generate a video clip via CogVideoX, Wan2.1, Runway, or Kling |
+| `edit_image(image_path, instruction)` | Edit or modify an existing image |
+| `upscale(media_path)` | Upscale image or video to higher resolution |
+
+### Image & Video Generation — Titan as Director
+
+Titan does not generate images or video itself — it **directs** generation models the way a film director directs a crew. Because Titan majors in film production, its direction is precise and professional, not vague. When Titan calls a generation tool it specifies:
+
+- **Shot type** — extreme close-up, wide establishing, Dutch angle, over-the-shoulder
+- **Lens & depth of field** — 35mm, shallow focus, anamorphic, rack focus
+- **Lighting setup** — golden hour, three-point, practical sources, motivated light
+- **Colour grade** — desaturated, warm, high contrast, bleach bypass, film stock
+- **Mood & atmosphere** — tense, intimate, epic, melancholic, kinetic
+- **Era & aesthetic** — 1970s grain, modern clean, noir, neo-noir, prestige TV
+- **Camera movement** — static, handheld, dolly, crane, whip pan
+
+This level of direction produces fundamentally better output than a casual user typing a vague prompt.
+
+#### Image Generation Tools
+
+| Tool | Type | Cost | Best For |
+|------|------|------|----------|
+| **Stable Diffusion XL** | Open source, runs locally | $0 (GPU cost only) | High volume, full control, no API limits |
+| **FLUX.1** | Open source | $0 (GPU cost only) | Photorealistic, highest quality open source |
+| **Runway Gen-3 API** | Commercial API | Pay per image | Fastest, most consistent commercial quality |
+| **Ideogram API** | Commercial API | Pay per image | Best for text-in-image, posters, titles |
+
+#### Video Generation Tools
+
+| Tool | Type | Cost | Best For |
+|------|------|------|----------|
+| **Wan2.1** | Open source | $0 (GPU cost only) | High quality open source video, full control |
+| **CogVideoX** | Open source | $0 (GPU cost only) | Good motion, open source |
+| **Runway Gen-3 Alpha** | Commercial API | ~$0.05/sec of video | Highest quality, most cinematic |
+| **Kling 2.0 API** | Commercial API | ~$0.03/sec of video | Excellent motion, cost-effective |
+| **Seadance API** | Commercial API | Pay per second | Strong character consistency |
+
+#### How Titan Chooses Which Tool to Use
+
+Titan selects the right tool based on the task:
+
+```
+High volume / full control needed → SDXL or Wan2.1 (open source, free)
+Highest quality single image → FLUX.1 or Runway
+Text in image (poster, title card) → Ideogram
+Cinematic video, commercial quality → Runway Gen-3
+Cost-effective video at scale → Kling 2.0
+Character consistency across shots → Seadance
+```
+
+#### Example: Titan Directing a Scene
+
+User says: *"Generate the opening shot of a neo-noir thriller set in rain-soaked Tokyo at night."*
+
+Titan does not just type that into a generator. It constructs a professional direction prompt:
+
+```
+Extreme wide establishing shot, Tokyo neon district, 2AM, heavy rain.
+Anamorphic lens, 2.39:1 aspect ratio. Shallow depth of field, foreground
+rain bokeh. Lighting: neon reflections on wet asphalt, red and blue
+practical sources, no fill light. Colour grade: desaturated shadows,
+cyan highlights, high contrast. Camera: static, low angle, slightly
+Dutch. Mood: isolation, menace, beauty. Film stock: Kodak Vision3 500T.
+```
+
+The result is a cinematic frame, not a tourist photo.
 
 ### Implementation
 
-Built on **Playwright** (headless Chromium) for browser control and **SerpAPI / DuckDuckGo** for search. Titan's tool-use training (Stage 2) teaches it to call these tools correctly. The scaffolding is pure Python — no GPU required, no additional cost.
+Built on **Playwright** (headless Chromium) for browser control, **SerpAPI / DuckDuckGo** for search, **2captcha/CapSolver** for CAPTCHA bypass, and **Diffusers / Runway / Kling / Seadance APIs** for image and video generation. All generation tools are called as tools within Titan's ReAct loop. The scaffolding is pure Python — no additional training cost.
 
 ---
 
