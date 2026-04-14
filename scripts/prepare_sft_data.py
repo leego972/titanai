@@ -11,7 +11,6 @@ Usage:
     python scripts/prepare_sft_data.py --stats          # Print dataset statistics
 """
 
-import os
 import json
 import argparse
 from pathlib import Path
@@ -78,7 +77,7 @@ def load_and_validate(jsonl_path: Path, verbose: bool = True) -> tuple:
 def print_stats(examples: list, source_name: str):
     """Print statistics about a dataset."""
     if not examples:
-        print(f"  [empty]")
+        print("  [empty]")
         return
 
     role_counts = Counter()
