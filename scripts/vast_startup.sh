@@ -93,7 +93,7 @@ apt-get update -qq && apt-get install -y -qq git wget curl python3-pip 2>/dev/nu
 
 # ── STEP 3: Python packages ───────────────────────────────────────────────────
 echo "[3/8] Installing Python packages..."
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 -q
+pip install torch --index-url https://download.pytorch.org/whl/cu121 -q  # torchvision not needed (pure LM)
 pip install transformers datasets tokenizers numpy tqdm pyyaml requests huggingface_hub -q
 
 # ── STEP 4: Clone/update TitanAI repository (PRE-FLIGHT FIX: git auth) ───────
