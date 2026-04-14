@@ -39,9 +39,9 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, random_split
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from model.titan_model import TitanLM, TitanConfig, build_model
+from model.titan_model import TitanConfig, build_model
 from data.sft_dataset import TitanSFTDataset, IGNORE_INDEX
-from training.checkpoint import save_checkpoint, load_checkpoint
+from training.checkpoint import save_checkpoint
 from tokenizers import Tokenizer
 
 
@@ -137,7 +137,6 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    project_cfg = cfg["project"]
     data_cfg = cfg["data"]
     model_cfg = cfg["model"]
     train_cfg = cfg["training"]
