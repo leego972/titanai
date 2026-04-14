@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'model/**'
+      - 'training/**'
+      - 'tokenizer/**'
+      - 'inference/**'
+      - 'evaluation/**'
+      - 'api/**'
+      - 'scripts/**'
+      - 'data/**'
+      - 'configs/**'
+      - 'requirements*.txt'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-type-check:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: pip install ruff mypy pyyaml
+
+      - name: Ruff lint check
+        run: ruff check model/ training/ tokenizer/ inference/ evaluation/ api/ scripts/ --ignore E501
+
+      - name: Ruff format check
+        run: ruff format --check model/ training/ tokenizer/ inference/ evaluation/ api/ scripts/
+
+      - name: Validate YAML configs
+        run: |
+          python -c "
+          import yaml, glob, sys
+          configs = glob.glob('configs/*.yaml')
+          if not configs:
+              print('No configs found')
+              sys.exit(1)
+          for f in configs:
+              with open(f) as fh:
+                  yaml.safe_load(fh)
+              print(f'  ✓ {f}')
+          print(f'All {len(configs)} config(s) are valid YAML')
+          "
+
+      - name: Check Python imports (syntax/import validation)
+        run: |
+          python -c "
+          import ast, glob, sys
+          errors = []
+          files = glob.glob('model/**/*.py', recursive=True) + \
+                  glob.glob('training/**/*.py', recursive=True) + \
+                  glob.glob('tokenizer/**/*.py', recursive=True) + \
+                  glob.glob('inference/**/*.py', recursive=True) + \
+                  glob.glob('evaluation/**/*.py', recursive=True) + \
+                  glob.glob('api/**/*.py', recursive=True)
+          for f in files:
+              try:
+                  with open(f) as fh:
+                      ast.parse(fh.read())
+              except SyntaxError as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors:
+                  print(f'SYNTAX ERROR: {e}', file=sys.stderr)
+              sys.exit(1)
+          print(f'All {len(files)} Python file(s) have valid syntax')
+          "
+
+  config-validation:
+    name: Config Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Validate all configs have required keys
+        run: |
+          python -c "
+          import yaml, glob, sys
+
+          REQUIRED_SECTIONS = ['project', 'tokenizer', 'data', 'model', 'training', 'evaluation', 'inference', 'logging']
+          REQUIRED_TRAINING_KEYS = ['clip_grad_norm', 'learning_rate', 'batch_size', 'max_steps', 'warmup_steps']
+
+          errors = []
+          for f in glob.glob('configs/*.yaml'):
+              with open(f) as fh:
+                  cfg = yaml.safe_load(fh)
+              for section in REQUIRED_SECTIONS:
+                  if section not in cfg:
+                      errors.append(f'{f}: missing section [{section}]')
+              train = cfg.get('training', {})
+              for key in REQUIRED_TRAINING_KEYS:
+                  if key not in train:
+                      errors.append(f'{f}: training section missing key [{key}]')
+              # Catch the old duplicate key bug
+              if 'grad_clip' in train:
+                  errors.append(f'{f}: dead key [training.grad_clip] found — use [clip_grad_norm] instead')
+              print(f'  checked: {f}')
+          if errors:
+              for e in errors: print(f'ERROR: {e}', file=sys.stderr)
+              sys.exit(1)
+          print('All configs valid')
+          "
