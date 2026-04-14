@@ -1,0 +1,77 @@
+# TitanAI SFT v0.2 — Improved Instruction Fine-Tuning
+# =====================================================
+# Purpose  : Full instruction tuning pass using real open-source datasets.
+#            Replaces the minimal v0.1 SFT (500 steps, 2 files) with a
+#            proper instruction-following training run.
+#
+# Datasets (downloaded by scripts/prepare_sft_v2_data.py):
+#   - Alpaca Cleaned     : ~52K high-quality instruction-response pairs
+#   - Dolly 15K          : 15K human-written instruction pairs (Databricks)
+#   Total                : ~67K examples
+#
+# Input    : checkpoints/crucible_v02/final.pt (crucible base model)
+# Output   : checkpoints/sft_v02/final.pt
+#
+# Run with:
+#   python scripts/run_sft_v2.py --config configs/titan_sft_v02.yaml \
+#       --checkpoint checkpoints/crucible_v02/final.pt
+#
+# Cost estimate (RTX 4090, ~$0.42/hr):
+#   ~5,000 steps at 4 batch, 4 grad accum, 2048 seq len
+#   ~2–3 hours total | ~$1–2
+
+project:
+  name: "titan-sft-v2"
+  version: "0.2.0"
+
+data:
+  sft_files:
+    - "data/sft/alpaca_cleaned.jsonl"
+    - "data/sft/dolly_15k.jsonl"
+  tokenizer_path: "tokenizer/artifacts_v32k/tokenizer.json"
+  val_split: 0.05
+  num_workers: 4
+
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 768
+  n_heads: 12
+  n_layers: 12
+  d_ff: 3072
+  max_seq_len: 2048
+  dropout: 0.05
+  tie_embeddings: true
+
+training:
+  batch_size: 4
+  gradient_accumulation_steps: 8        # Effective batch = 32 sequences
+  learning_rate: 5.0e-6                 # Conservative: fine-tuning a trained model
+  weight_decay: 0.01
+  max_steps: 5000
+  warmup_steps: 200
+  lr_scheduler: "cosine"
+  lr_min_ratio: 0.1
+  clip_grad_norm: 1.0
+  log_interval: 25
+  eval_interval: 500
+  save_interval: 1000
+  checkpoint_dir: "checkpoints/sft_v02"
+
+evaluation:
+  val_batch_size: 4
+  num_eval_batches: 50
+
+logging:
+  log_dir: "logs/sft_v02"
+  experiment_name: "titan-sft-v0.2"
+
+tokenizer:
+  path: "tokenizer/artifacts_v32k/tokenizer.json"
+  vocab_size: 32000
+
+inference:
+  default_max_new_tokens: 512
+  default_temperature: 0.7
+  default_top_k: 50
+  default_top_p: 0.95
