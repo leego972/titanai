@@ -99,16 +99,18 @@ def evaluate_sft(model, val_loader, device, num_batches=20):
         input_ids = batch["input_ids"].to(device)
         labels = batch["labels"].to(device)
 
-        # Shift for causal LM: predict token[i+1] from token[i]
-        logits, _ = model(input_ids[:, :-1])
-        shift_labels = labels[:, 1:]
+        # Shift for causal LM: predict token[i+1] from token[i] (bf16 autocast for flash-attn)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            logits, _ = model(input_ids[:, :-1])
+            shift_labels = labels[:, 1:]
 
-        # Flatten and compute loss (only on non-masked positions)
-        loss = nn.functional.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            shift_labels.reshape(-1),
-            ignore_index=IGNORE_INDEX,
-        )
+            # Flatten and compute loss (only on non-masked positions)
+            loss = nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                shift_labels.reshape(-1),
+                ignore_index=IGNORE_INDEX,
+                    label_smoothing=0.1,
+            )
         # Count unmasked tokens for perplexity calculation
         unmasked = (shift_labels != IGNORE_INDEX).sum().item()
         if unmasked > 0:
@@ -153,8 +155,7 @@ def main():
     print(f"[SFT] Tokenizer loaded from {tokenizer_path} | vocab_size={tokenizer.get_vocab_size()}")
 
     # Build model from config
-    model_config = TitanConfig.from_dict(cfg)
-    model = build_model(model_config)
+    model = build_model(cfg)
     model = model.to(device)
 
     # Load pre-trained base checkpoint
@@ -188,7 +189,7 @@ def main():
         raise ValueError("No training examples loaded. Check sft_files paths in config.")
 
     # Train / val split
-    val_size = max(1, int(len(full_dataset) * data_cfg.get("val_split", 0.1)))
+    val_size = max(2, int(len(full_dataset) * data_cfg.get("val_split", 0.1)))
     train_size = len(full_dataset) - val_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
@@ -253,6 +254,11 @@ def main():
     optimizer.zero_grad()
     accum_loss = 0.0
     accum_tokens = 0
+    micro_step = 0  # counts every micro-batch; optimizer fires every grad_accum_steps
+
+    best_val_loss = float("inf")
+    patience_counter = 0
+    early_stop_patience = train_cfg.get("early_stop_patience", 8)
 
     while step < max_steps:
         for batch in train_loader:
@@ -262,27 +268,30 @@ def main():
             input_ids = batch["input_ids"].to(device)
             labels = batch["labels"].to(device)
 
-            # Forward pass — shift inputs for causal LM
-            logits, _ = model(input_ids[:, :-1])
-            shift_labels = labels[:, 1:]
+            # Forward pass — shift inputs for causal LM (bf16 autocast for flash-attn)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                logits, _ = model(input_ids[:, :-1])
+                shift_labels = labels[:, 1:]
 
-            # Loss — only on unmasked (assistant) tokens
-            loss = nn.functional.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
-                shift_labels.reshape(-1),
-                ignore_index=IGNORE_INDEX,
-            )
+                # Loss — only on unmasked (assistant) tokens
+                loss = nn.functional.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    shift_labels.reshape(-1),
+                    ignore_index=IGNORE_INDEX,
+                    label_smoothing=0.1,
+                )
 
             # Scale for gradient accumulation
             (loss / grad_accum_steps).backward()
             accum_loss += loss.item()
             accum_tokens += (shift_labels != IGNORE_INDEX).sum().item()
+            micro_step += 1
 
-            if (step + 1) % grad_accum_steps == 0:
+            if micro_step % grad_accum_steps == 0:
                 # NaN/Inf check
                 if not math.isfinite(accum_loss):
                     print(f"[SFT] FATAL: Loss diverged at step {step} (loss={accum_loss:.4f}) — saving emergency checkpoint")
-                    save_checkpoint(model, optimizer, scheduler, step, checkpoint_dir / f"emergency_step_{step}.pt")
+                    save_checkpoint(str(checkpoint_dir / f"emergency_step_{step}.pt"), model, optimizer, scheduler, step, cfg)
                     raise RuntimeError(f"Loss is {accum_loss} at step {step}. Training halted.")
 
                 torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
@@ -299,9 +308,18 @@ def main():
                 if step % eval_interval == 0:
                     val_loss, val_ppl = evaluate_sft(model, val_loader, device, eval_cfg.get("num_eval_batches", 10))
                     logger.log_val(step, val_loss, val_ppl)
+                    # Early stopping
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                        if patience_counter >= early_stop_patience:
+                            print(f"[SFT] Early stopping at step {step} (patience={early_stop_patience})")
+                            break
 
                 if step % save_interval == 0:
-                    save_checkpoint(model, optimizer, scheduler, step, checkpoint_dir / f"step_{step}.pt")
+                    save_checkpoint(str(checkpoint_dir / f"step_{step}.pt"), model, optimizer, scheduler, step, cfg)
                     print(f"[SFT] Checkpoint saved: step_{step}.pt")
 
                 accum_loss = 0.0
@@ -309,7 +327,7 @@ def main():
 
     # Final save
     final_path = checkpoint_dir / "final.pt"
-    save_checkpoint(model, optimizer, scheduler, step, final_path)
+    save_checkpoint(str(final_path), model, optimizer, scheduler, step, cfg)
     print(f"[SFT] Training complete. Final checkpoint: {final_path}")
 
     # Final evaluation
@@ -318,5 +336,131 @@ def main():
     print(f"[SFT] Final validation — loss={val_loss:.4f} | perplexity={val_ppl:.2f}")
 
 
+
 if __name__ == "__main__":
     main()
+
+
+def train_sft(cfg, model, train_dataset, val_dataset, device, resume=None):
+    """
+    Called by run_upgrade.py with pre-built model and datasets.
+    Signature: train_sft(cfg, model, train_dataset, val_dataset, device, resume)
+    """
+    import math, time
+    from pathlib import Path
+    from torch.utils.data import DataLoader
+    from torch.optim import AdamW
+
+    train_cfg  = cfg["training"]
+    eval_cfg   = cfg.get("evaluation", {})
+    log_cfg    = cfg.get("logging", {"log_dir": "logs/upgrade", "experiment_name": "upgrade"})
+
+    # --- Dataloaders ---
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_cfg["batch_size"],
+        shuffle=True,
+        num_workers=cfg["data"].get("num_workers", 2),
+        pin_memory=(device.type == "cuda"),
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=eval_cfg.get("val_batch_size", 8),
+        shuffle=False,
+        num_workers=cfg["data"].get("num_workers", 2),
+    )
+
+    # --- Optimizer & scheduler ---
+    optimizer = AdamW(
+        model.parameters(),
+        lr=train_cfg["learning_rate"],
+        weight_decay=train_cfg["weight_decay"],
+        betas=(0.9, 0.95),
+    )
+    max_steps = train_cfg["max_steps"]
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        warmup_steps=train_cfg["warmup_steps"],
+        max_steps=max_steps,
+        min_lr_ratio=train_cfg.get("lr_min_ratio", 0.1),
+    )
+
+    checkpoint_dir = Path(train_cfg["checkpoint_dir"])
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    logger = SFTLogger(log_cfg["log_dir"], log_cfg["experiment_name"])
+    clip_grad = train_cfg["clip_grad_norm"]
+
+    # --- Resume ---
+    start_step = 0
+    if resume and Path(resume).exists():
+        print(f"[SFT] Resuming from: {resume}")
+        ckpt = torch.load(resume, map_location=device, weights_only=True)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        start_step = ckpt.get("step", 0)
+        print(f"[SFT] Resumed at step {start_step}")
+
+    # --- Training loop ---
+    grad_accum  = train_cfg.get("gradient_accumulation_steps", 1)
+    log_every   = train_cfg.get("log_interval", 25)
+    eval_every  = train_cfg.get("eval_interval", 500)
+    save_every  = train_cfg.get("save_interval", 1000)
+
+    model.train()
+    step       = start_step
+    micro_step = 0
+    accum_loss = 0.0
+    start_time = time.time()
+    optimizer.zero_grad()
+
+    print(f"[SFT] Training {max_steps} steps | {len(train_dataset)} train / {len(val_dataset)} val examples")
+
+    while step < max_steps:
+        for batch in train_loader:
+            if step >= max_steps:
+                break
+            input_ids = batch["input_ids"].to(device)
+            labels    = batch["labels"].to(device)
+
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                logits, _ = model(input_ids[:, :-1])
+                shift_labels = labels[:, 1:]
+                loss = nn.functional.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    shift_labels.reshape(-1),
+                    ignore_index=IGNORE_INDEX,
+                    label_smoothing=0.1,
+                )
+
+            (loss / grad_accum).backward()
+            accum_loss += loss.item()
+            micro_step += 1
+
+            if micro_step % grad_accum == 0:
+                if not math.isfinite(accum_loss):
+                    save_checkpoint(str(checkpoint_dir / f"emergency_{step}.pt"), model, optimizer, scheduler, step, cfg)
+                    raise RuntimeError(f"Loss diverged at step {step}: {accum_loss}")
+
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                step += 1
+
+                if step % log_every == 0:
+                    logger.log_train(step, accum_loss / grad_accum, scheduler.get_last_lr()[0], time.time() - start_time)
+                if step % eval_every == 0:
+                    vl, vp = evaluate_sft(model, val_loader, device, eval_cfg.get("num_eval_batches", 50))
+                    logger.log_val(step, vl, vp)
+                if step % save_every == 0:
+                    save_checkpoint(str(checkpoint_dir / f"step_{step}.pt"), model, optimizer, scheduler, step, cfg)
+
+                accum_loss = 0.0
+
+    # Final save + eval
+    final = checkpoint_dir / "final.pt"
+    save_checkpoint(str(final), model, optimizer, scheduler, step, cfg)
+    vl, vp = evaluate_sft(model, val_loader, device)
+    logger.log_val(step, vl, vp)
+    print(f"[SFT] Done. Final: {final} | val_loss={vl:.4f} | ppl={vp:.2f}")
