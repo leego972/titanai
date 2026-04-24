@@ -231,11 +231,16 @@ def parse_args():
     else:
         default_dst_config = str(root / "training" / "configs" / "titan_1b.yaml")
 
+    if (root / "configs" / "titan_109m.yaml").exists():
+        default_src_config = str(root / "configs" / "titan_109m.yaml")
+    else:
+        default_src_config = str(root / "training" / "configs" / "titan_109m.yaml")
+
     p = argparse.ArgumentParser(description="Inflate a 109M TitanAI checkpoint to 1B")
     p.add_argument("--src_checkpoint", required=True,
                    help="Path to the source 109M checkpoint (.pt)")
-    p.add_argument("--src_config", required=True,
-                   help="Path to the source model YAML config (e.g. configs/titan_109m.yaml)")
+    p.add_argument("--src_config", default=default_src_config,
+                   help="Path to the source model YAML config (default: auto-detected titan_109m.yaml)")
     p.add_argument("--dst_config", default=default_dst_config,
                    help="Path to the target 1B YAML config (default: auto-detected)")
     p.add_argument("--dst_checkpoint",
