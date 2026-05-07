@@ -1,23 +1,23 @@
 """
 Titan Data Preparation Pipeline — v2
-======================================
-Implements all preprocessing rules approved in the TitanAI Advancement Package v2.
+====================================
+Prepares text corpora for causal language-model training.
 
-Rules enforced (in order):
+Rules enforced:
     1.  Normalization       — UTF-8 NFC, strip control chars, collapse whitespace
     2.  Length filtering    — drop documents < MIN_WORDS words
     3.  Symbol ratio filter — drop documents where symbols > MAX_SYMBOL_RATIO of chars
     4.  Boilerplate filter  — drop documents containing known boilerplate phrases
     5.  Exact deduplication — SHA-256 hash per document, drop duplicates
-    6.  MinHash/LSH         — near-duplicate removal (Jaccard threshold 0.8)
-    7.  Metadata headers    — prepend [Source: X | Corpus: Y] to tech/cyber docs
-    8.  Chunking            — respect paragraph/natural boundaries, with overlap
-    9.  Deterministic split — 98/2 train/val split seeded before tokenization
+    6.  MinHash/LSH         — near-duplicate removal when datasketch is installed
+    7.  Metadata headers    — prepend headers to technical/cyber docs
+    8.  Chunking            — respect paragraph boundaries, with overlap
+    9.  Deterministic split — 98/2 train/val split before shard writing
     10. Manifest generation — version, token counts, ratios, source hashes
     11. Rejected data log   — every dropped document logged with reason
 
 Usage:
-    python data/prepare_data.py --config configs/titan_config.yaml [--corpus-version v1.0.0]
+    python data/prepare_data.py --config configs/titan_config.yaml --corpus-version v1.0.0
 """
 
 import os
@@ -38,15 +38,12 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from tokenizer.train_tokenizer import load_tokenizer
 
-# ─── MinHash availability ─────────────────────────────────────────────────────
 try:
     from datasketch import MinHash, MinHashLSH
     MINHASH_AVAILABLE = True
 except ImportError:
     MINHASH_AVAILABLE = False
     print("[WARNING] datasketch not installed — MinHash/LSH deduplication disabled.")
-
-# ─── Constants ────────────────────────────────────────────────────────────────
 
 BOILERPLATE_PHRASES = [
     "terms of service", "privacy policy", "accept cookies",
@@ -55,7 +52,6 @@ BOILERPLATE_PHRASES = [
     "this page uses cookies", "gdpr", "cookie consent",
 ]
 
-# Corpora that receive metadata headers (technical and cybersecurity)
 METADATA_HEADER_CORPORA = {"corpus_C_technical", "corpus_D_cyber"}
 
 CORPUS_HEADER = {
@@ -67,21 +63,26 @@ CORPUS_HEADER = {
     "corpus_F_instruct":  "[Source: Instruction | Corpus: F-Instruct]",
 }
 
-MINHASH_NUM_PERM   = 128
-MINHASH_THRESHOLD  = 0.80    # Jaccard similarity threshold
-MIN_WORDS          = 50
-MAX_SYMBOL_RATIO   = 0.30
-TRAIN_RATIO        = 0.98
-RANDOM_SEED        = 42
-CHUNK_OVERLAP_TOKS = 64      # token overlap between chunks
-SHARD_SIZE         = 10_000  # sequences per .npy shard
+MINHASH_NUM_PERM = 128
+MINHASH_THRESHOLD = 0.80
+MIN_WORDS = 50
+MAX_SYMBOL_RATIO = 0.30
+TRAIN_RATIO = 0.98
+RANDOM_SEED = 42
+CHUNK_OVERLAP_TOKS = 64
+SHARD_SIZE = 10_000
+DEFAULT_CORPUS_BUCKETS = [
+    "corpus_A_general",
+    "corpus_B_reasoning",
+    "corpus_C_technical",
+    "corpus_D_cyber",
+    "corpus_E_cinema",
+    "corpus_F_instruct",
+]
 
-
-# ─── Rule 1: Normalization ────────────────────────────────────────────────────
 
 def normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
-    # Strip control chars, keep standard whitespace
     text = "".join(
         ch for ch in text
         if unicodedata.category(ch) not in ("Cc", "Cf") or ch in "\n\t "
@@ -92,8 +93,6 @@ def normalize_text(text: str) -> str:
     lines = [line.strip() for line in text.split("\n")]
     return "\n".join(lines).strip()
 
-
-# ─── Rules 2–4: Filters ───────────────────────────────────────────────────────
 
 def passes_length_filter(text: str) -> bool:
     return len(text.split()) >= MIN_WORDS
@@ -112,8 +111,6 @@ def passes_boilerplate_filter(text: str) -> bool:
     return not any(phrase in lower for phrase in BOILERPLATE_PHRASES)
 
 
-# ─── Rules 5–6: Deduplication ─────────────────────────────────────────────────
-
 def document_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -129,8 +126,6 @@ def build_minhash(text: str) -> Optional[object]:
     return m
 
 
-# ─── Rule 7: Metadata headers ─────────────────────────────────────────────────
-
 def add_metadata_header(text: str, corpus_name: str) -> str:
     if corpus_name in METADATA_HEADER_CORPORA:
         header = CORPUS_HEADER.get(corpus_name, "")
@@ -139,18 +134,15 @@ def add_metadata_header(text: str, corpus_name: str) -> str:
     return text
 
 
-# ─── Rule 8: Chunking ─────────────────────────────────────────────────────────
-
 def chunk_document(text: str, max_tokens: int, tokenizer) -> List[str]:
-    """
-    Chunk a document into max_tokens-length pieces, respecting paragraph
-    boundaries. Applies CHUNK_OVERLAP_TOKS token overlap between chunks.
-    """
     tokens = tokenizer.encode(text).ids
     if len(tokens) <= max_tokens:
         return [text]
 
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        return [text]
+
     chunks: List[str] = []
     current_paras: List[str] = []
     current_tok_count = 0
@@ -159,7 +151,6 @@ def chunk_document(text: str, max_tokens: int, tokenizer) -> List[str]:
         para_toks = len(tokenizer.encode(para).ids)
         if current_tok_count + para_toks > max_tokens and current_paras:
             chunks.append("\n\n".join(current_paras))
-            # Carry over overlap
             overlap_paras: List[str] = []
             overlap_count = 0
             for p in reversed(current_paras):
@@ -180,7 +171,17 @@ def chunk_document(text: str, max_tokens: int, tokenizer) -> List[str]:
     return chunks if chunks else [text]
 
 
-# ─── Per-corpus processing ────────────────────────────────────────────────────
+def find_corpus_files(raw_dir: Path, corpus_name: str) -> List[Path]:
+    corpus_path = raw_dir / corpus_name
+    if corpus_path.exists():
+        return sorted(list(corpus_path.glob("**/*.txt")) + list(corpus_path.glob("**/*.md")))
+
+    # Compatibility path: allow loose files under data/raw for corpus_A_general.
+    if corpus_name == "corpus_A_general":
+        return sorted(list(raw_dir.glob("*.txt")) + list(raw_dir.glob("*.md")))
+
+    return []
+
 
 def process_corpus(
     raw_dir: Path,
@@ -191,17 +192,12 @@ def process_corpus(
     exact_seen: set,
     lsh: Optional[object],
 ) -> List[List[int]]:
-    corpus_path = raw_dir / corpus_name
-    if not corpus_path.exists():
-        print(f"  [SKIP] {corpus_name} — directory not found at {corpus_path}")
+    files = find_corpus_files(raw_dir, corpus_name)
+    if not files:
+        print(f"  [SKIP] {corpus_name} — no .txt/.md files found")
         return []
 
-    files = sorted(
-        list(corpus_path.glob("**/*.txt")) +
-        list(corpus_path.glob("**/*.md"))
-    )
     print(f"  [{corpus_name}] {len(files)} files")
-
     bos_id = tokenizer.token_to_id("<bos>") or 1
     eos_id = tokenizer.token_to_id("<eos>") or 2
 
@@ -218,7 +214,6 @@ def process_corpus(
             continue
 
         text = normalize_text(raw)
-
         if not passes_length_filter(text):
             rejected_log.append({"file": rel, "reason": "too_short"})
             rejected_count += 1
@@ -262,17 +257,26 @@ def process_corpus(
     return all_seqs
 
 
-# ─── Main pipeline ────────────────────────────────────────────────────────────
+def resolve_processed_dir(base_dir: Path, cfg: dict, corpus_version: str) -> Path:
+    processed_root = base_dir / cfg["data"]["processed_dir"]
+    version = cfg["data"].get("processed_version") or corpus_version
+    return processed_root / version
 
-def run_pipeline(config_path: str, corpus_version: str = "v1.0.0") -> Dict:
-    with open(config_path) as f:
+
+def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Optional[str] = None) -> Dict:
+    config_path_obj = Path(config_path)
+    if base_dir is None:
+        base_path = config_path_obj.parent.parent
+    else:
+        base_path = Path(base_dir)
+
+    with open(config_path_obj) as f:
         cfg = yaml.safe_load(f)
 
-    base_dir    = Path(config_path).parent.parent
-    raw_dir     = base_dir / "data" / "raw"
-    proc_dir    = base_dir / "data" / "processed" / corpus_version
-    rejected_dir = base_dir / "data" / "rejected"
-    tok_dir     = base_dir / cfg["tokenizer"]["save_dir"]
+    raw_dir = base_path / cfg["data"]["raw_dir"]
+    proc_dir = resolve_processed_dir(base_path, cfg, corpus_version)
+    rejected_dir = base_path / "data" / "rejected"
+    tok_dir = base_path / cfg["tokenizer"]["save_dir"]
     max_seq_len = cfg["model"]["max_seq_len"]
 
     for d in [proc_dir / "train", proc_dir / "val", rejected_dir]:
@@ -289,14 +293,7 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0") -> Dict:
     lsh = MinHashLSH(threshold=MINHASH_THRESHOLD, num_perm=MINHASH_NUM_PERM) if MINHASH_AVAILABLE else None
     rejected_log: List[Dict] = []
 
-    corpus_buckets = [
-        "corpus_A_general",
-        "corpus_B_reasoning",
-        "corpus_C_technical",
-        "corpus_D_cyber",
-        "corpus_E_cinema",
-    ]
-
+    corpus_buckets = cfg.get("data", {}).get("corpus_buckets", DEFAULT_CORPUS_BUCKETS)
     all_seqs: List[List[int]] = []
     bucket_token_counts: Dict[str, int] = {}
 
@@ -307,17 +304,24 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0") -> Dict:
         bucket_token_counts[bucket] = tok_count
         all_seqs.extend(seqs)
 
+    if not all_seqs:
+        raise RuntimeError(
+            f"No training sequences were produced from {raw_dir}. "
+            "Add .txt/.md files under data/raw/corpus_A_general or another corpus bucket."
+        )
+
     total_tokens = sum(bucket_token_counts.values())
     print(f"\n[Pipeline] Total sequences : {len(all_seqs):,}")
     print(f"[Pipeline] Total tokens    : {total_tokens:,}")
 
-    # Rule 9: Deterministic train/val split
     rng = random.Random(RANDOM_SEED)
     indices = list(range(len(all_seqs)))
     rng.shuffle(indices)
-    split_idx = int(len(indices) * TRAIN_RATIO)
+    split_idx = max(1, int(len(indices) * TRAIN_RATIO))
+    if split_idx >= len(indices):
+        split_idx = max(1, len(indices) - 1)
     train_idx = indices[:split_idx]
-    val_idx   = indices[split_idx:]
+    val_idx = indices[split_idx:] or indices[-1:]
     print(f"[Pipeline] Train: {len(train_idx):,}  Val: {len(val_idx):,}")
 
     def save_shards(idx_list: List[int], split: str) -> int:
@@ -337,23 +341,21 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0") -> Dict:
         return tok_total
 
     train_tokens = save_shards(train_idx, "train")
-    val_tokens   = save_shards(val_idx,   "val")
+    val_tokens = save_shards(val_idx, "val")
 
-    # Source hashes for manifest
     source_hashes: Dict[str, str] = {}
     for bucket in corpus_buckets:
-        bp = raw_dir / bucket
-        if bp.exists():
-            files = sorted(list(bp.glob("**/*.txt")) + list(bp.glob("**/*.md")))
+        files = find_corpus_files(raw_dir, bucket)
+        if files:
             h = hashlib.sha256()
             for f in files:
                 h.update(f.read_bytes())
             source_hashes[bucket] = h.hexdigest()
 
-    # Rule 10: Manifest
     manifest = {
         "version": corpus_version,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "output_dir": str(proc_dir),
         "preprocessing_rules": {
             "min_words": MIN_WORDS,
             "max_symbol_ratio": MAX_SYMBOL_RATIO,
@@ -386,14 +388,12 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0") -> Dict:
         json.dump(manifest, f, indent=2)
     print(f"[Pipeline] Manifest: {manifest_path}")
 
-    # Rule 11: Rejected log
     rej_path = rejected_dir / f"{corpus_version}_rejected.jsonl"
     with open(rej_path, "w") as f:
         for entry in rejected_log:
             f.write(json.dumps(entry) + "\n")
     print(f"[Pipeline] Rejected log: {rej_path} ({len(rejected_log)} entries)")
 
-    # Token ratio summary
     print("\n[Pipeline] Token ratio summary:")
     for b, c in bucket_token_counts.items():
         r = c / total_tokens if total_tokens > 0 else 0
@@ -407,5 +407,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Titan data preparation pipeline")
     parser.add_argument("--config", default="configs/titan_config.yaml")
     parser.add_argument("--corpus-version", default="v1.0.0")
+    parser.add_argument("--base-dir", default=None)
     args = parser.parse_args()
-    run_pipeline(args.config, args.corpus_version)
+    run_pipeline(args.config, args.corpus_version, args.base_dir)
