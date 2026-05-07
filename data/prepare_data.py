@@ -20,17 +20,16 @@ Usage:
     python data/prepare_data.py --config configs/titan_config.yaml --corpus-version v1.0.0
 """
 
-import os
+import argparse
+import hashlib
+import json
+import random
 import re
 import sys
-import json
-import hashlib
-import random
-import argparse
 import unicodedata
-from pathlib import Path
-from typing import List, Dict, Optional
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import numpy as np
 import yaml
@@ -55,12 +54,12 @@ BOILERPLATE_PHRASES = [
 METADATA_HEADER_CORPORA = {"corpus_C_technical", "corpus_D_cyber"}
 
 CORPUS_HEADER = {
-    "corpus_A_general":   "[Source: General | Corpus: A-General]",
+    "corpus_A_general": "[Source: General | Corpus: A-General]",
     "corpus_B_reasoning": "[Source: Reasoning | Corpus: B-Reasoning]",
     "corpus_C_technical": "[Source: Technical | Corpus: C-Technical]",
-    "corpus_D_cyber":     "[Source: Cybersecurity | Corpus: D-Cyber]",
-    "corpus_E_cinema":    "[Source: Cinema | Corpus: E-Cinema]",
-    "corpus_F_instruct":  "[Source: Instruction | Corpus: F-Instruct]",
+    "corpus_D_cyber": "[Source: Cybersecurity | Corpus: D-Cyber]",
+    "corpus_E_cinema": "[Source: Cinema | Corpus: E-Cinema]",
+    "corpus_F_instruct": "[Source: Instruction | Corpus: F-Instruct]",
 }
 
 MINHASH_NUM_PERM = 128
@@ -176,7 +175,6 @@ def find_corpus_files(raw_dir: Path, corpus_name: str) -> List[Path]:
     if corpus_path.exists():
         return sorted(list(corpus_path.glob("**/*.txt")) + list(corpus_path.glob("**/*.md")))
 
-    # Compatibility path: allow loose files under data/raw for corpus_A_general.
     if corpus_name == "corpus_A_general":
         return sorted(list(raw_dir.glob("*.txt")) + list(raw_dir.glob("*.md")))
 
@@ -257,13 +255,13 @@ def process_corpus(
     return all_seqs
 
 
-def resolve_processed_dir(base_dir: Path, cfg: dict, corpus_version: str) -> Path:
+def resolve_processed_dir(base_dir: Path, cfg: dict, corpus_version: Optional[str]) -> Path:
     processed_root = base_dir / cfg["data"]["processed_dir"]
-    version = cfg["data"].get("processed_version") or corpus_version
+    version = corpus_version or cfg["data"].get("processed_version") or "v1.0.0"
     return processed_root / version
 
 
-def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Optional[str] = None) -> Dict:
+def run_pipeline(config_path: str, corpus_version: Optional[str] = None, base_dir: Optional[str] = None) -> Dict:
     config_path_obj = Path(config_path)
     if base_dir is None:
         base_path = config_path_obj.parent.parent
@@ -273,8 +271,9 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Opt
     with open(config_path_obj) as f:
         cfg = yaml.safe_load(f)
 
+    selected_version = corpus_version or cfg["data"].get("processed_version") or "v1.0.0"
     raw_dir = base_path / cfg["data"]["raw_dir"]
-    proc_dir = resolve_processed_dir(base_path, cfg, corpus_version)
+    proc_dir = resolve_processed_dir(base_path, cfg, selected_version)
     rejected_dir = base_path / "data" / "rejected"
     tok_dir = base_path / cfg["tokenizer"]["save_dir"]
     max_seq_len = cfg["model"]["max_seq_len"]
@@ -282,7 +281,7 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Opt
     for d in [proc_dir / "train", proc_dir / "val", rejected_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n[Pipeline] TitanAI data preparation — version {corpus_version}")
+    print(f"\n[Pipeline] TitanAI data preparation — version {selected_version}")
     print(f"[Pipeline] Raw dir : {raw_dir}")
     print(f"[Pipeline] Output  : {proc_dir}")
 
@@ -298,8 +297,7 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Opt
     bucket_token_counts: Dict[str, int] = {}
 
     for bucket in corpus_buckets:
-        seqs = process_corpus(raw_dir, bucket, tokenizer, max_seq_len,
-                              rejected_log, exact_seen, lsh)
+        seqs = process_corpus(raw_dir, bucket, tokenizer, max_seq_len, rejected_log, exact_seen, lsh)
         tok_count = sum(len(s) for s in seqs)
         bucket_token_counts[bucket] = tok_count
         all_seqs.extend(seqs)
@@ -353,7 +351,7 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Opt
             source_hashes[bucket] = h.hexdigest()
 
     manifest = {
-        "version": corpus_version,
+        "version": selected_version,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "output_dir": str(proc_dir),
         "preprocessing_rules": {
@@ -388,7 +386,7 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Opt
         json.dump(manifest, f, indent=2)
     print(f"[Pipeline] Manifest: {manifest_path}")
 
-    rej_path = rejected_dir / f"{corpus_version}_rejected.jsonl"
+    rej_path = rejected_dir / f"{selected_version}_rejected.jsonl"
     with open(rej_path, "w") as f:
         for entry in rejected_log:
             f.write(json.dumps(entry) + "\n")
@@ -399,14 +397,14 @@ def run_pipeline(config_path: str, corpus_version: str = "v1.0.0", base_dir: Opt
         r = c / total_tokens if total_tokens > 0 else 0
         print(f"  {b:<30} {c:>12,} tokens  ({r:.1%})")
 
-    print(f"\n[Pipeline] Done. Version {corpus_version} ready.")
+    print(f"\n[Pipeline] Done. Version {selected_version} ready.")
     return manifest
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Titan data preparation pipeline")
     parser.add_argument("--config", default="configs/titan_config.yaml")
-    parser.add_argument("--corpus-version", default="v1.0.0")
+    parser.add_argument("--corpus-version", default=None)
     parser.add_argument("--base-dir", default=None)
     args = parser.parse_args()
     run_pipeline(args.config, args.corpus_version, args.base_dir)
