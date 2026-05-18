@@ -1,0 +1,136 @@
+# TitanAI Cybersecurity Deep Dive — Training Config
+  # ====================================================
+  # Purpose : Extended deep training pass focused on cybersecurity competence.
+  #           Titan must be capable of complex cyber builds:
+  #           threat modelling, secure architecture design, exploit analysis,
+  #           CVE research, tool building, and defensive security workflows.
+  #
+  # Position in pipeline:
+  #   3B base → SFT v2 → Tool Use → General Knowledge → [THIS STAGE] → Psychology
+  #
+  # This is Upgrade F (Cybersecurity Extended) from titan_upgrade_plan.md.
+  # It runs AFTER the general knowledge and tool-use stages so that Titan can
+  # reason about security concepts WITH the context of software, systems, and
+  # problem-solving competence already in place.
+  #
+  # Dataset breakdown:
+  #   CVE corpus       : NVD/MITRE CVE database (250K+ entries, structured)
+  #   ATT&CK framework : MITRE ATT&CK v14 — all tactics, techniques, procedures
+  #   Security papers  : arXiv security papers, USENIX, IEEE S&P, CCS (2010-2024)
+  #   Hardening guides : CIS Benchmarks, NIST SP 800 series, DISA STIGs
+  #   Pentest reports  : Public red team reports, HackTheBox writeups, CTF solutions
+  #   Secure coding    : OWASP guides, CWE database, secure code examples
+  #   Architecture     : Security architecture case studies, design patterns
+  #   Tool codebases   : Defensive tool source code (Suricata, Snort, OSSEC, etc.)
+  #   Threat models    : STRIDE/PASTA/MITRE ATT&CK threat model examples
+  #   Incident reports : Public incident reports, post-mortems, forensic analyses
+  #
+  # Total estimated: ~500K instruction pairs | ~40 hrs | ~$16
+
+  project:
+    name: "titan-cyber-deepdive"
+    version: "1.0.0"
+
+  model:
+    architecture: "decoder_transformer"
+    vocab_size: 32000
+    d_model: 2560
+    n_heads: 20
+    n_kv_heads: 4
+    n_layers: 36
+    d_ff: 10240
+    max_seq_len: 4096              # Extended context — needed for reading full CVEs, code files, reports
+    rope_base: 500000.0            # YaRN-style high base for 4096 context extrapolation
+    dropout: 0.03
+    tie_embeddings: true
+    gradient_checkpointing: true
+
+  data:
+    sft_files:
+      # Core CVE and vulnerability knowledge
+      - "data/cyber/cve_corpus.jsonl"
+      - "data/cyber/mitre_attack.jsonl"
+      - "data/cyber/cwe_database.jsonl"
+
+      # Hardening and defensive architecture
+      - "data/cyber/cis_benchmarks.jsonl"
+      - "data/cyber/nist_sp800.jsonl"
+      - "data/cyber/secure_architecture.jsonl"
+      - "data/cyber/threat_models.jsonl"
+
+      # Technical analysis and tool building
+      - "data/cyber/pentest_methodology.jsonl"
+      - "data/cyber/ctf_writeups.jsonl"
+      - "data/cyber/incident_reports.jsonl"
+      - "data/cyber/defensive_tools_code.jsonl"
+
+      # Secure coding
+      - "data/cyber/owasp_guides.jsonl"
+      - "data/cyber/secure_code_examples.jsonl"
+      - "data/cyber/code_review_security.jsonl"
+
+      # Research
+      - "data/cyber/security_papers.jsonl"
+
+    tokenizer_path: "tokenizer/artifacts_v32k/tokenizer.json"
+    val_split: 0.05
+    max_seq_len: 4096
+    num_workers: 4
+    # System prompt injected into every training example
+    system_prompt: >
+      You are Titan, an expert cybersecurity intelligence.
+      You specialise in defensive security, threat modelling, secure architecture,
+      CVE analysis, incident investigation, and building security tooling.
+      You are precise, technical, and efficiency-focused.
+      You always identify the most cost-effective and practical path to security.
+      You proactively flag risks the user has not asked about.
+      You never assist with active offensive operations against systems without authorisation.
+
+  training:
+    batch_size: 2
+    gradient_accumulation_steps: 8    # Effective batch = 16 examples
+    learning_rate: 3.0e-6             # Very conservative — deep-specialisation fine-tuning
+    weight_decay: 0.01
+    max_steps: 50000
+    warmup_steps: 500
+    lr_scheduler: "cosine"
+    lr_min_ratio: 0.1
+    clip_grad_norm: 1.0
+    log_interval: 50
+    eval_interval: 500
+    save_interval: 2000
+    checkpoint_dir: "checkpoints/titan_cyber_deepdive"
+    use_8bit_adam: true
+    use_compile: true
+    bf16: true
+    # Reference checkpoint: must be post-tool-use SFT checkpoint
+    resume_from: null   # Set to: checkpoints/sft_v02/final.pt or checkpoints/tool_v01/final.pt
+
+  evaluation:
+    val_batch_size: 2
+    num_eval_batches: 50
+    # Cyber-specific eval gates (manual review required):
+    # 1. CVE analysis accuracy: correctly identifies vulnerability class, CVSS vector, remediation
+    # 2. Threat model completeness: STRIDE coverage on a given system description
+    # 3. Secure architecture: produces actionable hardening plan from a given architecture diagram
+    # 4. Code review: identifies security flaws in vulnerable code snippets
+    # 5. Boundary gate: ZERO failures on prohibited-offensive-use prompts
+
+  logging:
+    log_dir: "logs/titan_cyber_deepdive"
+    experiment_name: "titan-cyber-deepdive-v1"
+    wandb:
+      enabled: false
+      project: "titanai"
+
+  inference:
+    default_max_new_tokens: 1024
+    default_temperature: 0.6       # Lower temp for technical accuracy
+    default_top_k: 40
+    default_top_p: 0.92
+
+  # Cost estimate (RTX 4090 spot ~$0.45/hr):
+  #   50,000 steps × ~3 sec/step = ~42 hrs → ~$19
+  #   A100 40GB  spot ~$1.50/hr:
+  #   50,000 steps × ~1.5 sec/step = ~21 hrs → ~$31
+  
