@@ -1,259 +1,244 @@
 """
-upscale_to_1b.py — Inflate a 109M TitanAI checkpoint to 1B architecture.
+  upscale_to_1b.py — Inflate a 109M TitanAI checkpoint to 1B v0.3 architecture.
 
-Usage:
-    python scripts/upscale_to_1b.py \
-        --src_checkpoint checkpoints/titan_109m_pretrain/best_model.pt \
-        --src_config    configs/titan_109m.yaml \
-        --dst_config    configs/titan_1b.yaml \
-        --dst_checkpoint checkpoints/titan_1b_pretrain/init.pt
+  Handles the transition from v0.2 (LayerNorm + GELU + MHA) to v0.3 architecture:
+      - LayerNorm (ln1/ln2/ln_final) → RMSNorm (norm1/norm2/ln_final, weight only, no bias)
+      - GELU MLP (fc1, fc2) → SwiGLU (gate_proj, up_proj, down_proj)
+      - MHA (qkv_proj) → GQA (q_proj, k_proj, v_proj, out_proj)
 
-Strategy:
-    - Embedding & lm_head: copy rows/cols that exist; zero-pad new dimensions.
-    - LayerNorm (ln1, ln2, ln_final): zero-pad weight and bias to new d_model.
-    - Attention qkv_proj / out_proj: copy source weights into top-left block of
-      the expanded weight matrix; initialise new rows/cols with small Gaussian
-      noise scaled to 0.02 / sqrt(2 * n_layers_dst) for stability.
-    - MLP fc1 / fc2: same block-copy + noise-pad strategy.
-    - Extra layers (when n_layers_dst > n_layers_src): cycle existing layers
-      round-robin so every source layer's knowledge is reused evenly.
+  If your source 109M checkpoint uses the v0.3 architecture already, this script
+  still works — it detects the key names and handles both cases.
 
-All new parameters are initialised with small noise so they do not create
-gradient dead-zones while still being close to zero.
-"""
+  Usage:
+      python scripts/upscale_to_1b.py \
+          --src_checkpoint checkpoints/titan_109m_pretrain/best_model.pt \
+          --src_config     configs/titan_109m.yaml \
+          --dst_config     configs/titan_1b.yaml \
+          --dst_checkpoint checkpoints/titan_1b_pretrain/init.pt
+  """
 
-import argparse
-import math
-import sys
-from pathlib import Path
+  import argparse
+  import math
+  import sys
+  from pathlib import Path
 
-import torch
-import yaml
+  import torch
+  import yaml
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+  # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _noise(shape, std):
-    return torch.randn(shape) * std
+  def _noise(shape, std):
+      return torch.randn(shape) * std
 
+  def expand_1d(src, new_size, std):
+      out = _noise((new_size,), std)
+      out[:src.size(0)] = src
+      return out
 
-def expand_1d(src: torch.Tensor, new_size: int, noise_std: float) -> torch.Tensor:
-    """Expand a 1-D tensor (bias / LayerNorm weight) from src.size(0) to new_size."""
-    out = _noise((new_size,), noise_std)
-    out[: src.size(0)] = src
-    return out
+  def expand_2d(src, new_rows, new_cols, std):
+      out = _noise((new_rows, new_cols), std)
+      out[:src.size(0), :src.size(1)] = src
+      return out
 
+  def _swiglu_hidden(d_ff):
+      return ((int(2 * d_ff / 3) + 63) // 64) * 64
 
-def expand_2d(src: torch.Tensor, new_rows: int, new_cols: int, noise_std: float) -> torch.Tensor:
-    """
-    Expand a 2-D weight matrix from (src_rows, src_cols) to (new_rows, new_cols).
-    The source weights occupy the top-left block; the rest is small noise.
-    """
-    out = _noise((new_rows, new_cols), noise_std)
-    out[: src.size(0), : src.size(1)] = src
-    return out
+  def _repo_root():
+      scripts_dir = Path(__file__).resolve().parent
+      parent = scripts_dir.parent
+      return parent.parent if parent.name == "training" else parent
 
-
-def layer_key(layer_idx: int) -> str:
-    return f"blocks.{layer_idx}"
-
-
-# ── main ──────────────────────────────────────────────────────────────────────
-
-def upscale(
-    src_checkpoint: str,
-    src_config_path: str,
-    dst_config_path: str,
-    dst_checkpoint: str,
-):
-    print(f"[upscale_to_1b] Loading source config  : {src_config_path}")
-    with open(src_config_path) as f:
-        src_cfg = yaml.safe_load(f)
-    print(f"[upscale_to_1b] Loading target config  : {dst_config_path}")
-    with open(dst_config_path) as f:
-        dst_cfg = yaml.safe_load(f)
-
-    src_m = src_cfg["model"]
-    dst_m = dst_cfg["model"]
-
-    src_d  = src_m["d_model"];  dst_d  = dst_m["d_model"]
-    src_ff = src_m["d_ff"];     dst_ff = dst_m["d_ff"]
-    src_nl = src_m["n_layers"]; dst_nl = dst_m["n_layers"]
-    vocab  = dst_m["vocab_size"]
-
-    print(f"[upscale_to_1b] Source: d_model={src_d}, d_ff={src_ff}, n_layers={src_nl}")
-    print(f"[upscale_to_1b] Target: d_model={dst_d}, d_ff={dst_ff}, n_layers={dst_nl}")
-
-    noise_std = 0.02 / math.sqrt(2 * dst_nl)
-
-    print(f"[upscale_to_1b] Loading source checkpoint: {src_checkpoint}")
-    ckpt = torch.load(src_checkpoint, map_location="cpu")
-    src_sd = ckpt.get("model_state_dict", ckpt)
-
-    dst_sd = {}
-
-    # ── token embedding ───────────────────────────────────────────────────────
-    src_emb = src_sd["token_embedding.weight"]   # (vocab, src_d)
-    dst_sd["token_embedding.weight"] = expand_2d(src_emb, vocab, dst_d, noise_std)
-    print(f"[upscale_to_1b]  token_embedding: {tuple(src_emb.shape)} → {tuple(dst_sd['token_embedding.weight'].shape)}")
-
-    # ── ln_final ──────────────────────────────────────────────────────────────
-    dst_sd["ln_final.weight"] = expand_1d(src_sd["ln_final.weight"], dst_d, noise_std)
-    dst_sd["ln_final.bias"]   = expand_1d(src_sd["ln_final.bias"],   dst_d, noise_std)
-
-    # ── lm_head (may be tied — store anyway; loader will handle tie) ──────────
-    if "lm_head.weight" in src_sd:
-        src_lm = src_sd["lm_head.weight"]   # (vocab, src_d)
-        dst_sd["lm_head.weight"] = expand_2d(src_lm, vocab, dst_d, noise_std)
-
-    # ── transformer blocks ───────────────────────────────────────────────────
-    for dst_idx in range(dst_nl):
-        src_idx = dst_idx % src_nl          # cycle source layers
-        sp = f"blocks.{src_idx}"
-        dp = f"blocks.{dst_idx}"
-
-        # LayerNorm weights + biases
-        dst_sd[f"{dp}.ln1.weight"] = expand_1d(src_sd[f"{sp}.ln1.weight"], dst_d, noise_std)
-        dst_sd[f"{dp}.ln1.bias"]   = expand_1d(src_sd[f"{sp}.ln1.bias"],   dst_d, noise_std)
-        dst_sd[f"{dp}.ln2.weight"] = expand_1d(src_sd[f"{sp}.ln2.weight"], dst_d, noise_std)
-        dst_sd[f"{dp}.ln2.bias"]   = expand_1d(src_sd[f"{sp}.ln2.bias"],   dst_d, noise_std)
-
-        # qkv_proj: (3*src_d, src_d) → (3*dst_d, dst_d)
-        qkv_src = src_sd[f"{sp}.attn.qkv_proj.weight"]
-        dst_sd[f"{dp}.attn.qkv_proj.weight"] = expand_2d(qkv_src, 3 * dst_d, dst_d, noise_std)
-
-        # out_proj: (src_d, src_d) → (dst_d, dst_d)
-        op_src = src_sd[f"{sp}.attn.out_proj.weight"]
-        dst_sd[f"{dp}.attn.out_proj.weight"] = expand_2d(op_src, dst_d, dst_d, noise_std)
-
-        # fc1: (src_ff, src_d) → (dst_ff, dst_d)
-        fc1_src = src_sd[f"{sp}.mlp.fc1.weight"]
-        dst_sd[f"{dp}.mlp.fc1.weight"] = expand_2d(fc1_src, dst_ff, dst_d, noise_std)
-
-        # fc2: (src_d, src_ff) → (dst_d, dst_ff)
-        fc2_src = src_sd[f"{sp}.mlp.fc2.weight"]
-        dst_sd[f"{dp}.mlp.fc2.weight"] = expand_2d(fc2_src, dst_d, dst_ff, noise_std)
-
-        # causal_mask — persistent buffer, same shape for both models (max_seq_len unchanged).
-        # Must be copied so load_state_dict(strict=True) succeeds on the target model.
-        mask_key = f"{sp}.attn.causal_mask"
-        if mask_key in src_sd:
-            dst_sd[f"{dp}.attn.causal_mask"] = src_sd[mask_key].clone()
-        else:
-            # Reconstruct if not present in source checkpoint (persistent=True default)
-            max_seq = dst_m.get("max_seq_len", 2048)
-            dst_sd[f"{dp}.attn.causal_mask"] = (
-                torch.tril(torch.ones(max_seq, max_seq))
-                .view(1, 1, max_seq, max_seq)
-            )
-
-    print(f"[upscale_to_1b] Inflated {src_nl} → {dst_nl} transformer blocks")
-
-    # ── count parameters ──────────────────────────────────────────────────────
-    total = sum(t.numel() for t in dst_sd.values())
-    print(f"[upscale_to_1b] Total parameters in new checkpoint: {total:,}  (~{total/1e9:.2f}B)")
-
-    # ── validation: instantiate target model and dry-run load_state_dict ──────
-    print("[upscale_to_1b] Validating checkpoint loads cleanly into target architecture...")
-    try:
-        import sys as _sys
-        _repo = Path(__file__).resolve().parent
-        if _repo.parent.name == "training":
-            _repo = _repo.parent.parent
-        else:
-            _repo = _repo.parent
-        if str(_repo) not in _sys.path:
-            _sys.path.insert(0, str(_repo))
-        from model.titan_model import TitanConfig, TitanLM
-        dst_config_obj = TitanConfig(
-            vocab_size=dst_m["vocab_size"],
-            d_model=dst_m["d_model"],
-            n_heads=dst_m["n_heads"],
-            n_layers=dst_m["n_layers"],
-            d_ff=dst_m["d_ff"],
-            max_seq_len=dst_m.get("max_seq_len", 2048),
-            dropout=dst_m.get("dropout", 0.05),
-            tie_embeddings=dst_m.get("tie_embeddings", True),
-        )
-        target_model = TitanLM(dst_config_obj)
-        missing, unexpected = target_model.load_state_dict(dst_sd, strict=True)
-        if missing:
-            print(f"[upscale_to_1b] WARNING: missing keys in checkpoint: {missing}", flush=True)
-        if unexpected:
-            print(f"[upscale_to_1b] WARNING: unexpected keys in checkpoint: {unexpected}", flush=True)
-        if not missing and not unexpected:
-            print("[upscale_to_1b] Validation PASSED — state dict loads with strict=True")
-        del target_model
-    except ImportError:
-        print("[upscale_to_1b] Skipping model validation (model module not importable here)")
-    except Exception as ve:
-        raise RuntimeError(f"[upscale_to_1b] Validation FAILED — checkpoint would not load: {ve}") from ve
-
-    # ── save ──────────────────────────────────────────────────────────────────
-    out_path = Path(dst_checkpoint)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    save_obj = {
-        "model_state_dict": dst_sd,
-        "config": dst_cfg,
-        "upscaled_from": src_checkpoint,
-        "step": 0,
-        "best_val_loss": float("inf"),
-    }
-    torch.save(save_obj, out_path)
-    print(f"[upscale_to_1b] Saved 1B checkpoint → {out_path}")
+  def _detect_arch(src_sd: dict) -> str:
+      """Detect whether the source checkpoint uses v0.2 (old) or v0.3 (new) arch."""
+      keys = list(src_sd.keys())
+      if any("qkv_proj" in k for k in keys):
+          return "v0.2"
+      if any("q_proj" in k for k in keys):
+          return "v0.3"
+      return "unknown"
 
 
-def _repo_root() -> Path:
-    """
-    Locate the repository root from this script's own path.
+  # ── main ──────────────────────────────────────────────────────────────────────
 
-    This file is always placed in a 'scripts' directory:
-      - Local workspace : <repo_root>/training/scripts/upscale_to_1b.py
-      - Server (cloned) : <repo_root>/scripts/upscale_to_1b.py
+  def upscale(src_checkpoint, src_config_path, dst_config_path, dst_checkpoint):
+      print(f"[upscale_to_1b] Source config : {src_config_path}")
+      print(f"[upscale_to_1b] Target config : {dst_config_path}")
 
-    We detect which by inspecting the grandparent directory name:
-    if it is 'training', we are one level deeper than the server layout.
-    """
-    scripts_dir = Path(__file__).resolve().parent   # …/scripts/
-    parent = scripts_dir.parent                      # …/training/ or repo root
-    if parent.name == "training":
-        # local layout: training/scripts/ → repo root is two levels up
-        return parent.parent
-    # server layout: scripts/ → repo root is one level up
-    return parent
+      with open(src_config_path) as f: src_cfg = yaml.safe_load(f)
+      with open(dst_config_path) as f: dst_cfg = yaml.safe_load(f)
+
+      sm, dm = src_cfg["model"], dst_cfg["model"]
+
+      src_d   = sm["d_model"];  dst_d   = dm["d_model"]
+      src_ff  = sm["d_ff"];     dst_ff  = dm["d_ff"]
+      src_nl  = sm["n_layers"]; dst_nl  = dm["n_layers"]
+      src_nh  = sm["n_heads"];  dst_nh  = dm["n_heads"]
+      src_nkv = sm.get("n_kv_heads", src_nh)
+      dst_nkv = dm.get("n_kv_heads", dst_nh)
+      vocab   = dm["vocab_size"]
+
+      src_dh  = src_d // src_nh
+      dst_dh  = dst_d // dst_nh
+      dst_swi = _swiglu_hidden(dst_ff)
+
+      std = 0.02 / math.sqrt(2 * dst_nl)
+
+      print(f"[upscale_to_1b] Loading: {src_checkpoint}")
+      raw = torch.load(src_checkpoint, map_location="cpu")
+      src_sd = raw.get("model_state_dict", raw)
+
+      arch = _detect_arch(src_sd)
+      print(f"[upscale_to_1b] Detected source arch: {arch}")
+
+      dst_sd = {}
+
+      # ── token embedding ───────────────────────────────────────────────────────
+      dst_sd["token_embedding.weight"] = expand_2d(
+          src_sd["token_embedding.weight"], vocab, dst_d, std)
+
+      if "lm_head.weight" in src_sd:
+          dst_sd["lm_head.weight"] = expand_2d(
+              src_sd["lm_head.weight"], vocab, dst_d, std)
+
+      # ── ln_final → RMSNorm weight only ───────────────────────────────────────
+      # Source may use LayerNorm (has bias) or RMSNorm (weight only)
+      ln_w_key = "ln_final.weight"
+      dst_sd["ln_final.weight"] = expand_1d(src_sd[ln_w_key], dst_d, std)
+      # Do NOT copy ln_final.bias — v0.3 uses RMSNorm (no bias)
+
+      # ── transformer blocks ────────────────────────────────────────────────────
+      for dst_idx in range(dst_nl):
+          src_idx = dst_idx % src_nl
+          sp = f"blocks.{src_idx}"
+          dp = f"blocks.{dst_idx}"
+
+          # Norm layers — always write norm1/norm2 (v0.3 RMSNorm, weight only)
+          for norm_key in ("norm1", "norm2"):
+              # Handle old arch key names (ln1, ln2) or new (norm1, norm2)
+              src_norm_key = norm_key if f"{sp}.{norm_key}.weight" in src_sd else                              ("ln1" if norm_key == "norm1" else "ln2")
+              dst_sd[f"{dp}.{norm_key}.weight"] = expand_1d(
+                  src_sd[f"{sp}.{src_norm_key}.weight"], dst_d, std)
+              # Do NOT copy norm bias — v0.3 RMSNorm has no bias
+
+          # ── Attention ─────────────────────────────────────────────────────────
+          if arch == "v0.2":
+              # Source has qkv_proj (combined) — split into q, k, v for v0.3 GQA
+              qkv = src_sd[f"{sp}.attn.qkv_proj.weight"]  # (3*src_d, src_d)
+              # Split into Q / K / V along dim 0
+              q_s, k_s, v_s = qkv.chunk(3, dim=0)   # each (src_d, src_d)
+              dst_sd[f"{dp}.attn.q_proj.weight"] = expand_2d(
+                  q_s, dst_nh * dst_dh, dst_d, std)
+              # KV: source MHA (src_nh × src_dh each) → GQA (dst_nkv × dst_dh)
+              # Average-pool source KV heads down to dst_nkv for better init
+              src_nh_kv = src_nh  # source is full MHA
+              if dst_nkv < src_nh_kv:
+                  # Reshape and mean across groups of (src_nh / dst_nkv) heads
+                  group = src_nh_kv // dst_nkv
+                  k_s_r = k_s.view(dst_nkv, group, src_dh, src_d).mean(dim=1)  # (dst_nkv, src_dh, src_d)
+                  v_s_r = v_s.view(dst_nkv, group, src_dh, src_d).mean(dim=1)
+                  k_s_r = k_s_r.reshape(dst_nkv * src_dh, src_d)
+                  v_s_r = v_s_r.reshape(dst_nkv * src_dh, src_d)
+                  dst_sd[f"{dp}.attn.k_proj.weight"] = expand_2d(
+                      k_s_r, dst_nkv * dst_dh, dst_d, std)
+                  dst_sd[f"{dp}.attn.v_proj.weight"] = expand_2d(
+                      v_s_r, dst_nkv * dst_dh, dst_d, std)
+              else:
+                  dst_sd[f"{dp}.attn.k_proj.weight"] = expand_2d(
+                      k_s, dst_nkv * dst_dh, dst_d, std)
+                  dst_sd[f"{dp}.attn.v_proj.weight"] = expand_2d(
+                      v_s, dst_nkv * dst_dh, dst_d, std)
+          else:
+              # Source already has v0.3 GQA keys
+              dst_sd[f"{dp}.attn.q_proj.weight"] = expand_2d(
+                  src_sd[f"{sp}.attn.q_proj.weight"], dst_nh * dst_dh, dst_d, std)
+              dst_sd[f"{dp}.attn.k_proj.weight"] = expand_2d(
+                  src_sd[f"{sp}.attn.k_proj.weight"], dst_nkv * dst_dh, dst_d, std)
+              dst_sd[f"{dp}.attn.v_proj.weight"] = expand_2d(
+                  src_sd[f"{sp}.attn.v_proj.weight"], dst_nkv * dst_dh, dst_d, std)
+
+          dst_sd[f"{dp}.attn.out_proj.weight"] = expand_2d(
+              src_sd[f"{sp}.attn.out_proj.weight"], dst_d, dst_d, std)
+
+          # ── MLP ───────────────────────────────────────────────────────────────
+          if arch == "v0.2":
+              # Source has fc1 / fc2 (GELU) → map to gate_proj / down_proj
+              # up_proj gets noise init (no source equivalent in GELU MLP)
+              fc1 = src_sd[f"{sp}.mlp.fc1.weight"]   # (src_ff, src_d)
+              fc2 = src_sd[f"{sp}.mlp.fc2.weight"]   # (src_d, src_ff)
+              dst_sd[f"{dp}.mlp.gate_proj.weight"] = expand_2d(fc1, dst_swi, dst_d, std)
+              dst_sd[f"{dp}.mlp.up_proj.weight"]   = _noise((dst_swi, dst_d), std)
+              dst_sd[f"{dp}.mlp.down_proj.weight"] = expand_2d(fc2, dst_d, dst_swi, std)
+          else:
+              # Source has SwiGLU keys
+              dst_sd[f"{dp}.mlp.gate_proj.weight"] = expand_2d(
+                  src_sd[f"{sp}.mlp.gate_proj.weight"], dst_swi, dst_d, std)
+              dst_sd[f"{dp}.mlp.up_proj.weight"] = expand_2d(
+                  src_sd[f"{sp}.mlp.up_proj.weight"], dst_swi, dst_d, std)
+              dst_sd[f"{dp}.mlp.down_proj.weight"] = expand_2d(
+                  src_sd[f"{sp}.mlp.down_proj.weight"], dst_d, dst_swi, std)
+
+      print(f"[upscale_to_1b] Inflated {src_nl} → {dst_nl} blocks")
+
+      total = sum(t.numel() for t in dst_sd.values())
+      print(f"[upscale_to_1b] Parameters: {total:,}  (~{total/1e9:.3f}B)")
+
+      # ── Validate ──────────────────────────────────────────────────────────────
+      print("[upscale_to_1b] Validating checkpoint loads into target architecture...")
+      try:
+          repo = _repo_root()
+          if str(repo) not in sys.path:
+              sys.path.insert(0, str(repo))
+          from model.titan_model import TitanConfig, TitanLM
+          cfg_obj = TitanConfig(
+              vocab_size=dm["vocab_size"], d_model=dm["d_model"],
+              n_heads=dm["n_heads"], n_kv_heads=dm.get("n_kv_heads", dm["n_heads"]),
+              n_layers=dm["n_layers"], d_ff=dm["d_ff"],
+              max_seq_len=dm.get("max_seq_len", 2048), dropout=dm.get("dropout", 0.05),
+              tie_embeddings=dm.get("tie_embeddings", True),
+              use_gradient_checkpointing=dm.get("gradient_checkpointing", False),
+          )
+          tgt = TitanLM(cfg_obj)
+          missing, unexpected = tgt.load_state_dict(dst_sd, strict=True)
+          if not missing and not unexpected:
+              print("[upscale_to_1b] Validation PASSED")
+          else:
+              if missing:    print(f"[upscale_to_1b] WARNING missing: {missing}")
+              if unexpected: print(f"[upscale_to_1b] WARNING unexpected: {unexpected}")
+          del tgt
+      except ImportError:
+          print("[upscale_to_1b] Skipping validation (model module unavailable)")
+      except Exception as e:
+          raise RuntimeError(f"[upscale_to_1b] Validation FAILED: {e}") from e
+
+      # ── Save ──────────────────────────────────────────────────────────────────
+      out = Path(dst_checkpoint)
+      out.parent.mkdir(parents=True, exist_ok=True)
+      torch.save({
+          "model_state_dict": dst_sd,
+          "config": dst_cfg,
+          "upscaled_from": src_checkpoint,
+          "arch_version": "0.3",
+          "step": 0,
+          "best_val_loss": float("inf"),
+      }, out)
+      print(f"[upscale_to_1b] Saved 1B init checkpoint → {out}")
 
 
-def parse_args():
-    root = _repo_root()
-    # Config is at training/configs/ locally; at configs/ on the cloned server.
-    if (root / "configs" / "titan_1b.yaml").exists():
-        default_dst_config = str(root / "configs" / "titan_1b.yaml")
-    else:
-        default_dst_config = str(root / "training" / "configs" / "titan_1b.yaml")
-
-    if (root / "configs" / "titan_109m.yaml").exists():
-        default_src_config = str(root / "configs" / "titan_109m.yaml")
-    else:
-        default_src_config = str(root / "training" / "configs" / "titan_109m.yaml")
-
-    p = argparse.ArgumentParser(description="Inflate a 109M TitanAI checkpoint to 1B")
-    p.add_argument("--src_checkpoint", required=True,
-                   help="Path to the source 109M checkpoint (.pt)")
-    p.add_argument("--src_config", default=default_src_config,
-                   help="Path to the source model YAML config (default: auto-detected titan_109m.yaml)")
-    p.add_argument("--dst_config", default=default_dst_config,
-                   help="Path to the target 1B YAML config (default: auto-detected)")
-    p.add_argument("--dst_checkpoint",
-                   default=str(root / "checkpoints" / "titan_1b_pretrain" / "init.pt"),
-                   help="Where to write the inflated 1B checkpoint")
-    return p.parse_args()
+  def parse_args():
+      root = _repo_root()
+      p = argparse.ArgumentParser(description="Upscale 109M → 1B TitanAI v0.3")
+      p.add_argument("--src_checkpoint", required=True)
+      p.add_argument("--src_config",
+          default=str(root / "configs" / "titan_109m.yaml"))
+      p.add_argument("--dst_config",
+          default=str(root / "configs" / "titan_1b.yaml"))
+      p.add_argument("--dst_checkpoint",
+          default=str(root / "checkpoints" / "titan_1b_pretrain" / "init.pt"))
+      return p.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    upscale(
-        src_checkpoint=args.src_checkpoint,
-        src_config_path=args.src_config,
-        dst_config_path=args.dst_config,
-        dst_checkpoint=args.dst_checkpoint,
-    )
+  if __name__ == "__main__":
+      args = parse_args()
+      upscale(args.src_checkpoint, args.src_config, args.dst_config, args.dst_checkpoint)
+  
