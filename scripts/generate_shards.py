@@ -23,12 +23,32 @@ import numpy as np
 from pathlib import Path
 from tokenizers import Tokenizer
 
+import argparse as _ap
+  import os as _os
+
+  _ap_parser = _ap.ArgumentParser(description="TitanAI shard generator")
+  _ap_parser.add_argument("--config",  default=None,
+                           help="YAML config to read max_seq_len and tokenizer path from")
+  _ap_parser.add_argument("--tokens",  type=int, default=None,
+                           help="Target token count (overrides hardcoded 100M default)")
+  _ap_parser.add_argument("--shard-size", type=int, default=None,
+                           help="Tokens per shard file (default: 10M)")
+  _ap_args, _ = _ap_parser.parse_known_args()
+
+  # Read YAML config if provided
+  _yaml_cfg = {}
+  if _ap_args.config:
+      import yaml as _yaml
+      with open(_ap_args.config) as _f: _yaml_cfg = _yaml.safe_load(_f)
+
+  
 BASE      = Path(__file__).parent.parent
 RAW       = BASE / "data" / "raw"
 SHARDS_DIR = BASE / "data" / "shards"
 SHARDS_DIR.mkdir(parents=True, exist_ok=True)
 
-TOK_PATH  = BASE / "tokenizer" / "titan_32k" / "tokenizer.json"
+_yaml_tok = _yaml_cfg.get("data", {}).get("tokenizer_path")
+  TOK_PATH  = (BASE / _yaml_tok) if _yaml_tok else (BASE / "tokenizer" / "titan_32k" / "tokenizer.json")
 MANIFEST  = BASE / "data" / "manifest.json"
 
 # Approved target ratios
@@ -42,9 +62,21 @@ BUCKET_RATIOS = {
 
 # Probe target: 100M tokens (representative sample for sandbox run)
 # Full Probe (1B) requires GPU — this generates a proportional sample
-TARGET_TOKENS   = 100_000_000   # 100M for sandbox validation
-SHARD_SIZE      = 10_000_000    # 10M tokens per shard
-MAX_SEQ_LEN     = 2048
+# TARGET_TOKENS: use --tokens CLI arg, or YAML training.max_steps * eff_batch_size, or 100M default
+  _yaml_tr = _yaml_cfg.get("training", {})
+  _yaml_m  = _yaml_cfg.get("model", {})
+  if _ap_args.tokens:
+      TARGET_TOKENS = _ap_args.tokens
+  elif _yaml_tr.get("max_steps") and _yaml_tr.get("batch_size") and _yaml_tr.get("gradient_accumulation_steps"):
+      _eff_batch = _yaml_tr["batch_size"] * _yaml_tr["gradient_accumulation_steps"] * _yaml_m.get("max_seq_len", 2048)
+      TARGET_TOKENS = _yaml_tr["max_steps"] * _eff_batch
+      print(f"[Shards] Token target from config: {TARGET_TOKENS:,} "
+            f"({_yaml_tr['max_steps']:,} steps × {_eff_batch:,} tokens/step)")
+  else:
+      TARGET_TOKENS = 100_000_000   # 100M default (sandbox/test only)
+      print("[Shards] WARNING: using 100M default. Pass --tokens 10000000000 for 10B token run.")
+SHARD_SIZE      = _ap_args.shard_size or 10_000_000  # 10M tokens per shard default
+MAX_SEQ_LEN     = _yaml_m.get("max_seq_len", 2048)  # reads from --config if provided
 RANDOM_SEED     = 42
 
 random.seed(RANDOM_SEED)
