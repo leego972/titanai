@@ -31,9 +31,18 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
+
+  # 8-bit Adam — halves optimizer VRAM at 1B+ scale (graceful fallback to AdamW)
+  try:
+      import bitsandbytes as bnb
+      _BNB_AVAILABLE = True
+  except ImportError:
+      _BNB_AVAILABLE = False
 from torch.optim.lr_scheduler import LambdaLR
 
-sys.path.insert(0, "/workspace/titanai")
+# Dynamic repo root — works regardless of where the repo is cloned
+  _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+  sys.path.insert(0, _REPO_ROOT)
 from model.titan_model import build_model
 from tokenizers import Tokenizer
 from datasets import load_dataset
@@ -43,7 +52,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--init-from", required=True, help="resume init checkpoint .pt (e.g. phase2 best.pt)")
 ap.add_argument("--resume",    default=None,  help="resume from step_N.pt (overrides --init-from for weights/optim/sched)")
 ap.add_argument("--out-dir",   required=True)
-ap.add_argument("--tokenizer", default="/workspace/titanai/tokenizer/titan_32k/tokenizer.json")
+ap.add_argument("--tokenizer", default=None, help="Path to tokenizer.json (default: auto-detect from repo root)")
 ap.add_argument("--seq-len",   type=int, default=2048)
 ap.add_argument("--batch-size",type=int, default=2)
 ap.add_argument("--grad-accum",type=int, default=16)
@@ -64,7 +73,60 @@ ap.add_argument("--force-dropout",        type=float, default=0.0)
 ap.add_argument("--seed",                 type=int,   default=20260418)
 ap.add_argument("--smoke",                type=int,   default=0,
                 help=">0: stop after this many steps (used for smoke test)")
+ap.add_argument("--config",        default=None,
+                help="Path to YAML config file — values override CLI defaults")
+ap.add_argument("--use-8bit-adam", action="store_true", default=False,
+                help="Use bitsandbytes 8-bit Adam (saves ~12GB VRAM on 1B model)")
+ap.add_argument("--compile",       action="store_true", default=False,
+                help="torch.compile the model — ~20%% throughput gain")
+ap.add_argument("--use-grad-ckpt", action="store_true", default=False,
+                help="Enable gradient checkpointing (VRAM for compute tradeoff)")
 args = ap.parse_args()
+
+# ── YAML config overlay ────────────────────────────────────────────────────
+# Reads YAML and overrides argparse defaults so --config configs/titan_1b.yaml just works
+if args.config:
+    import yaml as _yaml, os as _os
+    with open(args.config) as _f: _cfg = _yaml.safe_load(_f)
+    _tr = _cfg.get("training", {}); _m = _cfg.get("model", {})
+    _tok_path = _cfg.get("data", {}).get("tokenizer_path")
+    if "batch_size"                  in _tr: args.batch_size    = _tr["batch_size"]
+    if "gradient_accumulation_steps" in _tr: args.grad_accum    = _tr["gradient_accumulation_steps"]
+    if "learning_rate"               in _tr: args.lr            = _tr["learning_rate"]
+    if "weight_decay"                in _tr: args.weight_decay  = _tr["weight_decay"]
+    if "max_steps"                   in _tr: args.max_steps     = _tr["max_steps"]
+    if "warmup_steps"                in _tr: args.warmup_steps  = _tr["warmup_steps"]
+    if "lr_min_ratio"                in _tr: args.lr_min_ratio  = _tr["lr_min_ratio"]
+    if "clip_grad_norm"              in _tr: args.clip_grad     = _tr["clip_grad_norm"]
+    if "log_interval"                in _tr: args.log_every     = _tr["log_interval"]
+    if "eval_interval"               in _tr: args.eval_every    = _tr["eval_interval"]
+    if "save_interval"               in _tr: args.save_every    = _tr["save_interval"]
+    if "use_8bit_adam"               in _tr: args.use_8bit_adam = _tr["use_8bit_adam"]
+    if "use_compile"                 in _tr: args.compile       = _tr["use_compile"]
+    if "max_seq_len"                 in _m:  args.seq_len       = _m["max_seq_len"]
+    if "gradient_checkpointing"      in _m:  args.use_grad_ckpt = _m["gradient_checkpointing"]
+    if _tok_path and not _os.path.isabs(_tok_path):
+        args.tokenizer = _os.path.join(_REPO_ROOT, _tok_path)
+    elif _tok_path:
+        args.tokenizer = _tok_path
+    if "checkpoint_dir" in _tr and (not hasattr(args, "out_dir") or not args.out_dir):
+        args.out_dir = _os.path.join(_REPO_ROOT, _tr["checkpoint_dir"])
+    print(f"[Config] Loaded {args.config}: steps={args.max_steps} "
+          f"lr={args.lr} 8bit={args.use_8bit_adam} compile={args.compile}")
+
+# Auto-detect tokenizer if not explicitly set
+if not args.tokenizer:
+    for _tc in [
+        os.path.join(_REPO_ROOT, "tokenizer", "titan_32k", "tokenizer.json"),
+        os.path.join(_REPO_ROOT, "tokenizer", "artifacts_v32k", "tokenizer.json"),
+        os.path.join(_REPO_ROOT, "tokenizer", "tokenizer.json"),
+    ]:
+        if os.path.exists(_tc): args.tokenizer = _tc; break
+    if not args.tokenizer:
+        raise FileNotFoundError("No tokenizer found. Set --tokenizer <path>.")
+# Resolve out-dir relative to repo root
+if args.out_dir and not os.path.isabs(args.out_dir):
+    args.out_dir = os.path.join(_REPO_ROOT, args.out_dir)
 
 os.makedirs(args.out_dir, exist_ok=True)
 torch.manual_seed(args.seed)
@@ -103,11 +165,19 @@ model_cfg = {
     "max_seq_len":mcfg["max_seq_len"],
     "dropout":    args.force_dropout,
     "tie_embeddings": mcfg.get("tie_embeddings", True),
+    "n_kv_heads": mcfg.get("n_kv_heads", mcfg["n_heads"]),  # GQA — essential for v0.3
 }
 model = build_model({"model": model_cfg})
 missing, unexpected = model.load_state_dict(ck["model_state_dict"], strict=False)
 print(f"[pretrain] loaded weights — missing={len(missing)} unexpected={len(unexpected)}", flush=True)
 model = model.to(device)
+# torch.compile — ~20% throughput boost (PyTorch 2.0+)
+if getattr(args, "compile", False) and hasattr(torch, "compile"):
+    try:
+        model = torch.compile(model)
+        print("[Model] torch.compile: ACTIVE", flush=True)
+    except Exception as _ce:
+        print(f"[Model] torch.compile skipped: {_ce}", flush=True)
 n_real = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"[pretrain] trainable params: {n_real/1e6:.2f}M", flush=True)
 
@@ -121,11 +191,22 @@ for n, p in model.named_parameters():
         nodecay_params.append(p)
     else:
         decay_params.append(p)
-optim = AdamW(
-    [{"params": decay_params, "weight_decay": args.weight_decay},
-     {"params": nodecay_params, "weight_decay": 0.0}],
-    lr=args.lr, betas=(0.9, 0.95), eps=1e-8, fused=True,
-)
+# ─── Optimizer ─────────────────────────────────────────────────────────────
+if getattr(args, "use_8bit_adam", False) and _BNB_AVAILABLE:
+    print("[Optim] Using bitsandbytes 8-bit Adam (VRAM saving active)")
+    optim = bnb.optim.Adam8bit(
+        [{"params": decay_params, "weight_decay": args.weight_decay},
+         {"params": nodecay_params, "weight_decay": 0.0}],
+        lr=args.lr, betas=(0.9, 0.95), eps=1e-8,
+    )
+else:
+    if getattr(args, "use_8bit_adam", False) and not _BNB_AVAILABLE:
+        print("[Optim] WARNING: bitsandbytes not installed, falling back to AdamW")
+    optim = AdamW(
+        [{"params": decay_params, "weight_decay": args.weight_decay},
+         {"params": nodecay_params, "weight_decay": 0.0}],
+        lr=args.lr, betas=(0.9, 0.95), eps=1e-8, fused=True,
+    )
 def lr_lambda(step):
     if step < args.warmup_steps:
         return step / max(1, args.warmup_steps)
