@@ -30,7 +30,7 @@ STATUS_FILE = Path("/workspace/status.json")
 TOKENIZER = "tokenizer/artifacts_v32k/tokenizer.json"
 
 # ── Ordered upgrade sequence ──────────────────────────────────
-UPGRADE_ORDER = [
+UPGRADE_ORDER = ["emo", 
     "a", "b", "c", "d", "n", "m", "o", "ak", "ay", "h", "g", "f", "i", 
     "bg", "bk", "be", "bx", "by", "bf", "bv", "bw", "bu", "bz", 
     "z", "ar", "as", "bl", "bm", "bn", "x", "w", "bp", "ab", "k", "aa", 
