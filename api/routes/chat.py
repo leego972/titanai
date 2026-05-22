@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from ..core.model_manager import manager
@@ -31,6 +31,7 @@ from ..core.schemas import (
     ChatMessage, UsageInfo, StreamChunk, StreamDelta, StreamChoice,
 )
 from ..middleware.auth import verify_api_key
+from ..core.persona import get_system_prompt, is_request_private
 
 log = logging.getLogger("titan.chat")
 router = APIRouter(prefix="/v1/chat/completions", tags=["Chat"])
@@ -78,8 +79,19 @@ def extract_assistant_response(generated: str) -> str:
 @router.post("", response_model=ChatCompletionResponse)
 async def create_chat_completion(
     request: ChatCompletionRequest,
-    _: Optional[str] = Depends(verify_api_key),
+    fastapi_request: Request,
+    api_key: Optional[str] = Depends(verify_api_key),
 ):
+    # Determine Persona based on Request Headers and Auth
+    is_private = is_request_private(fastapi_request.headers, api_key)
+    system_prompt = get_system_prompt(is_private)
+    
+    # Inject/Replace System Prompt
+    if request.messages and request.messages[0].role == "system":
+        request.messages[0].content = system_prompt
+    else:
+        request.messages.insert(0, ChatMessage(role="system", content=system_prompt))
+
     """
     OpenAI-compatible chat completion endpoint.
     Archibald can use this as a drop-in replacement for OpenAI API calls.

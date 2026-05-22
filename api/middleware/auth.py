@@ -9,9 +9,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 
 from ..core.config import config
+from ..core.identity import check_identity
 
 security = HTTPBearer(auto_error=False)
-
 
 async def verify_api_key(request: Request) -> Optional[str]:
     """
@@ -29,7 +29,7 @@ async def verify_api_key(request: Request) -> Optional[str]:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:].strip()
-        if token == config.API_KEY:
+        if token == config.API_KEY or check_identity(token):
             return token
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -39,7 +39,7 @@ async def verify_api_key(request: Request) -> Optional[str]:
     # Check X-API-Key header
     x_api_key = request.headers.get("X-API-Key", "").strip()
     if x_api_key:
-        if x_api_key == config.API_KEY:
+        if x_api_key == config.API_KEY or check_identity(x_api_key):
             return x_api_key
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
