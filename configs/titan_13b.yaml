@@ -1,0 +1,81 @@
+# TitanAI 13B — Full-Scale Pretraining Config (Quantised for 2x RTX 4090)
+# ============================================================
+# Architecture: d_model=5120, n_heads=40, n_kv_heads=8 (GQA), n_layers=40
+# Activation  : SwiGLU (hidden=13696)
+# Norm        : RMSNorm
+# Positional  : RoPE (base=10000)
+# Parameters  : ~13 billion
+#
+# Requirements: 2× RTX 4090 (24GB each) with 4-bit/8-bit Quantization
+#
+# Run AFTER:
+#   1. titan_1b final checkpoint passes perplexity_threshold
+#   2. python scripts/upscale_to_13b.py produces checkpoints/titan_13b_pretrain/init.pt
+#
+# Token budget:
+#   effective_batch = 2 × 16 × 2048 = 65,536 tokens/step (2 GPUs, batch=1, accum=32)
+#   150,000 steps = ~9.8B tokens (recommended)
+
+project:
+  name: "titan-13b"
+  version: "1.0.0"
+
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 5120
+  n_heads: 40
+  n_kv_heads: 8                # GQA: 8 KV heads shared across 40 Q heads (5× KV cache savings)
+  n_layers: 40
+  d_ff: 20480                  # SwiGLU hidden = (2/3 × 20480) → 13632 (auto-computed to 13696)
+  max_seq_len: 2048
+  rope_base: 10000.0
+  dropout: 0.05
+  tie_embeddings: true
+  gradient_checkpointing: true
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 32
+  learning_rate: 1.5e-5         # More conservative for 13B
+  weight_decay: 0.1
+  max_steps: 200000
+  warmup_steps: 2000
+  lr_scheduler: "cosine"
+  lr_min_ratio: 0.1
+  clip_grad_norm: 1.0
+  log_interval: 100
+  eval_interval: 2000
+  save_interval: 5000
+  checkpoint_dir: "checkpoints/titan_13b_pretrain"
+  use_8bit_adam: true
+  use_4bit_quant: true          # Custom flag for bitsandbytes 4-bit training
+  use_compile: false            # Disable compile for 4-bit/8-bit to avoid issues
+  bf16: true
+  resume_from: null
+
+tokenizer:
+  path: "tokenizer/artifacts_v32k/tokenizer.json"
+  vocab_size: 32000
+
+data:
+  processed_dir: "data/processed"
+  max_seq_len: 2048
+
+evaluation:
+  val_batch_size: 1
+  num_eval_batches: 50
+  perplexity_threshold: 8.0
+
+logging:
+  log_dir: "logs/titan_13b"
+  experiment_name: "titan-13b-pretrain-v1"
+  wandb:
+    enabled: false
+    project: "titanai"
+
+inference:
+  default_max_new_tokens: 512
+  default_temperature: 0.7
+  default_top_k: 50
+  default_top_p: 0.95

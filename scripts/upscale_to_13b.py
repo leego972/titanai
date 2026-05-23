@@ -1,10 +1,10 @@
 """
-upscale_to_13b.py — Inflate a 7B TitanAI checkpoint to 13B architecture.
+upscale_to_13b.py — Inflate a 1B TitanAI checkpoint to 13B architecture.
 
 Usage:
     python scripts/upscale_to_13b.py \
         --src_checkpoint checkpoints/titan_7b_pretrain/best_model.pt \
-        --src_config    configs/titan_7b.yaml \
+        --src_config    configs/titan_1b.yaml \
         --dst_config    configs/titan_13b.yaml \
         --dst_checkpoint checkpoints/titan_13b_pretrain/init.pt
 
@@ -231,16 +231,16 @@ def parse_args():
     else:
         default_dst_config = str(root / "training" / "configs" / "titan_13b.yaml")
 
-    if (root / "configs" / "titan_7b.yaml").exists():
-        default_src_config = str(root / "configs" / "titan_7b.yaml")
+    if (root / "configs" / "titan_1b.yaml").exists():
+        default_src_config = str(root / "configs" / "titan_1b.yaml")
     else:
-        default_src_config = str(root / "training" / "configs" / "titan_7b.yaml")
+        default_src_config = str(root / "training" / "configs" / "titan_1b.yaml")
 
-    p = argparse.ArgumentParser(description="Inflate a 7B TitanAI checkpoint to 13B")
+    p = argparse.ArgumentParser(description="Inflate a 1B TitanAI checkpoint to 13B")
     p.add_argument("--src_checkpoint", required=True,
-                   help="Path to the source 7B checkpoint (.pt)")
+                   help="Path to the source 1B checkpoint (.pt)")
     p.add_argument("--src_config", default=default_src_config,
-                   help="Path to the source model YAML config (default: auto-detected titan_7b.yaml)")
+                   help="Path to the source model YAML config (default: auto-detected titan_1b.yaml)")
     p.add_argument("--dst_config", default=default_dst_config,
                    help="Path to the target 13B YAML config (default: auto-detected)")
     p.add_argument("--dst_checkpoint",
