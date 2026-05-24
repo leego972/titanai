@@ -108,7 +108,7 @@ def write_docs(bucket_dir, docs, tag):
         if h in _seen_hashes:
             continue
         _seen_hashes.add(h)
-        (bucket_dir / f"{tag}_{start+i:06d}.txt").write_text(
+        (bucket_dir / f"{tag}_{start+n:06d}.txt").write_text(
             text.strip(), encoding="utf-8"
         )
         n += 1
@@ -304,7 +304,9 @@ def openalex(queries, bucket_dir, tag, label="Political Science Research"):
                 inv   = w.get("abstract_inverted_index") or {}
                 if not inv:
                     continue
-                mx = max(p for ps in inv.values() for p in ps)
+                mx = max((p for ps in inv.values() for p in ps), default=-1)
+                if mx < 0:
+                    continue
                 wl = [""] * (mx + 1)
                 for word, ps in inv.items():
                     for p in ps:
