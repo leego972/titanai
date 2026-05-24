@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
   """
-  sync_dropbox_to_github.py
-  Runs every 30 min on the Vast.ai instance.
-    1. Dropbox /workspace/titanai/scripts  -> GitHub leego972/titanai/scripts
-    2. Dropbox /workspace/titanai/configs  -> GitHub leego972/titanai/configs
-    3. Dropbox /workspace/titanai/data (logs/json only, <=500KB) -> GitHub data/dropbox_sync/
-    4. Instance training logs + status     -> Dropbox /workspace/titanai_status/
-  """
-  import os, sys, json, base64, hashlib, urllib.request, urllib.parse, urllib.error, time
+  sync_dropbox_to_github.py — runs every 30 min via background loop
+  1. Dropbox /workspace/titanai/scripts  -> GitHub leego972/titanai/scripts   (new/changed, post-cutoff only)
+  2. Dropbox /workspace/titanai/configs  -> GitHub leego972/titanai/configs   (new/changed, post-cutoff only)
+  3. Dropbox /workspace/titanai/data     -> GitHub data/dropbox_sync/         (small text files only)
+  4. Instance live status + logs         -> Dropbox /workspace/titanai_status/ (backup)
 
-  # ── credentials (written by install_dropbox_sync.sh) ───────────────────────
+  Safety: files already on GitHub are only overwritten if Dropbox server_modified >= SYNC_CUTOFF
+          so we never clobber recent GitHub edits with old Dropbox copies.
+  """
+  import os, sys, json, base64, glob, hashlib, urllib.request, urllib.parse, urllib.error, time
+  from datetime import datetime, timezone
+
+  SYNC_CUTOFF = datetime(2026, 5, 1, tzinfo=timezone.utc)
+
   ENV = '/workspace/titanai/.dropbox_sync_env'
   cfg = {}
   if os.path.exists(ENV):
@@ -30,34 +34,36 @@
       ts = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
       print(f'[{ts}] {msg}', flush=True)
 
-  def dbx_request(endpoint, body=None, content_type='application/json'):
+  def dbx_request(endpoint, body):
       global DBX_TOKEN
-      url = f'https://api.dropboxapi.com/2/{endpoint}'
-      data = json.dumps(body).encode() if body is not None else b''
-      req = urllib.request.Request(url, data=data)
+      req = urllib.request.Request(
+          f'https://api.dropboxapi.com/2/{endpoint}',
+          data=json.dumps(body).encode()
+      )
       req.add_header('Authorization', f'Bearer {DBX_TOKEN}')
-      req.add_header('Content-Type', content_type)
+      req.add_header('Content-Type', 'application/json')
       try:
-          with urllib.request.urlopen(req) as resp:
+          with urllib.request.urlopen(req, timeout=30) as resp:
               return json.loads(resp.read())
       except urllib.error.HTTPError as e:
           err = e.read().decode()
           if 'expired_access_token' in err and DBX_REFRESH:
               log('Token expired — refreshing...')
               if refresh_token():
-                  return dbx_request(endpoint, body, content_type)
+                  return dbx_request(endpoint, body)
           log(f'Dropbox error {e.code}: {err[:200]}')
+          return None
+      except Exception as e:
+          log(f'Dropbox request error: {e}')
           return None
 
   def dbx_download(path):
       global DBX_TOKEN
-      url = 'https://content.dropboxapi.com/2/files/download'
-      arg = json.dumps({'path': path})
-      req = urllib.request.Request(url)
+      req = urllib.request.Request('https://content.dropboxapi.com/2/files/download')
       req.add_header('Authorization', f'Bearer {DBX_TOKEN}')
-      req.add_header('Dropbox-API-Arg', arg)
+      req.add_header('Dropbox-API-Arg', json.dumps({'path': path}))
       try:
-          with urllib.request.urlopen(req) as resp:
+          with urllib.request.urlopen(req, timeout=60) as resp:
               return resp.read()
       except Exception as e:
           log(f'Download error {path}: {e}')
@@ -65,14 +71,15 @@
 
   def dbx_upload(path, content):
       global DBX_TOKEN
-      url = 'https://content.dropboxapi.com/2/files/upload'
-      arg = json.dumps({'path': path, 'mode': 'overwrite', 'autorename': False})
-      req = urllib.request.Request(url, data=content)
+      req = urllib.request.Request(
+          'https://content.dropboxapi.com/2/files/upload',
+          data=content
+      )
       req.add_header('Authorization', f'Bearer {DBX_TOKEN}')
       req.add_header('Content-Type', 'application/octet-stream')
-      req.add_header('Dropbox-API-Arg', arg)
+      req.add_header('Dropbox-API-Arg', json.dumps({'path': path, 'mode': 'overwrite', 'autorename': False}))
       try:
-          with urllib.request.urlopen(req) as resp:
+          with urllib.request.urlopen(req, timeout=60) as resp:
               return json.loads(resp.read())
       except Exception as e:
           log(f'Upload error {path}: {e}')
@@ -83,23 +90,18 @@
       if not DBX_REFRESH:
           return False
       creds = base64.b64encode(f'{APP_KEY}:{APP_SECRET}'.encode()).decode()
-      url = 'https://api.dropbox.com/oauth2/token'
       data = urllib.parse.urlencode({'grant_type': 'refresh_token', 'refresh_token': DBX_REFRESH}).encode()
-      req = urllib.request.Request(url, data=data)
+      req = urllib.request.Request('https://api.dropbox.com/oauth2/token', data=data)
       req.add_header('Authorization', f'Basic {creds}')
       req.add_header('Content-Type', 'application/x-www-form-urlencoded')
       try:
-          with urllib.request.urlopen(req) as resp:
+          with urllib.request.urlopen(req, timeout=30) as resp:
               d = json.loads(resp.read())
               DBX_TOKEN = d['access_token']
-              # Update .env file
               lines = open(ENV).readlines()
               with open(ENV, 'w') as f:
-                  for line in lines:
-                      if line.startswith('DBX_ACCESS_TOKEN='):
-                          f.write(f'DBX_ACCESS_TOKEN={DBX_TOKEN}\n')
-                      else:
-                          f.write(line)
+                  for ln in lines:
+                      f.write(f'DBX_ACCESS_TOKEN={DBX_TOKEN}\n' if ln.startswith('DBX_ACCESS_TOKEN=') else ln)
               log('Token refreshed OK')
               return True
       except Exception as e:
@@ -107,46 +109,48 @@
           return False
 
   def gh_get(path):
-      url = f'https://api.github.com/repos/{REPO}/contents/{path}'
-      req = urllib.request.Request(url)
+      req = urllib.request.Request(f'https://api.github.com/repos/{REPO}/contents/{path}')
       req.add_header('Authorization', f'token {GH_TOKEN}')
       req.add_header('Accept', 'application/vnd.github.v3+json')
       try:
-          with urllib.request.urlopen(req) as resp:
+          with urllib.request.urlopen(req, timeout=30) as resp:
               return json.loads(resp.read())
       except urllib.error.HTTPError as e:
-          if e.code == 404:
-              return None
-          raise
+          return None if e.code == 404 else None
+      except Exception:
+          return None
 
   def gh_put(path, content_bytes, message, sha=None):
-      url = f'https://api.github.com/repos/{REPO}/contents/{path}'
       body = {'message': message, 'content': base64.b64encode(content_bytes).decode()}
       if sha:
           body['sha'] = sha
-      data = json.dumps(body).encode()
-      req = urllib.request.Request(url, data=data, method='PUT')
+      req = urllib.request.Request(
+          f'https://api.github.com/repos/{REPO}/contents/{path}',
+          data=json.dumps(body).encode(), method='PUT'
+      )
       req.add_header('Authorization', f'token {GH_TOKEN}')
       req.add_header('Content-Type', 'application/json')
       req.add_header('Accept', 'application/vnd.github.v3+json')
       try:
-          with urllib.request.urlopen(req) as resp:
+          with urllib.request.urlopen(req, timeout=30) as resp:
               return json.loads(resp.read())
       except Exception as e:
           log(f'GitHub put error {path}: {e}')
           return None
 
   def sync_dropbox_folder_to_github(dbx_folder, gh_prefix, max_size=500*1024, exts=None):
-      """Sync a Dropbox folder into GitHub. Skips files >max_size or wrong extension."""
       result = dbx_request('files/list_folder', {'path': dbx_folder, 'recursive': False})
       if not result:
+          log(f'  Could not list {dbx_folder}')
           return 0
-      pushed = 0
+      pushed = skipped_old = 0
       for entry in result.get('entries', []):
           if entry['.tag'] != 'file':
               continue
           name = entry['name']
-          if entry.get('size', 0) > max_size:
+          size = entry.get('size', 0)
+          dbx_modified = datetime.strptime(entry['server_modified'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+          if size > max_size:
               continue
           if exts and not any(name.endswith(e) for e in exts):
               continue
@@ -156,79 +160,55 @@
           gh_path = f'{gh_prefix}/{name}'
           existing = gh_get(gh_path)
           sha = existing.get('sha') if existing else None
-          # Only push if content changed
           if existing:
-              remote_content = base64.b64decode(existing.get('content', '').replace('\n', ''))
+              try:
+                  remote_content = base64.b64decode(existing.get('content', '').replace('\n', ''))
+              except Exception:
+                  remote_content = b''
               if remote_content == content:
                   continue
-          msg = f'sync(dropbox): update {gh_path}'
-          r = gh_put(gh_path, content, msg, sha)
+              if dbx_modified < SYNC_CUTOFF:
+                  skipped_old += 1
+                  continue
+          r = gh_put(gh_path, content, f'sync(dropbox): {name}', sha)
           if r and r.get('commit'):
-              log(f'  Pushed {gh_path} ({len(content)} bytes)')
+              log(f'  Pushed {gh_path} ({size}B)')
               pushed += 1
-          time.sleep(0.3)
+          time.sleep(0.5)
+      if skipped_old:
+          log(f'  Skipped {skipped_old} old Dropbox files (GitHub version kept)')
       return pushed
 
   def push_status_to_dropbox():
-      """Push live training status + logs from instance to Dropbox."""
       files = [
-          ('/workspace/titanai/data/live_status.json',         '/workspace/titanai_status/live_status.json'),
-          ('/workspace/titanai/data/training_log_latest.txt',  '/workspace/titanai_status/training_log_latest.txt'),
-          ('/workspace/titanai/data/corpus_progress_latest.txt','/workspace/titanai_status/corpus_progress_latest.txt'),
+          ('/workspace/titanai/data/live_status.json',           '/workspace/titanai_status/live_status.json'),
+          ('/workspace/titanai/data/training_log_latest.txt',    '/workspace/titanai_status/training_log_latest.txt'),
+          ('/workspace/titanai/data/corpus_progress_latest.txt', '/workspace/titanai_status/corpus_progress_latest.txt'),
       ]
-      # Also grab latest training log
-      import glob
-      for pat in ['/workspace/titanai/logs/titan_1b/upgrade_*/training.log']:
-          for f in glob.glob(pat):
-              files.append((f, f'/workspace/titanai_status/{os.path.basename(os.path.dirname(f))}_training.log'))
-
+      for pat in glob.glob('/workspace/titanai/logs/titan_1b/upgrade_*/training.log'):
+          stage = os.path.basename(os.path.dirname(pat))
+          files.append((pat, f'/workspace/titanai_status/{stage}_training.log'))
       uploaded = 0
       for local, remote in files:
           if not os.path.exists(local):
               continue
           content = open(local, 'rb').read()
           if len(content) > 2 * 1024 * 1024:
-              content = content[-500*1024:]  # last 500KB only
-          r = dbx_upload(remote, content)
-          if r:
+              content = content[-500*1024:]
+          if dbx_upload(remote, content):
               uploaded += 1
       if uploaded:
           log(f'Pushed {uploaded} status files to Dropbox')
 
   if __name__ == '__main__':
       if not DBX_TOKEN:
-          log('ERROR: No DBX_ACCESS_TOKEN in .dropbox_sync_env — aborting')
-          sys.exit(1)
+          log('ERROR: No DBX_ACCESS_TOKEN — aborting'); sys.exit(1)
       if not GH_TOKEN:
-          log('ERROR: No GH_TOKEN in .dropbox_sync_env — aborting')
-          sys.exit(1)
-
-      log('=== Dropbox ↔ GitHub sync starting ===')
-
-      # 1. Dropbox scripts → GitHub
-      n = sync_dropbox_folder_to_github(
-          '/workspace/titanai/scripts', 'scripts',
-          exts=['.py', '.sh', '.yaml', '.yml', '.json', '.md', '.txt']
-      )
-      log(f'Scripts: {n} files synced')
-
-      # 2. Dropbox configs → GitHub
-      n = sync_dropbox_folder_to_github(
-          '/workspace/titanai/configs', 'configs',
-          exts=['.yaml', '.yml', '.json', '.toml', '.ini', '.cfg', '.md']
-      )
-      log(f'Configs: {n} files synced')
-
-      # 3. Dropbox data (small files) → GitHub data/dropbox_sync/
-      n = sync_dropbox_folder_to_github(
-          '/workspace/titanai/data', 'data/dropbox_sync',
-          max_size=200*1024,
-          exts=['.json', '.md', '.txt', '.log', '.yaml']
-      )
-      log(f'Data files: {n} files synced')
-
-      # 4. Instance status → Dropbox
+          log('ERROR: No GH_TOKEN — aborting'); sys.exit(1)
+      log('=== Dropbox → GitHub sync starting ===')
+      log(f'Scripts: {sync_dropbox_folder_to_github("/workspace/titanai/scripts", "scripts", exts=[".py",".sh",".yaml",".yml",".json",".md",".txt"])} synced')
+      log(f'Configs: {sync_dropbox_folder_to_github("/workspace/titanai/configs", "configs", exts=[".yaml",".yml",".json",".toml",".cfg",".md"])} synced')
+      log(f'Data:    {sync_dropbox_folder_to_github("/workspace/titanai/data",    "data/dropbox_sync", max_size=200*1024, exts=[".json",".md",".txt",".log",".yaml"])} synced')
       push_status_to_dropbox()
-
       log('=== Sync complete ===')
   
