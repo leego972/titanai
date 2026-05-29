@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# Build tools needed to compile llama-cpp-python from source
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     build-essential \
@@ -8,14 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps first (layer-cached unless requirements change)
-COPY requirements.txt .
+COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY main.py .
+COPY server/main.py .
 
-# Model is downloaded at runtime to this path (mount a volume here in prod)
 ENV MODEL_PATH=/app/models/final_q8_0.gguf
 ENV MODEL_URL=https://github.com/leego972/titanai/releases/download/titan-1b-v1/final_q8_0.gguf
 ENV N_CTX=4096
