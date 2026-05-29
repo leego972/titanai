@@ -8,7 +8,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY server/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Compile llama-cpp-python from source with no native CPU flags
+# so it works on any x86_64 CPU (Railway does not guarantee AVX2)
+RUN CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF" \
+    pip install --no-cache-dir --no-binary llama-cpp-python llama-cpp-python==0.3.4
+
+RUN pip install --no-cache-dir fastapi==0.115.5 "uvicorn[standard]==0.32.1" httpx==0.28.0 pydantic==2.10.3
 
 COPY server/main.py .
 
