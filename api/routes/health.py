@@ -110,3 +110,31 @@ async def metrics(_: Optional[str] = Depends(verify_api_key)):
             status_code=500,
             content={"error": f"Failed to read metrics: {str(e)}"}
         )
+
+
+  @router.get("/debug/fs")
+  async def debug_fs():
+      """Temporary: list filesystem paths for debugging."""
+      import os, subprocess
+      results = {}
+      paths = [
+          "/app/titanai/checkpoints",
+          "/app/titanai/configs",
+          "/app",
+      ]
+      for p in paths:
+          if os.path.exists(p):
+              try:
+                  files = []
+                  for f in os.listdir(p):
+                      full = os.path.join(p, f)
+                      size = os.path.getsize(full) if os.path.isfile(full) else -1
+                      files.append({"name": f, "size": size})
+                  results[p] = files
+              except Exception as e:
+                  results[p] = str(e)
+          else:
+              results[p] = "does not exist"
+      env = {k: v for k, v in os.environ.items() if "TITAN" in k}
+      return {"paths": results, "env": env}
+  
