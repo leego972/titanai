@@ -1,0 +1,19 @@
+Question: <p>I'm looking at creating a server in python that I can run, and will work as an SSH server. This will then let different users login, and act as if they'd logged in normally, but only had access to one command.</p>
+
+<p>I want to do this so that I can have a system where I can add users to without having to create a system wide account, so that they can then, for example, commit to a VCS branch, or similar.</p>
+
+<p>While I can work out how to do this with conch to get it to a "custom" shell... I can't figure out how to make it so that the SSH stream works as if it were a real one (I'm preferably wanting to limit to /bin/bzr so that bzr+ssh will work.</p>
+
+<p>It needs to be in python (which i can get to do the authorisation) but don't know how to do the linking to the app. </p>
+
+<p>This needs to be in python to work within the app its designed for, and to be able to be used for those without access to add new users</p>
+
+Answer: <p>When you write a Conch server, you can control what happens when the client makes a shell request by implementing <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/conch/interfaces.py?rev=24441#L62"><code>ISession.openShell</code></a>.  The Conch server will request <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/conch/interfaces.py?rev=24441#L6"><code>IConchUser</code></a> from your realm and then adapt the resulting avatar to <code>ISession</code> to call <code>openShell</code> on it if necessary.</p>
+
+<p><code>ISession.openShell</code>'s job is to take the transport object passed to it and associate it with a protocol to interpret the bytes received from it and, if desired, to write bytes to it to be sent to the client.</p>
+
+<p>In an unfortunate twist, the object passed to <code>openShell</code> which represents the transport is actually an <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/internet/interfaces.py?rev=24441#L1028"><code>IProcessProtocol</code></a> provider.  This means that you need to call <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/internet/interfaces.py?rev=24441#L1033"><code>makeConnection</code></a> on it, passing an <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/internet/interfaces.py?rev=24441#L1261"><code>IProcessTransport</code></a> provider.  When data is received from the client, the <code>IProcessProtocol</code> will call <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/internet/interfaces.py?rev=24441#L1282"><code>writeToChild</code></a> on the transport you pass to <code>makeConnection</code>.  When you want to send data to the client, you should call <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/internet/interfaces.py?rev=24441#L1043"><code>childDataReceived</code></a> on it.</p>
+
+<p>To see the exact behavior, I suggest reading <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/conch/ssh/session.py?rev=24441#L173">the implementation of the <code>IProcessProtocol</code> that is passed in</a>.  Don't depend on anything that's not part of <code>IProcessProtocol</code>, but seeing the implementation can make it easier to understand what's going on.</p>
+
+<p>You may also want to look at <a href="http://twistedmatrix.com/trac/browser/trunk/twisted/conch/unix.py?rev=24441#L174">the implementation of the normal shell-creation</a> to get a sense of what you're aiming for.  This will give you a clue about how to associate the stdio of the bzr child process you launch with the SSH channel.</p>

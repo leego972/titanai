@@ -1,0 +1,119 @@
+# Why is MainEvaluate being used when LinearSolve can be compiled?
+
+According to this question LinearSolve can be Compiled. However, CompilePrint shows a MainEvaluate but no-warning is generated. It appears that LinearSolve is not compilable, given the MainEvaluate. But the lack of warning is surprising. Something more subtle is going on. Consider the following.
+
+In[1]:= SetSystemOptions[
+"CompileOptions" -> "CompileReportExternal" -> True];
+
+In[2]:= << CompiledFunctionTools
+
+In[3]:= v2 = Compile[{{m, _Real, 2}, {v, _Real, 1}},
+LinearSolve[m, v]
+];
+
+In[4]:= CompilePrint[v2]
+
+Out[4]= "
+2 arguments
+3 Tensor registers
+Underflow checking off
+Overflow checking off
+Integer overflow checking on
+RuntimeAttributes -> {}
+
+T(R2)0 = A1
+T(R1)1 = A2
+Result = T(R1)2
+
+1   T(R1)2 = MainEvaluate[ Hold[LinearSolve][ T(R2)0, T(R1)1]]
+2   Return
+"
+
+
+There are no warnings generated, but I am not sure why there is a MainEvaluate in the CompilePrint.
+
+There is a much clearer warning that Compiling fails when one uses Options within LinearSolve while attempting to compile. Consider the following:
+
+In[5]:= v3 = Compile[{{m, _Real, 2}, {v, _Real, 1}},
+LinearSolve[m, v, Method -> "Cholesky"]
+]
+
+During evaluation of In[5]:= Compile::extscalar: Method->Cholesky cannot
+be compiled and will be evaluated externally.
+The result is assumed to be of type Integer. >>
+
+During evaluation of In[5]:= Compile::exttensor: LinearSolve[m,v,Method->Cholesky]
+cannot be compiled and will be evaluated externally.
+The result is assumed to be a rank 2 tensor of type Real. >>
+
+
+Also, CompilePrint gives the following:
+
+In[6]:= CompilePrint[v3]
+
+Out[6]= "
+2 arguments
+1 Integer register
+3 Tensor registers
+Underflow checking off
+Overflow checking off
+Integer overflow checking on
+RuntimeAttributes -> {}
+
+T(R2)0 = A1
+T(R1)1 = A2
+Result = T(R2)2
+
+1   T(R2)2 = MainEvaluate[ Function[{m, v}, LinearSolve[m, v,
+Method -> Cholesky]][ T(R2)0, T(R1)1]]
+2   Return
+"
+
+
+Questions: If LinearSolve can't be compiled, why is there no warning in the default case? Is there something more subtle going on (e.g. some parts of the process are compiled)? If yes, how can one use the Method option within the Compiled function to ensure that what can be compiled actually is?
+
+-
+Short answer: no it can't be compiled. –  rcollyer Feb 2 '12 at 18:22
+@rcollyer I would however like to understand why there is no warning –  acl Feb 2 '12 at 18:24
+you probably want to rephrase it as "why is no warning produced", since otherwise it looks like an exact duplicate of the question @rcollyer links to above (and will be closed as such, it appears) –  acl Feb 2 '12 at 18:27
+@acl But the list given by Oleksandr and linked by rcollyer says LinearSolve can be compiled. –  asim Feb 2 '12 at 18:31
+@rcollyer is right; LinearSolve can't be compiled. However, you normally don't get a warning because InternalCompileValues provides complete type information about it based on the type of the arguments. (Adding a Method subverts matching against the patterns given by InternalCompileValues[LinearSolve], so you then get the warning.) Appearance of a function in the second list I gave does not necessarily mean it can be compiled without needing MainEvaluate! –  Oleksandr R. Feb 2 '12 at 23:03
+
+acl already posted the crucial information needed to solve this conundrum (i.e., the definition of InternalCompileValues[LinearSolve]), but wishes to delete his post since he had not interpreted it to give the complete answer. Therefore I re-post the following observation along with a summary of what it means.
+
+The input,
+
+InternalCompileValues[];
+InternalCompileValues[LinearSolve]
+
+
+yields:
+
+HoldPattern[InternalCompileValues[LinearSolve]] :> {
+HoldPattern[
+LinearSolve[
+SystemCompileDumpx_?(InternalTensorTypeQ[Real, {_, _}]),
+SystemCompileDumpb_?(InternalTensorTypeQ[Real, {_}])]
+] :> _?(InternalTensorTypeQ[Real, {_}]),
+HoldPattern[
+LinearSolve[
+SystemCompileDumpx_?(InternalTensorTypeQ[Complex, {_, _}]),
+SystemCompileDumpb_?(InternalTensorTypeQ[Complex, {_}])]
+] :> _?(InternalTensorTypeQ[Complex, {_}])
+}
+
+
+Briefly put, this tells us that when the compiler sees a function call like LinearSolve[x, b], it knows that:
+
+• when x is a real matrix and b is a real vector, the result is a real vector
+• when x is a complex matrix and b is a complex vector, the result is a complex vector
+
+As a result of this knowledge, the compiler is able to determine what type of register is needed to store the return value from LinearSolve in these two cases. This is important if further operations are then carried out on the result: in the absence of type information, all subsequent operations on LinearSolve's return value would need to be performed via the interpreter using MainEvaluate for full generality, but because the type of the result is predetermined, such operations can be compiled instead. However, since LinearSolve is a highly optimized top-level function, compilation does not offer any benefit outside of this scenario, and so knowing the return type has no value if LinearSolve[x, b] is the entire contents of the compiled function, since the operation may as well have been performed via the interpreter anyway.
+
+As regards why LinearSolve[x, b, Method -> m] produces a message: it is because the definition for InternalCompileValues[LinearSolve] does not provide for pattern matching against LinearSolve calls when any Method is specified. It handles only the form LinearSolve[x, b].
+
+### Conclusion
+
+Just because InternalCompileValues[func] is defined for some function func, one cannot assume that func can be called directly from compiled code without using a MainEvaluate call. It simply means that the compiler has information about func which it can incorporate into the compilation process as a whole.
+
+-

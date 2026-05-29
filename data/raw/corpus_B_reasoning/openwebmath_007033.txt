@@ -1,0 +1,88 @@
+using parallel program
+3
+1
+Entering edit mode
+3.7 years ago
+
+I have 10,000 genome.For analyzing each genome, the following software takes 2/3 minutes. I am using the following loop and I think will take ~ a month to analyze my data . I am looking forward a faster way. e.g using parallel. How to fit the loop in parallel? or any other suggestions?
+
+cat fna.ls | while read i j; do
+mkdir -p ~/jobs_resfinder/${j%.*} perl ~/res/resfinder.pl -d ~/res/resfinderdb -i${i} -a all -k 90.00 -l 0.60 -o ~/jobs_resfinder/${j%.*} done  Where, fna.ls = list of genomes sequence • 1.0k views ADD COMMENT 0 Entering edit mode Paste out-put of cat fna.ls ADD REPLY 0 Entering edit mode These is ~10,000 . I paste only 2 /Volumes/scratch/brownlab/chrisbr/DB/RefSeq86/bacteria/G/Geobacteraceae_bacterium_GWC2_53_11-1798316#GCA_001802645.1/GCA_001802645.1_ASM180264v1_genomic.fna GCA_001802645.1_ASM180264v1_genomic.fna /Volumes/scratch/brownlab/chrisbr/DB/RefSeq86/bacteria/G/Gammaproteobacteria_bacterium_REDSEA-S21_B8-1811667#GCA_001629445.1/GCA_001629445.1_ASM162944v1_genomic.fna GCA_001629445.1_ASM162944v1_genomic.fna  ADD REPLY 0 Entering edit mode reformat the post according to below post ADD REPLY 0 Entering edit mode I added code markup to your post for increased readability. You can do this by selecting the text and clicking the 101010 button. When you compose or edit a post that button is in your toolbar, see image below: In addition, I converted this thread to a "Question". "Tool" should only be used for announcing new tools. ADD REPLY 0 0 Entering edit mode Thanks. I have no coding background and struggle a lot with it. I googled a lot, but can't solve problem for this one. So, looking for expert solution ! ADD REPLY 0 Entering edit mode 3.7 years ago 5heikki 10k Assuming you have installed GNU parallel, something like this: #!/bin/bash THREADS="16" function restFinderFunction() { i="$1"
+j="$2" mkdir -p ~/jobs_resfinder/${j%.*}
+perl ~/res/resfinder.pl -d ~/res/resfinderdb -i ${i} -a all -k 90.00 -l 0.60 -o ~/jobs_resfinder/${j%.*}
+}
+
+export -f restFinderFunction
+
+cat fna.ls | parallel -j "$THREADS" -n 2 restFinderFunction {} #or parallel -j "$THREADS" -n 2 restFinderFunction {} <fna.ls
+
+
+Like this
+
+$cat file 1 2 3 4 5 6 7 8 9 10$function joku(){ echo "arg 1:$1 arg2:$2"; }; export -f joku; cat file | parallel -j4 -n2 joku {}
+arg 1:1 arg2:2
+arg 1:3 arg2:4
+arg 1:5 arg2:6
+arg 1:7 arg2:8
+arg 1:9 arg2:10
+
+0
+Entering edit mode
+
+Thanks a lot . But I am confused in one point . My fna.ls file is the list for $i and$j . So, is it right to declare like that? i="$1" j="$2"
+
+I also tried like that. First, I nano my script in test.sh Then run following code. But still it takes same time. How to make it faster?
+
+parallel  --eta -j 3 --load 80% -k 'bash test.sh'
+
+0
+Entering edit mode
+
+Because of parallel -n 2 restFinderFunction gets two args. To the function they're $1 and$2. You don't need to reassign them to i and j. You can use them directly as well. What goes for running the script, you simply save it, chmod +x and just execute it: ./script.sh ..don't call it with parallel
+
+You can monitor stuff with e.g. htop. If IO is the bottle neck then running in parallel will do you little good..
+
+0
+Entering edit mode
+
+Hi,
+
+I tried your script. It can generate a directory but that is empty. And it also produces other directory named " Network". I can't figure out the reason.The main problem is it can't execute the Perl script. So, no output in the directory.
+
+Any suggestion?
+
+0
+Entering edit mode
+
+If your data is in format:
+
+arg1<tab>arg2
+arg1<tab>arg2
+
+
+You should actually change the tabs to newlines before piping to parallel, e.g.
+
+cat fna.ls | tr "\t" "\n" | parallel ...
+
+
+The script was written for data that was in format like below:
+
+arg1
+arg2
+arg1
+arg2
+
+0
+Entering edit mode
+
+thanks a lot . It works! :)
+
+0
+Entering edit mode
+3.7 years ago
+
+using a Makefile (should work, I cannot test it without your data/software)
+
+run it in parallel using the option -j <jobs> of make
+
+make -j 16

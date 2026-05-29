@@ -1,0 +1,97 @@
+# C++ OpenGL Debug Utility
+
+Edit: A follow up post can be found here.
+
+So I've started a c++ project, coming from Java / C# there are many obvious differences.
+
+Below is an example of a class I've been working on:
+
+.h
+
+#pragma once
+
+#include <vector>
+
+#include <GL/glew.h>
+#include <glm/glm.hpp>
+
+class GLDebug {
+private:
+
+struct Line {
+glm::vec3 p0, p1;
+};
+
+private:
+
+std::vector<Line> m_lines;
+
+public:
+
+GLDebug();
+~GLDebug();
+
+public:
+void drawLine(const glm::vec3& p0, const glm::vec3& p1);
+
+void onRender(const glm::mat4& projMatrix, const glm::mat4& viewMatrix);
+};
+
+
+.cpp
+
+#include "GLDebug.h"
+
+#include <glm/gtc/type_ptr.hpp>
+
+GLDebug::GLDebug() { }
+
+GLDebug::~GLDebug() { }
+
+void GLDebug::drawLine(const glm::vec3& p0, const glm::vec3& p1) {
+m_lines.push_back({ p0, p1 });
+}
+
+void GLDebug::onRender(const glm::mat4& projMatrix, const glm::mat4& viewMatrix) {
+glMatrixMode(GL_PROJECTION);
+
+glMatrixMode(GL_MODELVIEW);
+
+glBegin(GL_LINES);
+
+for (auto& line : m_lines) {
+glVertex3fv(glm::value_ptr(line.p0));
+glVertex3fv(glm::value_ptr(line.p1));
+}
+
+glEnd();
+
+m_lines.clear();
+}
+
+
+I've written this basic OpenGL debug utility class based on one I wrote in Java previously. Now it seems fine from what I can tell, but with my limited C++ knowledge I'm wondering if anything I'm doing is redundant / unnecessary and/or performance impacting.
+
+One other thing, I know I can use compiler directives such as #ifdef _DEBUG etc. If I wanted this class to only exist if compiling in debug mode, Obviously I can't wrap the whole class in the ifdef as that would break other code that is calling functions in the GLDebug class. So I was thinking of wrapping the functions internals instead. Is that a bad approach, I could use them everywhere else as well but that seems kinda bloated and less manageable.
+
+• What is the purpose of this class? What are you debugging? It has an array of Lines, but removes them after every render. I don't think this can be reasonably reviewed as it is, since it doesn't do anything of significance. It doesn't even keep track of the context its drawing into. And you can't make the class go away in non-debug builds if it does all of your drawing. I'm having trouble making sense of what you're actually trying to accomplish here. Can you elaborate? – user1118321 May 10 '18 at 1:21
+• I think you’ve done a great job of picking up C++ language rather than writing Java in C++. – JDługosz May 10 '18 at 2:47
+• @user1118321 This class isn't used for drawing everything, rather just rendering debug lines/frustums/transforms/etc in immediate mode (passing what needs to be drawn every frame). For actual model rendering etc, I'll be using VAOs/VBOs with a proper mesh class etc. This class essentially will serve no purpose in "release" mode. – Hex May 10 '18 at 13:08
+
+Just a couple points (also well done properly qualifying namespaces, a rare thing to see).
+
+• #pragma once is non-standard. Meaning it will probably work but is not guaranteed to. Bjarne himself recommends against using it.
+
+• Not following your multiple private and public approach. Usually you have a section for each without repeating the keywords.
+
+• It makes more sense to order your interface from public to private as people using it don't want to look at the internals of your class, they want to know what methods they can use.
+
+• You don't do anything in either your constructor or your destructor. In this case it makes sense to let the compiler take care of them.
+
+• Avoid declaring more than one variable per line
+
+• First off thanks for the response! As for the multiple private/public I was planning on adding more functionality to the class with a mix of private/public functions/member variables etc, I figure having multiple public/private would allow better layout content by providing a public/private for each "section". (Though I should note, I'm coming from a Java/C# background where having a mix of public / private through out the class is common, so if this is an abnormal approach in C++ let me know.) As for the constructor and destructor, I just roughed them in for future use. – Hex May 9 '18 at 19:15
+• @HexCrown (1) Abnormal might be a bit much but it certainly is an unusual approach. Most people will use the two section way. (2) No problem but from a reviewers point of view it's simply something to point out. I hope to see your complete class up for review when it's done. – yuri May 9 '18 at 19:26
+• I'm new to this site, would I post the completed class when done as an edit or as a separate post? Also one of the things I was hoping to get feedback on was the struct Line {...}; being used as it is, is that the best way to go about encapsulating the data to be held in the vector, or is there a more generic/elegant approach, it seems kinda off to me. – Hex May 9 '18 at 19:53
+• @HexCrown (1) Simply post it as a new question. You can mention that it's a follow-up question to one of your previous ones and link to it. (2) The way you use it looks fine to me however I just noticed you actually declare two variables in one line which should be avoided. (I'll update this in the answer) – yuri May 9 '18 at 20:02
+• I've made a follow up post as you suggested, it can be found here: codereview.stackexchange.com/questions/194124/… – Hex May 10 '18 at 17:11

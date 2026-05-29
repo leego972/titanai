@@ -1,0 +1,95 @@
+Pair end merging and statistical output
+1
+0
+Entering edit mode
+4.5 years ago
+jomo018 ▴ 620
+1. I am looking for a paired end merging utility similar to FLASH or PEAR that also outputs statistical information, mainly number of pair mismatches.
+
+2. Is this type of information available from a SAM file after alignment with BOWTIE, BWA or some other aligner?
+
+paired ends alignment overlap • 1.5k views
+0
+Entering edit mode
+
+0
+Entering edit mode
+
+I am looking for mismatches in base resolution, not read resolution. Pairs can be merged (or aligned concordantly) even if some overlapping bases disagree. I am looking for the number or rate of these mismatching bases.
+
+0
+Entering edit mode
+
+Do you mean variant calling ?
+
+0
+Entering edit mode
+
+You can call it variant calling where one mate declares different base than the other.
+
+2
+Entering edit mode
+4.5 years ago
+
+BBMerge can do this, with the "ecco" flag, which rather than combining the reads, just does error-correction via overlap:
+
+bbmerge.sh in=reads.fq ecco mix out=corrected.fq
+Total time: 1.890 seconds.
+
+Pairs:                  1000000
+Joined:                 182539          18.254%
+Ambiguous:              817461          81.746%
+No Solution:            0               0.000%
+Too Short:              0               0.000%
+Errors Corrected:       6994
+
+Avg Insert:             159.9
+Standard Deviation:     21.5
+Mode:                   187
+
+Insert range:           100 - 191
+90th percentile:        186
+75th percentile:        178
+50th percentile:        164
+25th percentile:        145
+10th percentile:        128
+
+0
+Entering edit mode
+
+In this example reads must be interleaved. @Brian: Is that a requirement?
+
+0
+Entering edit mode
+
+I am just reading the manual. They also allow in1 and in2 paired inputs.
+
+0
+Entering edit mode
+
+Yep, the syntax can also be:
+
+bbmerge.sh in1=r1.fq in2=r2.fq ecco mix out1=corrected1.fq out2=correct2.fq
+
+
+...but I normally show the interleaved version of the command for conciseness.
+
+0
+Entering edit mode
+
+Errors Corrected are number of pairs corrected rather than number of bases corrected. Right?
+
+0
+Entering edit mode
+
+No, it is the total number of bases corrected.
+
+0
+Entering edit mode
+
+Thank you Brian. Can you clarify the tag trimq=xx (as opposed to qtrim...). For example, suppose you have a low quality base in the middle of a read, is it considered an N or something else?
+
+0
+Entering edit mode
+
+"qtrim" tells the program which end to trim, while "trimq" specifies the quality threshold. Only ends can be trimmed (and mainly the right end is the important one for trimming with respect to merging). "qtrim=r trimq=15" will trim the bases on the right end such that the region trimmed has an average quality below 15, while the remaining region has an average quality at least 15. For example, if the last 5 base qualities were "20, 0, 17, 19, 16", then the last 4 bases would be trimmed as that region has an average quality below 15 (not that 0 is an N) but the 20 would not be trimmed. It's a little hard to calculate by eye because the scores are first transformed to the probability scale (where 16 is roughly 2.5% chance of error) before being averaged. Low-quality bases are not considered N. Rather, if two reads mismatch at a location and one is higher quality than the other, the base with the higher quality is assumed correct and the resuting quality score is higher-lower.

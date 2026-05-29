@@ -1,0 +1,237 @@
+# How to Train Neural Networks With Backpropagation
+
+This post is an attempt to demystify backpropagation, which is the most common method for training neural networks. This post is broken into a few main sections:
+
+1. Explanation
+2. Working through examples
+3. Simple sample C++ source code using only standard includes
+4. Links to deeper resources to continue learning
+
+Let’s talk about the basics of neural nets to start out, specifically multi layer perceptrons. This is a common type of neural network, and is the type we will be talking about today. There are other types of neural networks though such as convolutional neural networks, recurrent neural networks, Hopfield networks and more. The good news is that backpropagation applies to most other types of neural networks too, so what you learn here will be applicable to other types of networks.
+
+# Basics of Neural Networks
+
+A neural network is made up layers.
+
+Each layer has some number of neurons in it.
+
+Every neuron is connected to every neuron in the previous and next layer.
+
+Below is a diagram of a neural network, courtesy of wikipedia. Every circle is a neuron. This network takes 3 floating point values as input, passes them through 4 neurons in a hidden layer and outputs two floating point values. The hidden layer neurons and the output layer neurons do processing of the values they are giving, but the input neurons do not.
+
+To calculate the output value of a single neuron, you multiply every input into that neuron by a weight for that input, sum them up, and add a bias that is set for the neuron. This “weighted input” value is fed into an activation function and the result is the output value of that neuron. Here is a diagram for a single neuron:
+
+The code for calculating the output of a single neuron could look like this:
+
+float weightedInput = bias;
+
+for (int i = 0; i < inputs.size(); ++i)
+weightedInput += inputs[i] * weights[i];
+
+float output = Activation(weightedInput);
+
+
+To evaluate an entire network of neurons, you just repeat this process for all neurons in the network, going from left to right (from input to output).
+
+Neural networks are basically black boxes. We train them to give specific ouputs when we give them specific inputs, but it is often difficult to understand what it is that they’ve learned, or what part of the data they are picking up on.
+
+Training a neural network just means that we adjust the weight and bias values such that when we give specific inputs, we get the desired outputs from the network. Being able to figure out what weights and biases to use can be tricky, especially for networks with lots of layers and lots of neurons per layer. This post talks about how to do just that.
+
+Regarding training, there is a funny story where some people trained a neural network to say whether or not a military tank was in a photograph. It had a very high accuracy rate with the test data they trained it with, but when they used it with new data, it had terrible accuracy. It turns out that the training data was a bit flawed. Pictures of tanks were all taken on a sunny day, and the pictures without tanks were taken on a cloudy day. The network learned how to detect whether a picture was of a sunny day or a cloudy day, not whether there was a tank in the photo or not!
+
+This is one type of pitfall to watch out for when dealing with neural networks – having good training data – but there are many other pitfalls to watch out for too. Architecting and training neural networks is quite literally an art form. If it were painting, this post would be teaching you how to hold a brush and what the primary colors are. There are many, many techniques to learn beyond what is written here to use as tools in your toolbox. The information in this post will allow you to succeed in training neural networks, but there is a lot more to learn to get higher levels of accuracy from your nets!
+
+# Neural Networks Learn Using Gradient Descent
+
+Let’s take a look at a simple neural network where we’ve chosen random values for the weights and the bias:
+
+If given two floating point inputs, we’d calculate the output of the network like this:
+
+$Output = Activation(Input0 * Weight0 + Input1 * Weight1 + Bias)$
+
+Plugging in the specific values for the weights and biases, it looks like this:
+
+$Output = Activation(Input0 * 0.23 + Input1 * -0.1 + 0.3)$
+
+Let’s say that we want this network to output a zero when we give an input of 1,0, and that we don’t care what it outputs otherwise. We’ll plug 1 and 0 in for Input0 and Input1 respectively and see what the output of the network is right now:
+
+$Output = Activation(1* 0.23 + 0 * -0.1 + 0.3) \\ Output = Activation(0.53)$
+
+For the activation function, we are going to use a common one called the sigmoid activation function, which is also sometimes called the logistic activation function. It looks like this:
+
+$\sigma(x) = \frac{1}{1+e^{-x}}$
+
+Without going into too much detail, the reason why sigmoid is so commonly used is because it’s a smoother and differentiable version of the step function.
+
+Applying that activation function to our output neuron, we get this:
+
+$Output = Activation(0.53) \\ Output = \sigma(0.53) \\ Output = 0.6295$
+
+So, we plugged in 1 and 0, but instead of getting a 0 out, we got 0.6295. Our weights and biases are wrong, but how do we correct them?
+
+The secret to correcting our weights and biases is whichever of these terms seem least scary to you: slopes, derivatives, gradients.
+
+If “slope” was the least scary term to you, you probably remember the line formula $y=mx+b$ and that the m value was the “rise over run” or the slope of the line. Well believe it or not, that’s all a derivative is. A derivative is just the slope of a function at a specific point on that function. Even if a function is curved, you can pick a point on the graph and get a slope at that point. The notation for a derivative is $\frac{dy}{dx}$, which literally means “change in y divided by change in x”, or “delta y divided by delta x”, which is literally rise over run.
+
+In the case of a linear function (a line), it has the same derivative over the entire thing, so you can take a step size of any size on the x axis and multiply that step size by $\frac{dy}{dx}$ to figure out how much to add or subtract from y to stay on the line.
+
+In the case of a non linear function, the derivative can change from one point to the next, so this slope is only guaranteed to be accurate for an infinitely small step size. In practice, people just often use “small” step sizes and calling it good enough, which is what we’ll be doing momentarily.
+
+Now that you realize you already knew what a derivative is, we have to talk about partial derivatives. There really isn’t anything very scary about them and they still mean the exact same thing – they are the slope! They are even calculated the exact same way, but they use a fancier looking d in their notation: $\frac{\partial y}{\partial x}$.
+
+The reason partial derivatives even exist is because if you have a function of multiple variables like $z=f(x,y)=x^2+3y+2$, you have two variables that you can take the derivative of. You can calculate $\frac{\partial z}{\partial x}$ and $\frac{\partial z}{\partial y}$. The first value tells you how much the z value changes for a change in x, the second value tells you how much the z value changes for a change in y.
+
+By the way, if you are curious, the partial derivatives for that function above are below. When calculating partial derivatives, any variable that isn’t the one you care about, you just treat as a constant and do normal derivation.
+
+$\frac{\partial z}{\partial x} = 2x\\ \frac{\partial z}{\partial y} = 3\\$
+
+If you put both of those values together into a vector $(\frac{\partial z}{\partial x},\frac{\partial z}{\partial y})$ you have what is called the gradient vector.
+
+The gradient vector has an interesting property, which is that it points in the direction that makes the function output grow the most. Basically, if you think of your function as a surface, it points up the steepest direction of the surface, from the point you evaluated the function at.
+
+We are going to use that property to train our neural network by doing the following:
+
+1. Calculate the gradient of a function that describes the error in our network. This means we will have the partial derivatives of all the weights and biases in the network.
+2. Multiply the gradient by a small “learning rate” value, such as 0.05
+3. Subtract these scaled derivatives from the weights and biases to decrease the error a small amount.
+
+This technique is called steepest gradient descent (SGD) and when we do the above, our error will decrease by a small amount. The only exception is that if we use too large of a learning rate, it’s possible that we make the error grow, but usually the error will decrease.
+
+We will do the above over and over, until either the error is small enough, or we’ve decided we’ve tried enough iterations that we think the neural network is never going to learn the things we want to teach it. If the network doesn’t learn, it means it needs to be re-architected with a different structure, different numbers of neurons and layers, different activation functions, etc. This is part of the “art” that I mentioned earlier.
+
+Before moving on, there is one last thing to talk about: global minimums vs local minimums.
+
+Imagine that the function describing the error in our network is visualized as bumpy ground. When we initialize our weights and biases to random numbers we are basically just choosing a random location on the ground to start at. From there, we act like a ball, and just roll down hill from wherever we are. We are definitely going to get to the bottom of SOME bump / hole in the ground, but there is absolutely no reason to except that we’ll get to the bottom of the DEEPEST bump / hole.
+
+The problem is that SGD will find a LOCAL minimum – whatever we are closest too – but it might not find the GLOBAL minimum.
+
+In practice, this doesn’t seem to be too large of a problem, at least for people casually using neural nets like you and me, but it is one of the active areas of research in neural networks: how do we do better at finding more global minimums?
+
+You might notice the strange language I’m using where I say we have a function that describes the error, instead of just saying we use the error itself. The function I’m talking about is called the “cost function” and the reason for this is that different ways of describing the error give us different desirable properties.
+
+For instance, a common cost function is to use mean squared error of the actual output compared to the desired output.
+
+For a single training example, you plug the input into the network and calculate the output. You then plug the actual output and the target output into the function below:
+
+$Cost = ||target-output||^2$
+
+In other words, you take the vector of the neuron outputs, subtract it from the actual output that we wanted, calculate the length of the resulting vector and square it. This gives you the squared error.
+
+The reason we use squared error in the cost function is because this way error in either direction is a positive number, so when gradient descent does it’s work, we’ll find the smallest magnitude of error, regardless of whether it’s positive or negative amounts. We could use absolute value, but absolute value isn’t differentiable, while squaring is.
+
+To handle calculating the cost of multiple inputs and outputs, you just take the average of the squared error for each piece of training data. This gives you the mean squared error as the cost function across all inputs. You also average the derivatives to get the combined gradient.
+
+# More on Training
+
+Before we go into backpropagation, I want to re-iterate this point: Neural Networks Learn Using Gradient Descent.
+
+All you need is the gradient vector of the cost function, aka the partial derivatives of all the weights and the biases for the cost.
+
+Backpropagation gets you the gradient vector, but it isn’t the only way to do so!
+
+Another way to do it is to use dual numbers which you can read about on my post about them: Multivariable Dual Numbers & Automatic Differentiation.
+
+Using dual numbers, you would evaluate the output of the network, using dual numbers instead of floating point numbers, and at the end you’d have your gradient vector. It’s not quite as efficient as backpropagation (or so I’ve heard, I haven’t tried it), but if you know how dual numbers work, it’s super easy to implement.
+
+Another way to get the gradient vector is by doing so numerically using finite differences. You can read about numerical derivatives on my post here: Finite Differences
+
+Basically what you would do is if you were trying to calculate the partial derivative of a weight, like $\frac{\partial Cost}{\partial Weight0}$, you would first calculate the cost of the network as usual, then you would add a small value to Weight0 and evaluate the cost again. You subtract the new cost from the old cost, and divide by the small value you added to Weight0. This will give you the partial derivative for that weight value. You’d repeat this for all your weights and biases.
+
+Since realistic neural networks often have MANY MANY weights and biases, calculating the gradient numerically is a REALLY REALLY slow process because of how many times you have to run the network to get cost values with adjusted weights. The only upside is that this method is even easier to implement than dual numbers. You can literally stop reading and go do this right now if you want to 😛
+
+Lastly, there is a way to train neural networks which doesn’t use derivatives or the gradient vector, but instead uses the more brute force-ish method of genetic algorithms.
+
+Using genetic algorithms to train neural networks is a huge topic even to summarize, but basically you create a bunch of random networks, see how they do, and try combining features of networks that did well. You also let some of the “losers” reproduce as well, and add in some random mutation to help stay out of local minimums. Repeat this for many many generations, and you can end up with a well trained network!
+
+Here’s a fun video visualizing neural networks being trained by genetic algorithms: Youtube: Learning using a genetic algorithm on a neural network
+
+# Backpropagation is Just the Chain Rule!
+
+Going back to our talk of dual numbers for a second, dual numbers are useful for what is called “forward mode automatic differentiation”.
+
+Backpropagation actually uses “reverse mode automatic differentiation”, so the two techniques are pretty closely tied, but they are both made possible by what is known as the chain rule.
+
+The chain rule basically says that if you can write a derivative like this:
+
+$dy/dx$
+
+That you can also write it like this:
+
+$dy/du*du/dx$
+
+That might look weird or confusing, but since we know that derivatives are actual values, aka actual ratios, aka actual FRACTIONS, let’s think back to fractions for a moment.
+
+$3/2 = 1.5$
+
+So far so good? Now let’s choose some number out of the air – say, 5 – and do the same thing we did with the chain rule
+$3/2 = \\ 3/5 * 5/2 = \\ 15/10 = \\ 3/2 = \\ 1.5$
+
+Due to doing the reverse of cross cancellation, we are able to inject multiplicative terms into fractions (and derivatives!) and come up with the same answer.
+
+Ok, but who cares?
+
+Well, when we are evaluating the output of a neural network for given input, we have lots of equations nested in each other. We have neurons feeding into neurons feeding into neurons etc, with the logistic activation function at each step.
+
+Instead of trying to figure out how to calculate the derivatives of the weights and biases for the entire monster equation (it’s common to have hundreds or thousands of neurons or more!), we can instead calculate derivatives for each step we do when evaluating the network and then compose them together.
+
+Basically, we can break the problem into small bites instead of having to deal with the equation in it’s entirety.
+
+Instead of calculating the derivative of how a specific weight affects the cost directly, we can instead calculate these:
+
+1. dCost/dOutput: The derivative of how a neuron’s output affects cost
+2. dOutput/dWeightedInput: The derivative of how the weighted input of a neuron affects a neuron’s output
+3. dWeightedInput/dWeight: The derivative of how a weight affects the weighted input of a neuron
+
+Then, when we multiply them all together, we get the real value that we want:
+dCost/dOutput * dOutput/dWeightedInput * dWeightedInput/dWeight = dCost/dWeight
+
+Now that we understand all the basic parts of back propagation, I think it’d be best to work through some examples of increasing complexity to see how it all actually fits together!
+
+# Backpropagation Example 1: Single Neuron, One Training Example
+
+This example takes one input and uses a single neuron to make one output. The neuron is only trained to output a 0 when given a 1 as input, all other behavior is undefined. This is implemented as the Example1() function in the sample code.
+
+# Backpropagation Example 2: Single Neuron, Two Training Examples
+
+This time, we are going to teach it not only that it should output 0 when given a 1, but also that it should output 1 when given a 0.
+
+We have two training examples, and we are training the neuron to act like a NOT gate. This is implemented as the Example2() function in the sample code.
+
+The first thing we do is calculate the derivatives (gradient vector) for each of the inputs.
+
+We already calculated the “input 1, output 0” derivatives in the last example:
+$\frac{\partial Cost}{\partial Weight} = 0.1476 \\ \frac{\partial Cost}{\partial Bias} = 0.1476$
+
+If we follow the same steps with the “input 0, output 1” training example we get these:
+$\frac{\partial Cost}{\partial Weight} = 0.0 \\ \frac{\partial Cost}{\partial Bias} = -0.0887$
+
+To get the actual derivatives to train the network with, we just average them!
+$\frac{\partial Cost}{\partial Weight} = 0.0738 \\ \frac{\partial Cost}{\partial Bias} = 0.0294$
+
+From there, we do the same adjustments as before to the weight and bias values to get a weight of 0.2631 and a bias of 0.4853.
+
+If you are wondering how to calculate the cost, again you just take the cost of each training example and average them. Adjusting the weight and bias values causes the cost to drop from 0.1547 to 0.1515, so we have made progress.
+
+It takes 10 times as many iterations with these two training examples to get the same level of error as it did with only one training example though.
+
+As we saw in the last example, after 10,000 iterations, the error was 0.007176.
+
+In this example, after 100,000 iterations, the error is 0.007141. At that point, weight is -9.879733 and bias is 4.837278
+
+# Backpropagation Example 3: Two Neurons in One Layer
+
+Here is the next example, implemented as Example3() in the sample code. Two input neurons feed to two neurons in a single layer giving two outputs.
+
+Let’s look at how we’d calculate the derivatives needed to train this network using the training example that when we give the network 01 as input that it should give out 10 as output.
+
+First comes the forward pass where we calculate the network’s output when we give it 01 as input.
+
+$Z0=input0*weight0+input1*weight1+bias0 \\ Z0=0*0.2+1*0.8+0.5 \\ Z0=1.3 \\ \\ O0=\sigma(1.3) \\ O0=0.7858\\ \\ Z1=input0*weight2+input0*weight3+bias1\\ Z1=0*0.6+1*0.4+0.1\\ Z1=0.5\\ \\ O1=\sigma(0.5)\\ O1=0.6225$
+
+Next we calculate a cost. We don’t strictly need to do this step since we don’t use this value during backpropagation, but this will be useful to verify that we’ve improved things after an iteration of training.
+
+$Cost=0.5*||target-actual||^2\\ Cost=0.5*||(1,0)-(0.7858,0.6225)||^2\\ Cost=0.5*||(0.2142,-0.6225)||^2\\ Cost=0.5*0.6583^2\\ Cost=0.2167$
+
+Now we begin the backwards pass to calculate the derivatives that we’ll need for training.
+
+Let’s calculate dCost

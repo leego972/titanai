@@ -1,0 +1,82 @@
+Question: <p>In Python specifically, how do variables get shared between threads?</p>
+
+<p>Although I have used <code>threading.Thread</code> before I never really understood or saw examples of how variables got shared.  Are they shared between the main thread and the children or only among the children? When would I need to use thread local storage to avoid this sharing?</p>
+
+<p>I have seen many warnings about synchronizing access to shared data among threads by using locks but I have yet to see a really good example of the problem. </p>
+
+<p>Thanks in advance!</p>
+
+Answer: <p>Consider the following code:</p>
+
+<pre><code>#/usr/bin/env python
+
+from time import sleep
+from random import random
+from threading import Thread, local
+
+data = local()
+
+def bar():
+    print "I'm called from", data.v
+
+def foo():
+    bar()
+
+class T(Thread):
+    def run(self):
+        sleep(random())
+        data.v = self.getName()   # Thread-1 and Thread-2 accordingly
+        sleep(1)
+        foo()
+</code></pre>
+
+<pre> >> T().start(); T().start()
+I'm called from Thread-2
+I'm called from Thread-1 </pre>
+
+<p>Here threading.local() is used as a quick and dirty way to pass some data from run() to bar() without changing the interface of foo(). </p>
+
+<p>Note that using global variables won't do the trick:</p>
+
+<pre><code>#/usr/bin/env python
+
+from time import sleep
+from random import random
+from threading import Thread
+
+def bar():
+    global v
+    print "I'm called from", v
+
+def foo():
+    bar()
+
+class T(Thread):
+    def run(self):
+        global v
+        sleep(random())
+        v = self.getName()   # Thread-1 and Thread-2 accordingly
+        sleep(1)
+        foo()
+</code></pre>
+
+<pre> >> T().start(); T().start()
+I'm called from Thread-2
+I'm called from Thread-2 </pre>
+
+<p>Meanwhile, if you could afford passing this data through as an argument of foo() - it would be a more elegant and well-designed way:</p>
+
+<pre><code>from threading import Thread
+
+def bar(v):
+    print "I'm called from", v
+
+def foo(v):
+    bar(v)
+
+class T(Thread):
+    def run(self):
+        foo(self.getName())
+</code></pre>
+
+<p>But this is not always possible when using third-party or poorly designed code.</p>

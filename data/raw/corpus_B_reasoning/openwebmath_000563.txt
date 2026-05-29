@@ -1,0 +1,57 @@
+# SQL Server 2008 backup script
+
+I have a lot of SharePoint 2013 databases to backup and if update fail to restore, so I want to automate this operations.
+
+ALTER DATABASE [TEST_1] SET OFFLINE WITH ROLLBACK IMMEDIATE
+GO
+
+BACKUP DATABASE [TEST_1]
+TO DISK = 'C:\path\test_1.bak' WITH NOINIT, STATS = 10
+GO
+
+ALTER DATABASE [TEST_1] SET ONLINE WITH ROLLBACK IMMEDIATE
+
+
+But there is and error msg:
+
+Msg 942, Level 14, State 4, Line 1
+Database 'TEST_1' cannot be opened because it is offline.
+
+Msg 3013, Level 16, State 1, Line 1
+BACKUP DATABASE is terminating abnormally.
+
+Is it possbile to switch database offline, make backup and turn it in online mode after this?
+
+## migrated from stackoverflow.comJun 22 '15 at 17:01
+
+This question came from our site for professional and enthusiast programmers.
+
+• SharePoint has this functionality that will do the backups of the database for you via the SharePoint Administrator Console (or whatever it is called in 2013). It will do this via PowerShell scripts I do believe. – Shawn Melton Jun 22 '15 at 17:35
+• Why would you want to take the database offline during the backup ? – Spörri Jun 22 '15 at 23:20
+
+Two things. First if you are going to do that then make your script this:
+
+ ALTER DATABASE [TEST_1] SET SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+USE [TEST_1]
+GO
+BACKUP DATABASE [TEST_1] TO DISK = 'C:\Program Files\Microsoft SQL Server\MSSQL.1\MSSQL\Backup\test\test_1.bak' WITH NOINIT, STATS = 10
+GO
+ALTER DATABASE [TEST_1] SET MULTI_USER WITH ROLLBACK IMMEDIATE
+
+
+Single user will kick everyone off but then you will be the first one back on with the backup. Then when you are done set it back to multi_user.
+
+Second you might consider using Minion Backup. It's a free automated backup script that is supposed to be both very powerful and easy to use. The writers may very well have a config specifically for SharePoint or at the very least you can ask them. http://minionware.net/#miniontabs|2
+
+It is not possible, because you cannot create a backup of an offline database.
+
+From MSDN:
+
+Without the NO_TRUNCATE option, the database must be in the ONLINE state. If the database is in the SUSPENDED state, you might be able to create a backup by specifying NO_TRUNCATE. But if the database is in the OFFLINE or EMERGENCY state, BACKUP is not allowed even with NO_TRUNCATE
+
+I write Minion Backup and this kind of thing would be very easy to do. We allow you to run Pre and Post code before each DB, so for your SharePoint DB, you can just put it into single-user mode and change it back when it's done. However, we can't guarantee that you'll be the one to get that connection.
+
+But you can download Minion Backup here and give it a shot. http://www.MinionWare.net
+
+SQL does not allow to backup a database when in offline mode. You can also create maintenance plans in order to automate the job. So the first step of you job can be setting the offline databases to online mode and then the maintenance plan will do is work and then the third step will be to set your databases back to online.

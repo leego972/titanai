@@ -1,0 +1,45 @@
+Question: <p>Suppose the following:</p>
+
+<pre><code>&gt;&gt;&gt;s = set([1, 2, 3])
+</code></pre>
+
+<p>How do I get a value (any value) out of s without doing s.pop()? I want to leave the item in the set until I am sure I can remove it - something I can only be sure of after an asynchronous call to another host.</p>
+
+<p>Quick and dirty:</p>
+
+<pre><code>&gt;&gt;&gt;elem = s.pop()
+&gt;&gt;&gt;s.add(elem)
+</code></pre>
+
+<p>But do you know of a better way? Ideally in constant time.</p>
+
+Answer: <p>To provide some timing figures behind the different approaches, consider the following code.
+<em>The get() is my custom addition to Python's setobject.c, being just a pop() without removing the element.</em></p>
+
+<pre><code>from timeit import *
+
+stats = ["for i in xrange(1000): iter(s).next()   ",
+         "for i in xrange(1000): \n\tfor x in s: \n\t\tbreak",
+         "for i in xrange(1000): s.add(s.pop())   ",
+         "for i in xrange(1000): s.get()          "]
+
+for stat in stats:
+    t = Timer(stat, setup="s=set(range(100))")
+    try:
+        print "Time for %s:\t %f"%(stat, t.timeit(number=1000))
+    except:
+        t.print_exc()
+</code></pre>
+
+<p>The output is:</p>
+
+<pre><code>$ ./test_get.py
+Time for for i in xrange(1000): iter(s).next()   :       0.433080
+Time for for i in xrange(1000):
+        for x in s:
+                break:   0.148695
+Time for for i in xrange(1000): s.add(s.pop())   :       0.317418
+Time for for i in xrange(1000): s.get()          :       0.146673
+</code></pre>
+
+<p>This means that the <strong><em>for/break</em></strong> solution is the fastest (sometimes faster than the custom get() solution).</p>

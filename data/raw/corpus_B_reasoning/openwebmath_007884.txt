@@ -1,0 +1,148 @@
+# Site design for upvote/downvote submissions
+
+I don't really have any specific questions for this thread. I have been working on an independent project recently and have been learning everything from the web. Just yesterday I became aware of templating and the idea of separating business and presentational logic.
+
+I would be very thankful for any comments regarding possible re-factorings, security vulnerabilities, improved design philosophies, etc. The purpose of this thread is mostly a sanity check and to be sure my current design and methodology is sound.
+
+index.php
+
+<?php
+require('db.php');
+
+$resultsPerPage = 15;$submissionCount = mysql_num_rows(mysql_query("SELECT id FROM $submissionsTableName"));$pageCount = ceil($submissionCount /$resultsPerPage);
+
+if (isset($_GET['sort'])) if ($_GET['sort'] == 'hot' || $_GET['sort'] == 'new' ||$_GET['sort'] == 'top')
+$sort =$_GET['sort'];
+else
+header('Location: 404.php');
+else
+$sort = 'hot'; switch ($sort) {
+case 'hot':
+$sortAlgorithm = 'submissions.id * (submissions.upvote - submissions.downvote)'; break; case 'new':$sortAlgorithm = 'submissions.id';
+break;
+case 'top':
+$sortAlgorithm = '(submissions.upvote - submissions.downvote)'; break; } if (isset($_GET['page']))
+if ($_GET['page'] <=$pageCount && $_GET['page'] >= 1)$page = $_GET['page']; else header('Location: 404.php'); else$page = 1;
+
+$startRow = ($page - 1) * $resultsPerPage; if (isset($_GET['search'])) {
+$searchArgs = explode(' ',$_GET['search']);
+$argCount = count($searchArgs);
+$searchSQL = '\'' .$searchArgs[0] . '\'';
+
+for ($i = 1;$i < $argCount;$i++) {
+$searchSQL .= ', \'' .$searchArgs[$i] . '\''; }$submissionQuery = mysql_query("SELECT submissions.* FROM submissions, tags, tagmap WHERE tagmap.tagID = tags.id AND (tags.text IN ($searchSQL)) AND submissions.id = tagmap.submissionID ORDER BY$sortAlgorithm DESC LIMIT $startRow,$resultsPerPage");
+} else {
+$submissionQuery = mysql_query("SELECT id, category, title, author, date, upvote, downvote FROM$submissionsTableName ORDER BY $sortAlgorithm DESC LIMIT$startRow, $resultsPerPage"); }$outcomeCount = mysql_num_rows($submissionQuery);$submissions = array();
+while ($row = mysql_fetch_assoc($submissionQuery)) {
+$upvote = "upvote";$downvote = "downvote";
+$rowIP =$_SERVER['REMOTE_ADDR'];
+$userIPRow = mysql_fetch_assoc(mysql_query("SELECT type FROM$votingIPsTableName WHERE submissionID = $row[id] AND commentID = 0 AND IPAddress = '$rowIP'"));
+
+if ($userIPRow['type'] == 'upvote active')$upvote = 'upvote active';
+else if ($userIPRow['type'] == 'downvote active')$downvote = 'downvote active';
+$votes =$row['upvote'] - $row['downvote'];$tagsQuery = mysql_query("SELECT tags.text FROM tags INNER JOIN tagmap ON tags.id = tagmap.tagID WHERE tagmap.submissionID = $row[id]");$tags = array();
+while ($tag = mysql_fetch_assoc($tagsQuery)) {
+$tags[] =$tag['text'];
+}
+
+$commentsQuery = mysql_query("SELECT id FROM$commentsTableName WHERE submissionID = $row[id]");$commentCount = mysql_num_rows($commentsQuery);$submissions[] = array('submission' => $row, 'upvote' =>$upvote, 'votes' => $votes, 'downvote' =>$downvote, 'tags' => $tags, 'commentCount' =>$commentCount);
+}
+
+// Divider
+
+$index_view = new Template('index_view.php', array( 'header' => new Template('header.php'), 'menu' => new Template('menu.php'), 'submissions' => new Template('submissions.php', array('submissions' =>$submissions)),
+'pagination' => new Template('pagination.php', array('page' => $page, 'pageCount' =>$pageCount, 'resultsPerPage' => $resultsPerPage, 'outcomeCount' =>$outcomeCount, 'submissionCount' => $submissionCount, 'sort' =>$sort)),
+'footer' => new Template('footer.php')
+));
+
+$index_view->render(); ?>  submissions.php <div id="submissions"> <?php foreach ($this->submissions as $row): ?> <div class="submission" id="submission<?php echo$row['submission']['id']; ?>">
+<div class="voteblock">
+<a class="<?php echo $row['upvote']; ?>" title="Upvote"></a> <div class="votes"><?php echo$row['votes']; ?></div>
+<a class="<?php echo $row['downvote']; ?>" title="Downvote"></a> </div> <div class="submissionblock"> <h3><a href="s/<?php echo$row['submission']['id']; ?>.php"><?php echo $row['submission']['title']; ?></a> (<?php echo$row['submission']['category']; ?>) - <?php echo $row['commentCount']; ?> comments</h3> <div class="tags"> <?php foreach ($row['tags'] as $tag): echo$tag . ' ';
+endforeach;
+?>
+</div>
+<span class="date"><?php echo $row['submission']['date']; ?></span> by <span class="author"><?php echo$row['submission']['author']; ?></span>
+</div>
+</div>
+<?php endforeach; ?>
+</div>
+
+
+index_view.php
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>Website</title>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+<link href="styles.css" rel="stylesheet" type="text/css"/>
+<link href="favicon.png" rel="shortcut icon" />
+</head>
+<body>
+<?php
+$this->header->render();$this->menu->render();
+$this->submissions->render();$this->pagination->render();
+$this->footer->render(); ?> <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.5.1/jquery.min.js"></script> <script type="text/javascript" src="vote.js"></script> <script type="text/javascript" src="prettydate.js"></script> </body> </html>  ## 2 Answers Well, it's good that you thought of it. And you are definitely moving in the right direction. Your code seems to be fine, but still not very readable and not very structured. Try to organize your code to classes or smaller functions. E.g. this: if (isset($_GET['sort']))
+if ($_GET['sort'] == 'hot' ||$_GET['sort'] == 'new' || $_GET['sort'] == 'top')$sort = $_GET['sort']; else header('Location: 404.php'); else$sort = 'hot';
+
+switch ($sort) { case 'hot':$sortAlgorithm = 'submissions.id * (submissions.upvote - submissions.downvote)';
+break;
+case 'new':
+$sortAlgorithm = 'submissions.id'; break; case 'top':$sortAlgorithm = '(submissions.upvote - submissions.downvote)';
+break;
+}
+
+
+Should be in function get_sort_algorith(), or even in class Request, or it's subclass. This might seem useless right now, but having code in a function or class makes debugging easier and makes this code re-usable in another parts of the project.
+
+Have you heard/tried any MVC frameworks and/or about MVC design pattern? This pattern describes splitting code to Model (=data & database access), View (=html templates) & Controller (code that manipulates data and calls views for output).
+
+Here are some useful links that might help you:
+
+Some other notes:
+
+header('Location: 404.php');
+
+
+This probably won't give you what you want. This wold be 301 redirect, not a 404 error. You'd better use header("HTTP/1.0 404 Not Found"); and configure your webserver to map error 404 to 404.php. In apache this could be done with ErrorDocument 404 /404.php
+
+if (isset($_GET['search'])) {$searchArgs = explode(' ', $_GET['search']);$argCount = count($searchArgs);$searchSQL = '\'' . $searchArgs[0] . '\''; for ($i = 1; $i <$argCount; $i++) {$searchSQL .= ', \'' . $searchArgs[$i] . '\'';
+}
+
+
+SQL injection here. Assume what will happen if someone will make request with search='; DROP TABLE users. ALWAYS escape what you are getting from outside of your app.
+
+• Frameworks are a very good way to learn MVC, because good ones will force you to use it. You have to invest a little more time reading before you can hack away, but it is well worth it. – amccormack Apr 4 '11 at 1:23
+
+## Use sql binding
+
+Additive to the answer above, look into sql binding. After going through the learning cycle myself (unfettered user input into sql, sql escaping, and finally sql binding), neither of the first two should be used for anything that touches user input and then goes to any database that you like. At all.
+
+In other words, the sooner you start using binding with your sql, the better off you'll be. PDO ( http://php.net/manual/en/book.pdo.php ) is something you'll want to get somewhat familiar with, but the uh, api I guess for PDO is rather complex, so what I have done is implemented a wrapper that allows me to work like this:
+
+$datum = query_item('select id from users where user_id = :id', array(':id'=>5));$row_array = query_row('select * from users where user_id = :id', array(':id'=>5)); \$iterable_resultset = query('select * from users where user_id = :id', array(':id'=>5));
+
+In other words, a simplified query wrapper function to make all your sql easily bindable.
+
+The functions are based in part on the code here:
+
+https://github.com/tchalvak/ninjawars/blob/master/deploy/lib/data/lib_db.php
+
+Anyway, the point is, look into sql binding, you'll be glad you did every time you hear about -other- people's sql-injection problems.
+
+## Use templating principles
+
+One thing I notice with your code (submissions.php and index_view.php for example) is that you're using naked php in your html. That will tend to get complicated when you end up using three or four languages/principles (php, html, javascript, css) in the same page. Let me tell you, the code that I hate, the code that I cringe when I see I have to debug it, that's javascript code with php intermixed on a html page working with css. What you want to work on is separation of concerns. When it comes to php, understanding that and harnessing the benefits of that, at least when you're new to php, will be greatly increased by using a template engine for a while, at least until you understand php enough to decide when and whether you want to skip the templating agent.
+
+1/4 of the benefit of a templating engine will be simplified syntax, and 3/4 of the benefit will be separation of concerns. Using an MVC pattern, which @rvs mentioned, gives a similar benefit, but getting to know a template engine library will be helpful if you end up doing cleanup on someone else's code and can't fully rewrite an existing system (story of my life as a php developer).
+
+So I suggest getting to know smarty ( http://www.smarty.net/ ). In the beginning it should be easy to just include smarty as a lib in projects and using the templates there.
+
+## In lieu of a templating engine
+
+Let's suppose you don't want to get into the complexity of template engines and template engine syntax for the moment, you should still work towards separation of concerns. The simple way to do this in php is just avoid any php except echos in your html. Do all of your logic -outside- of your html, and just pass variables to echo or loop over and then echo into where-ever the html is. It'll make your php code and your html code much easier to debug and much easier to redesign.
+
+Sql binding and separation of concerns, those are the biggest things I've learned make my life easier when developing php.

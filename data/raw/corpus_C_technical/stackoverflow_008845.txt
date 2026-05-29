@@ -1,0 +1,59 @@
+Question: <p>I'm trying to validate that a submitted URL doesn't already exist in the database.</p>
+
+<p>The relevant parts of the Form class look like this:</p>
+
+<pre><code>from django.contrib.sites.models import Site
+class SignUpForm(forms.Form):
+    # ... Other fields ...
+    url = forms.URLField(label='URL for new site, eg: example.com')
+
+    def clean_url(self):
+        url = self.cleaned_data['url']
+        try:
+            a = Site.objects.get(domain=url)
+
+        except Site.DoesNotExist:
+            return url
+
+        else:
+            raise forms.ValidationError("That URL is already in the database.  Please submit a unique URL.")
+
+    def clean(self):
+        # Other form cleaning stuff.  I don't *think* this is causing the grief
+</code></pre>
+
+<p>The problem is, regardless of what value I submit, I can't raise the <code>ValidationError</code>.  And if I do something like this in the <code>clean_url()</code> method:</p>
+
+<pre><code>if Site.objects.get(domain=url):
+    raise forms.ValidationError("That URL is already in the database.  Please submit a unique URL.")
+</code></pre>
+
+<p>then I get a <code>DoesNotExist</code> error, even for URLs that already exist in the Database.  Any ideas?</p>
+
+Answer: <p>I think,  you can return '' and fill _errors.</p>
+
+<pre><code>msg = u"That URL is already in the database.  Please submit a unique URL."
+self._errors["url"]=ErrorList([msg])
+return ''
+</code></pre>
+
+<p>or</p>
+
+<pre><code>from django.contrib.sites.models import Site
+class SignUpForm(forms.Form):
+    # ... Other fields ...
+
+url = forms.URLField(label='URL for new site, eg: example.com')
+
+def clean_url(self):
+    url = self.cleaned_data['url']
+    try:
+        a = Site.objects.get(domain=url)
+        raise forms.ValidationError("That URL is already in the database.  Please submit a unique URL.")
+    except Site.DoesNotExist:
+        return url
+    return ''
+
+def clean(self):
+    # Other form cleaning stuff.  I don't *think* this is causing the grief
+</code></pre>

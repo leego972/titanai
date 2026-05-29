@@ -1,0 +1,73 @@
+Question: <p>I have a log file being written by another process which I want to watch for changes. Each time a change occurrs I'd like to read the new data in to do some processing on it.</p>
+
+<p>What's the best way to do this? I was hoping there'd be some sort of hook from the PyWin32 library. I've found the <code>win32file.FindNextChangeNotification</code> function but have no idea how to ask it to watch a specific file.</p>
+
+<p>If anyone's done anything like this I'd be really grateful to hear how...</p>
+
+<p><strong>[Edit]</strong> I should have mentioned that I was after a solution that doesn't require polling.</p>
+
+<p><strong>[Edit]</strong> Curses! It seems this doesn't work over a mapped network drive. I'm guessing windows doesn't 'hear' any updates to the file the way it does on a local disk.</p>
+
+Answer: <p>Well after a bit of hacking of Tim Golden's script, I have the following which seems to work quite well:</p>
+
+<pre><code>import os
+
+import win32file
+import win32con
+
+path_to_watch = "." # look at the current directory
+file_to_watch = "test.txt" # look for changes to a file called test.txt
+
+def ProcessNewData( newData ):
+    print "Text added: %s"%newData
+
+# Set up the bits we'll need for output
+ACTIONS = {
+  1 : "Created",
+  2 : "Deleted",
+  3 : "Updated",
+  4 : "Renamed from something",
+  5 : "Renamed to something"
+}
+FILE_LIST_DIRECTORY = 0x0001
+hDir = win32file.CreateFile (
+  path_to_watch,
+  FILE_LIST_DIRECTORY,
+  win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+  None,
+  win32con.OPEN_EXISTING,
+  win32con.FILE_FLAG_BACKUP_SEMANTICS,
+  None
+)
+
+# Open the file we're interested in
+a = open(file_to_watch, "r")
+
+# Throw away any exising log data
+a.read()
+
+# Wait for new data and call ProcessNewData for each new chunk that's written
+while 1:
+  # Wait for a change to occur
+  results = win32file.ReadDirectoryChangesW (
+    hDir,
+    1024,
+    False,
+    win32con.FILE_NOTIFY_CHANGE_LAST_WRITE,
+    None,
+    None
+  )
+
+  # For each change, check to see if it's updating the file we're interested in
+  for action, file in results:
+    full_filename = os.path.join (path_to_watch, file)
+    #print file, ACTIONS.get (action, "Unknown")
+    if file == file_to_watch:
+        newText = a.read()
+        if newText != "":
+            ProcessNewData( newText )
+</code></pre>
+
+<p>It could probably do with a load more error checking, but for simply watching a log file and doing some processing on it before spitting it out to the screen, this works well.</p>
+
+<p>Thanks everyone for your input - great stuff!</p>

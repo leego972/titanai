@@ -1,0 +1,257 @@
+The ICLIFETEST Procedure
+
+Statistical Methods
+
+Subsections:
+
+Nonparametric Estimation of the Survival Function
+
+Suppose the event times for a total of subjects, , , …, , are independent random variables with an underlying cumulative distribution function . Denote the corresponding survival function as . Interval-censoring occurs when some or all ’s cannot be observed directly but are known to be within the interval .
+
+The observed intervals might or might not overlap. It they do not overlap, then you can usually use conventional methods for right-censored data, with minor modifications. On the other hand, if some intervals overlap, you need special algorithms to compute an unbiased estimate of the underlying survival function.
+
+To characterize the nonparametric estimate of the survival function, Peto (1973) and Turnbull (1976) show that the estimate can jump only at the right endpoint of a set of nonoverlapping intervals (also known as Turnbull intervals), . A simple algorithm for finding these intervals is to order all the boundary values with labels of and attached and then pick up the intervals that have as the left boundary and as the right boundary. For example, suppose that the data set contains only three intervals, , , and . The ordered values are . Then the Turnbull intervals are and .
+
+For the exact observation , Ng (2002) suggests that it be represented by the interval for a positive small value . If for an observation (), then the observation is represented by .
+
+Define , . Given the data, the survival function, , can be determined only up to equivalence classes , which are complements of the Turnbull intervals. is undefined if is within some . The likelihood function for is then
+
+where is 1 if is contained in and 0 otherwise.
+
+Denote the maximum likelihood estimate for as . The survival function can then be estimated as
+
+Estimation Algorithms
+
+Peto (1973) suggests maximizing this likelihood function by using a Newton-Raphson algorithm subject to the constraint . This approach has been implemented in the ICE macro. Although feasible, the optimization becomes less stable as the dimension of increases.
+
+Treating interval-censored data as missing data, Turnbull (1976) derives a self-consistent equation for estimating the ’s:
+
+where is the expected probability that the event occurs within for the th subject, given the observed data.
+
+The algorithm is an expectation-maximization (EM) algorithm in the sense that it iteratively updates and . Convergence is declared if, for a chosen number ,
+
+where denotes the updated value for after the th iteration.
+
+An alternative criterion is to declare convergence when increments of the likelihood are small:
+
+There is no guarantee that the converged values constitute a maximum likelihood estimate (MLE). Gentleman and Geyer (1994) introduced the Kuhn-Tucker conditions based on constrained programming as a check of whether the algorithm converges to a legitimate MLE. These conditions state that a sufficient and necessary condition for the estimate to be a MLE is that the Lagrange multipliers are nonnegative for all the ’s that are estimated to be zero, where is the derivative of the log-likelihood function with respect to :
+
+You can use Turnbull’s method by specifying METHOD=TURNBULL in the ICLIFETEST statement. The Lagrange multipliers are displayed in the Nonparametric Survival Estimates table.
+
+Groeneboom and Wellner (1992) propose using the iterative convex minorant (ICM) algorithm to estimate the underlying survival function as an alternative to Turnbull’s method. Define , as the cumulative probability at the right boundary of the th Turnbull interval: . It follows that . Denote and . You can rewrite the likelihood function as
+
+Maximizing the likelihood with respect to the ’s is equivalent to maximizing it with respect to the ’s. Because the ’s are naturally ordered, the optimization is subject to the following constraint:
+
+Denote the log-likelihood function as . Suppose its maximum occurs at . Mathematically, it can be proved that equals the maximizer of the following quadratic function:
+
+where , denotes the derivatives of , and is a positive definite matrix of size (Groeneboom and Wellner, 1992).
+
+An iterative algorithm is needed to determine . For the th iteration, the algorithm updates the quantity
+
+where is the parameter estimate from the previous iteration and is a positive definite diagonal matrix that depends on .
+
+A convenient choice for is the negative of the second-order derivative of the log-likelihood function :
+
+Given and , the parameter estimate for the th iteration maximizes the quadratic function .
+
+Define the cumulative sum diagram as a set of points in the plane, where and
+
+Technically, equals the left derivative of the convex minorant, or in other words, the largest convex function below the diagram . This optimization problem can be solved by the pool-adjacent-violators algorithm (Groeneboom and Wellner, 1992).
+
+Occasionally, the ICM step might not increase the likelihood. Jongbloed (1998) suggests conducting a line search to ensure that positive increments are always achieved. Alternatively, you can switch to the EM step, exploiting the fact that the EM iteration never decreases the likelihood, and then resume iterations of the ICM algorithm after the EM step. As with Turnbull’s method, convergence can be determined based on the closeness of two consecutive sets of parameter values or likelihood values. You can use the ICM algorithm by specifying METHOD=ICM in the PROC ICLIFETEST statement.
+
+As its name suggests, the EMICM algorithm combines the self-consistent EM algorithm and the ICM algorithm by alternating the two different steps in its iterations. Wellner and Zhan (1997) show that the converged values of the EMICM algorithm always constitute an MLE if it exists and is unique. The ICLIFETEST procedure uses the EMICM algorithm as the default.
+
+Variance Estimation of the Survival Estimator
+
+Peto (1973) and Turnbull (1976) suggest estimating the variances of the survival estimates by inverting the Hessian matrix, which is obtained by twice differentiating the log-likelihood function. This method can become less stable when the number of ’s increase as increases. Simulations have shown that the confidence limits based on variances estimated with this method tend to have conservative coverage probabilities that are greater than the nominal level (Goodall, Dunn, and Babiker, 2004).
+
+Sun (2001) proposes using two resampling techniques, simple bootstrap and multiple imputation, to estimate the variance of the survival estimator. The undefined regions that the Turnbull intervals represent create a special challenge using the bootstrap method. Because each bootstrap sample could have a different set of Turnbull intervals, some time points to evaluate the variances based on the original Turnbull intervals might be located within the intervals in a bootstrap sample, with the result that their survival probabilities become unknown. A simple ad hoc solution is to shrink the Turnbull interval to its right boundary and modify the survival estimates into a right continuous function:
+
+Let denote the number of resampling data sets. Let denote the independent samples from the original data with replacement, . Let be the modified estimate of the survival function computed from the th resampling data set. Then you can estimate the variance of by the sample variance as
+
+where
+
+The method of multiple imputations exploits the fact that interval-censored data reduce to right-censored data when all interval observations of finite length shrink to single points (). For right-censored data, you can estimate the variance of the survival estimates via the well-known Greenwood formula (1958) as
+
+where is the number of events at time and is the number of subjects at risk just prior to , and is the Kaplan-Meier estimator of the survival function,
+
+Essentially, multiple imputation is used to account for the uncertainty of ranking overlapping intervals. The th imputed data set is obtained by substituting every interval-censored observation of finite length with an exact event time randomly drawn from the conditional survival function:
+
+Denote the Kaplan-Meier estimate of each imputed data set as . The variance of is estimated by
+
+where
+
+and
+
+and
+
+Note that the first term in the formula for mimics the Greenwood formula but uses expected numbers of deaths and subjects. The second term is the sample variance of the Kaplan-Meier estimates of imputed data sets, which accounts for between-imputation contributions.
+
+Pointwise Confidence Limits of the Survival Function
+
+Pointwise confidence limits can be computed for the survival function given the estimated standard errors. Let be specified by the ALPHA= option. Let be the critical value for the standard normal distribution. That is, , where is the cumulative distribution function of the standard normal random variable.
+
+Constructing the confidence limits for the survival function as might result in an estimate that exceeds the range [0,1] at extreme values of t. This problem can be avoided by applying a transformation to so that the range is unrestricted. In addition, certain transformed confidence intervals for perform better than the usual linear confidence intervals (Borgan and Liestøl, 1990). You can use the CONFTYPE= option to set one of the following transformations: the log-log function (Kalbfleisch and Prentice, 1980), the arcsine–square root function (Nair, 1984), the logit function (Meeker and Escobar, 1998), the log function, and the linear function.
+
+Let g denote the transformation that is being applied to the survival function . Using the delta method, you estimate the standard error of by
+
+where is the first derivative of the function g. The 100(1 – )% confidence interval for is given by
+
+where is the inverse function of g. The choices for the transformation g are as follows:
+
+• arcsine–square root transformation: The estimated variance of is The 100(1 – )% confidence interval for is given by
+
+• linear transformation: This is the same as the identity transformation. The 100(1 – )% confidence interval for is given by
+
+• log transformation: The estimated variance of is The 100(1 – )% confidence interval for is given by
+
+• log-log transformation: The estimated variance of is The 100(1 – )% confidence interval for is given by
+
+• logit transformation: The estimated variance of is
+
+The 100(1 – )% confidence limits for are given by
+
+Quartile Estimation
+
+The first quartile (25th percentile) of the survival time is the time beyond which 75% of the subjects in the population under study are expected to survive. For interval-censored data, it is problematic to define point estimators of the quartiles based on the survival estimate because of its undefined regions of Turnbull intervals. To overcome this problem, you need to impute survival probabilities within the Turnbull intervals. The previously defined estimator achieves this by placing all the estimated probabilities at the right boundary of the interval. The first quartile is estimated by
+
+If is exactly equal to 0.75 from to , the first quartile is taken to be . If is greater than 0.75 for all values of , the first quartile cannot be estimated and is represented by a missing value in the printed output.
+
+The general formula for estimating the 100p percentile point is
+
+The second quartile (the median) and the third quartile of survival times correspond to p = 0.5 and p = 0.75, respectively.
+
+Brookmeyer and Crowley (1982) constructed the confidence interval for the median survival time based on the confidence interval for the survival function . The methodology is generalized to construct the confidence interval for the 100p percentile based on a g-transformed confidence interval for (Klein and Moeschberger, 1997). You can use the CONFTYPE= option to specify the g-transformation. The % confidence interval for the first quantile survival time is the set of all points t that satisfy
+
+where is the first derivative of and is the percentile of the standard normal distribution.
+
+Kernel-Smoothed Estimation
+
+After you obtain the survival estimate , you can construct a discrete estimator for the cumulative hazard function. First, you compute the jumps of the discrete function as
+
+where the ’s have been defined previously for calculating the Lagrange multiplier statistic.
+
+Essentially, the numerator and denominator estimate the number of failures and the number at risks that are associated with the Turnbull intervals. Thus these quantities estimate the increments of the cumulative hazard function over the Turnbull intervals.
+
+The estimator of the cumulative hazard function is
+
+Like , is undefined if is located within some Turnbull interval . To facilitate applying the kernel-smoothed methods, you need to reformulate the estimator so that it has only point masses. An ad hoc approach would be to place all the mass for a Turnbull interval at the right boundary. The kernel-based estimate of the hazard function is computed as
+
+where is a kernel function and is the bandwidth. You can estimate the cumulative hazard function by integrating with respect to .
+
+Practically, an upper limit is usually imposed so that the kernel-smoothed estimate is defined on . The ICLIFETEST procedure sets the value depending on whether the right boundary of the last Turnbull interval is finite or not: if and otherwise.
+
+Typical choices of kernel function are as follows:
+
+• uniform kernel:
+
+• Epanechnikov kernel:
+
+• biweight kernel:
+
+For t < b, the symmetric kernels are replaced by the corresponding asymmetric kernels of Gasser and Müller (1979). Let . The modified kernels are as follows:
+
+• uniform kernel:
+
+• Epanechnikov kernel:
+
+• biweight kernel:
+
+For , let . The asymmetric kernels for are used, with x replaced by –x.
+
+The bandwidth parameter controls how much “smoothness” you want to have in the kernel-smoothed estimate. For right-censored data, a commonly accepted method of choosing an optimal bandwidth is to use the mean integrated square error(MISE) as an objective criteria. This measure becomes difficult to adapt to interval-censored data because it no longer has a closed-form mathematical formula.
+
+Pan (2000) proposes using a -fold cross validation likelihood as a criterion for choosing the optimal bandwidth for the kernel-smoothed estimate of the survival function. The ICLIFETEST procedure implements this approach for smoothing the hazard function. Computing such a criterion entails a cross validation type procedure. First, the original data are partitioned into almost balanced subsets , . Denote the kernel-smoothed estimate of the leave-one-subset-out data as . The optimal bandwidth is defined as the one that maximizes the cross validation likelihood:
+
+Comparison of Survival between Groups
+
+If the TEST statement is specified, the ICLIFETEST procedure compares the groups formed by the levels of the TEST variable using a generalized log-rank test. Let be the underlying survival function of the kth group, . The null and alternative hypotheses to be tested are
+
+for all
+
+versus
+
+at least one of the ’s is different for some
+
+Let denote the number of subjects in group , and let denote the total number of subjects ().
+
+Generalized Log-Rank Statistic
+
+For the th subject, let be a vector of indicators that represent whether or not the subject belongs to the th group. Denote , where represents the treatment effect for the th group. Suppose that a model is specified and the survival function for the th subject can be written as
+
+where denotes the nuisance parameters.
+
+It follows that the likelihood function is
+
+where denotes the interval observation for the th subject.
+
+Testing whether or not the survival functions are equal across the groups is equivalent to testing whether all the ’s are zero. It is natural to consider a score test based on the specified model (Finkelstein, 1986).
+
+The score statistics for are derived as the first-order derivatives of the log-likelihood function evaluated at and .
+
+where denotes the maximum likelihood estimate for the , given that .
+
+Under the null hypothesis that , all groups share the same survival function . It is typical to leave unspecified and obtain a nonparametric maximum likelihood estimate using, for instance, Turnbull’s method. In this case, represents all the parameters to be estimated in order to determine .
+
+Suppose the given data generates Turnbull intervals as . Denote the probability estimate at the right end point of the th interval by . The nonparametric survival estimate is for any .
+
+Under the null hypothesis, Fay (1999) showed that the score statistics can be written in the form of a weighted log-rank test as
+
+where
+
+and denotes the derivative of with respect to .
+
+estimates the expected number of events within for the th group, and it is computed as
+
+is an estimate for the expected number of events within for the whole sample, and it is computed as
+
+Similarly, estimates the expected number of subjects at risk before entering for the th group, and can be estimated by . is an estimate of the expected number of subjects at risk before entering for all the groups: .
+
+Assuming different survival models gives rise to different weight functions (Fay, 1999). For example, Finkelstein’s score test (1986) is derived assuming a proportional hazards model; Fay’s test (1996) is based on a proportional odds model.
+
+The choices of weight function are given in Table 49.3.
+
+Table 49.3: Weight Functions for Various Tests
+
+Test
+
+Sun (1996)
+
+1.0
+
+Fay (1999)
+
+Finkelstein (1986)
+
+Harrington-Fleming (p,q)
+
+Variance Estimation of the Generalized Log-Rank Statistic
+
+Sun (1996) proposed the use of multiple imputation to estimate the variance-covariance matrix of the generalized log-rank statistic . This approach is similar to the multiple imputation method as presented in Variance Estimation of the Survival Estimator. Both methods impute right-censored data from interval-censored data and analyze the imputed data sets by using standard statistical techniques. Huang, Lee, and Yu (2008) suggested improving the performance of the generalized log-rank test by slightly modifying the variance calculation.
+
+Suppose the given data generate Turnbull intervals as . Denote the probability estimate for the th interval as , and denote the nonparametric survival estimate as for any .
+
+In order to generate an imputed data set, you need to randomly generate a survival time for every subject of the sample. For the th subject, a random time is generated randomly based on the following discrete survival function:
+
+where denotes the interval observation for the subject.
+
+For the th imputed data set (), let and denote the numbers of failures and subjects at risk by counting the imputed ’s for group . Let and denote the corresponding pooled numbers.
+
+You can perform the standard log-rank test for right-censored data on each of the imputed data sets (Huang, Lee, and Yu, 2008). The test statistic is
+
+where
+
+Its variance-covariance matrix is estimated by the Greenwood formula as
+
+where
+
+After analyzing each imputed data set, you can estimate the variance-covariance matrix of by pooling the results as
+
+where
+
+The overall test statistic is formed as , where is the generalized inverse of . Under the null hypothesis, the statistic has a chi-squared distribution with degrees of freedom equal to the rank of . By default, the ICLIFETEST procedure perform 1000 imputations. You can change the number of imputations by the IMPUTE option in the PROC ICLIFETEST statement.
+
+Stratified Tests
+
+Suppose the generalized log-rank test is to be stratified on the levels that are formed from the variables that you specify in the STRATA statement. Based only on the data of the th stratum (), let be the test statistic for the th stratum and let be the corresponding covariance matrix as constructed in the section Variance Estimation o

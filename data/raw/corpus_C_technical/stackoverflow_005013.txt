@@ -1,0 +1,48 @@
+Question: <p>A python script is running two parallel python processes ( created via os.fork() ) each of which eventually tries to check out a subversion repository leaf into the same working copy dir.</p>
+
+<p>Before running 'svn co ...' command in a sub-process ( via python subprocess module ) the parent python code checks if the working copy dir already exists. </p>
+
+<pre><code>  if os.path.isdir(checkout_dir):
+     # working copy dir already exists
+     return checkout_dir
+</code></pre>
+
+<p>So that if it does there shouldn't be any 'svn co' running, but rather immediate return from the parent function.</p>
+
+<p>Nevertheless some collision happened and one of the python processes failed on 'svn co ..' with the following error.</p>
+
+<pre><code>checked-out failed: svn: Working copy '/tmp/qm_23683' locked
+svn: run 'svn cleanup' to remove locks (type 'svn help cleanup' for details)**
+</code></pre>
+
+<p>So the first question is why the working copy dir existence check didn't work and the second - is there a way to find out that a working copy dir is locked by svn and loop until it is unlocked?</p>
+
+<p>Thanks.</p>
+
+Answer: <p>This sounds like a potential race condition, in that something like the following can happen:</p>
+
+<ol>
+<li>Process A checks to see if the directory exists (it doesn't yet).</li>
+<li>Process B checks to see if the directory exists (it doesn't yet).</li>
+<li>Process A invokes <code>svn</code>, which creates the directory.</li>
+<li>Process B invokes <code>svn</code>, which subsequently fails.</li>
+</ol>
+
+<p>An easy way to avoid this is to have each process attempt to <em>create</em> the directory rather than checking for its existence.  If the other process has already created the directory, the other process is guaranteed to get a well-defined error code under a very wide variety of platforms and filesystems.  For instance, this is one of the only reliable ways to do synchronization on many implementations of NFS.  Luckily, <code>svn</code> won't care if the working directory already exists.</p>
+
+<p>The Python code would look something like this:</p>
+
+<pre><code>import os, errno
+
+# ...
+
+try:
+  os.mkdir(dirName)
+except OSError, e:
+  if e.errno != errno.EEXIST: raise # some other error
+  print 'Directory already exists.'
+else:
+  print 'Successfully created new directory.'
+</code></pre>
+
+<p>This technique is easy to implement, very reliable, and useful in a wide variety of situations.</p>

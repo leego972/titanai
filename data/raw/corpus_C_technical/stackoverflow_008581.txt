@@ -1,0 +1,91 @@
+Question: <p>I'd like to extract the text from an HTML file using Python.  I want essentially the same output I would get if I copied the text from a browser and pasted it into notepad.  </p>
+
+<p>I'd like something more robust than using regular expressions that may fail on poorly formed HTML.  I've seen many people recommend Beautiful Soup, but I've had a few problems using it.  For one, it picked up unwanted text, such as JavaScript source.  Also, it did not interpret HTML entities.  For example, I would expect &amp;#39; in HTML source to be converted to an apostrophe in text, just as if I'd pasted the browser content into notepad.</p>
+
+<p><strong>Update</strong> <code>html2text</code> looks promising. It handles HTML entities correctly and ignores JavaScript.  However, it does not exactly produce plain text; it produces markdown that would then have to be turned into plain text. It comes with no examples or documentation, but the code looks clean.</p>
+
+<hr>
+
+<p>Related questions:</p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/37486/filter-out-html-tags-and-resolve-entities-in-python">Filter out HTML tags and resolve entities in python</a></li>
+<li><a href="http://stackoverflow.com/questions/57708/convert-xmlhtml-entities-into-unicode-string-in-python">Convert XML/HTML Entities into Unicode String in Python</a></li>
+</ul>
+
+Answer: <p>Here is a version of xperroni's answer which is a bit more complete. It skips script and style sections and translates charrefs (e.g., &amp;#39;) and HTML entities (e.g., &amp;amp;).</p>
+
+<p>It also includes a trivial plain-text-to-html inverse converter.</p>
+
+<pre><code>"""
+HTML &lt;-&gt; text conversions.
+"""
+from HTMLParser import HTMLParser, HTMLParseError
+from htmlentitydefs import name2codepoint
+import re
+
+class _HTMLToText(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self._buf = []
+        self.hide_output = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('p', 'br') and not self.hide_output:
+            self._buf.append('\n')
+        elif tag in ('script', 'style'):
+            self.hide_output = True
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == 'br':
+            self._buf.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag == 'p':
+            self._buf.append('\n')
+        elif tag in ('script', 'style'):
+            self.hide_output = False
+
+    def handle_data(self, text):
+        if text and not self.hide_output:
+            self._buf.append(re.sub(r'\s+', ' ', text))
+
+    def handle_entityref(self, name):
+        if name in name2codepoint and not self.hide_output:
+            c = unichr(name2codepoint[name])
+            self._buf.append(c)
+
+    def handle_charref(self, name):
+        if not self.hide_output:
+            n = int(name[1:], 16) if name.startswith('x') else int(name)
+            self._buf.append(unichr(n))
+
+    def get_text(self):
+        return re.sub(r' +', ' ', ''.join(self._buf))
+
+def html_to_text(html):
+    """
+    Given a piece of HTML, return the plain text it contains.
+    This handles entities and char refs, but not javascript and stylesheets.
+    """
+    parser = _HTMLToText()
+    try:
+        parser.feed(html)
+        parser.close()
+    except HTMLParseError:
+        pass
+    return parser.get_text()
+
+def text_to_html(text):
+    """
+    Convert the given text to html, wrapping what looks like URLs with &lt;a&gt; tags,
+    converting newlines to &lt;br&gt; tags and converting confusing chars into html
+    entities.
+    """
+    def f(mo):
+        t = mo.group()
+        if len(t) == 1:
+            return {'&amp;':'&amp;amp;', "'":'&amp;#39;', '"':'&amp;quot;', '&lt;':'&amp;lt;', '&gt;':'&amp;gt;'}.get(t)
+        return '&lt;a href="%s"&gt;%s&lt;/a&gt;' % (t, t)
+    return re.sub(r'https?://[^] ()"\';]+|[&amp;\'"&lt;&gt;]', f, text)
+</code></pre>

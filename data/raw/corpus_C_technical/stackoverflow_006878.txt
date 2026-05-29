@@ -1,0 +1,75 @@
+Question: <p>I'm starting a new application and looking at using an ORM -- in particular, SQLAlchemy.</p>
+
+<p>Say I've got a column 'foo' in my database and I want to increment it.  In straight sqlite, this is easy:</p>
+
+<pre><code>db = sqlite3.connect('mydata.sqlitedb')
+cur = db.cursor()
+cur.execute('update table stuff set foo = foo + 1')
+</code></pre>
+
+<p>I figured out the SQLAlchemy SQL-builder equivalent:</p>
+
+<pre><code>engine = sqlalchemy.create_engine('sqlite:///mydata.sqlitedb')
+md = sqlalchemy.MetaData(engine)
+table = sqlalchemy.Table('stuff', md, autoload=True)
+upd = table.update(values={table.c.foo:table.c.foo+1})
+engine.execute(upd)
+</code></pre>
+
+<p>This is slightly slower, but there's not much in it.</p>
+
+<p>Here's my best guess for a SQLAlchemy ORM approach:</p>
+
+<pre><code># snip definition of Stuff class made using declarative_base
+# snip creation of session object
+for c in session.query(Stuff):
+    c.foo = c.foo + 1
+session.flush()
+session.commit()
+</code></pre>
+
+<p>This does the right thing, but it takes just under fifty times as long as the other two approaches.  I presume that's because it has to bring all the data into memory before it can work with it.</p>
+
+<p>Is there any way to generate the efficient SQL using SQLAlchemy's ORM?  Or using any other python ORM?  Or should I just go back to writing the SQL by hand?</p>
+
+Answer: <p>Here's an example of how to solve the same problem without having to map the fields manually:</p>
+
+<pre><code>from sqlalchemy import Column, ForeignKey, Integer, String, Date, DateTime, text, create_engine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.attributes import InstrumentedAttribute
+
+engine = create_engine('postgres://postgres@localhost:5432/database')
+session = sessionmaker()
+session.configure(bind=engine)
+
+Base = declarative_base()
+
+
+class Media(Base):
+  __tablename__ = 'media'
+  id = Column(Integer, primary_key=True)
+  title = Column(String, nullable=False)
+  slug = Column(String, nullable=False)
+  type = Column(String, nullable=False)
+
+  def update(self):
+    s = session()
+    mapped_values = {}
+    for item in Media.__dict__.iteritems():
+      field_name = item[0]
+      field_type = item[1]
+      is_column = isinstance(field_type, InstrumentedAttribute)
+      if is_column:
+        mapped_values[field_name] = getattr(self, field_name)
+
+    s.query(Media).filter(Media.id == self.id).update(mapped_values)
+    s.commit()
+</code></pre>
+
+<p>So to update a Media instance, you can do something like this:</p>
+
+<pre><code>media = Media(id=123, title="Titular Line", slug="titular-line", type="movie")
+media.update()
+</code></pre>

@@ -1,0 +1,39 @@
+Question: <p>I'm trying to debug a deadlock in a multi-threaded Python application after it has locked up.  Is there a way to attach a debugger to inspect the state of the process?  </p>
+
+<p>Edit: I'm attempting this on Linux, but it would be great if there were a cross-platform solution.  It's Python after all :)</p>
+
+Answer: <p>You can attach a debugger to a multi-threaded Python process, but you need to do it at the C level.  To make sense of what's going on, you need the Python interpreter to be compiled with symbols.  If you don't have one, you need to download source from python.org and build it yourself:</p>
+
+<pre><code>./configure --prefix=/usr/local/pydbg
+make OPT=-g
+sudo make install
+sudo ln -s /usr/local/pydbg/bin/python /usr/local/bin/dbgpy
+</code></pre>
+
+<p>Make sure your workload is running on that version of the interpreter.  You can then attach to it with GDB at any time.  The Python folks have included a sample ".gdbinit" in their Misc directory, which has some useful macros.  However it's broken for multi-threaded debugging (!).  You need to replace lines like this</p>
+
+<pre><code>while $pc &lt; Py_Main || $pc &gt; Py_GetArgcArgv
+</code></pre>
+
+<p>with the following:</p>
+
+<pre><code>while ($pc &lt; Py_Main || $pc &gt; Py_GetArgcArgv) &amp;&amp; ($pc &lt; t_bootstrap || $pc &gt; thread_PyThread_start_new_thread)
+</code></pre>
+
+<p>Otherwise commands like <code>pystack</code> won't terminate on threads other than the main thread.  With this stuff in place, you can do stuff like</p>
+
+<pre><code>gdb&gt; attach &lt;PID&gt;
+gdb&gt; info threads
+gdb&gt; thread &lt;N&gt;
+gdb&gt; bt
+gdb&gt; pystack
+gdb&gt; detach
+</code></pre>
+
+<p>and see what's going on.  Kind of.</p>
+
+<p>You can parse what the objects are with the "pyo" macro.  <a href="http://chrismiles.livejournal.com/20226.html">Chris has some examples</a> on his blog.</p>
+
+<p>Good luck.</p>
+
+<p>(Shoutout for <a href="http://mcfunley.com/cs/blogs/dan/archive/2007/10/19/1530.aspx">Dan's blog</a> for some key information for me, notably the threading fix!)</p>

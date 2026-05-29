@@ -1,0 +1,103 @@
+Question: <p>We have developers with knowledge of these languages - Ruby , Python, .Net or Java. We are developing an application which will mainly handle XML documents. Most of the work is to convert predefined XML files into database tables, providing mapping between XML documents through database, creating reports from database etc. Which language will be the easiest and fastest to work with?
+(It is a web-app)</p>
+
+Answer: <p>A dynamic language rules for this.  Why?  The mappings are easy to code and change.  You don't have to recompile and rebuild.</p>
+
+<p>Indeed, with a little cleverness, you can have your "XML XPATH to a Tag -> DB table-field" mappings as disjoint blocks of Python code that your main application imports.</p>
+
+<p>The block of Python code <strong>is</strong> your configuration file.  It's not an <code>.ini</code> file or a <code>.properties</code> file that describes a configuration.  It <strong>is</strong> the configuration.</p>
+
+<p>We use Python, xml.etree and the SQLAlchemy (to separate the SQL out of your programs) for this because we're up and running with very little effort and a great deal of flexibility.</p>
+
+<p><hr /></p>
+
+<p><strong>source.py</strong></p>
+
+<pre><code>"""A particular XML parser.  Formats change, so sometimes this changes, too."""
+
+import xml.etree.ElementTree as xml
+
+class SSXML_Source( object ):
+    ns0= "urn:schemas-microsoft-com:office:spreadsheet"
+    ns1= "urn:schemas-microsoft-com:office:excel"
+    def __init__( self, aFileName, *sheets ):
+        """Initialize a XML source.
+        XXX - Create better sheet filtering here, in the constructor.
+        @param aFileName: the file name.
+        """
+        super( SSXML_Source, self ).__init__( aFileName )
+        self.log= logging.getLogger( "source.PCIX_XLS" )
+        self.dom= etree.parse( aFileName ).getroot()
+    def sheets( self ):
+        for wb in self.dom.getiterator("{%s}Workbook" % ( self.ns0, ) ):
+            for ws in wb.getiterator( "{%s}Worksheet" % ( self.ns0, ) ):
+                yield ws
+    def rows( self ):
+        for s in self.sheets():
+            print s.attrib["{%s}Name" % ( self.ns0, ) ]
+            for t in s.getiterator( "{%s}Table" % ( self.ns0, ) ):
+                for r in t.getiterator( "{%s}Row" % ( self.ns0, ) ):
+                    # The XML may not be really useful.
+                    # In some cases, you may have to convert to something useful
+                    yield r
+</code></pre>
+
+<p><strong>model.py</strong></p>
+
+<pre><code>"""This is your target object.  
+It's part of the problem domain; it rarely changes.
+"""
+class MyTargetObject( object ):
+    def __init__( self ):
+        self.someAttr= ""
+        self.anotherAttr= ""
+        self.this= 0
+        self.that= 3.14159
+    def aMethod( self ):
+        """etc."""
+        pass
+</code></pre>
+
+<p><strong>builder_today.py</strong> One of many mapping configurations</p>
+
+<pre><code>"""One of many builders.  This changes all the time to fit
+specific needs and situations.  The goal is to keep this
+short and to-the-point so that it has the mapping and nothing
+but the mapping.
+"""
+
+import model
+
+class MyTargetBuilder( object ):
+    def makeFromXML( self, element ):
+        result= model.MyTargetObject()
+        result.someAttr= element.findtext( "Some" )
+        result.anotherAttr= element.findtext( "Another" )
+        result.this= int( element.findtext( "This" ) )
+        result.that= float( element.findtext( "that" ) )
+        return result
+</code></pre>
+
+<p><strong>loader.py</strong></p>
+
+<pre><code>"""An application that maps from XML to the domain object
+using a configurable "builder".
+"""
+import model
+import source
+import builder_1
+import builder_2
+import builder_today
+
+# Configure this:  pick a builder is appropriate for the data:
+b= builder_today.MyTargetBuilder()
+
+s= source.SSXML_Source( sys.argv[1] )
+for r in s.rows():
+    data= b.makeFromXML( r )
+    # ... persist data with a DB save or file write
+</code></pre>
+
+<p><hr /></p>
+
+<p>To make changes, you can correct a builder or create a new builder.  You adjust the loader source to identify which builder will be used.  You can, without too much trouble, make the selection of builder a command-line parameter.  Dynamic imports in dynamic languages seem like overkill to me, but they are handy.</p>

@@ -1,0 +1,117 @@
+# Set object local axis based on face orientation
+
+I am struggling to formulate my problem exactly, so edits are welcome.
+
+I have an object where local axis are completely off, like in this simple example. I want fix it, so align one axis with the face normal, another with one of the edges and third perpendicular to both. I created a Custom Transform Orientation using one of the edges and it is just perfect. Can I change the local axis to match it?
+
+The motivation behind, is that I have to position the object vertically in my scene. The object is complex, so I struggle to do it visually.
+
+Do I need some python to do this? Any hints on how to do it?
+
+• You don't necessarily need python to do it, you can do it manually in the 3D view, but unfortunately Blender's precision modeling and alignment tools are severely lacking and very unsuited for this type of work. The key to this is using Transform Orientations, from the 3DView Properties Shelf but it's a multi step process involving several tasks – Duarte Farrajota Ramos Sep 22 '16 at 18:34
+• @DuarteFarrajotaRamos yes, this seems surprisingly hard. I already created Transform Orientation from using one of the edges and this orientation is just perfect, but can I do anything with it? The problem is I have to position this object vertically in the scene. doing it visually is non trivial, especially because it is a complex object. Any further hints? – Noidea Sep 23 '16 at 9:34
+• @DuarteFarrajotaRamos maybe I can make it much global axis and then reset local axis to global? – Noidea Sep 23 '16 at 10:04
+• @MrZak no, no, I created a transform and I can use it. But I still cannot align my object vertically, because visually it is non trivial. So what I wanted to do - align local axis correctly and then match local axis to global. – Noidea Sep 23 '16 at 11:10
+• @MrZak maybe having a god local axis is not necessary. But I already had to mess a great deal to mirror this object - adding empties, snapping, parenting and whatever, and that could have been just a mouse click... Now I got it, but let's put it easy, I want to put the damn lightpost vertically! – Noidea Sep 23 '16 at 11:18
+
+This is not exactly a solution, but a painful workaround. If someone can provides a better answer, I will accept it.
+
+The solution relies on two assumptions:
+
+1. You can create a Custom Transform Orientation which matched your desired orientation.
+2. You don't mind that object will be moved.
+
+"Solution":
+
+1. Create a Custom Transform Orientation. For this simple example: select the edge you want to align, press CtrlAltSpace or find it at bottom of the N-Panel.
+2. Rotate to align custom transform to global axis. I followed this post. In short: add empty at the face center, align it to custom transform, parent object to the empty, clear the empty rotation, clear the object's parent keeping transformation, rotate 180°.
+3. Change local axis to match the global ones. Use Apply Transformation (CtrlA)
+
+Here is another workaround to the problem, which I have also struggled with a lot.
+
+You create a new transform orientation from the selected vertex, face or edge.
+
+Press CtrlAltSpace
+
+This creates the orientation and puts it in the list of available orientatons, it also selects it as the current one.
+
+The list will look like this:
+
+Here we see some custom orientations added by me.
+
+The normal of the object used will be the new Z-axis of an orientation. I am not sure how the other axes are calculated, but they also adapt somewhat to the selection.
+
+In the moment you create a orientation, you get the chance to give it a name of your choice in the transform panel (T).
+
+The users orientation added seems to be saved in the blend file.
+
+If you alter the object that an orientation originated from, the orientation will not change in any way.
+
+Now if you in edit mode want to for instance grab part of the mesh along the selected orientations Z-axis, you press GZZ (press Z twice)
+
+The text below tells that the orientation Vertex.001 is used.
+
+The orientations are listed in the properties shelf of the 3D view (N).
+
+They can be renamed or removed from there.
+
+Also note that if you want to extrude or extrude-scale some geometry (initiated with E or E S) with respect of the custom orientation, you will need to cancel the extrusion with Esc and then G or S respectively. That is because extrusions will always use the "Normal" orientation as an alternative to the global, but grab or scale uses the custom orientation as the alternative.
+
+• OP has already done this. They just want to know how to make the Local orientation match the Custom one they made. – Tooniis Jan 15 '18 at 11:01
+
+Another workaround could be, if you are working with simple meshes, to
+
+1. create the custom transform orientation and put the 3D cursor in the axis you want
+2. create a cube
+3. Align your cube to your custom transform orientation with Object > Transform > Align to Transform Orientation
+4. Select you mesh then the cube and merge Ctrl + J
+5. Enter Edit Mode and erase the cube shape
+
+There could be some problems with UV if you haven't save it before, but it worked for me.
+
+Some python to do it.
+
+Test Script
+
+• Run in edit mode with face selected.
+• Use the face centre to make translation matrix as space, will rotate about this pivot point.
+• Aligns face normal to local z (0, 0, 1) by rotating.
+• Finds the most orthogonal edge to face normal and rotates to align with "forward" (0, 1, 0)
+• Translates verts such that face center is back into original location.
+
+Script
+
+import bpy
+import bmesh
+from mathutils import Vector, Matrix
+
+context = bpy.context
+ob = context.edit_object
+me = ob.data
+bm = bmesh.from_edit_mesh(me)
+
+face = bm.select_history.active
+o = face.calc_center_median()
+face.normal_update()
+norm = face.normal
+edges = sorted((e for e in face.edges), key=lambda e: abs((e.verts[1].co - e.verts[0].co).dot(face.normal)))
+e = edges[0]
+# if this value is 0 then edge and normal orthogonal should test
+print((e.verts[1].co - e.verts[0].co).dot(face.normal))
+T = Matrix.Translation(-o)
+up = Vector((0, 0, 1))
+R = face.normal.rotation_difference(up).to_matrix()
+bmesh.ops.transform(bm, verts=bm.verts, matrix=R, space=T)
+forward = Vector((0, 1, 0))
+R = (e.verts[1].co - e.verts[0].co).rotation_difference(forward).to_matrix()
+bmesh.ops.transform(bm, verts=bm.verts, matrix=R, space=T)
+T = Matrix.Translation(face.calc_center_median() - o)
+bmesh.ops.transform(bm, verts=bm.verts, matrix=T)
+bmesh.update_edit_mesh(me)
+
+
+If to make operator of code above would have enum to select the values of up and forward axes 'X', '-X', 'Y', '-Y', 'Z', '-Z' or alternatively find the closest axis to normal etc.
+
+EDIT should prob put in one more step to make sure edge axis is exactly orthogonal.
+
+• I agree with you that a simple solution is just to make a cube, orient it correctly, merge the subject with the cube, and delete the cube faces in edit mode. That's it. It is kind of a shame that we can't take advantage of matching a rotated 3D cursor, but oh-well. – hatinacat2000 Nov 4 at 19:30

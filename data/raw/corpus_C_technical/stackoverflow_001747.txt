@@ -1,0 +1,64 @@
+Question: <p>I have a web report that uses a Django form (new forms) for fields that control the query used to generate the report (start date, end date, ...). The issue I'm having is that the page should work using the form's initial values (unbound), but I can't access the cleaned_data field unless I call is_valid(). But is_valid() always fails on unbound forms.</p>
+
+<p>It seems like Django's forms were designed with the use case of editing data such that an unbound form isn't really useful for anything other than displaying HTML.</p>
+
+<p>For example, if I have:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+else:
+    form = MyForm(request.method.POST)
+
+if form.is_valid():
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>is_valid() will fail if this is a GET (since it's unbound), and if I do:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+else:
+    form = MyForm(request.method.POST)
+    if form.is_valid():
+       do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>the first call to do_query triggers exceptions on form.cleaned_data, which is not a valid field because is_valid() has not been called. It seems like I have to do something like:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+    do_query(form['start_date'].field.initial, form['end_date'].field.initial)
+else:
+    form = MyForm(request.method.POST)
+    if form.is_valid():
+       do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>that is, there isn't a common interface for retrieving the form's values between a bound form and an unbound one.</p>
+
+<p>Does anyone see a cleaner way to do this?</p>
+
+Answer: <p>You can pass a dictionary of initial values to your form:</p>
+
+<pre><code>if request.method == "GET":
+    # calculate my_start_date and my_end_date here...
+    form = MyForm( { 'start_date': my_start_date, 'end_date': my_end_date} )
+...
+</code></pre>
+
+<p>See the <a href="http://docs.djangoproject.com/en/dev/ref/forms/api/" rel="nofollow">official forms API documentation</a>, where they demonstrate this.</p>
+
+<p><strong>edit</strong>: Based on answers from other users, maybe this is the cleanest solution:</p>
+
+<pre><code>if request.method == "GET":
+    form = MyForm()
+    form['start_date'] = form['start_date'].field.initial
+    form['end_date'] = form['end_date'].field.initial
+else:
+    form = MyForm(request.method.POST)
+if form.is_valid():
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>I haven't tried this though; can someone confirm that this works? I think this is better than creating a new method, because this approach doesn't require other code (possibly not written by you) to know about your new 'magic' accessor.</p>

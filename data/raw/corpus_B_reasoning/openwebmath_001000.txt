@@ -1,0 +1,163 @@
+# AC adapter to battery switch transient
+
+#### electrophile
+
+Joined Aug 30, 2013
+166
+Here is a schematic that switches to a battery source when the AC adapter dies out. It works but there is a drop transient which is about 50% of the output voltage. Any suggestions on how this can be reduced or better yet eliminated? Also attached is the LTSpice file.
+
+#### Attachments
+
+• 1.2 KB Views: 17
+
+#### AlbertHall
+
+Joined Jun 4, 2014
+11,506
+The adaptor voltage has to get very low before the MOSFET will turn on (up to 3V below the battery voltage). If the adaptor voltage is greater than the battery voltage then do away with the MOSFET and connect the anode of D2 to the battery.
+
+#### electrophile
+
+Joined Aug 30, 2013
+166
+Unfortunately the battery and AC adapter are more or less the same voltage since when the power goes out, the battery takes over.
+
+If I were to eliminate the P-MOSFET, both the AC adapter and the battery would share the load current and this is not something that is feasible since when the AC adapter is present the battery is being charged.
+
+#### AlbertHall
+
+Joined Jun 4, 2014
+11,506
+You might have a look at the LTC4412 or similar.
+Or, if you have access to the internals of the adaptor and it is regulated, then you could use the fall of voltage before the regulator and use that to trigger the switchover. This way you can switch to battery operation before the regulator output has begun to fall.
+
+#### johnmariow
+
+Joined May 4, 2016
+20
+I agree that the MOSFET may be creating the problem. To learn more about this, replace the adaptor with a square wave generator in LTSPICE. Then observe the square wave on the gate of the MOSFET and the square wave on the anode of D2. You will probably observe a time delay between the falling edge of the square wave from the square wave generator and the rising edge of the square wave at the anode of the diode. I suspect the the width of this time delay will be equal to the width of the transient you are observing.
+
+#### electrophile
+
+Joined Aug 30, 2013
+166
+
+#### johnmariow
+
+Joined May 4, 2016
+20
+I was talking about doing it in the LTSPICE circuit simulator. Not on the actual circuit. The transistor would react faster than the MOSFET; but you still would have a race condition. The transient will be less, but I think it will still exist.
+
+Last edited:
+
+#### electrophile
+
+Joined Aug 30, 2013
+166
+I was talking about doing it in the LTSPICE circuit simulator. Not on the actual circuit.
+Yeah I was replying to Albert and your reply came right then and it looked like I replied to your message I'll try the square wave generator simulation. Will keep you posted.
+
+#### AlbertHall
+
+Joined Jun 4, 2014
+11,506
+I was thinking more on this and instead of grounding the P-MOSFET gate directly, I added a PNP transistor there and switched that using the AC adapter voltage. This seems to get rid of the transient when the switching happens. I also see a voltage drop of about 70mV on the output.
+Is this simulated or real world? The real world adaptor will have an output capacitor which will mean its output voltage will fall slowly when mains power is removed and that is going to be difficult to get around unless you add a very big capacitor on the circuit output to maintain the load voltage until the adaptor voltage has fallen far enough to turn the MOSFET on.
+
+The circuit with the transistor pulls the gate to ground but it doesn't pull it up so because of the gate capacitance the MOSFET may never be turned off. That might be why the transient disappeared. There should be a resistor from gate to source.
+
+#### grahamed
+
+Joined Jul 23, 2012
+100
+Hi
+
+You might like to consider the use of a "perfect diode" in place the current switch and Schottky arrangement.
+
+The Schottky may only drop 1/2V or so but that is 10% of your battery wasted.
+
+#### Attachments
+
+• 1.6 KB Views: 14
+
+#### electrophile
+
+Joined Aug 30, 2013
+166
+This will be eventually implemented in the real world. I see what you mean. I placed a 1k resistor there and now I see the 2.6V transient again.
+
+@johnmariow I simulated it with the square wave instead of the adapter and you are right, the width of the time delay is the transient width as well.
+
+So how do I build this without the LTC chip?
+
+#### electrophile
+
+Joined Aug 30, 2013
+166
+Hi
+
+You might like to consider the use of a "perfect diode" in place the current switch and Schottky arrangement.
+
+The Schottky may only drop 1/2V or so but that is 10% of your battery wasted.
+I'm not sure I understand this schematic. Could you please elaborate? Where would my two inputs go?
+
+#### AlbertHall
+
+Joined Jun 4, 2014
+11,506
+So how do I build this without the LTC chip?
+If you cannot be sure that the adaptor voltage will always be greater than the battery voltage then I don't see how.
+Another wild thought: Use a higher voltage adaptor with a separate regulator in your circuit to get the correct voltage. That way you can implement the method I described earlier.
+
+#### hp1729
+
+Joined Nov 23, 2015
+2,304
+Here is a schematic that switches to a battery source when the AC adapter dies out. It works but there is a drop transient which is about 50% of the output voltage. Any suggestions on how this can be reduced or better yet eliminated? Also attached is the LTSpice file.
+A capacitor on the output? Maybe 100 uF or so depending on the current being drawn.
+
+#### grahamed
+
+Joined Jul 23, 2012
+100
+I'm not sure I understand this schematic. Could you please elaborate? Where would my two inputs go?
+The FET connects exactly where it is now, the diode is removed.
+
+The FET is controlled by the BJTs which switch it on as required to act as a diode.
+
+Due to the common base voltage they are controlled by the emitter voltages.
+
+If the input-side BJT has the higher emitter voltage it turns on, the output-side BJT turns off which then allows the FET to turn on.
+
+The simulation should demonstrate all this.
+
+#### grahamed
+
+Joined Jul 23, 2012
+100
+if the .asc shows a diode across the FET (I can't see it at the moment) please ignore it. It doesn't do anything. I included it because the FETs I had to hand had an intrinsic diode but the model did not include one.
+
+#### AlbertHall
+
+Joined Jun 4, 2014
+11,506
+if the .asc shows a diode across the FET (I can't see it at the moment) please ignore it. It doesn't do anything. I included it because the FETs I had to hand had an intrinsic diode but the model did not include one.
+But does this switch depending on whether adaptor or battery has the highest voltage, and given that that cannot be guaranteed in this case then, with a fully charged battery and the mains voltage on the low side, it will operate from the battery despite mains power being available?
+
+#### grahamed
+
+Joined Jul 23, 2012
+100
+All diode switches operate on the basis of the higher voltage. This is no different just a better diode.
+
+If switching is required then a further BJT CE// with the input BJT will do it.
+
+#### Tonyr1084
+
+Joined Sep 24, 2015
+6,269
+What about using an Op-Amp to compare the two voltages? The moment the adaptor drops below the battery voltage the Op-Amp can trigger a switch. Even if the battery voltage isn't at its peak charge, the Op-Amp won't switch out until that threshold is crossed. Wire the amp as a comparator. That way its output can control a MOSFET or two, shutting one supply off and switching the other on. I'm sure a few milliseconds of crossover wouldn't hurt anything if both supplies are giving a push for that short duration. The switch that cuts out the PS can be held high for a few mS via a capacitor. Meanwhile the other MOSFET can switch the battery into the circuit before the first cuts out.
+
+Am I wrong?
+
+Last edited:

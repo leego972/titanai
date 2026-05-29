@@ -1,0 +1,60 @@
+Question: <p>I have a web report that uses a Django form (new forms) for fields that control the query used to generate the report (start date, end date, ...). The issue I'm having is that the page should work using the form's initial values (unbound), but I can't access the cleaned_data field unless I call is_valid(). But is_valid() always fails on unbound forms.</p>
+
+<p>It seems like Django's forms were designed with the use case of editing data such that an unbound form isn't really useful for anything other than displaying HTML.</p>
+
+<p>For example, if I have:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+else:
+    form = MyForm(request.method.POST)
+
+if form.is_valid():
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>is_valid() will fail if this is a GET (since it's unbound), and if I do:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+else:
+    form = MyForm(request.method.POST)
+    if form.is_valid():
+       do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>the first call to do_query triggers exceptions on form.cleaned_data, which is not a valid field because is_valid() has not been called. It seems like I have to do something like:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+    do_query(form['start_date'].field.initial, form['end_date'].field.initial)
+else:
+    form = MyForm(request.method.POST)
+    if form.is_valid():
+       do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>that is, there isn't a common interface for retrieving the form's values between a bound form and an unbound one.</p>
+
+<p>Does anyone see a cleaner way to do this?</p>
+
+Answer: <p>If you add this method to your form class:</p>
+
+<pre><code>def get_cleaned_or_initial(self, fieldname):
+        if hasattr(self, 'cleaned_data'):
+            return self.cleaned_data.get(fieldname)
+        else:
+            return self[fieldname].field.initial
+</code></pre>
+
+<p>you could then re-write your code as:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+else:
+    form = MyForm(request.method.POST)
+    form.is_valid()
+
+do_query(form.get_cleaned_or_initial('start_date'), form.get_cleaned_or_initial('end_date'))
+</code></pre>

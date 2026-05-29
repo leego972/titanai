@@ -1,0 +1,82 @@
+Question: <p>What is the most elegant way to solve this:</p>
+
+<ul>
+<li>open a file for reading, but only if it is not already opened for writing</li>
+<li>open a file for writing, but only if it is not already opened for reading or writing</li>
+</ul>
+
+<p>The built-in functions work like this</p>
+
+<pre><code>&gt;&gt;&gt; path = r"c:\scr.txt"
+&gt;&gt;&gt; file1 = open(path, "w")
+&gt;&gt;&gt; print file1
+&lt;open file 'c:\scr.txt', mode 'w' at 0x019F88D8&gt;
+&gt;&gt;&gt; file2 = open(path, "w")
+&gt;&gt;&gt; print file2
+&lt;open file 'c:\scr.txt', mode 'w' at 0x02332188&gt;
+&gt;&gt;&gt; file1.write("111")
+&gt;&gt;&gt; file2.write("222")
+&gt;&gt;&gt; file1.close()
+</code></pre>
+
+<p>scr.txt now contains '111'.</p>
+
+<pre><code>&gt;&gt;&gt; file2.close()
+</code></pre>
+
+<p>scr.txt was overwritten and now contains '222' (on Windows, Python 2.4).</p>
+
+<p>The solution should work inside the same process (like in the example above) as well as when another process has opened the file.<br />
+It is preferred, if a crashing program will not keep the lock open.</p>
+
+Answer: <p>To make you safe when opening files within one application, you could try something like this:</p>
+
+<pre><code>import time
+class ExclusiveFile(file):
+    openFiles = {}
+    fileLocks = []
+
+    class FileNotExclusiveException(Exception):
+        pass
+
+    def __init__(self, *args):
+
+        sMode = 'r'
+        sFileName = args[0]
+        try:
+            sMode = args[1]
+        except:
+            pass
+        while sFileName in ExclusiveFile.fileLocks:
+            time.sleep(1)
+
+        ExclusiveFile.fileLocks.append(sFileName)
+
+        if not sFileName in ExclusiveFile.openFiles.keys() or (ExclusiveFile.openFiles[sFileName] == 'r' and sMode == 'r'):
+            ExclusiveFile.openFiles[sFileName] = sMode
+            try:
+                file.__init__(self, sFileName, sMode)
+            finally:
+                ExclusiveFile.fileLocks.remove(sFileName)
+         else:
+            ExclusiveFile.fileLocks.remove(sFileName)
+            raise self.FileNotExclusiveException(sFileName)
+
+    def close(self):
+        del ExclusiveFile.openFiles[self.name]
+        file.close(self)
+</code></pre>
+
+<p>That way you subclass the <code>file</code> class. Now just do:</p>
+
+<pre><code>&gt;&gt;&gt; f = ExclusiveFile('/tmp/a.txt', 'r')
+&gt;&gt;&gt; f
+&lt;open file '/tmp/a.txt', mode 'r' at 0xb7d7cc8c&gt;
+&gt;&gt;&gt; f1 = ExclusiveFile('/tmp/a.txt', 'r')
+&gt;&gt;&gt; f1
+&lt;open file '/tmp/a.txt', mode 'r' at 0xb7d7c814&gt;
+&gt;&gt;&gt; f2 = ExclusiveFile('/tmp/a.txt', 'w') # can't open it for writing now
+exclfile.FileNotExclusiveException: /tmp/a.txt
+</code></pre>
+
+<p>If you open it first with 'w' mode, it won't allow anymore opens, even in read mode, just as you wanted...</p>

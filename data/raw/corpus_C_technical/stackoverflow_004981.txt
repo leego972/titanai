@@ -1,0 +1,62 @@
+Question: <p>I have a PHP application which needs to output a python script, more specifically a bunch of variable assignment statements, eg.</p>
+
+<pre><code>subject_prefix = 'This String From User Input'
+msg_footer = """This one too."""
+</code></pre>
+
+<p>The contents of subject_prefix et al need to be written to take user input; as such, I need to escape the contents of the strings. Writing something like the following isn't going to cut it; we're stuffed as soon as someone uses a quote or newline or anything else that I'm not aware of that could be hazardous:</p>
+
+<pre><code>echo "subject_prefix = '".$subject_prefix."'\n";
+</code></pre>
+
+<p>So. Any ideas?</p>
+
+<p>(Rewriting the app in Python isn't possible due to time constraints. :P )</p>
+
+<p><strong>Edit, years later:</strong></p>
+
+<p>This was for integration between a web-app (written in PHP) and Mailman (written in Python). I couldn't modify the install of the latter, so I needed to come up with a way to talk in its language to manage its configuration.</p>
+
+<p>This was also a <em>really</em> bad idea.</p>
+
+Answer: <p>I needed to code this to escape a string in the "ntriples" format, which uses <a href="http://docs.python.org/reference/lexical%5Fanalysis.html#string-literals" rel="nofollow">python escaping</a>. </p>
+
+<p>The following function takes a utf-8 string and returns it escaped for python (or ntriples format).
+It may do odd things if given illegal utf-8 data. It doesn't understand about Unicode characters past xFFFF. It does not (currently) wrap the string in double quotes.</p>
+
+<p>The uniord function comes from a comment on php.net.</p>
+
+<pre><code>    function python_string_escape( $string )
+    {
+            $string = preg_replace( "/\\\\/", "\\\\", $string ); # \\ (first to avoid string re-escaping)
+            $string = preg_replace( "/\n/", "\\n", $string ); # \n
+            $string = preg_replace( "/\r/", "\\r", $string ); # \r 
+            $string = preg_replace( "/\t/", "\\t", $string ); # \t 
+            $string = preg_replace( "/\"/", "\\\"", $string ); # \"
+            $string = preg_replace(
+                            "/([\x{00}-\x{1F}]|[\x{7F}-\x{FFFF}])/ue",
+                            "sprintf(\"\\u%04X\",uniord(\"$1\"))",
+                            $string );
+            return $string;
+    }
+
+    function uniord($c) {
+            $h = ord($c{0});
+            if ($h &lt;= 0x7F) {
+                    return $h;
+            } else if ($h &lt; 0xC2) {
+                    return false;
+            } else if ($h &lt;= 0xDF) {
+                    return ($h &amp; 0x1F) &lt;&lt; 6 | (ord($c{1}) &amp; 0x3F);
+            } else if ($h &lt;= 0xEF) {
+                    return ($h &amp; 0x0F) &lt;&lt; 12 | (ord($c{1}) &amp; 0x3F) &lt;&lt; 6
+                                             | (ord($c{2}) &amp; 0x3F);
+            } else if ($h &lt;= 0xF4) {
+                    return ($h &amp; 0x0F) &lt;&lt; 18 | (ord($c{1}) &amp; 0x3F) &lt;&lt; 12
+                                             | (ord($c{2}) &amp; 0x3F) &lt;&lt; 6
+                                             | (ord($c{3}) &amp; 0x3F);
+            } else {
+                    return false;
+            }
+    }
+</code></pre>

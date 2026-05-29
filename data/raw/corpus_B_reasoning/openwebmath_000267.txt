@@ -1,0 +1,106 @@
+## Merging Functions, Modules, Classes, the whole nine yards...
+
+Say we have a declarative language, where a = b is an assertion that governs the rest of the code, not an assignment operation. To this language we add the notion of explicit scopes -- assignments only apply within a scope, it's okay to have multiple contradictory assignments in different scopes. On top of this, we add one more idea -- scopes can inherit from one another, which is to say that children can overwrite assignments of their parents but otherwise maintain the same environment. For example:
+
+foo(a, b, c)
+gamma = a * b
+rho = b * c
+gamma * rho
+
+bar(a, b, c) extends foo
+gamma = a * a
+
+
+is a piece of code in which bar assigns a different value to gamma but otherwise runs exactly as foo does, computing gamma * rho and returning the result. What I am talking about is function inheritance. In the above example, foo and bar must have the same signature for it to work -- but there are ideas from object oriented programming that can be leveraged to get around that.
+
+Of course, the above example is little bit simplistic. Far more interesting is the use of the implies operator (->) for matching:
+
+foo(a, b, c)
+'a' -> a
+'b' -> b
+'c' -> c
+'foo' -> 'foo'
+
+bar(a, b, c) extends foo
+'foo' -> 'bar extending foo'
+
+
+Here we use the implies operator to mean "when x is injected into my symbol space there is y" or in other words "a message x gets a response of y". Now, this example also offers up some real problems -- how do we specify tail recursion or termination in this language? -- but I'm willing to bet that a little study would reveal straightforward syntactic forms for this kind of thing.
+
+Now that I have thought this language up, I have to work on it. I swore there would never be a day when I would stray from the well settled lands of software development to wander in the wilds of language design! Alas, I am doomed. All I ask from ltu is some thoughtful criticism of my idea, some pointers to earlier work in this domain and some suggestions about the syntax. What I want in the end is a language that is process/message oriented like Erlang but also has straightforward syntax for the notion of 'inheritance'.
+
+## Comment viewing options
+
+### I had the same idea
+
+I am working on the same idea for my own language. The biggest problem is that normal function scopes already have inheritance: they inherit from the parent scope. So adding explicit inheritance gives you multiple inheritance, with all the problems that go with it.
+
+I have thought about this some more. A language like Objective-C, which does have 'message passing' of a kind, would be exactly what I wanted, except for the absence of concurrent facilities. So, my idea has narrowed a little bit -- instead of a 'scope oriented language' we can have an object-oriented language in which objects are concurrent processes that can receive messages from other objects and the message passing system is brokered by some clever VM that knows how to deal with method calls across the network to other 'nodes'.
+
+Maybe there is the germ of an OO extension to Erlang in all this -- something to do with mapping 'methods' to receive in that language. Consider also that Erlang may be able to play the role of C for some other language -- you might translate Haskell to Erlang to get concurrent, distributed Haskell, for example. Erlang is pretty dumb when it comes to numbers, strings and records -- but it's perfectly okay for control flow and manipulating binary junk -- it may be the C of concurrent programming.
+
+### While this idea is appealing
+
+While this idea is appealing I suspect it's hard to find the right level of granularity. Often a member variable is really just an object attribute and not a concurrent process. It doesn't make sense to enforce isolation and transparent distribution in any case. When you deal with state and referential intransparency you need at least topological notions of locality and boundary. Maybe escape analysis has the right vocabulary to start with?
+
+I guess Erlang with classes is much harder than C with classes. But maybe you can prove me wrong?
+
+### Finding the right level of
+
+Finding the right level of granularity is challenging -- it seems that the 'server' is the primitive that fits best what I want to do. A 'server' is a shared nothing, tail-recursive function that receives certain messages. What I'd like is a way to compose servers and override their responses to certain messages.
+
+foo(a, b) ->
+'first' -> a
+'second' -> b
+
+bar(c)
+'only' -> c
+
+foobar(a, b, c)
+?compose foo(a, b) bar(c)
+'abc' -> a * b * c
+
+
+So now we can have a foobar that responds like a bar and a foo. I swear I just saw the dreaded diamond around here somewhere... I guess a combination of variable renaming (for function local code) and orderly message overriding (for the interface) will allow for 'multiple composition' without pain (though not without a little confusion).
+
+As for escape analysis, I'm not sure what to say about it. I'm certainly not going to implement it. That's for languages with mutation and shared state -- two things I want to stay away from, if I can.
+
+### Now I need some cool
+
+Now I need some cool branding.
+
+• ConcurrenC (hard to resist, but it doesn't make any sense)
+• Oolang (play on Erlang and a category of tea)
+• Erloo (cute, unintimidating)
+
+Which is better? Really, ConcurrenC belongs to another project.
+
+You could have called it "Except", except it would likely be confused with Expect.
+
+Josh
+
+### With a little more
+
+With a little more experience, I see Erlang as the sh of concurrent programming.
+
+### beta?
+
+I havent' really used the beta language (or the successor, gbeta), but it seems like the unification of "class" and "method" declarations into a common "pattern" construct in those languages would bring about exactly the kind of function inheritance you describe.
+
+Can anybody with greater familiarity with beta comment on whether this is the case?
+
+### Prototype-based languages
+
+I'm pretty sure this is how things work in most purely prototype-based languages like Self and Io (but not Javascript). In Io, scopes are first class objects that delegate to the outer scope, and everything ultimately delegates to the both the Lobby and Object through a cycle of delegation. There are two different things you can make: blocks, whose scope delegates to the scope where they were made (lexical scope) and methods, whose scope delegates to the object that they're on.
+
+### Merging stuff
+
+You can do that, but you have a problem here. Now, what does it mean for two functions to be equivalent? Ordinarily, you choose either extensional equality (functions are equivalent iff for all inputs they produce the same result) or the weaker intensional equality. But allowing "extension" like this exposes all the local variables of a function as part of that function's identity.
+
+It's probably better to factor that sort of code into a class (which you can inherit from and extend by overriding existing fields and adding new ones), and a function that constructs an element of that class and then returns the member coinciding to the "return" value. This scheme doesn't require stretching the notions of extension and equivalence.
+
+### Ohmu
+
+Check out the paper linked to from here.
+
+"The Ohmu model unifies functions, classes, instances, templates, and even aspects into a single construct - the structure. Function calls, instantiation, aspect-weaving, and inheritance are likewise unified into a single operation - the structure transformation"

@@ -1,0 +1,60 @@
+# How to Export Symbols from a Unix Shared Library?
+
+This topic is 4816 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+## Recommended Posts
+
+The title pretty much says it all. I see how to to find and get the addresses of symbols at run time, but I don't know how to specify which symbols are to be exported, and what name to identify them with.
+
+##### Share on other sites
+As far as I'm aware, normally most non-static global variables and functions will be accessible in a shared library.
+
+The thing to remember is that if you use C++, you need to be concerned with name mangling (this is true on win32 also of course).
+
+Name mangling is where void foo(void) { } gets changed into foo__Fv or something similar.
+
+You can't easily work out what the name will be, so instead, use extern "C" when declaring your function (you don't need to do anything special when defining it).
+
+extern "C" {  void foo();}// .. somewhere elsevoid foo() {  std::cout << "Hello, world" << std::endl;}
+
+Then you can use
+
+g++ -shared -o myplugin.so myplugin.cpp
+
+And something like
+
+void * dlhandle = dlopen("./myplugin.so",RTLD_NOW);foo = (footype) dlsym(dlhandle,"foo");foo();
+
+Declare footype to be the type of your function as a function pointer.
+
+If you're wondering how you declare a class in your main program (exe) and then subclass it, overriding virtual functions in your .so, then the answer is definitely, that you should make a "factory" function (with C linkeage as above) which calls new(thing) and returns a pointer.
+
+You can then cast the pointer to the base class and you're done.
+
+However, this typically only works if you use -Wl,--export-dynamic when compiling your main exe, because this enables you to call functions in your exe from your dll (for example, the base class's constructor). You'll need this even if you don't have an explicit calls back.
+
+Mark
+
+1. 1
+2. 2
+JoeJ
+17
+3. 3
+4. 4
+frob
+11
+5. 5
+
+• 13
+• 16
+• 13
+• 20
+• 13
+• ### Forum Statistics
+
+• Total Topics
+632181
+• Total Posts
+3004625
+
+×

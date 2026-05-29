@@ -1,0 +1,75 @@
+Question: <p>I have a class with two class methods (using the classmethod() function) for getting and setting what is essentially a static variable.  I tried to use the property() function with these, but it results in an error.  I was able to reproduce the error with the following in the interpreter:</p>
+
+<pre><code>&gt;&gt;&gt; class foo(object):
+...     _var=5
+...     def getvar(cls):
+...             return cls._var
+...     getvar=classmethod(getvar)
+...     def setvar(cls,value):
+...             cls._var=value
+...     setvar=classmethod(setvar)
+...     var=property(getvar,setvar)
+...
+&gt;&gt;&gt; f.getvar()
+5
+&gt;&gt;&gt; f.setvar(4)
+&gt;&gt;&gt; f.getvar()
+4
+&gt;&gt;&gt; f.var
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in ?
+TypeError: 'classmethod' object is not callable
+&gt;&gt;&gt; f.var=5
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in ?
+TypeError: 'classmethod' object is not callable
+</code></pre>
+
+<p>Is it possible to use the property() function with classmethod decorated functions?</p>
+
+Answer: <p>There is no reasonable way to make this "class property" system to work in Python.</p>
+
+<p>Here is one unreasonable way to make it work. You can certainly make it more seamless with increasing amounts of metaclass magic.</p>
+
+<pre><code>class ClassProperty(object):
+    def __init__(self, getter, setter):
+        self.getter = getter
+        self.setter = setter
+    def __get__(self, cls, owner):
+        return getattr(cls, self.getter)()
+    def __set__(self, cls, value):
+        getattr(cls, self.setter)(value)
+
+class MetaFoo(type):
+    var = ClassProperty('getvar', 'setvar')
+
+class Foo(object):
+    __metaclass__ = MetaFoo
+    _var = 5
+    @classmethod
+    def getvar(cls):
+        print "Getting var =", cls._var
+        return cls._var
+    @classmethod
+    def setvar(cls, value):
+        print "Setting var =", value
+        cls._var = value
+
+x = Foo.var
+print "Foo.var = ", x
+Foo.var = 42
+x = Foo.var
+print "Foo.var = ", x
+</code></pre>
+
+<p>The knot of the issue is that properties are what Python calls "descriptors". There is no short and easy way to explain how this sort of metaprogramming works, so I must point you to the <a href="http://users.rcn.com/python/download/Descriptor.htm">descriptor howto</a>.</p>
+
+<p>You only ever need to understand this sort of things if you are implementing a fairly advanced framework. Like a transparent object persistence or RPC system, or a kind of domain-specific language.</p>
+
+<p>However, in a comment to a previous answer, you say that you </p>
+
+<blockquote>
+  <p>need to modify an attribute that in such a way that is seen by all instances of a class, and in the scope from which these class methods are called does not have references to all instances of the class.</p>
+</blockquote>
+
+<p>It seems to me, what you really want is an <a href="http://en.wikipedia.org/wiki/Observer_pattern">Observer</a> design pattern.</p>

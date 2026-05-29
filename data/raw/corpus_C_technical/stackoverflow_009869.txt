@@ -1,0 +1,151 @@
+Question: <p>I'm using the <a href="http://docs.python.org/library/subprocess.html">subprocess module</a> to start a subprocess and connect to it's output stream (stdout). I want to be able to execute non-blocking reads on its stdout. Is there a way to make .readline non-blocking or to check if there is data on the stream before I invoke <code>.readline</code>? I'd like this to be portable or at least work under Windows and Linux.</p>
+
+<p>here is how I do it for now (It's blocking on the <code>.readline</code> if no data is avaible):</p>
+
+<pre><code>p = subprocess.Popen('myprogram.exe', stdout = subprocess.PIPE)
+output_str = p.stdout.readline()
+</code></pre>
+
+Answer: <p>Adding this answer here since it provides ability to set non-blocking pipes on Windows and Unix.</p>
+
+<p>All the <code>ctypes</code> details are thanks to <a href="http://stackoverflow.com/questions/34504970">@techtonik's answer</a>.</p>
+
+<p>There is a slightly modified version to be used both on Unix and Windows systems.</p>
+
+<ul>
+<li>Python3 compatible <em>(only minor change needed)</em>.</li>
+<li>Includes posix version, and defines exception to use for either.</li>
+</ul>
+
+<p>This way you can use the same function and exception for Unix and Windows code.</p>
+
+<pre class="lang-py prettyprint-override"><code># pipe_non_blocking.py (module)
+"""
+Example use:
+
+    p = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            )
+
+    pipe_non_blocking_set(p.stdout.fileno())
+
+    try:
+        data = os.read(p.stdout.fileno(), 1)
+    except PortableBlockingIOError as ex:
+        if not pipe_non_blocking_is_error_blocking(ex):
+            raise ex
+"""
+
+
+__all__ = (
+    "pipe_non_blocking_set",
+    "pipe_non_blocking_is_error_blocking",
+    "PortableBlockingIOError",
+    )
+
+import os
+
+
+if os.name == "nt":
+    def pipe_non_blocking_set(fd):
+        # Constant could define globally but avoid polluting the name-space
+        # thanks to: http://stackoverflow.com/questions/34504970
+        import msvcrt
+
+        from ctypes import windll, byref, wintypes, WinError, POINTER
+        from ctypes.wintypes import HANDLE, DWORD, BOOL
+
+        LPDWORD = POINTER(DWORD)
+
+        PIPE_NOWAIT = wintypes.DWORD(0x00000001)
+
+        def pipe_no_wait(pipefd):
+            SetNamedPipeHandleState = windll.kernel32.SetNamedPipeHandleState
+            SetNamedPipeHandleState.argtypes = [HANDLE, LPDWORD, LPDWORD, LPDWORD]
+            SetNamedPipeHandleState.restype = BOOL
+
+            h = msvcrt.get_osfhandle(pipefd)
+
+            res = windll.kernel32.SetNamedPipeHandleState(h, byref(PIPE_NOWAIT), None, None)
+            if res == 0:
+                print(WinError())
+                return False
+            return True
+
+        return pipe_no_wait(fd)
+
+    def pipe_non_blocking_is_error_blocking(ex):
+        if not isinstance(ex, PortableBlockingIOError):
+            return False
+        from ctypes import GetLastError
+        ERROR_NO_DATA = 232
+
+        return (GetLastError() == ERROR_NO_DATA)
+
+    PortableBlockingIOError = OSError
+else:
+    def pipe_non_blocking_set(fd):
+        import fcntl
+        fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+        return True
+
+    def pipe_non_blocking_is_error_blocking(ex):
+        if not isinstance(ex, PortableBlockingIOError):
+            return False
+        return True
+
+    PortableBlockingIOError = BlockingIOError
+</code></pre>
+
+<p>To avoid reading incomplete data, I ended up writing my own readline generator (which returns the byte string for each line).</p>
+
+<p>Its a generator so you can for example...</p>
+
+<pre><code>def non_blocking_readlines(f, chunk=1024):
+    """
+    Iterate over lines, yielding b'' when nothings left
+    or when new data is not yet available.
+
+    stdout_iter = iter(non_blocking_readlines(process.stdout))
+
+    line = next(stdout_iter)  # will be a line or b''.
+    """
+    import os
+
+    from .pipe_non_blocking import (
+            pipe_non_blocking_set,
+            pipe_non_blocking_is_error_blocking,
+            PortableBlockingIOError,
+            )
+
+    fd = f.fileno()
+    pipe_non_blocking_set(fd)
+
+    blocks = []
+
+    while True:
+        try:
+            data = os.read(fd, chunk)
+            if not data:
+                # case were reading finishes with no trailing newline
+                yield b''.join(blocks)
+                blocks.clear()
+        except PortableBlockingIOError as ex:
+            if not pipe_non_blocking_is_error_blocking(ex):
+                raise ex
+
+            yield b''
+            continue
+
+        while True:
+            n = data.find(b'\n')
+            if n == -1:
+                break
+
+            yield b''.join(blocks) + data[:n + 1]
+            data = data[n + 1:]
+            blocks.clear()
+        blocks.append(data)
+</code></pre>

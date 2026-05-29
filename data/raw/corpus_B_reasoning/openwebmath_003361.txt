@@ -1,0 +1,100 @@
+# Does rmarkdown allow captions and references for code chunks?
+
+Is there a trick for captioning and referencing a chuck of code in rmarkdown (not the result of running the code)? For example, how do I reference this block of code:
+
+{r blah}
+blah <- "blah"
+
+
+
+I know that I can use \@ref(fig:theFig) or \@ref(tab:theTable) to get at fig.cap or caption (with kable) but I don't see a way to caption and reference the code itself.
+
+This would be a great feature. And I think it is not integrated yet. Here is an approach that works for PDF documents and allows you to generate captions as well as labels for cross-referencing:
+
+1. Include a header.tex with the following content
+
+\usepackage{caption}
+\usepackage{floatrow}
+
+\DeclareNewFloatType{chunk}{placement=H, fileext=chk, name=}
+\captionsetup{options=chunk}
+\renewcommand{\thechunk}{Chunk~\thesection.\arabic{chunk}}
+\makeatletter
+\makeatother
+
+
+Since the environment used for chunks is not a floating type we declare a new one, named chunk. The option name is left blank since we already redefine \thechunk in the next line by prepending the word Chunk (play with the name option and see what happens).
+
+The chunks should be enumerated by section and so we tell tex to reset the counter each time a new section begins.
+
+If you do not use section numbering (by setting the YAML option), then replace the line
+
+\renewcommand{\thechunk}{Chunk~\thesection.\arabic{chunk}}
+
+
+by
+
+\renewcommand{\thechunk}{Chunk~\arabic{chunk}}
+
+1. Modify the knitr source hook in your rmarkdown document
+
+library(knitr)
+oldSource <- knit_hooks$get("source") knit_hooks$set(source = function(x, options) {
+x <- oldSource(x, options)
+x <- ifelse(!is.null(options$ref), paste0("\\label{", options$ref,"}", x), x)
+ifelse(!is.null(options$codecap), paste0("\\captionof{chunk}{", options$codecap,"}", x), x)
+})
+
+
+Here we make use of two new chunk options ref and codecap. If either one is not NULL, a corresponding label or caption is generated using the the commands \label or \captionof.
+
+MWE:
+
+---
+title: "Cross-referencing Code Chunks"
+output:
+pdf_document:
+includes:
+number_sections: true
+---
+
+{r, echo=FALSE}
+library(knitr)
+oldSource <- knit_hooks$get("source") knit_hooks$set(source = function(x, options) {
+x <- oldSource(x, options)
+x <- ifelse(!is.null(options$ref), paste0("\\label{", options$ref,"}", x), x)
+ifelse(!is.null(options$codecap), paste0("\\captionof{chunk}{", options$codecap,"}", x), x)
+})
+
+
+# Foo
+
+{r Foo, ref = "TheFooChunk", codecap = "My Chunk"}
+print("Foo!")
+
+
+\newpage
+
+# Bar
+
+{r Bar, ref = "TheBarChunk", codecap = "My second chunk"}
+print("Bar!")
+
+
+
+
+Here is the output (of both pages):
+
+### Adding the caption below the code chunk
+
+If you'd prefer to add the caption below the code chunk, instead of above, this can be achieved by altering the above knitr hook to read:
+
+oldSource <- knit_hooks$get("source") knit_hooks$set(source = function(x, options) {
+x <- oldSource(x, options)
+x <- ifelse(!is.null(options$codecap), paste0(x, "\\captionof{chunk}{", options$codecap,"}"), x)
+ifelse(!is.null(options$ref), paste0(x, "\\label{", options$ref,"}"), x)
+})
+
+
+• However, I since found that swapping the order of the arguments of the paste0 command is sufficient to position the caption below. ie. paste0(x, "\\label{", options$ref,"}") and paste0(x, "\\captionof{chunk}{", options$codecap,"}"). Oct 12 '20 at 21:10
+• This also works for bookdown. header.txt and the knitr source hook chunk need no modification. The YAML header just needs to replace pdf_document: with bookdown::pdf_book:. No need to include number_sections: true in the YAML header, because bookdown numbers sections by default. Note that no numbering will occur unless you include the codecap chunk option, even if you included ref. Apr 13 '21 at 13:11

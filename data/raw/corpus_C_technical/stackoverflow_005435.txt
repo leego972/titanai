@@ -1,0 +1,102 @@
+Question: <p>Can you add new statements (like <code>print</code>, <code>raise</code>, <code>with</code>) to Python's syntax?</p>
+
+<p>Say, to allow..</p>
+
+<pre><code>mystatement "Something"
+</code></pre>
+
+<p>Or,</p>
+
+<pre><code>new_if True:
+    print "example"
+</code></pre>
+
+<p>Not so much if you <em>should</em>, but rather if it's possible (short of modifying the python interpreters code)</p>
+
+Answer: <p>One way to do things like this is to preprocess the source and modify it, translating your added statement to python.  There are various problems this approach will bring, and I wouldn't recommend it for general usage, but for experimentation with language, or specific-purpose metaprogramming, it can occassionally be useful.</p>
+
+<p>For instance, lets say we want to introduce a "myprint" statement, that instead of printing to the screen instead logs to a specific file.  ie:</p>
+
+<pre><code>myprint "This gets logged to file"
+</code></pre>
+
+<p>would be equivalent to</p>
+
+<pre><code>print &gt;&gt;open('/tmp/logfile.txt','a'), "This gets logged to file"
+</code></pre>
+
+<p>There are various options as to how to do the replacing, from regex substitution to generating an AST, to writing your own parser depending on how close your syntax matches existing python.  A good intermediate approach is to use the tokenizer module.  This should allow you to add new keywords, control structures etc while interpreting the source similarly to the python interpreter, thus avoiding the breakage crude regex solutions would cause.  For the above "myprint", you could write the following transformation code:</p>
+
+<pre><code>import tokenize
+
+LOGFILE = '/tmp/log.txt'
+def translate(readline):
+    for type, name,_,_,_ in tokenize.generate_tokens(readline):
+        if type ==tokenize.NAME and name =='myprint':
+            yield tokenize.NAME, 'print'
+            yield tokenize.OP, '&gt;&gt;'
+            yield tokenize.NAME, "open"
+            yield tokenize.OP, "("
+            yield tokenize.STRING, repr(LOGFILE)
+            yield tokenize.OP, ","
+            yield tokenize.STRING, "'a'"
+            yield tokenize.OP, ")"
+            yield tokenize.OP, ","
+        else:
+            yield type,name
+</code></pre>
+
+<p>(This does make myprint effectively a keyword, so use as a variable elsewhere will likely cause problems)</p>
+
+<p>The problem then is how to use it so that your code is usable from python.  One way would just be to write your own import function, and use it to load code written in your custom language.  ie:</p>
+
+<pre><code>import new
+def myimport(filename):
+    mod = new.module(filename)
+    f=open(filename)
+    data = tokenize.untokenize(translate(f.readline))
+    exec data in mod.__dict__
+    return mod
+</code></pre>
+
+<p>This requires you handle your customised code differently from normal python modules however.  ie "<code>some_mod = myimport("some_mod.py")</code>" rather than "<code>import some_mod</code>"</p>
+
+<p>Another fairly neat (albeit hacky) solution is to create a custom encoding (See <a href="http://www.python.org/dev/peps/pep-0263/">PEP 263</a>) as <a href="http://code.activestate.com/recipes/546539/">this</a> recipe demonstrates.  You could implement this as:</p>
+
+<pre><code>import codecs, cStringIO, encodings
+from encodings import utf_8
+
+class StreamReader(utf_8.StreamReader):
+    def __init__(self, *args, **kwargs):
+        codecs.StreamReader.__init__(self, *args, **kwargs)
+        data = tokenize.untokenize(translate(self.stream.readline))
+        self.stream = cStringIO.StringIO(data)
+
+def search_function(s):
+    if s!='mylang': return None
+    utf8=encodings.search_function('utf8') # Assume utf8 encoding
+    return codecs.CodecInfo(
+        name='mylang',
+        encode = utf8.encode,
+        decode = utf8.decode,
+        incrementalencoder=utf8.incrementalencoder,
+        incrementaldecoder=utf8.incrementaldecoder,
+        streamreader=StreamReader,
+        streamwriter=utf8.streamwriter)
+
+codecs.register(search_function)
+</code></pre>
+
+<p>Now after this code gets run (eg. you could place it in your .pythonrc or site.py) any code starting with the comment "# coding: mylang" will automatically be translated through the above preprocessing step.  eg.</p>
+
+<pre><code># coding: mylang
+myprint "this gets logged to file"
+for i in range(10):
+    myprint "so does this : ", i, "times"
+myprint ("works fine" "with arbitrary" + " syntax" 
+  "and line continuations")
+</code></pre>
+
+<p>Caveats:</p>
+
+<p>There are problems to the preprocessor approach, as you'll probably be familiar with if you've worked with the C preprocessor.  The main one is debugging.  All python sees is the preprocessed file which means that text printed in the stack trace etc will refer to that.  If you've performed significant translation, this may be very different from your source text.  The example above doesn't change line numbers etc, so won't be too different, but the more you change it, the harder it will be to figure out.</p>

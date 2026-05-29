@@ -1,0 +1,53 @@
+# Correct vector input to map texture light in Cycles
+
+What is the correct vector input for a texture connected to a Cycles lamp so that I can make a projector-like textured light?
+
+I am trying to make an projector-like effect with a textured light in Cycles, currently trying it out with a Spot type of lamp, but I am open to any solution involving other lamp types if they work correctly.
+
+The problem is that whatever vector input I use, the texture is always projected downwards, towards the global $$-Z$$ axis in scene world space, no matter where I point my spot light. I would like to have the texture always project "forward" towards the the direction the spot light is pointing, in the local $$-Z$$ axis.
+
+The plan would then be to use this spot at several places in my scene, pointing at different directions, and as it currently stands I would have to have a different node setup for each spot instance, manually compensating for each unique rotation in the scene, which would quickly become unpractical.
+
+I have searched around the internet and I am currently using a solution similar to the one on this BSE question.
+
+Is there any better method, perhaps involving some funky Vector Math, or is this not currently supported?
+
+• What about having the light still in the scene and rotate everything around with camera? Motion is relative. You can workaround around this like that. The texture coordinates of lights does not follow the light's local transforms..that makes it very hard to do what you want - the solution won't be trivial if there is any at all. – Jaroslav Jerryno Novotny Jul 1 '16 at 19:34
+• Also what about the UV project modifier to project a texture with round alpha with emission shader onto some geometry using the UV's – Jaroslav Jerryno Novotny Jul 1 '16 at 19:36
+• Still light and rotate the scene would be quite cumbersome to manage on a large scene, and would only ever work for one spot per scene unfortunately. The UV project modifier does make the desired effect but as I understand would only work in one object at a time, so it would also be a really cumbersome solution to light up a complex scene with lots of objects/lights. Thanks for the input though – Duarte Farrajota Ramos Jul 1 '16 at 23:42
+
+One way to accomplish this is by using drivers to rotate the coordinates according to the rotation of the lamp.
+
+1. Add a mapping node between the texture coordinate node and the texture
+3. Open the graph editor and switch from F-Curves to Drivers in the header
+4. With the lamp object and mapping node selected, set up each driver by selecting the appropriate driver type and transform type:
+
+Result:
+
+• This seems to be working reasonably well, best solution so far. I had never used drivers in Blender before. Is there a way to specify the driver to take the value automatically from the object its applied to (self?), so that on duplication new spot (spot 2, spot3) objects are automatically driven by their own rotation instead of the original spot's (spot 1) rotation? That would definitely ease the process. – Duarte Farrajota Ramos Jul 1 '16 at 23:49
+• @DuarteFarrajotaRamos Unfortunately no.. I sure wish there was such a thing, but some workarounds are possible – gandalf3 Jul 2 '16 at 2:32
+• Ah I see, one can only dream... Thanks for those links, I'll look into those solutions tomorrow, and also thanks got the answer. – Duarte Farrajota Ramos Jul 2 '16 at 3:20
+• I may have found a similar solution using area lights instead, in case you are interested. Answer posted bellow – Duarte Farrajota Ramos Jul 2 '16 at 18:48
+• Someone 'up there' must have heard our prayers. \o/ Unless I misunderstood this commit, from henceforth self reference now seems to be supported in drivers for upcoming Blender builds. – Duarte Farrajota Ramos Jul 31 '16 at 4:26
+
+For the sake of completeness and future reference I found out how to do it without drivers.
+
+You can achieve this using an area light instead of a spot light, then make use of the Geometry node's Normal and Incoming socket and subtract them using a Vector Math node.
+
+It still suffers from tiling/mirroring artifacts at extreme angles like the solutions by @gandalf3, but those can be adjusted with the Vector Mapping node as long as multiple instances of the light are maintain within a certain angle threshold, and overall it seems like a more maintainable solution in the long term.
+
+Smaller sized area lights will produce sharper image projections.
+
+EDIT: As of Blender 2.79 Blender, Cycles can correctly use lamp texture coordinates directly in Spot, Area, and Point Lamp types without any further contrivances. Just use the Normal output on the Texture Coordinates node as vector input for a texture.
+
+Committed by Lukas Stockner Cycles: Implement texture coordinates for Point, Spot and Area Lamps
+
+Cycles: Implement texture coordinates for Point, Spot and Area Lamps
+
+When using the Normal output of the Texture Coordinate node on Point and Spot lamps, the coordinates now depend on the rotation of the lamp. On Area lamps, the Parametric output of the Geometry node now returns UV coordinates on the area lamp.
+
+Credit for the Area lamp part goes to Stefan Werner (from D1995).
+
+As Duarte mentioned, 2.79 fixes light projection so textured lamps can be rotated, but to make a spotlight into a "normal" projector the image needs to be centered and warp adjusted. Added node setup for reference.
+
+• – cegaton Sep 27 '17 at 22:11

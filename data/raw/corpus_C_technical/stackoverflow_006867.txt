@@ -1,0 +1,37 @@
+Question: <p>I have multiple Network Interface Cards on my computer, each with its own IP address.</p>
+
+<p>When I use <code>gethostbyname(gethostname())</code> from Python's (built-in) <code>socket</code> module, it will only return one of them.  How do I get the others?</p>
+
+Answer: <p>Use the <a href="http://alastairs-place.net/netifaces/"><code>netifaces</code></a> module.  Because networking is complex, using netifaces can be a little tricky, but here's how to do what you want:</p>
+
+<pre><code>&gt;&gt;&gt; import netifaces
+&gt;&gt;&gt; netifaces.interfaces()
+['lo', 'eth0']
+&gt;&gt;&gt; netifaces.ifaddresses('eth0')
+{17: [{'broadcast': 'ff:ff:ff:ff:ff:ff', 'addr': '00:11:2f:32:63:45'}], 2: [{'broadcast': '10.0.0.255', 'netmask': '255.255.255.0', 'addr': '10.0.0.2'}], 10: [{'netmask': 'ffff:ffff:ffff:ffff::', 'addr': 'fe80::211:2fff:fe32:6345%eth0'}]}
+&gt;&gt;&gt; for interface in netifaces.interfaces():
+...   print netifaces.ifaddresses(interface)[netifaces.AF_INET]
+...
+[{'peer': '127.0.0.1', 'netmask': '255.0.0.0', 'addr': '127.0.0.1'}]
+[{'broadcast': '10.0.0.255', 'netmask': '255.255.255.0', 'addr': '10.0.0.2'}]
+&gt;&gt;&gt; for interface in netifaces.interfaces():
+...   for link in netifaces.ifaddresses(interface)[netifaces.AF_INET]:
+...     print link['addr']
+...
+127.0.0.1
+10.0.0.2
+</code></pre>
+
+<p>This can be made a little more readable like this:</p>
+
+<pre><code>from netifaces import interfaces, ifaddresses, AF_INET
+
+def ip4_addresses():
+    ip_list = []
+    for interface in interfaces():
+        for link in ifaddresses(interface)[AF_INET]:
+            ip_list.append(link['addr'])
+    return ip_list
+</code></pre>
+
+<p>If you want IPv6 addresses, use <code>AF_INET6</code> instead of <code>AF_INET</code>.  If you're wondering why <code>netifaces</code> uses lists and dictionaries all over the place, it's because a single computer can have multiple NICs, and each NIC can have multiple addresses, and each address has its own set of options.</p>

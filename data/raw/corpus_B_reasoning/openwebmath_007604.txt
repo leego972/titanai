@@ -1,0 +1,93 @@
+# How to assign values using nested Part[ ] expressions?
+
+Why doesn't this work? Can I make it work?
+
+x = Range[10];
+x[[4;;7]][[2]]
+
+==> 5
+
+x[[4;;7]][[2]] = 100
+
+==> Set::partd1 : Depth of object x[[4;;7, 2]] is not sufficient for the given part specification
+• Why can't you just do x[[4 - 1 + 2]] = 100? – J. M. will be back soon Mar 28 '18 at 16:33
+• This comes from passing arguments by reference using Hold[x_]. A function may restrict x to a subrange before calling a nested function, which may do the same thing again leading to a chain of part specifications (e.g. x[[4;;7]][[2;;3]][[1]]). It works for reading, but not for writing. One alternative that I'm not looking forward to is passing x and its part specification separately and somehow collapsing the part spec before accessing x. – user3704499 Mar 28 '18 at 16:39
+
+While I am not sure it is general enough, a first attempt may be to try something like this:
+
+Clear[nestedPartSet];
+nestedPartSet // Attributes = {HoldFirst};
+nestedPartSet[ sym_ , partspecs__, val_ ] := Module[
+{
+dimensions = Dimensions@sym,
+posArray, positions
+},
+posArray = Array[ List, dimensions ];
+positions = Fold[ Part, posArray, {partspecs} ];
+(Part[ sym, #] = val) & @@@ positions;
+sym
+]
+
+nestedPartSet[ x, 4;;7, 1;;2, 100 ]
+
+(* {1, 2, 3, 100, 100, 6, 7, 8, 9, 10} *)
+• Thanks gwr. This helped a lot. I was able to generalize your basic idea to multiple dimensions and arbitrary arguments by wrapping the array and its partial set of indices in a single Unique symbol. You can then further wrap the symbol with more indices to any level. The wrapped symbols can then be passed to functions which can read or write the submatrix. Everything shares the same actual matrix. Its not too fast, but it seems pretty general. I could post the code if you're interested. – user3704499 Mar 29 '18 at 2:00
+• @user, you can post the code as an answer to your own question, so people can take a look at it and make suggestions. – J. M. will be back soon Mar 29 '18 at 3:39
+
+Part[] nearly provides composable "views" for read/write operations on lists and arrays, but reading and writing operations are sometimes inconsistent:
+
+x = Range[10]
+x[[4 ;; 7]][[2]]
+
+Out[61]=
+{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+Out[62]=
+5
+
+In[18]:=
+x[[4 ;; 7]][[2]] = 100;
+
+During evaluation of In[18]:= Set::partd1:Depth of object x[[4;;7,2]] is not sufficient for the given part specification. >>
+
+Thanks to gwr's answer, I was motivated to create ArrayRefs for reading/writing pieces of arrays or lists. The basic idea is to wrap a reference to a List or Array with a symbol, and then further wrap the symbol with submatrix expressions ("views") which may be evaluted using set[] and get[] functions. The symbol or submatrix views may be passed to other functions for evaluation, or further wrapped producing sub-sub-matrix views etc. All read/write actions affect the original List or Array.
+
+makeArrayRef[ref_Symbol] := Block[
+{obj},
+With[{this = Unique[obj]},
+set[this, value_] ^:= ref = value;  (* Set entire ref to a new value *)
+set[this, part__, value_] ^:= ref[[part]] = value;    (* Set part of ref *)
+get[this] ^:= ref;                  (* Get entire ref *)
+get[this, part__] ^:= ref[[part]];  (* get part of ref *)
+this[] := ref;                      (* shortcuts for get *)
+this[part__] := ref[[part]];
+this
+]
+];
+SetAttributes[makeArrayRef, HoldAll];
+
+view[p_, parts__] := view$@@ Prepend[substSpan$[List@parts], p];
+substSpan$[parts_] := Replace[parts, {s_Span :> span$[s], l_List :> span$[l]}, {1}]; get[view$[p_, parts__]] ^:= get @@ viewEval$[p, parts]; get[view$[p_, parts1__], parts2__] ^:= get[view[view$[p, parts1], parts2]]; set[view$[p_, parts__], value_] ^:= set @@ Append[viewEval$[p, parts], value]; set[view$[p_, parts1__], parts2__, value_] ^:= set[view[view$[p, parts1], parts2], value]; view$[p_, parts1__][parts2___] := get[view$[p, parts1], parts2]; view$[view$[p_, pre___, args1__span$, post___], args2$__] := Module[ {j, args, args2 = List@args2$, n2},
+
+n2 = Length@args2;
+j = 1;
+args = Replace[List[pre, args1, post], span$[s : (__Span|__List)] :> If[j <= n2, span$[s, args2[[j++]]], span$[s]], {1}]; view$ @@ Join[{p}, args, args2[[j;;]]]
+];
+view$[view$[p_, args1__], args2__] := view$[p, args1, args2]; (* args1 doesn't contain span$ *)
+SetAttributes[span$, Flat]; viewEval$[p_, pre___, parts__span$, post___] := Module[ {i = 1, dim = Dimensions[p[]]}, Prepend[Replace[{pre,parts,post}, {span$[args__] :> Fold[Part, Range[dim[[i++]]], List@args], x_ :> (i++; x)}, {1}], p]
+];
+viewEval$[p_, parts__] := {p, parts}; (* parts doesn't contain span$ *)
+
+A few motivating examples Make a simple list
+
+x = Range[10];
+p = makeArrayRef[x]
+
+Out[20]=
+obj$1062 Look at its contents p[] Out[21]= {1, 2, 3, 4, 5, 6, 7, 8, 9, 10} Create some references to sub-parts of the list q = view[p, 4 ;; 7] r = view[q, 2 ;; 3] q[] r[] Out[22]= view$[obj$1062, span$[4 ;; 7]]
+
+Out[23]=
+view$[obj$1062, span$[4 ;; 7, 2 ;; 3]] Out[24]= {4, 5, 6, 7} Out[25]= {5, 6} Assign values to sub-parts; print the original list set[r, 100] x Out[26]= 100 Out[27]= {1, 2, 3, 4, 100, 100, 7, 8, 9, 10} Further restrict the sub-part set[r, 1, 99] x Out[28]= 99 Out[29]= {1, 2, 3, 4, 99, 100, 7, 8, 9, 10} Construct a matrix m = Array["m", {3, 10}]; p = makeArrayRef[m]; MatrixForm[p[]] Create some sub-matrix references. Use the view[] function. q = view[p, 2 ;; 3, 5 ;; All ;; 2] r = view[q, 1 ;; All, 2] Out[33]= view$[obj$1093, span$[2 ;; 3], span$[5 ;; All ;; 2]] Out[34]= view$[obj$1093, span$[2 ;; 3, 1 ;; All], span$[5 ;; All ;; 2, 2]] Assign values to the sub-matrices. Note that all operations modify the original matrix m set[q, 100] MatrixForm[q[]] set[r, 99] MatrixForm[m] Assign sub-matrices using other sub-matrices set[q, 1 + p[1 ;; 2, 2 ;; 4]]; MatrixForm[m] Indices can be lists too s = view[p, 1, {2, 3, 5, 7}]; set[s, "prime-column"] MatrixForm[m] Works for SparseArrays also {n, nnz} = {15, 50}; n = 15; SeedRandom[1] indices = RandomInteger[{1, n}, {nnz, 2}]; values = RandomReal[{0, 1}, nnz]; spmat = SparseArray[Thread[indices -> values], {n, n}]; MatrixPlot[spmat] p = makeArrayRef[spmat]; q = view[p, 5 ;; 10, 3 ;; 12] set[q, 1] MatrixPlot[spmat] Out[52]= view$[obj$1210, span$[5 ;; 10], span$[3 ;; 12]] Out[53]= 1 Performance kind of sucks when indices involve Spans or Lists Timing[Do[spmat[[5 ;; 10,3 ;; 12]]; , {10000}]] Timing[Do[q[]; , {10000}]] Out[55]= {0.03125, Null} Out[56]= {0.328125, Null} Performance is better without Spans q2 = view[p, 1] Timing[Do[q2[]; , {10000}]] Out[57]= view$[obj\$1210, 1]
+
+Out[58]=
+{0.09375, Null}

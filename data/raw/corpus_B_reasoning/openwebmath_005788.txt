@@ -1,0 +1,105 @@
+# When do coefficients estimated by logistic and logit-linear regression differ?
+
+When modelling continuous proportions (e.g. proportional vegetation cover at survey quadrats, or proportion of time engaged in an activity), logistic regression is considered inappropriate (e.g. Warton & Hui (2011) The arcsine is asinine: the analysis of proportions in ecology). Rather, OLS regression after logit-transforming the proportions, or perhaps beta regression, are more appropriate.
+
+Under what conditions do the coefficient estimates of logit-linear regression and logistic regression differ when using R's lm and glm?
+
+Take the following simulated dataset, where we can assume that p are our raw data (i.e. continuous proportions, rather than representing ${n_{successes}\over n_{trials}}$):
+
+set.seed(1)
+x <- rnorm(1000)
+a <- runif(1)
+b <- runif(1)
+logit.p <- a + b*x + rnorm(1000, 0, 0.2)
+p <- plogis(logit.p)
+
+plot(p ~ x, ylim=c(0, 1))
+
+
+Fitting a logit-linear model, we obtain:
+
+summary(lm(logit.p ~ x))
+##
+## Call:
+## lm(formula = logit.p ~ x)
+##
+## Residuals:
+##      Min       1Q   Median       3Q      Max
+## -0.64702 -0.13747 -0.00345  0.15077  0.73148
+##
+## Coefficients:
+##             Estimate Std. Error t value Pr(>|t|)
+## (Intercept) 0.868148   0.006579   131.9   <2e-16 ***
+## x           0.967129   0.006360   152.1   <2e-16 ***
+## ---
+## Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+##
+## Residual standard error: 0.208 on 998 degrees of freedom
+## Multiple R-squared:  0.9586, Adjusted R-squared:  0.9586
+## F-statistic: 2.312e+04 on 1 and 998 DF,  p-value: < 2.2e-16
+
+
+Logistic regression yields:
+
+summary(glm(p ~ x, family=binomial))
+##
+## Call:
+## glm(formula = p ~ x, family = binomial)
+##
+## Deviance Residuals:
+##      Min        1Q    Median        3Q       Max
+## -0.32099  -0.05475   0.00066   0.05948   0.36307
+##
+## Coefficients:
+##             Estimate Std. Error z value Pr(>|z|)
+## (Intercept)  0.86242    0.07684   11.22   <2e-16 ***
+## x            0.96128    0.08395   11.45   <2e-16 ***
+## ---
+## Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+##
+## (Dispersion parameter for binomial family taken to be 1)
+##
+##     Null deviance: 176.1082  on 999  degrees of freedom
+## Residual deviance:   7.9899  on 998  degrees of freedom
+## AIC: 701.71
+##
+## Number of Fisher Scoring iterations: 5
+##
+## Warning message:
+## In eval(expr, envir, enclos) : non-integer #successes in a binomial glm!
+
+
+Will the logistic regression coefficient estimates always be unbiased with respect to the logit-linear model's estimates?
+
+• Note a theoretical distinction: with a binomial model applied to proportions you assume that trials behind each proportion are independent, that is, behind proportion 0.1 there "were", say, 10 independent trials yielding one success. For linear model, 0.1 is simply a value, some arbitrary measure. Mar 7 '15 at 10:13
+• I am somewhat doubtful in how far it even makes sense to apply a binomial model to proportions in the way done by the OP. After all, family=binomial implies that the dependent variable represents binomial counts -- not proportions. And how would glm know that 0.1 is like "one out of ten" and not "ten out of hundred"? While the proportion itself does not differ, this has major implications for how the standard error is computed. Mar 7 '15 at 10:24
+• @Wolfgang - I realise (and mention in my post) that it's inappropriate to model continuous proportions of this sort with logistic regression. I was interested more in if/when/how the point estimates of coefficients differ. Mar 7 '15 at 10:42
+• @Wolfgang, you are right, but it depends on the implementation. Some programs will allow to to input proportions as the DV and 1s in place of the bases, while the dataset is weighted by the real bases. So looks as if you analyze proportions, not counts. Mar 7 '15 at 11:10
+• @ttnphns Similarly, in R one can enter proportions as the DV and supply a vector containing numbers of trials to the weights arg (though this isn't what I was attempting in my post, where I have intentionally analysed the data incorrectly). Mar 7 '15 at 11:15
+
+Perhaps this can be answered in the "reverse" fashion - I.e. when are they the same?
+
+Now the IRLS algorithm used in logistic regression provides some insight here. At convergence you can express the model coefficients as:
+
+$$\hat {\beta}_{logistic}=\left (X^TWX\right)^{-1} X^TWz$$
+
+where $W$ is a diagonal weight matrix with ith term $W_{ii}=n_ip_i (1-p_i)$ and $z$ is a pseudo response that has ith element $z_i=x_i^T\hat {\beta}_{logistic} +\frac {y_i -n_ip_i}{n_ip_i (1-p_i)}$. Note that $var (z_i -x_i^T\hat {\beta})=W_{ii}^{-1}$ which makes logistic regression seem very similar to weighted least squares on a "logit type" of quantity. Note that all the relationships are implicit in logistic regression (eg $z$ depends on $\beta$ which depends on $z$).
+
+So I would suggest that the difference is mostly in using weighted least squares (logistic) vs unweighted least squares (ols on logits). If you weighted the logits $\log (y)-\log (n-y)$ by $y (1-y/n)$ (where $y$ is the number of "events" and $n$ the number of "trials") in the lm () call you would get more similar results.
+
+• Impressive. Could you please show your last sentence by R code using the given simulated data? Thanks! Mar 11 '15 at 5:36
+
+Please don't hesitate to point it out if I am wrong.
+
+First, I have so say, in the second fit, you call glm in a wrong way! To fit a logistic regression by glm, the response should be (binary) categorical variable, but you use p, a numeric variable! I have to say warning is just too gentle to let users know their mistakes...
+
+And, as you might expect, you get similar estimates of coefficients by the two fits just by COINCIDENCE. If you replace logit.p <- a + b*x + rnorm(1000, 0, 0.2) with logit.p <- a + b*x + rnorm(1000, 0, 0.7), ie, changing the variance of the error term from 0.2 to 0.7, then the results of the two fits will be greatly different, although the second fit (glm) is meaningless at all...
+
+Logistic regression is used for (binary) classification, so you should have categorical response, as is stated above. For example, the observations of the response should be a series of "success" or "failure", rather than a series of "probability (frequency)" as in your data. For a given categorical data set, you can calculate only one overall frequency for "response=success" or "response=failure", rather than a series. In the data you generate, there is no categorical variable at all, so it is impossible to apply logistic regression. Now you can see, although they have similar appearance, logit-linear regression (as you call it) is just an ordinary linear REGRESSION problem (ie, response is a numeric variable) using transformed response (just like sqr or sqrt transformation), and logistic regression is a CLASSIFICATION problem (ie, response is a categorical variable; don't get confused by the word "regression" in "logistic regression").
+
+Typically, linear regression is fitted through Ordinary Least Squares (OLS), which minimizes the square loss for regression problem; logistic regression is fitted through Maximum Likelihood Estimate (MLE), which minimizes log-loss for classification problem. Here is a reference on loss functions Loss Function, Deva Ramanan. In the first example, you regard p as the response, and fit a ordinary linear regression model through OLS; in the second example, you tell R that you are fitting a logistic regression model by family=binomial, so R fit the model by MLE. As you can see, in the first model, you get t-test and F-test, which are classical outputs of OLS fit for linear regression. In the second model, the significance test of coefficient is based on z instead of t, which is the classical output of MLE fit of logistic regression.
+
+• Nice question (+1) and nice answer (+1). I learned something new. Mar 7 '15 at 9:21
+• I would agree. However this logistic regression is a CLASSIFICATION problem might be misinterpreted in a sense that it is worth only as long as it can well classify. Which would be wrong to think, because a model "optimal" theoretically and by how it models probabilities may sometimes classify worse than a not so good model. Mar 7 '15 at 10:20
+• @ttnphns Thanks for your comment! I think it is a convention to call it a classification problem if the response is categorical. Whether the model performs well or not is important, but maybe doesn't affect the naming. Mar 7 '15 at 10:31
+• Thanks @JellicleCat - I'm aware that proportion data of this type are not suited to logistic regression, but was curious about the circumstances under which coefficient estimates would differ from those of OLS with logit-transformed proportions. Thanks for your example - it's clear that with increased variance, coefficient estimates diverge. Mar 7 '15 at 10:52

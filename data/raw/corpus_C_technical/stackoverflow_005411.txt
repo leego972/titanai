@@ -1,0 +1,42 @@
+Question: <p>I just learned about <a href="http://ngrep.sourceforge.net/" rel="nofollow">ngrep</a>, a cool program that lets you easily sniff packets that match a particular string.</p>
+
+<p>The only problem is that it can be hard to see the match in the big blob of output. I'd like to write a wrapper script to highlight these matches -- it could use ANSI escape sequences:</p>
+
+<pre><code>echo -e 'This is \e[31mRED\e[0m.'
+</code></pre>
+
+<p>I'm most familiar with Perl, but I'm perfectly happy with a solution in Python or any other language. The simplest approach would be something like:</p>
+
+<pre><code>while (&lt;STDIN&gt;) {
+   s/$keyword/\e[31m$keyword\e[0m/g;
+   print;
+}
+</code></pre>
+
+<p>However, this isn't a nice solution, because ngrep prints out hash marks without newlines whenever it receives a non-matching packet, and the code above will suppress the printing of these hashmarks until the script sees a newline.</p>
+
+<p>Is there any way to do the highlighting without inhibiting the instant appearance of the hashmarks?</p>
+
+Answer: <p>This seems to do the trick, at least comparing two windows, one running a straight ngrep (e.g. ngrep whatever) and one being piped into the following program (with ngrep whatever | ngrephl target-string).</p>
+
+<pre><code>#! /usr/bin/perl
+
+use strict;
+use warnings;
+
+$| = 1; # autoflush on
+
+my $keyword = shift or die "No pattern specified\n";
+my $cache   = '';
+
+while (read STDIN, my $ch, 1) {
+    if ($ch eq '#') {
+        $cache =~ s/($keyword)/\e[31m$1\e[0m/g;
+        syswrite STDOUT, "$cache$ch";
+        $cache = '';
+    }
+    else {
+        $cache .= $ch;
+    }
+}
+</code></pre>

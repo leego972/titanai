@@ -1,0 +1,147 @@
+Question: <p>I have been trying to find information on how to retrieve attachments from a gmail account in either python or PHP, I'm hoping that someone here can be of some help, thanks.</p>
+
+<p>Related:</p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/348630/how-can-i-download-all-emails-with-attachments-from-gmail">How can I download all emails with attachments from Gmail?</a></li>
+</ul>
+
+Answer: <pre><code>I recently worked on this topic and here is the code which works well. It also saves the details of the attachments in a word document with the following details:
+-&gt; Date
+-&gt; Time
+-&gt; From
+-&gt; Email ID
+-&gt; Subject
+
+
+
+
+
+
+
+
+
+
+&lt;?php 
+
+
+ /*
+    *   Gmail attachment extractor.
+    *
+    *   Downloads attachments from Gmail and saves it to a file.
+    *   Uses PHP IMAP extension, so make sure it is enabled in your php.ini,
+    *   extension=php_imap.dll
+    *
+    */
+
+    header('Content-type:application\msword');
+    header('Content-Disposition:attachment;Filename=document_name.doc');
+    set_time_limit(0); 
+    /* connect to gmail with your credentials */
+    $hostname = '{imap.googlemail.com:993/imap/ssl}INBOX';
+    $username = 'email@gmail.com';
+    $password = 'password';
+    /* try to connect */
+    $inbox = imap_open($hostname,$username,$password) or die('Cannot connect to       
+    Gmail: ' . imap_last_error());
+    /* get all new emails. If set to 'ALL' instead 
+    * of 'NEW' retrieves all the emails, but can be 
+    * resource intensive, so the following variable, 
+    * $max_emails, puts the limit on the number of emails downloaded.
+    * 
+    */
+    $emails = imap_search($inbox,'ALL');
+    /* useful only if the above search is set to 'ALL' */
+    $max_emails = 110;
+
+
+    /* if any emails found, iterate through each email */
+    if($emails){
+    $count = 1;
+
+    /* put the newest emails on top */
+    rsort($emails);
+    /* for every email... */
+    foreach($emails as $email_number){
+    /* get information specific to this email */
+    //$overview = imap_fetch_overview($inbox,$email_number,0);
+    $check=imap_check($inbox);
+    $result=imap_fetch_overview($inbox,"1:{$check-&gt;Nmsgs}",0);
+    foreach($result as $overview){
+    echo "#{$overview-&gt;msgno}({$overview-&gt;date})-From: {$overview-&gt;from}
+    {$overview-&gt;subject}\n"}
+    /* get mail message */
+    $message = imap_fetchbody($inbox,$email_number,2);
+    /* get mail structure */
+    $structure =imap_fetchstructure($inbox, $email_number);
+    //$functions = array('function1' =&gt; imap_fetchstructure($inbox,
+    $email_number));
+    //print_r(array_keys($functions));
+    $attachments = array();
+    //print_r(array_keys($attachments[$i]));
+    if($structure-&gt;parts[$i]-&gt;ifdparameters){
+    foreach($structure-&gt;parts[$i]-&gt;dparameters as $object){
+    if(strtolower($object-&gt;attribute) == 'filename'){
+    $attachments[$i]['is_attachment'] = true;
+    $attachments[$i]['filename'] = $object-&gt;value;
+        }
+       }
+      }
+       if($structure-&gt;parts[$i]-&gt;ifparameters) 
+       {
+         foreach($structure-&gt;parts[$i]-&gt;parameters as $object) 
+         {
+             if(strtolower($object-&gt;attribute) == 'name') 
+            {
+                $attachments[$i]['is_attachment'] = true;
+                $attachments[$i]['name'] = $object-&gt;value;
+            }
+        }
+     }
+     if($attachments[$i]['is_attachment']){
+     $attachments[$i]['attachment']imap_fetchbody($inbox,$email_number,$i+1);
+     /* 4 = QUOTED-PRINTABLE encoding */
+     if($structure-&gt;parts[$i]-&gt;encoding == 3){ 
+     $attachments[$i]['attachment'] = base64_decode($attachments[$i]  
+           ['attachment']);
+      }
+      /* 3 = BASE64 encoding */
+      elseif($structure-&gt;parts[$i]-&gt;encoding == 4){ 
+      $attachments[$i]['attachment'] =              
+
+      quoted_printable_decode($attachments[$i]['attachment']);
+      }
+
+       }
+      }
+     }
+       /* iterate through each attachment and save it */
+       foreach($attachments as $attachment)
+       {
+       if($attachment['is_attachment'] == 1){
+        $filename = $attachment['name'];
+        if(empty($filename)) $filename = $attachment['filename'];
+        if(empty($filename)) $filename = time() . ".dat";
+       /* prefix the email number to the filename in case two emails
+       * have the attachment with the same file name.
+       */
+       $fp = fopen($email_number . "-" . $filename, "w+");
+       fwrite($fp, $attachment['attachment']);
+        fclose($fp);
+        }
+
+        }
+
+          if($count++ &gt;= $max_emails) break;
+
+
+         }
+
+       } 
+
+        /* close the connection */
+
+       imap_close($inbox);
+
+  ?&gt;
+</code></pre>

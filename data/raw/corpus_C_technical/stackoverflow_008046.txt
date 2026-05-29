@@ -1,0 +1,236 @@
+Question: <p>Code like this often happens:</p>
+
+<pre><code>l = []
+while foo:
+    #baz
+    l.append(bar)
+    #qux
+</code></pre>
+
+<p>This is really slow if you're about to append thousands of elements to your list, as the list will have to be constantly resized to fit the new elements.</p>
+
+<p>In Java, you can create an ArrayList with an initial capacity. If you have some idea how big your list will be, this will be a lot more efficient.</p>
+
+<p>I understand that code like this can often be re-factored into a list comprehension. If the for/while loop is very complicated, though, this is unfeasible. Is there any equivalent for us Python programmers?</p>
+
+Answer: <p>The Pythonic way for this is:</p>
+
+<pre><code>x = [None] * numElements
+</code></pre>
+
+<p>or whatever default value you wish to prepop with, e.g.</p>
+
+<pre><code>bottles = [Beer()] * 99
+sea = [Fish()] * many
+vegetarianPizzas = [None] * peopleOrderingPizzaNotQuiche
+</code></pre>
+
+<p>Python's default approach can be pretty efficient, although that efficiency decays as you increase the number of elements.</p>
+
+<p>Compare</p>
+
+<pre><code>import time
+
+class Timer(object):
+    def __enter__(self):
+        self.start = time.time()
+        return self
+
+    def __exit__(self, *args):
+        end = time.time()
+        secs = end - self.start
+        msecs = secs * 1000  # millisecs
+        print('%fms' % msecs)
+
+Elements   = 100000
+Iterations = 144
+
+print('Elements: %d, Iterations: %d' % (Elements, Iterations))
+
+
+def doAppend():
+    result = []
+    i = 0
+    while i &lt; Elements:
+        result.append(i)
+        i += 1
+
+def doAllocate():
+    result = [None] * Elements
+    i = 0
+    while i &lt; Elements:
+        result[i] = i
+        i += 1
+
+def doGenerator():
+    return list(i for i in range(Elements))
+
+
+def test(name, fn):
+    print("%s: " % name, end="")
+    with Timer() as t:
+        x = 0
+        while x &lt; Iterations:
+            fn()
+            x += 1
+
+
+test('doAppend', doAppend)
+test('doAllocate', doAllocate)
+test('doGenerator', doGenerator)
+</code></pre>
+
+<p>with</p>
+
+<pre><code>#include &lt;vector&gt;
+typedef std::vector&lt;unsigned int&gt; Vec;
+
+static const unsigned int Elements = 100000;
+static const unsigned int Iterations = 144;
+
+void doAppend()
+{
+    Vec v;
+    for (unsigned int i = 0; i &lt; Elements; ++i) {
+        v.push_back(i);
+    }
+}
+
+void doReserve()
+{
+    Vec v;
+    v.reserve(Elements);
+    for (unsigned int i = 0; i &lt; Elements; ++i) {
+        v.push_back(i);
+    }
+}
+
+void doAllocate()
+{
+    Vec v;
+    v.resize(Elements);
+    for (unsigned int i = 0; i &lt; Elements; ++i) {
+        v[i] = i;
+    }
+}
+
+#include &lt;iostream&gt;
+#include &lt;chrono&gt;
+using namespace std;
+
+void test(const char* name, void(*fn)(void))
+{
+    cout &lt;&lt; name &lt;&lt; ": ";
+
+    auto start = chrono::high_resolution_clock::now();
+    for (unsigned int i = 0; i &lt; Iterations; ++i) {
+        fn();
+    }
+    auto end = chrono::high_resolution_clock::now();
+
+    auto elapsed = end - start;
+    cout &lt;&lt; chrono::duration&lt;double, milli&gt;(elapsed).count() &lt;&lt; "ms\n";
+}
+
+int main()
+{
+    cout &lt;&lt; "Elements: " &lt;&lt; Elements &lt;&lt; ", Iterations: " &lt;&lt; Iterations &lt;&lt; '\n';
+
+    test("doAppend", doAppend);
+    test("doReserve", doReserve);
+    test("doAllocate", doAllocate);
+}
+</code></pre>
+
+<p>On my Windows 7 i7, 64-bit Python gives</p>
+
+<pre><code>Elements: 100000, Iterations: 144
+doAppend: 3587.204933ms
+doAllocate: 2701.154947ms
+doGenerator: 1721.098185ms
+</code></pre>
+
+<p>While C++ gives (built with MSVC, 64-bit, Optimizations enabled)</p>
+
+<pre><code>Elements: 100000, Iterations: 144
+doAppend: 74.0042ms
+doReserve: 27.0015ms
+doAllocate: 5.0003ms
+</code></pre>
+
+<p>C++ debug build produces:</p>
+
+<pre><code>Elements: 100000, Iterations: 144
+doAppend: 2166.12ms
+doReserve: 2082.12ms
+doAllocate: 273.016ms
+</code></pre>
+
+<p>The point here is that with Python you can achieve a 7-8% performance improvement, and if you think you're writing a high-performance app (or if you're writing something that is used in a web service or something) then that isn't to be sniffed at, but you may need to rethink your choice of language.</p>
+
+<p>Also, the Python code here isn't really Python code. Switching to truly Pythonesque code here gives better performance:</p>
+
+<pre><code>import time
+
+class Timer(object):
+    def __enter__(self):
+        self.start = time.time()
+        return self
+
+    def __exit__(self, *args):
+        end = time.time()
+        secs = end - self.start
+        msecs = secs * 1000  # millisecs
+        print('%fms' % msecs)
+
+Elements   = 100000
+Iterations = 144
+
+print('Elements: %d, Iterations: %d' % (Elements, Iterations))
+
+
+def doAppend():
+    for x in range(Iterations):
+        result = []
+        for i in range(Elements):
+            result.append(i)
+
+def doAllocate():
+    for x in range(Iterations):
+        result = [None] * Elements
+        for i in range(Elements):
+            result[i] = i
+
+def doGenerator():
+    for x in range(Iterations):
+        result = list(i for i in range(Elements))
+
+
+def test(name, fn):
+    print("%s: " % name, end="")
+    with Timer() as t:
+        fn()
+
+
+test('doAppend', doAppend)
+test('doAllocate', doAllocate)
+test('doGenerator', doGenerator)
+</code></pre>
+
+<p>Which gives</p>
+
+<pre><code>Elements: 100000, Iterations: 144
+doAppend: 2153.122902ms
+doAllocate: 1346.076965ms
+doGenerator: 1614.092112ms
+</code></pre>
+
+<p>(in 32-bit doGenerator does better than doAllocate).</p>
+
+<p>Here the gap between doAppend and doAllocate is significantly larger.</p>
+
+<p>Obviously, the differences here really only apply if you are doing this more than a handful of times or if you are doing this on a heavily loaded system where those numbers are going to get scaled out by orders of magnitude, or if you are dealing with considerably larger lists.</p>
+
+<p>The point here: Do it the pythonic way for the best performance.</p>
+
+<p>But if you are worrying about general, high-level performance, Python is the wrong language. The most fundamental problem being that Python function calls has traditionally been upto 300x slower than other languages due to Python features like decorators etc (<a href="https://wiki.python.org/moin/PythonSpeed/PerformanceTips#Data_Aggregation#Data_Aggregation" rel="nofollow">https://wiki.python.org/moin/PythonSpeed/PerformanceTips#Data_Aggregation#Data_Aggregation</a>).</p>

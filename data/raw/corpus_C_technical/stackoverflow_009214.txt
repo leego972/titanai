@@ -1,0 +1,68 @@
+Question: <p>I just got done working through the Django tutorials for the second time, and am understanding things much more clearly now. However, I'm still unclear how apps inside a site interact with one another.</p>
+
+<p>For example, lets say I'm writing a blog application (a rather popular activity, apparently). Blog posts and comments tend to go together, and yet they are distinct enough that they should be built into separate apps, as is the general philosophy of Djano development.</p>
+
+<p>Consider the following example. In reality I would not actually write the comment app myself, as good code for that already exists on the web, but this is for demonstration/practice purposes:</p>
+
+<p><strong>mysite/blog/models.py</strong></p>
+
+<pre><code>from django.db import models
+
+class post(models.Model):
+    title = models.CharField(max_length=200)
+    author = models.CharField(max_length=200)
+    content = models.TextField()
+</code></pre>
+
+<p><strong>mysite/comments/models.py</strong></p>
+
+<pre><code>from django.db import models
+from mysite.blog.models import post
+
+class comment(models.Model):
+    id = models.AutoField()
+    post = models.ForeignKey(post)
+    author = models.CharField(max_length=200)
+    text = models.TextField()
+</code></pre>
+
+<p>Is what I wrote above, importing a model from another app and setting it as a foreign key, how Django apps interact? Or is there a different/better method for the apps that comprise a site to interact?</p>
+
+<p><strong>Update</strong><br>
+Per the recommendation in one response, I'm reading the documentation for contrib.contenttypes. If I'm reading this correctly, I could rewrite my example comment app like this:  </p>
+
+<pre><code>from django.db import models  
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contentypes import generic
+
+class comment(models.Model):  
+    id = models.AutoField()  
+    author = models.CharField(max_length=200)  
+    text = models.TextField()  
+    content_type = models.ForeignKey(ContentType)  
+    content_object = generic.GenericForeignKey(content_type, id)  
+</code></pre>
+
+<p>Would this be correct?</p>
+
+Answer: <p>Take a look at django's built-in <a href="http://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#ref-contrib-contenttypes">contenttypes framework</a>:</p>
+
+<p><code>django.contrib.contenttypes</code></p>
+
+<p>It allows you develop your applications as stand-alone units.  This is what the django developers used to allow django's built-in <a href="http://docs.djangoproject.com/en/dev/ref/contrib/comments/#ref-contrib-comments-index">comment framework</a> to attach a comment to any model in your project.</p>
+
+<p>For instance, if you have some content object that you want to "attach" to other content objects of different types, like allowing each user to leave a "favorite" star on a blog post, image, or user profile, you can create a <code>Favorite</code> model with a <a href="http://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#generic-relations">generic relation field</a> like so:</p>
+
+<pre><code>from django.db import models
+from django.contrib.auth.models import User
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes import generic
+
+class Favorite(models.Model):
+    user = models.ForeignKey(User)
+    content_type = models.ForeignKey(ContentType)
+    object_id = models.PositiveIntegerField()
+    content_object = generic.GenericForeignKey('content_type', 'object_id')
+</code></pre>
+
+<p>In this way you can add a <code>Favorite</code> star from any user to any model in your project.  If you want to add API access via the recipient model class you can either add a <a href="http://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#reverse-generic-relations">reverse generic relation field</a> on the recipient model (although this would be "coupling" the two models, which you said you wanted to avoid), or do the lookup through the <code>Favorite</code> model with the <code>content_type</code> and <code>object_id</code> of the recipient instance, see the <a href="http://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#reverse-generic-relations">official docs</a> for an example. </p>

@@ -1,0 +1,25 @@
+Question: <p>I want to get a list of all Django auth user with a specific permission group, something like this:</p>
+
+<pre><code>user_dict = {
+    'queryset': User.objects.filter(permisson='blogger')
+}
+</code></pre>
+
+<p>I cannot find out how to do this. How are the permissions groups saved in the user model?</p>
+
+Answer: <p>Do not forget that specifying permission codename is not enough because different apps may reuse the same codename. One needs to get permission object to query Users correctly:</p>
+
+<pre><code>def get_permission_object(permission_str):
+    app_label, codename = permission_str.split('.')
+    return Permission.objects.filter(content_type__app_label=app_label, codename=codename).first()
+
+def get_users_with_permission(permission_str, include_su=True):
+    permission_obj = get_permission_object(permission_str)
+    q = Q(groups__permissions=permission_obj) | Q(user_permissions=permission_obj)
+    if include_su:
+        q |= Q(is_superuser=True)
+    return User.objects.filter(q).distinct()
+</code></pre>
+
+<p>Code with imports:
+<a href="https://github.com/Dmitri-Sintsov/django-jinja-knockout/blob/master/django_jinja_knockout/models.py" rel="nofollow">https://github.com/Dmitri-Sintsov/django-jinja-knockout/blob/master/django_jinja_knockout/models.py</a></p>

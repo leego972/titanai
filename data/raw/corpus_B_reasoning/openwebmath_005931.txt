@@ -1,0 +1,73 @@
+# Why do we need a ramp for stepper motor?
+
+I am a newbie and trying to understand how i can run a stepper motor. The concept i had in mind was that steppers need digital pulses to run, and i tried it out too. I was able to run the stepper i am using very easily. But lately I came across a link where they have used a ramp for starting a stepper justifying it by saying that
+
+"if we try to start the stepper motor with fast pulses then it just sits there and hums away not turning, We need to start the stepper off slowly and gradually increase the speed of the steps (ramping up)." Source:http://www.societyofrobots.com/member_tutorials/book/export/html/314
+
+My question is why does the stepper then starts up with regular square pulses? Why do we need a ramp? All the other forums and tutorial always talk about providing digital pulses to the stepper for starting it up, why is the concept of ramp generation not discussed there? Is it a bad practice to run stepper with digital pulses?
+
+• I think you are confusing the "ramp" with "square wave" shapes. The control is still by square wave, just the speed/rate of change of these control steps is increased from zero to the intended steps per second or whatever velocity you are trying to get. – KyranF Dec 13 '14 at 7:49
+• Say your stepper square wave looks like a 3KHz signal. Rather than go from dead stop to flat-out, you should start with a low frequency (or a longer gap between pulses). Flooring a car accelerator pedal takes about half a second, and either smokes tyres (in low gear) or takes a while to respond (in high gear). – Alan Campbell Dec 13 '14 at 9:42
+• Yep i did confuse the ramp with the pulses, thanks for the feedback guys! – alexhilton Dec 18 '14 at 4:16
+
+When the controller steps the motor, the rotor has to move far enough (angle) that when the next coil (or coil pair) is energized it will pull the rotor in the correct direction. If the rotor has not moved through enough angle, then the coils will pull the rotor backwards and the motor just sits there and buzzes. You can find many illustrations and animations online that explain how normal operation works- imagine if the rotor only moved a fraction of the intended amount.
+
+The rotor, shaft, and whatever is connected to the shaft all have inertia and there is friction of various kinds.
+
+The maximum speed the stepper can turn the shaft is related to the torque available from the motor and the torque required to turn the shaft (available torque drops as RPM increases, and the required torque generally increases as the RPMs increase). That's not directly related to the inertia.
+
+To actually get to the maximum (or some fraction thereof) you can only accelerate the RPM so fast without missing steps. The maximum acceleration is related to the inertia and the excess available torque at a given RPM. If the motor is doing all it can just to keep up with the current RPM then you can no longer accelerate. If the RPM are low enough, you don't need to ramp it up, you can simply tell it to step, but that will typically be only a fraction of the RPM the motor is capable of. Often linear ramps are used for simplicity, but a more convex curve would be optimal.
+
+Here is a motor torque curve from Oriental Motor (a major Japanese maker):
+
+To predict the maximum rate of acceleration you need to know the torque and the mass moment of inertia. If you exceed the maximum rate of acceleration at a given loading then the motor will lose steps, so a reasonable safety margin is a good idea.
+
+• Thanks Sphero for such a detailed reply, i was actually confusing myself with two major things, i will work on a way to select the frequency of the steps to make up a ramp! – alexhilton Dec 18 '14 at 4:16
+• Do you have some literature? – Carlton Banks Dec 12 '16 at 0:38
+• @CarltonBanks Check out the link above to Oriental Motor. – Spehro Pefhany Dec 12 '16 at 1:23
+• It doesn't nessesarily mention why it is better ramping than not, (If at all, only mention selection as far i can read) I mean as far I understand one could microstep the motor and not ramp it, difference would be the torque not being that powerfull. – Carlton Banks Dec 12 '16 at 1:27
+• If you don't care about maximum speed there is no reason to ramp. Ramping lets you get a higher maximum speed for a given inertia + torque without losing steps. – Spehro Pefhany Dec 12 '16 at 1:58
+
+It sounds like the description you have read is talking about ramping up speed, in other words, the frequency of the steps. The pulses for each step are still square.
+
+The reason is that a stepper motor can generate only so much torque. When we exceed this maximum torque, the motor misses steps.
+
+Furthermore, accelerating the motor requires torque by Newton's second law of motion: force equals mass times acceleration:
+
+$$F=ma$$
+
+For a rotating system the terms change a bit, but they are mostly analogous: torque equals the moment of inertia times angular acceleration:
+
+$$\tau = I \alpha$$
+
+The consequence is that to instantly accelerate the motor would require infinite torque which is not possible. Thus, we must limit acceleration, that is, "ramp up" the speed, to limit the torque required to something that the motor can generate without missing steps.
+
+Two years later... I wanted to add some details about the typical speed vs vibration/noise for any step motor.
+
+When stepping very slowly, like one per second, the shaft will move to the new location and overshoot then undershoot many times until it stabilize on that step. The process repeat on each new step.
+
+The electric voltage/current has to be sufficient for the load and the motor size need to be selected to match the torque required.
+
+Once the motor does not need to move, the voltage/current can be reduced by about 50% to 75% to maintain that position. In cases where the friction is dominant, or using some type of gear, the motor can be desenergized completely. This is similar to relays which need for example 12 volt to activate, but then easily keep the contact activated with only 9 volt.
+
+When increasing the speed to about 20 per second, the vibration/noise reach it maximum. This is a speed that most engineer will try to avoid.
+
+As the speed is increased, the vibration/noise decrease, by the torque also falls. If you plot the noise vs frequency, the shape will show a clear down direction with some local maxima, often at harmonic frequency.
+
+Let's assume that a typical value above 100 step per second, the vibration is low enough to be tolerable and let say that the torque become too weak for reliable operation above 500 hertz.
+
+You can start a step motor using any of these frequency right away, without ramping the speed from 100 Hz to 500 Hz. Similarly, you can stop abruptly the steps, no matter the frequency. The holding current is sufficient to lock the motor at that step.
+
+The ramping is needed when you want to exceed the maximum frequency. Given the "typical" number above, you may find that your motor still have enough torque, when smootly accelerated, to work from 500 Hz to 700 Hz. The trick for a reliable operation is to start the ramp somewhere like 400 Hz, then let it increase up to 700 Hz. Keep it at that speed until approaching the target position.
+
+Then, decelerate smoothly from 700 Hz to 450 Hz. If target position still not reached, keep the motor at that speed. Then, from 450 Hz, you can stop. Keep the motor energized at max current/voltage for 0.1 second to 1 second to make sure all source of vibration dissipated.
+
+The linear ramp is easier to create. But the optimum is the "S" shape. You start at the safe frequency, increase slowly at first and change rate of increasing the speed exponentially until reaching the maximum.
+
+When it is time to decelerate, the same algorithm apply, decreasing the speed slowly and exponentially changing the rate of speed decreasing, stop decreasing the speed when reaching the safe speed, which allow to stop the motor abruptly.
+
+The actual code doing all that, using a motorola 68HC05 microcontroller, was taking about 500 bytes (the internal EPROM was 8K total and the RAM was 128 bytes). It was written in assembler.
+
+If you have the hardware for micro-stepping, then you can ignore all the mention about noise and vibration. You still need a "S" shape acceleration if you want to exceed the usual maximum speed. But since there is no vibration no matter the speed, you can let the deceleration go as low as you want.
+
+The lessons learned from the square wave drive still hold thru. Thhat is, for the most efficient way to reach destination, you want the deceleration to sit at the frequency just below the point where the motor torque is sufficient for abrupt stop and start.

@@ -1,0 +1,68 @@
+Question: <p>Basically, something similar to System.Xml.XmlWriter - A streaming XML Writer that doesn't incur much of a memory overhead. So that rules out xml.dom and xml.dom.minidom. Suggestions?</p>
+
+Answer: <p>I think you'll find XMLGenerator from xml.sax.saxutils is the closest thing to what you want.</p>
+
+<pre>
+import time
+from xml.sax.saxutils import XMLGenerator
+from xml.sax.xmlreader import AttributesNSImpl
+
+LOG_LEVELS = ['DEBUG', 'WARNING', 'ERROR']
+
+
+class xml_logger:
+    def __init__(self, output, encoding):
+        """
+        Set up a logger object, which takes SAX events and outputs
+        an XML log file
+        """
+        logger = XMLGenerator(output, encoding)
+        logger.startDocument()
+        attrs = AttributesNSImpl({}, {})
+        logger.startElementNS((None, u'log'), u'log', attrs)
+        self._logger = logger
+        self._output = output
+        self._encoding = encoding
+        return
+
+    def write_entry(self, level, msg):
+        """
+        Write a log entry to the logger
+        level - the level of the entry
+        msg   - the text of the entry.  Must be a Unicode object
+        """
+        #Note: in a real application, I would use ISO 8601 for the date
+        #asctime used here for simplicity
+        now = time.asctime(time.localtime())
+        attr_vals = {
+            (None, u'date'): now,
+            (None, u'level'): LOG_LEVELS[level],
+            }
+        attr_qnames = {
+            (None, u'date'): u'date',
+            (None, u'level'): u'level',
+            }
+        attrs = AttributesNSImpl(attr_vals, attr_qnames)
+        self._logger.startElementNS((None, u'entry'), u'entry', attrs)
+        self._logger.characters(msg)
+        self._logger.endElementNS((None, u'entry'), u'entry')
+        return
+
+    def close(self):
+        """
+        Clean up the logger object
+        """
+        self._logger.endElementNS((None, u'log'), u'log')
+        self._logger.endDocument()
+        return
+
+if __name__ == "__main__":
+    #Test it out
+    import sys
+    xl = xml_logger(sys.stdout, 'utf-8')
+    xl.write_entry(2, u"Vanilla log entry")
+    xl.close()   
+
+</pre>
+
+<p>You'll probably want to look at the rest of the article I got that from at <a href="http://www.xml.com/pub/a/2003/03/12/py-xml.html">http://www.xml.com/pub/a/2003/03/12/py-xml.html</a>.</p>

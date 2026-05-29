@@ -1,0 +1,66 @@
+Question: <p>Is there a way to have a default parameter passed to a action in the case where the regex didnt match anything using django?</p>
+
+<pre><code>
+urlpatterns = patterns('',(r'^test/(?P&lt;name&gt;.*)?$','myview.displayName'))
+
+#myview.py
+def displayName(request,name):
+      # write name to response or something
+</code></pre>
+
+<p>I have tried setting the third parameter in the urlpatterns to a dictionary containing ' and giving the name parameter a default value on the method, none of which worked. the name parameter always seems to be None. I really dont want to code a check for None if i could set a default value.</p>
+
+<p>Clarification: here is an example of what i was changing it to.</p>
+
+<pre><code>
+def displayName(request,name='Steve'):
+      return HttpResponse(name)
+#i also tried
+
+urlpatterns = patterns('',
+      (r'^test/(?P&lt;name&gt;.*)?$',
+        'myview.displayName',
+        dict(name='Test')
+      )
+)
+</code></pre>
+
+<p>when i point my browser at the view it displays the text
+'None'</p>
+
+<p>Any ideas?</p>
+
+Answer: <p>The problem is that when the pattern is matched against 'test/' the groupdict captured by the regex contains the mapping 'name' => None:</p>
+
+<pre><code>&gt;&gt;&gt; url.match("test/").groupdict()
+{'name': None}
+</code></pre>
+
+<p>This means that when the view is invoked, using something I expect that is similar to below:</p>
+
+<pre><code>view(request, *groups, **groupdict)
+</code></pre>
+
+<p>which is equivalent to:</p>
+
+<pre><code>view(request, name = None)
+</code></pre>
+
+<p>for 'test/', meaning that name is assigned None rather than not assigned.</p>
+
+<p>This leaves you with two options. You can:</p>
+
+<ol>
+<li>Explicitly check for None in the view code which is kind of hackish.</li>
+<li>Rewrite the url dispatch rule to make the name capture non-optional and introduce a second rule to capture when no name is provided. </li>
+</ol>
+
+<p>For example:</p>
+
+<pre><code>urlpatterns = patterns('',
+    (r'^test/(?P&lt;name&gt;.+)$','myview.displayName'), # note the '+' instead of the '*'
+    (r'^test/$','myview.displayName'),
+)
+</code></pre>
+
+<p>When taking the second approach, you can simply call the method without the capture pattern, and let python handle the default parameter or you can call a different view which delegates.</p>

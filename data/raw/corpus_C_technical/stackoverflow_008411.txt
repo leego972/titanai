@@ -1,0 +1,29 @@
+Question: <p>Is it possible to terminate a running thread without setting/checking any flags/semaphores/etc.?</p>
+
+Answer: <p>This is based on <a href="http://code.activestate.com/recipes/496960-thread2-killable-threads/" rel="nofollow">thread2 -- killable threads (Python recipe)</a></p>
+
+<p>You need to call PyThreadState_SetasyncExc(), which is only available through ctypes.</p>
+
+<p>This has only been tested on Python 2.7.3, but it is likely to work with other recent 2.x releases.</p>
+
+<pre><code>import ctypes
+
+def terminate_thread(thread):
+    """Terminates a python thread from another thread.
+
+    :param thread: a threading.Thread instance
+    """
+    if not thread.isAlive():
+        return
+
+    exc = ctypes.py_object(SystemExit)
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_long(thread.ident), exc)
+    if res == 0:
+        raise ValueError("nonexistent thread id")
+    elif res &gt; 1:
+        # """if it returns a number greater than one, you're in trouble,
+        # and you should call it again with exc=NULL to revert the effect"""
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(thread.ident, None)
+        raise SystemError("PyThreadState_SetAsyncExc failed")
+</code></pre>

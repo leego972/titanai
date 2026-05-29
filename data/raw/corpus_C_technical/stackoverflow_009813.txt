@@ -1,0 +1,48 @@
+Question: <p>I'm trying to run an interactive command through paramiko.  The cmd execution tries to prompt for a password but I do not know how to supply the password through paramiko's exec_command and the execution hangs.  Is there a way to send values to the terminal if a cmd execution expects input interactively?</p>
+
+<pre><code>ssh = paramiko.SSHClient()
+ssh.connect(server, username=username, password=password)
+ssh_stdin, ssh_stdout, ssh_stderr = ssh.exec_command("psql -U factory -d factory -f /tmp/data.sql")
+</code></pre>
+
+<p>Does anyone know how this can addressed? Thank you.</p>
+
+Answer: <pre><code>ssh = paramiko.SSHClient()
+ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.connect(server_IP,22,username, password)
+
+
+stdin, stdout, stderr = ssh.exec_command('/Users/lteue/Downloads/uecontrol-CXC_173_6456-R32A01/uecontrol.sh -host localhost ')
+alldata = ""
+while not stdout.channel.exit_status_ready():
+   solo_line = ""        
+   # Print stdout data when available
+   if stdout.channel.recv_ready():
+      # Retrieve the first 1024 bytes
+      solo_line = stdout.channel.recv(1024) 
+      alldata += solo_line
+   if(cmp(solo_line,'uec&gt; ') ==0 ):    #Change Conditionals to your code here  
+     if num_of_input == 0 :
+      data_buffer = ""    
+      for cmd in commandList :
+       #print cmd
+       stdin.channel.send(cmd)        # send input commmand 1
+      num_of_input += 1
+     if num_of_input == 1 :
+      stdin.channel.send('q \n')      # send input commmand 2 , in my code is exit the interactive session, the connect will close.
+      num_of_input += 1 
+print alldata
+ssh.close()              
+</code></pre>
+
+<p>Why the stdout.read() will hang if use dierectly without checking  stdout.channel.recv_ready(): in while stdout.channel.exit_status_ready():  </p>
+
+<p>For my case ,after run command on remote server , the session is waiting for user input  , after input 'q' ,it will close the connection . 
+But before inputting 'q' , the stdout.read() will waiting for EOF,seems this methord does not works if buffer is larger .</p>
+
+<ul>
+<li><strong>I tried stdout.read(1) in while , it works<br>
+ I tried stdout.readline() in while , it works also.<br>
+ stdin, stdout, stderr   = ssh.exec_command('/Users/lteue/Downloads/uecontrol')<br>
+ stdout.read()  will hang</strong></li>
+</ul>

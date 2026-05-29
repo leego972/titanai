@@ -1,0 +1,100 @@
+Gneiss regression summary issue
+
+Background:
+I am following the gneiss tutorial, using the data and code attached below. I can run the tutorial with the tutorial data with no issues. So the issue is with my stuff.
+
+The Problem:
+My regression summary doesn’t show all of my patients. Specifically, it doesn’t show Patient AH. The No. Observations is correct (12), and the sample ID’s for AH appear in the Predicted Balances and Residuals .csv files, but AH is absent from the Coefficients and Coefficient values .csv files. AH does appear in the dendrogram-heatmap visualization.
+
+What I have done:
+I have checked my metadata file, and it doesn’t seem to show any errors. The SampleID’s in the metadata file match those in each of the feature tables. I have tried different values in the Patient column in the metadata file and I have tried different columns, with no success. I tried creating new metadata files, nope. I went back all the way to the original fastq files and confirmed the sample ID’s were correct. When using QIIME1’s  biom summarize-table  on the exported composition and balances artifacts, the SampleID’s for AH are present in both. In addition, when I specified  --p-formula "Group"  it only showed Group B. I also tried  --p-formula "PatientGroup" , both Patient AH and Group A were missing. Grasping at straws, I changed the 'A's to other letters, that wasn't the issue. I have done a number of other things, but none have worked.
+
+Files:
+Unfiltered feature table artifact: table_unflt.qza (57.1 KB)
+Unfiltered feature table visual: table_unflt.qzv (356.1 KB)
+Filtered feature table artifact: table.qza (52.4 KB)
+Filtered feature table visual: table.qzv (349.2 KB)
+Composition feature table: composition.qza (56.3 KB)
+Hierarchy: hierarchy.qza (51.0 KB)
+Balances: balances.qza (111.5 KB)
+Regression summary: regression_summary.qzv (355.2 KB)
+Dendro-Heatmap: heatmap.qzv (122.9 KB)
+Composition biom summarize-table output: comp.txt (616 Bytes)
+Balances biom summarize-table output: bals.txt (765 Bytes)
+
+Code:
+
+# remove features present in only 1 sample
+qiime feature-table filter-features \
+--i-table table_unflt.qza \
+--p-min-samples 2 \
+--o-filtered-table table.qza
+
+# remove features with frequency less than 10
+qiime feature-table filter-features \
+--i-table table.qza \
+--p-min-frequency 10 \
+--o-filtered-table table.qza
+
+--i-table table.qza \
+--p-pseudocount 1 \
+--o-composition-table composition.qza
+
+# correlation-clustering
+qiime gneiss correlation-clustering \
+--i-table composition.qza \
+--o-clustering hierarchy.qza
+
+# ilr transform
+qiime gneiss ilr-transform \
+--i-table composition.qza \
+--i-tree hierarchy.qza \
+--o-balances balances.qza
+
+# regression
+qiime gneiss ols-regression \
+--p-formula "Patient" \
+--i-table balances.qza \
+--i-tree hierarchy.qza \
+--o-visualization regression_summary.qzv
+
+# dendrogram-heatmap visual
+qiime gneiss dendrogram-heatmap \
+--i-table composition.qza \
+--i-tree hierarchy.qza \
+--p-color-map seismic \
+--o-visualization heatmap.qzv
+
+I imagine at this point I am just overlooking something small and 'easy' since that seems to be the way it always goes. Any help is welcomed.
+
+-Kristopher
+
+1 Like
+
+Hi @kparke10, this is a very good question, and the intuition behind it is quite subtle.
+
+Whenever you are trying to formulate a categorical test with K groups, you can only run K-1 tests. In your case, it is expected to have one of the groups missing, because that group has become your baseline group.
+
+Think of it this way.
+
+If you are trying to test the difference between two treatment groups, you’ll have the following hypothesis.
+
+H_0: \mu_1 = \mu_2
+
+You are really just testing to see if the average between your two groups is the same – if they aren’t, then you’ll have a small p-value and can reject that. Here you have K=2 and just one test. And it turns out that you can solve this problem using regression with just one variable (i.e. does the sample came from group 1 or not).
+
+Now if you have 3 groups, it gets a little tricker to encode this into a regression problem. But essentially, you can use the same trick as above - by creating two variables. (variable 1 - does the sample belong to the first group) and (variable 2 - does the sample belong to the second group). You don’t need to have a third variable, because if you can always figure out if a sample came from the third group if it didn’t belong to either group 1 or group 2. There is a pretty good discussion on stack exchange showing the equivalence between ANOVA and regression here.
+
+With the linear regression in Gneiss, the first group is automatically chosen as the default baseline. If you want to chose another baseline (i.e. Group B is the baseline), you can modify the formula to
+
+--p-formula C(Group, Treatment('B'))
+
+The C() is to tell the formula that it is a categorical variable, and the Treatment() denotes that the baseline group is B.
+
+TL;DR your analysis is fine. There are just some subtle details about how regression works with categorical variables.
+
+2 Likes
+
+Thank you for the response!
+
+This topic was automatically closed 31 days after the last reply. New replies are no longer allowed.

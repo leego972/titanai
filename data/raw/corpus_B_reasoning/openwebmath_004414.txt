@@ -1,0 +1,190 @@
+# 6. Data Formats¶
+
+MØD utilises several data formats and encoding schemes.
+
+## 6.1. GML¶
+
+MØD uses the Graph Modelling Language (GML) for general specification of graphs and rules. The parser recognises most of the published specification, with regard to syntax. The specific grammar is as follows.
+
+GML   ::=  (key value)*
+key   ::=  identifier
+value ::=  int
+double
+quoteEscapedString
+list
+list  ::=  '[' (key value)* ']'
+
+
+A quoteEscapedString is zero or more characters surrounded by double quotation marks. To include a \" character it must be escaped. Tabs, newlines, and backslashses can be written as \t, \n, and \\. An identifier must match the regular expression [a-zA-Z][a-zA-Z0-9]* GML code may have line comments, starting with #. They are ignored during parsing.
+
+## 6.2. Tikz (Rule)¶
+
+This format is used for visualising rules similarly to how the Tikz (Graph) format is used for graphs. A rule is depicted as its span $$(L\leftarrow K\rightarrow R)$$ with the vertex positions in the plane indicating the embedding of $$K$$ in $$L$$ and $$R$$. Additionally, $$L\backslash K$$ and $$R\backslash K$$ are shown in different colour in $$L$$ and $$R$$ respectively.
+
+## 6.3. DOT (Rule)¶
+
+The DOT format (from Graphviz) is used for generating vertex coordinates for the Tikz format, when Open Babel can not be used.
+
+## 6.4. GML (Rule)¶
+
+A rule $$(L\leftarrow K\rightarrow R)$$ in GML format is specified as three graphs; $$L\backslash K$$, $$K$$, and $$R\backslash K$$. Each graph is specified a a list of vertices and edges, similar to a graph in GML format. The key-value structure is exemplified by the following grammar.
+
+ruleGML         ::=  'rule ['
+[ ruleId ]
+[ leftSide ]
+[ context ]
+[ rightSide ]
+matchConstraint*
+']'
+ruleId          ::=  'ruleID' quoteEscapedString
+leftSide        ::=  'left [' (node | edge)* ']'
+context         ::=  'context [' (node | edge)* ']'
+rightSide       ::=  'right [' (node | edge)* ']'
+node            ::=  'node [ id' int 'label' quoteEscapedString ']'
+edge            ::=  'edge [ source' int 'target' int 'label' quoteEscapedString ']'
+matchConstraint ::=  adjacency
+'id' int
+'op "' op '"'
+'count' unsignedInt
+[ 'nodeLabels [' labelList ']' ]
+[ 'edgeLabels [' labelList ']' ]
+']'
+labelList       ::=  ('label' quoteEscapedString)*
+op              ::=  '<' | '<=' | '=' | '>=' | '>'
+
+
+Note though that list elements can appear in any order.
+
+## 6.5. Tikz (Graph)¶
+
+Graphs are visualised using generated Tikz code. The coordinates for the layout is either generated using Open Babel or Graphviz. The visualisation style is controlled by passing instances of the classes mod::GraphPrinter (C++) and mod.GraphPrinter (Python) to the printing functions. The drawing style is inspired by ChemFig and Open Babel. See also PostMØD (mod_post).
+
+## 6.6. DOT (Graph)¶
+
+The DOT format (from Graphviz) is used for generating vertex coordinates for the Tikz format, when Open Babel can not be used.
+
+## 6.7. GML (Graph)¶
+
+A graph can be specified as GML by giving a list of vertices and edges with the key graph. The following grammar exemplifies the required key-value structure.
+
+graphGML ::=  'graph [' (node | edge)* ']'
+node     ::=  'node [ id' int 'label' quoteEscapedString ']'
+edge     ::=  'edge [ source' int 'target' int 'label' quoteEscapedString ']'
+
+
+Note though that list elements can appear in any order.
+
+## 6.8. SMILES¶
+
+The Simplified molecular-input line-entry system is a line notation for molecules. MØD can load most SMILES strings, and converts them internally to labelled graphs. For graphs that are sufficiently molecule-like, a SMILES string can be generated. The generated strings are canonical in the sense that the same version of MØD will print the same SMILES string for isomorphic molecules.
+
+Warning
+
+The SMILES canonicalisation algorithm is the original CANGEN algorithm that does not work in general, and some molecules with specific symmetries thus have multiple “canonical” forms. This problem will be fixed at some point. To properly check for isomorphism, load the graphs and call the appropriate method.
+
+The reading of SMILES strings is based on the OpenSMILES specification, but with the following notes/changes.
+
+• Only single SMILES strings are accepted, i.e., not multiple strings separated by white-space.
+• The specical dot “bond” (.) is not allowed.
+• Isotope information is ignored.
+• Chirality information is ignored.
+• Up and down bonds are regarded as implicit bonds, i.e., they might represent either a sngle bond or an aromatic bond. The stereo information is ignored.
+• Atom classes are ignored.
+• Wildcard atoms (specified with *) are converted to vertices with label *. Any other information on the vertex is ignored (e.g., the charge in [*-]).
+• Only charges from $$-9$$ to $$9$$ are allowed.
+• The bond type \$ is currently not allowed.
+• Aromaticity can only be specified using the bond type : or using the special lower case atoms. I.e., c1ccccc1 and C1:C:C:C:C:C:1 represent the same molecule, but C1=CC=CC=C1 is a different molecule.
+• The final graph will conform to the molecule encoding scheme described below.
+• Implicit hydrogens are added following a more complicated procedure.
+• A bracketed atom can have a radical by writing a dot (.) between the position of the charge and the position of the class.
+
+The written SMILES strings are intended to be canonical and may not conform to any “prettyness” standards.
+
+### 6.8.1. Implicit Hydrogen Atoms¶
+
+When SMILES strings are written they will use implicit hydrogens whenever they can be inferred when reading the string. For the purposes of implicit hydrogens we use the following definition of valence for an atom. The valence of an atom is the weighted sum of its incident edges, where single (-) and aromatic (:) bonds have weight 1, double bounds (=) have weight 2, and triple bonds (#) have weight 3. If an atom has an incident aromatic bond, its valence is increased by 1. The atoms that can have implicit hydrogens are B, C, N, O, P, S, F, Cl, Br, and I. Each have a set of so-called normal valences as shown in the following table. The atoms N and S additionally have certain sets of incident edges that are also considered normal, which are also listed in the table.
+
+Atom Normal Valences and Neighbourhoods
+B 3
+C 4
+N 3, 5, $$\{-, :, :\}$$, $$\{-, -, =\}$$, $$\{:, :, :\}$$
+O 2
+P 3, 5
+S 2, 4, 6, $$\{:, :\}$$
+F, Cl, Br, I 1
+
+If the set of incident edges is listed in the table, then no hydrogens are added. If the valence is higher than the highest normal valence, then no hydrogens are added. Otherwise, hydrogens are added until the valence is at the next higher normal valence.
+
+When writing SMILES strings the inverse procedure is used.
+
+## 6.9. GraphDFS¶
+
+The GraphDFS format is intended to provide a convenient line notation for general undirected labelled graphs. Thus it is in many aspects similar to SMILES strings, but a string being both a valid SMILES string and GraphDFS string may not represent the same graph. The semantics of ring-closures/back-edges are in particular not the same.
+
+### 6.9.1. Grammar¶
+
+graphDFS                     ::=  chain
+chain                        ::=  vertex evPair*
+vertex                       ::=  (labelVertex | ringClosure) branch*
+evPair                       ::=  edge vertex
+labelVertex                  ::=  '[' bracketEscapedString ']' [ defRingId ]
+implicitHydrogenVertexLabels [ defRingId ]
+implicitHydrogenVertexLabels ::=  'B' | 'C' | 'N' | 'O' | 'P' | 'S' | 'F' | 'Cl' | 'Br' | 'I'
+defRingId                    ::=  unsignedInt
+ringClosure                  ::=  unsignedInt
+edge                         ::=  '{' braceEscapedString '}'
+shorthandEdgeLabels
+shorthandEdgeLabels          ::=  '-' | ':' | '=' | '#' | ''
+branch                       ::=  '(' evPair+ ')'
+
+
+A bracketEscapedString and braceEscapedString are zero or more characters except respectively ] and }. To have these characters in each of their strings they must be escaped, i.e., \] and \} respectively.
+
+The parser additionally enforces that a defRingId may not be a number which has previously been used. Similarly, a ringClosure may only be a number which has previously occured in a defRingId.
+
+A vertex specified via the implicitHydrogenVertexLabels rule will potentially have ekstra neighbours added after parsning. The rules are the exact same as for implicit hydrogen atoms in SMILES.
+
+### 6.9.2. Semantics¶
+
+A GraphDFS string is, like the SMILES strings, an encoding of a depth-first traversal of the graph it encodes. Vertex labels are enclosed in square brackets and edge labels are enclosed in curly brackets. However, a special set of labels can be specified without the enclosing brackets. An edge label may additionally be completely omitted as a shorthand for a dash (-).
+
+A vertex can have a numeric identifier, defined by the defRingId non-terminal. At a later stage this identifier can be used as a vertex specification to specify a back-edge in the depth-first traversal. Example: [v1]1-[v2]-[v3]-[v4]-1, specifies a labelled $$C_3$$ (which equivalently can be specified shorter as [v1]1[v2][v3][v4]1).
+
+A vertex being a ringClosure can never be the first vertex in a string, and is thus preceded with a edge. As in a depth-first traversal, such a back-edge is a kind of degenerated branch. Example: [v1]1[v2][v3][v4]1[v5][v6]1, this specifies a graph which is two fused $$C_4$$ with a common edge (and not just a common vertex).
+
+Warning
+
+The semantics of back-edges/ring closures are not the same as in SMILES strings. In SMILES, a pair of matching numeric identifiers denote the individual back-edges.
+
+A branch in the depth-first traversal is enclosed in parentheses.
+
+### 6.9.3. Abstracted Molecules¶
+
+The short-hand labels for vertices and edges makes it easier to specify partial molecules than using GML files.
+
+As example, consider modelling Acetyl-CoA in which we wish to abstract most of the CoA part. The GraphDFS string CC(=O)S[CoA] can be used and we let the library add missing hydrogen atoms to the vertices which encode atoms. A plain CoA molecule would in this modelling be [CoA]S, or a bit more verbosely as [CoA]S[H].
+
+The format can also be used to create completely abstract structures (it can encode any undirected labelled graph), e.g., RNA strings. Note that in this case it may not be appropriate to add “missing” hydrogen atoms. This can be controlled by an optional parameter to the loading function.
+
+## 6.10. Molecule Encoding¶
+
+There is no strict requirement that graphs encode molecules, however several optimizations are in place when they do. The following describes how to encode molecules as undirected, simple, labelled graphs and thus when the library assumes a graph is a molecule.
+
+### 6.10.1. Edges / Bonds¶
+
+An edge encodes a chemical bond if and only if its label is listed in the table below.
+
+Label Interpretation
+- Single bond
+: “Aromatic” bond
+= Double bond
+# Triple bond
+
+### 6.10.2. Vertices / Atoms¶
+
+A vertex encodes an atom with a charge if and only if its label conforms to the following grammar.
+
+vertexLabel ::=  atomSymbol [ charge ] [ radical ]
+charge      ::=  singleDigit ('-' | '+')
+
+With atomSymbol being a properly capitalised atom symbol.

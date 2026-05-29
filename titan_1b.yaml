@@ -1,0 +1,88 @@
+# TitanAI 1B — Pretraining Config v0.3
+  # ============================================================
+  # Architecture: d_model=2048, n_heads=16, n_kv_heads=4 (GQA), n_layers=24
+  # Activation  : SwiGLU (hidden=5504)
+  # Norm        : RMSNorm
+  # Positional  : RoPE (base=10000)
+  # Attention   : FlashAttention-2 → PyTorch SDPA → manual fallback
+  # Requirements: A100 40GB (tight) | A100 80GB (comfortable) | 2x RTX 4090 DDP
+  #
+  # IMPORTANT — ARCHITECTURE CHANGE FROM v0.2:
+  #   This config uses the v0.3 architecture (RMSNorm + SwiGLU + GQA).
+  #   If you have a checkpoint from the previous architecture, re-run:
+  #     python scripts/upscale_to_1b.py --src_checkpoint <old_109m_ckpt>
+  #   to produce a fresh init.pt before resuming.
+  #
+  # Token budget at these settings:
+  #   effective_batch = batch_size(1) × grad_accum(32) × seq_len(2048) = 65,536 tokens/step
+  #   max_steps(150000) × 65,536 = ~9.8 billion tokens
+  #   Minimum production-quality floor: 91,500 steps (~6B tokens)
+  #
+  # Cost estimate on Vast.ai (spot):
+  #   RTX 4090 solo  : ~14 hrs → ~$6   (with Flash Attention 2)
+  #   A100 40GB SXM  : ~8 hrs  → ~$14
+  #   A100 80GB PCIe : ~6 hrs  → ~$15
+
+  project:
+    name: "titan-1b"
+    version: "0.3.0"
+
+  model:
+    architecture: "decoder_transformer"
+    vocab_size: 32000
+    d_model: 2048
+    n_heads: 16
+    n_kv_heads: 4                # GQA: 4 KV heads shared across 16 Q heads (4× KV cache savings)
+    n_layers: 24
+    d_ff: 8192                   # SwiGLU hidden = (2/3 × 8192) → 5504 (auto-computed)
+    max_seq_len: 2048
+    rope_base: 10000.0
+    dropout: 0.05
+    tie_embeddings: true
+    gradient_checkpointing: true  # Essential for A100 40GB
+
+  training:
+    batch_size: 1
+    gradient_accumulation_steps: 32   # Effective batch = 65,536 tokens/step
+    learning_rate: 5.0e-5
+    weight_decay: 0.01
+    max_steps: 150000                  # ~9.8B tokens — production quality
+    warmup_steps: 500
+    lr_scheduler: "cosine"
+    lr_min_ratio: 0.1
+    clip_grad_norm: 1.0
+    log_interval: 100
+    eval_interval: 2000
+    save_interval: 5000
+    checkpoint_dir: "checkpoints/titan_1b_pretrain"
+    use_8bit_adam: true
+    use_compile: true
+    bf16: true
+    resume_from: null              # Set to checkpoint path to resume
+
+  tokenizer:
+    path: "tokenizer/artifacts_v32k/tokenizer.json"
+    vocab_size: 32000
+
+  data:
+    processed_dir: "data/processed"
+    max_seq_len: 2048
+
+  evaluation:
+    val_batch_size: 1
+    num_eval_batches: 50
+    perplexity_threshold: 12.0    # Gate threshold before 3B upscale is approved
+
+  logging:
+    log_dir: "logs/titan_1b"
+    experiment_name: "titan-1b-pretrain-v03"
+    wandb:
+      enabled: false              # Set true + pip install wandb for real-time curves
+      project: "titanai"
+
+  inference:
+    default_max_new_tokens: 512
+    default_temperature: 0.7
+    default_top_k: 50
+    default_top_p: 0.95
+  

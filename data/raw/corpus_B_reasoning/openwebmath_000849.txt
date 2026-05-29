@@ -1,0 +1,138 @@
+# object smooth orbital limit around another object depending on mouse drag
+
+I am working in Unity.
+
+I have special objects that can each be dragged freely around in 2d.
+
+The objects cannot get too close to other objects (minimal Vector3.distance allowed is 1.5f).
+
+I also have special connectors, which I can apply freely between 2 of any of these special objects. once 2 objects are connected, dragging them is further restricted.
+
+The 2 objects cannot get too far between each other (max Vector3.distance allowed is 5f).
+
+Both of these restrictions work, my issue is that once these restrictions occur, the objects are pretty much just stuck in place until dragged away from the restriction they tried to pass.
+
+I want the object being dragged to orbit smoothly around the object it's connected to, once they reach any of the 2 restrictions.
+
+The best example I can think of is the angry birds slingshot,
+
+that once it reaches it's maximum pullback, you can just orbit along this max distance smoothly up or down depending on where you are trying to drag, this same smooth effect needs to occur both when too close and too far.
+
+Hope I explained myself thoroughly I tried to find answers and try myself but could not reach any working solution.
+
+The closest I think I got to a solution is with rays and the on point of ray function like in the video I provided below but I have no idea how could that be implemented in my sort of game.
+
+thanks,
+
+Remember the BBQ.
+
+link to the sort of angry birds pulling mechanics I am talking about: https://unity3d.com/learn/tutorials/topics/physics/making-angry-birds-style-game-part-1
+
+Image provided is very inaccurate to the boundaries of each restriction, just to make it seem more clear.
+
+If I understand your question correctly this can be done using a bit of vector math. I've created an example in Javascript so please keep in mind that many of the mathematical operations I'm doing here can be done in Unity really easily using the built-in classes and methods.
+
+The ball will follow your mouse when you hover it over the window. I recommend you run it in Chrome if possible. Also once you click "Run Snippet" I recommed you click the "Full page" link, the reason for this is because the mouse coordinates don't account for the scrollbar, so if you scroll down the mouse coordinates will no longer be accurate.
+
+The function called "mousemove" is where the magic happens.
+
+Ask away if you need any clarification.
+
+var OUTER_BOUNDS = 160;
+var INNER_BOUNDS = 40;
+
+var canvas = document.getElementById("mainCanvas");
+var ctx = canvas.getContext("2d");
+
+var centerPos = {
+x: (canvas.width / 2),
+y: (canvas.height / 2)
+};
+
+var ballPos = {
+x: -1000,
+y: -1000
+};
+
+function mousemove(event) {
+//This is where the good stuff happens.
+//Set the ball to be at the position of the mouse.
+ballPos.x = event.clientX;
+ballPos.y = event.clientY;
+
+//Calculate the distance from the center to the ball. This is simple linear algebra.
+var dX = ballPos.x - centerPos.x;
+var dY = ballPos.y - centerPos.y;
+var distance = Math.sqrt(Math.pow(dX, 2) + Math.pow(dY, 2));
+
+if (distance > 0) {
+//Calculate a unit vector that points from the center towards the ball. This is the same as normalizing the vector.
+var direction = {
+x: dX / distance,
+y: dY / distance
+};
+
+//If you square your inner and outer bounds you can perform this same comparison we're about to make without using the square root operation.
+if (distance > (OUTER_BOUNDS - BALL_RADIUS)) {
+//The ball is outside the outer bounds. We will calculate a new position for it using the unit vector above.
+ballPos.x = centerPos.x + (direction.x * (OUTER_BOUNDS - BALL_RADIUS));
+ballPos.y = centerPos.y + (direction.y * (OUTER_BOUNDS - BALL_RADIUS));
+} else if (distance < (INNER_BOUNDS + BALL_RADIUS)) {
+//The ball is too close to the center. We use the same method as above to calculate a new position for it.
+ballPos.x = centerPos.x + (direction.x * (INNER_BOUNDS + BALL_RADIUS));
+ballPos.y = centerPos.y + (direction.y * (INNER_BOUNDS + BALL_RADIUS));
+}
+}
+};
+
+function run() {
+window.requestAnimationFrame(run);
+draw();
+}
+
+function draw() {
+//Draw background.
+ctx.fillStyle = "#444444";
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+//Draw the center ball.
+strokeCircle(centerPos.x, centerPos.y, OUTER_BOUNDS, "#FF0000");
+strokeCircle(centerPos.x, centerPos.y, INNER_BOUNDS, "#FF0000");
+
+//Draw the moveable ball.
+}
+
+function fillCircle(x, y, radius, color) {
+ctx.fillStyle = color;
+ctx.beginPath();
+ctx.arc(x, y, radius, 0, Math.PI * 2);
+ctx.fill();
+}
+
+function strokeCircle(x, y, radius, color) {
+ctx.strokeStyle = color;
+ctx.lineWidth = 2;
+ctx.beginPath();
+ctx.arc(x, y, radius, 0, Math.PI * 2);
+ctx.stroke();
+}
+
+run();
+html,
+body {
+margin: 0;
+}
+<canvas id="mainCanvas" width="400" height="400"></canvas>
+
+• This looks great!! thank you so much for the feedback and that code snippet is above and beyond! – Remember The BBQ Jun 21 '16 at 21:39
+• I'll try implementing it to my game when I have the time and see if I'll need any clarification. Thanks again!! :) – Remember The BBQ Jun 21 '16 at 21:40
+
+Instead of hard restrictions you can use opposing forces.
+
+You want to simulate a rubber band between the two objects. That sort of force can be simulated by applying a push every frame that equals "distance to object" to the power of "your rubber band's springiness". If you want to increase the effective distance that object A can travel away from object B without being pulled back then you subtract a "distance constant" from that value and do a check at the end which sets any negative values for force to zero. At some other distance threshold you can set the rubber band to break.
+
+• thanks for the feedback I will try to implement this idea when I have the time :) – Remember The BBQ Jun 21 '16 at 16:13
+• pushing the object should be done with addforce? Because I don't have any physics in the game I am wondering if this would work if this is what you meant. – Remember The BBQ Jun 21 '16 at 16:13
+• It would be ineffective now that I think about it since the object re positions itself on every LateUpdate() call based on the position of the mouse, wouldn't that just make the whole adding force meaningless? – Remember The BBQ Jun 21 '16 at 16:29
+• unless by rubber band you mean using springjoint2d? – Remember The BBQ Jun 21 '16 at 16:51
+• Yes, pushing should be done via addforce. It sounds like you'll have to change your mouse code as well so that it doesn't reposition itself, but rather is attracted to the point of the mouse click (perhaps raycasted out to some distance). – Tealr Jun 29 '16 at 6:06

@@ -1,0 +1,56 @@
+Question: <p>I'm wondering where I find the source to show how the operator ** is implemented in Python.  Can someone point me in the right direction?  </p>
+
+Answer: <p>The python grammar definition (from which the parser is generated using <a href="http://www.python.org/dev/peps/pep-0269/">pgen</a>), look for 'power': <a href="http://svn.python.org/view/python/trunk/Grammar/Grammar?rev=65872&amp;view=markup">Gramar/Gramar</a></p>
+
+<p>The python ast, look for 'ast_for_power': <a href="http://svn.python.org/view/python/trunk/Python/ast.c?rev=67590&amp;view=markup">Python/ast.c</a></p>
+
+<p>The python eval loop, look for 'BINARY_POWER': <a href="http://svn.python.org/view/python/trunk/Python/ceval.c?rev=67666&amp;view=markup">Python/ceval.c</a></p>
+
+<p>Which calls PyNumber_Power (implemented in <a href="http://svn.python.org/view/python/trunk/Objects/abstract.c?rev=66043&amp;view=markup">Objects/abstract.c</a>):</p>
+
+<pre><code>PyObject *
+PyNumber_Power(PyObject *v, PyObject *w, PyObject *z)
+{
+    return ternary_op(v, w, z, NB_SLOT(nb_power), "** or pow()");
+}
+</code></pre>
+
+<p>Essentially, invoke the <strong>pow</strong> slot. For long objects (the only default integer type in 3.0) this is implemented in the long_pow function <a href="http://svn.python.org/view/python/trunk/Objects/longobject.c?rev=65518&amp;view=markup">Objects/longobject.c</a>, for int objects (in the 2.x branches) it is implemented in the int_pow function <a href="http://svn.python.org/view/python/trunk/Objects/intobject.c?rev=64753&amp;view=markup">Object/intobject.c</a></p>
+
+<p>If you dig into long_pow, you can see that after vetting the arguments and doing a bit of set up, the heart of the exponentiation can be see here:</p>
+
+<pre><code>if (Py_SIZE(b) &lt;= FIVEARY_CUTOFF) {
+	/* Left-to-right binary exponentiation (HAC Algorithm 14.79) */
+	/* http://www.cacr.math.uwaterloo.ca/hac/about/chap14.pdf    */
+	for (i = Py_SIZE(b) - 1; i &gt;= 0; --i) {
+		digit bi = b-&gt;ob_digit[i];
+
+		for (j = 1 &lt;&lt; (PyLong_SHIFT-1); j != 0; j &gt;&gt;= 1) {
+			MULT(z, z, z)
+			if (bi &amp; j)
+				MULT(z, a, z)
+		}
+	}
+}
+else {
+	/* Left-to-right 5-ary exponentiation (HAC Algorithm 14.82) */
+	Py_INCREF(z);	/* still holds 1L */
+	table[0] = z;
+	for (i = 1; i &lt; 32; ++i)
+		MULT(table[i-1], a, table[i])
+
+	for (i = Py_SIZE(b) - 1; i &gt;= 0; --i) {
+		const digit bi = b-&gt;ob_digit[i];
+
+		for (j = PyLong_SHIFT - 5; j &gt;= 0; j -= 5) {
+			const int index = (bi &gt;&gt; j) &amp; 0x1f;
+			for (k = 0; k &lt; 5; ++k)
+				MULT(z, z, z)
+			if (index)
+				MULT(z, table[index], z)
+		}
+	}
+}
+</code></pre>
+
+<p>Which uses algorithms discussed in <a href="http://www.cacr.math.uwaterloo.ca/hac/about/chap14.pdf">Chapter 14.6</a> of the <a href="http://www.cacr.math.uwaterloo.ca/hac/">Handbook of Applied Cryptography</a> which describes efficient exponentiation algorithms for arbitrary precision arithmetic.</p>

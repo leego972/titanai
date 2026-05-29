@@ -1,0 +1,56 @@
+Question: <p>I've factored out common attributes from two classes into an abstract base class, however I have another model that needs to reference either one of those classes. It's not possible to reference an ABC as it doesn't actually have a database table.</p>
+
+<p>The following example should illustrate my problem:</p>
+
+<pre><code>class Answer(models.Model):
+    ovramt = models.ForeignKey("Ovramt")
+    question = models.ForeignKey("Question")
+    answer = models.CharField(max_length=3, choices=(("yes","yes"),("no","no") ("NA","N/A"))
+    likelihood = models.IntegerField(choices=LIKELY_CHOICES)
+    consequence = models.IntegerField(choices=CONSEQUENCE_CHOICES)
+
+    class Meta:
+        abstract = True
+
+class Answer_A(Answer):
+    resident = models.ForeignKey("Resident")
+    def __unicode__(self):
+        return u"%s - %s - %s" %(self.ovramt.ssa.name, self.resident, self.question)    
+
+class Answer_B(Answer):
+    def __unicode__(self):
+        return u"%s - %s" %(self.ovramt.ssa.name, self.question)    
+
+class Answer_Risk(models.Model):
+    answer = models.ForeignKey("Answer")
+    risk = models.CharField(max_length=200)
+
+    def __unicode__(self):
+        return self.risk
+</code></pre>
+
+<p>Answer_A and Answer_B are slightly different in that Answer_A also needs a FK relationship to another table. Answer_B may also require some specific attributes later. The problem would STILL exist if I had Answer_B be the superclass - and have Answer_A subclass or compose it.</p>
+
+<p>A 'Risk' is the same whether it's Answer_A or Answer_B. I also have other models that need to reference an 'Answer' regardless of it's sub-type. How can this be done? How can you reference a type regardless of it's sub-type?</p>
+
+<p>Update:<br />
+I was trying to avoid a join operation but I don't think I'm going to be able to. Would it be worth having the reference to 'Resident' in all 'Answer's and just nulling it where required? Or is that considered very bad practice? </p>
+
+Answer: <p>A <a href="https://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#generic-relations">generic relation</a> seems to be the solution. But it will complicate things even further.</p>
+
+<p>It seems to me; your model structure is already more complex than necessary. I would simply merge all three <code>Answer</code> models into one. This way:</p>
+
+<ul>
+<li><code>Answer_Risk</code> would work without modification.</li>
+<li>You can set <code>resident</code> to None (NULL) in case of an <code>Answer_A</code>.</li>
+<li>You can return different string represantations depending on <code>resident == None</code>. (in other words; same functionality)</li>
+</ul>
+
+<p>One more thing; are your answers likely to have more than one risk? If they'll have none or one risk you should consider following alternative implementations:</p>
+
+<ul>
+<li>Using a <a href="http://docs.djangoproject.com/en/dev/topics/db/models/#one-to-one-relationships">one-to-one relationship</a></li>
+<li>Demoting risk as a field (or any number of fields) inside <code>Answer</code> class.</li>
+</ul>
+
+<p>My main concern is neither database structure nor performance (although these changes should improve performance) but <em>code maintainability</em>.</p>

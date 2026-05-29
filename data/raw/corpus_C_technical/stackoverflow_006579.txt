@@ -1,0 +1,69 @@
+Question: <p>I'm trying to figure out if there's a reasonably efficient way to perform a lookup in a dictionary (or a hash, or a map, or whatever your favorite language calls it) where the keys are regular expressions and strings are looked up against the set of keys.  For example (in Python syntax):</p>
+
+<pre><code>&gt;&gt;&gt; regex_dict = { re.compile(r'foo.') : 12, re.compile(r'^FileN.*$') : 35 }
+&gt;&gt;&gt; regex_dict['food']
+12
+&gt;&gt;&gt; regex_dict['foot in my mouth']
+12
+&gt;&gt;&gt; regex_dict['FileNotFoundException: file.x does not exist']
+35
+</code></pre>
+
+<p>(Obviously the above example won't work as written in Python, but that's the sort of thing I'd like to be able to do.)</p>
+
+<p>I can think of a naive way to implement this, in which I iterate over all of the keys in the dictionary and try to match the passed in string against them, but then I lose the O(1) lookup time of a hash map and instead have O(n), where n is the number of keys in my dictionary.  This is potentially a big deal, as I expect this dictionary to grow very large, and I will need to search it over and over again (actually I'll need to iterate over it for every line I read in a text file, and the files can be hundreds of megabytes in size).</p>
+
+<p>Is there a way to accomplish this, without resorting to O(n) efficiency?</p>
+
+<p>Alternatively, if you know of a way to accomplish this sort of a lookup in a database, that would be great, too.</p>
+
+<p>(Any programming language is fine -- I'm using Python, but I'm more interested in the data structures and algorithms here.)</p>
+
+<p>Someone pointed out that more than one match is possible, and that's absolutely correct.  Ideally in this situation I'd like to return a list or tuple containing all of the matches.  I'd settle for the first match, though.</p>
+
+<p>I can't see O(1) being possible in that scenario; I'd settle for anything less than O(n), though.  Also, the underlying data structure could be anything, but the basic behavior I'd like is what I've written above: lookup a string, and return the value(s) that match the regular expression keys.</p>
+
+Answer: <p>@rptb1 you don't have to avoid capturing groups, because you can use re.groups to count them.  Like this:</p>
+
+<pre><code># Regular expression map
+# Abuses match.lastindex to figure out which key was matched
+# (i.e. to emulate extracting the terminal state of the DFA of the regexp engine)
+# Mostly for amusement.
+# Richard Brooksby, Ravenbrook Limited, 2013-06-01
+
+import re
+
+class ReMap(object):
+    def __init__(self, items):
+        if not items:
+            items = [(r'epsilon^', None)] # Match nothing
+        self.re = re.compile('|'.join('('+k+')' for (k,v) in items))
+        self.lookup = {}
+        index = 1
+        for key, value in items:
+            self.lookup[index] = value
+            index += re.compile(key).groups + 1
+
+    def __getitem__(self, key):
+        m = self.re.match(key)
+        if m:
+            return self.lookup[m.lastindex]
+        raise KeyError(key)
+
+def test():
+    remap = ReMap([(r'foo.', 12),
+                   (r'.*([0-9]+)', 99),
+                   (r'FileN.*', 35),
+                   ])
+    print remap['food']
+    print remap['foot in my mouth']
+    print remap['FileNotFoundException: file.x does not exist']
+    print remap['there were 99 trombones']
+    print remap['food costs $18']
+    print remap['bar']
+
+if __name__ == '__main__':
+    test()
+</code></pre>
+
+<p>Sadly very few RE engines actually compile the regexps down to machine code, although it's not especially hard to do.  I suspect there's an order of magnitude performance improvement waiting for someone to make a really good RE JIT library.</p>

@@ -1,0 +1,151 @@
+# How to get the text equally separated from the headrule and footrule with geometry?
+
+In the following MWE I'd like to define a dimen, usep, and do the blue margins (uhsep and ufsep) be equal to it, and ubsep (in green) to the half of it, when footnotes are to be printed. Otherwise, uhsep and ubsep should be equal to usep. Note that the distances should be measured from the headrule, footnoterule and footrule. Nor the headrule neither the footrule should be moved.
+
+After the comments, I've achieved the basic layout (uhsep=ubsep=usep) with headsep, bottom and footskip:
+
+%pages without footnotes
+\def\usep{1cm}
+\newdimen\hsep  \setlength{\hsep}{\dimexpr\usep+.3\baselineskip\relax}
+\newdimen\fskip \setlength{\fskip}{\dimexpr\usep+.9\baselineskip\relax}
+\newgeometry[left=3.5cm, right=1.5cm, top=2.5cm, bottom=\bmar, headsep=\hsep, footskip=\fskip, showframe]{geometry}
+
+
+\documentclass[a4paper,titlepage,11pt,twoside,openright]{report}
+
+\usepackage[left=3.5cm, right=1.5cm, top=2.5cm, bottom=2.5cm, showframe]{geometry}
+\usepackage{lipsum}
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}
+\usepackage[pagestyles,explicit]{titlesec}
+
+\makeatletter
+\renewcommand\setfootrule[1]{%
+\ifdim#1=\z@ \let\makefootrule\@empty
+\else \def\makefootrule{\color{red}\rule[.9\baselineskip]{\linewidth}{#1}} \fi}
+\makeatother
+
+{\color{red}\sffamily Section title}{}{} %odd
+\setfoot[\color{red}\sffamily\thepage][][\color{red}\sffamily Degree] %even
+{\color{red}\sffamily Theis title}{}{\color{red}\sffamily\thepage} %odd
+}
+
+\begin{document}
+
+%Change seps, skips...
+
+\pagestyle{main}
+\lipsum[1-2]
+\footnote{This is a footnote}
+\lipsum[3-4]
+\footnote{This is another footnote}
+\lipsum[5-7]
+
+\end{document}
+
+
+Solution using titlesec and geometry which provides a command \updategeometry{<tbmargin>}{<sep>}, where <tbmargin> is the top and bottom margin, measured to the main head and foot rules, and is the separation from the rules to the text.
+
+\def\chapv{1cm} \def\usep{0cm}
+\def\tbmargin{\dimexpr\usep+\chapv\relax}
+\def\hsep{\dimexpr.3\baselineskip+\usep\relax}
+\def\fskip{\dimexpr.9\baselineskip+\usep\relax}
+
+\newcommand\updategeometry[2]{
+\def\chapv{#1} \def\usep{#2}
+\newgeometry{left=3.5cm, right=1.5cm, top=\tbmargin, bottom=\tbmargin, headsep=\hsep, footskip=\fskip}
+}
+
+• This will result in uneven pages because you'll have more space at the bottom of some pages than others. Why do you wish to do this? – cfr Sep 21 '14 at 22:45
+• I'd like to consider the footnotes as 'part of the footer' rather than 'part of the text' (ubsep may be rather small when footnotes are shown). On the other hand, when footnotes are not displayed, I want the body of the text to be smaller in pages when the Table of Contents and Lists of Figures/Tables are shown. Having uhsep and ubsep equal centers the content in the page. – U.Martinez-Corral Sep 21 '14 at 22:48
+• But when you have a longer footnote, it will use part of the space otherwise used by the body. So it cannot look like 'part of the footer', can it? There's no problem using a different layout for the toc, tof, tot etc. if you really wish to. The footnote issue is a lot trickier. I don't say it cannot be done. But I do think it will not be at all straightforward. – cfr Sep 21 '14 at 22:52
+• Do you mean getting to know in which pages the footnotes are going to be shown is difficult? I can understand it, since the layout affects placing them and vice versa. If so, could you help me just to have ubsep equal to uhsep? Should it be something like \addtolength{\textheight}{-(\usep-\footskip)}? – U.Martinez-Corral Sep 21 '14 at 23:01
+• Hang on. I'll have a look. That should be doable. – cfr Sep 21 '14 at 23:03
+
+This is an answer to the modified question in the comments - not to your original question. I think the original question would be far from straightforward, if it can be done at all.
+
+I think this is right but I'm not sure. You need to set \ulength to half of the value you want for the dimension you mentioned. geometry is then used to set the headsep and footskip and fancyhdr is used to manage the headers and footers:
+
+\documentclass[a4paper,titlepage,11pt,twoside,openright]{report}
+\usepackage{geometry}
+\usepackage{lipsum}
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}
+\usepackage[pagestyles,explicit]{titlesec}
+\newlength{\ulength}
+\setlength{\ulength}{5mm}
+
+\usepackage{fancyhdr}
+\fancypagestyle{main}{%
+\fancyhf{}%
+\fancyhf[loh]{\color{red}\sffamily Section title}%
+\fancyhf[reh]{\color{red}\sffamily Chapter title}%
+\fancyhf[lof]{\color{red}\sffamily Thesis title}%
+\fancyhf[rof,lef]{\color{red}\sffamily\thepage}%
+\fancyhf[ref]{\color{red}\sffamily Degree}%
+\renewcommand{\footrulewidth}{.4pt}%
+\renewcommand{\footrule}{%
+
+\begin{document}
+
+%Change seps, skips...
+
+\pagestyle{main}
+\lipsum[1-2]
+\footnote{This is a footnote}
+\lipsum[3-4]
+\footnote{This is another footnote}
+\lipsum[5-7]
+
+\end{document}
+
+
+Note that I used fancyhdr because it is easier to layout the page consistently. Moreover, fancyhdr tells you if things are going to go wrong because there is not enough space and so on.
+
+I used geometry to set footskip etc. because, if you are using the package at all, you need to use it to make changes to the page layout. Otherwise, it doesn't know you've changed things and cannot take those changes into account when calculating lengths. So even when you are specifying 'native' dimensions such as footskip, make sure to do it using geometry.
+
+# Update
+
+To get the chapter and section titles automatically included in the header, I would do something like the following. This is partly because I'm just not very familiar with titlesec and have never used it for headers and footers. I mainly used fancyhdr because it tells you if the size of the header or footer is too small and tells you how large it needs to be. This was useful in laying out the page appropriately. However, I cannot see any reason why you could not substitute the facilities of titleps and drop fancyhdr if you prefer.
+
+\documentclass[a4paper,titlepage,11pt,twoside,openright]{report}
+\usepackage{geometry}
+\usepackage{lipsum}
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}
+\usepackage{titlesec}
+\newlength{\ulength}
+\setlength{\ulength}{5mm}
+
+\usepackage{fancyhdr}
+\fancypagestyle{main}{%
+\fancyhf{}%
+\fancyhf[loh]{\color{red}\sffamily \rightmark}%
+\fancyhf[reh]{\color{red}\sffamily \leftmark}%
+\fancyhf[lof]{\color{red}\sffamily Thesis title}%
+\fancyhf[rof,lef]{\color{red}\sffamily\thepage}%
+\fancyhf[ref]{\color{red}\sffamily Degree}%
+\renewcommand{\footrulewidth}{.4pt}%
+\renewcommand{\footrule}{%
+
+\begin{document}
+
+%Change seps, skips...
+
+\pagestyle{main}
+\renewcommand{\chaptermark}[1]{%
+\markboth{#1}{}}
+\renewcommand{\sectionmark}[1]{%
+\markright{#1}}
+\chapter{Chapter title}
+\lipsum[1-2]
+\footnote{This is a footnote}
+\section{Section title}
+\lipsum[3-4]
+\footnote{This is another footnote}
+\lipsum[5-12]
+
+\end{document}
+
+
+• Thanks for this solution. I'm using titlesec to set the titles of chapters and sections. Although I've used fancyhdr in other documents, I'd prefer to avoid loading more packages (if possible). However, I'll keep this as a reference, in case I can't get it done just with titlesec and geometry. – U.Martinez-Corral Sep 22 '14 at 3:22
+• If I use fancyhdr to define pagestyles instead of titlesec, \sectiontitle and \chaptertile won't work, even if I load \usepackage[pagestyles,explicit]{titlesec}. I'd like to show those instead of 'Chapter title' and 'Section title' in your example. Is it possible or should change \leftmark and \rightmark? – U.Martinez-Corral Sep 22 '14 at 16:13
+• @U.Martinez-Corral See my edit. I imagine you could substitute titleps if you wish. I'm just not very familiar with that package and don't have time to look at it right now so I've given you a quick solution with fancyhdr. – cfr Sep 22 '14 at 16:42
+• That's enough. It was just curiosity about how those are defined, since they seem clearer to me than leftmark and rightmark. Thanks again for your replies. – U.Martinez-Corral Sep 22 '14 at 16:49

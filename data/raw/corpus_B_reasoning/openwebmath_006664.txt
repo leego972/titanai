@@ -1,0 +1,61 @@
+# Short Note Spectral preconditioning
+
+Jon Claerbout and Dave Nichols
+
+jon@sep.stanford.edu
+
+INTRODUCTION
+
+Industry uses many scaled adjoint operators. We'd like to define the best scaling functions. It is not clear how to define the best'' scaling but one way is to define it as that which causes CG inversion to go the fastest''. The rationale for this choice is that inversion is presumeably the goal, and the scaled adjoint is the first step.
+
+Here I will briefly describe conventional wisdom about scaling and then go on to show how spectral scaling of Kirchoff and other operators can be done using multidimensional prediction-error filters.
+
+CONVENTIONAL SCALING
+
+Iterative methods like conjugate gradients (CG) can sometimes be accelerated by a change of variables. Say we are solving .We implicitly define new variables by a trial solution'' (where is any matrix of rank equal the dimension of )getting .After solving this system for ,we merely substitute into to get the solution to the original problem. The question is whether this change of variables has saved any effort. On the surface, things seem worse. Instead of iterative applications of and we have introduced iterative applications of and .This is not a problem if the operator is quicker than .Our big hope is that we have chosen so that the number of iterations decreases. We have little experience to guide the choice of to cause the number of iterations to decrease other than that columns of should have equal scales'' so could be a diagonal matrix scaling columns of .The preconditioning matrix need not even be square.
+
+The use of a preconditioner does not change the final solution unless the operator has a null space. In that case, iterating with leads to a solution with no component in the null space of .On the other hand, iterating with leads to a solution with no component in the null space of .We will not pause for a proof since no application comes directly to mind.
+
+Scaling the adjoint Given the usual linearized regression between data space and model space, ,the simplest image of the model space results from application of the adjoint operator .Unless has no physical units, however, the physical units of do not match those of so we need a scaling factor. The theoretical solution suggests the scaling units should be those of .We could probe the operator or its adjoint with white noise or a zero frequency input. Bill Symes suggests we probe with the data because it has the spectrum of interest. He proposes we make our image with where we choose the weighting function to be:
+ (1)
+which obviously has the correct physical units. The weight can be thought of as a diagonal matrix containing the ratio of two images. A problem with the choice adjointwt is that the denominator might vanish or might even be negative. The way to stabilize any ratio is to revise it by changing to
+ (2)
+where is a parameter to be chosen, and the angle braces indicate the possible need for local smoothing.
+
+Since a scaled adjoint is a guess at the solution to the regression, it is logical to choose values for and the smoothing parameters that give fastest convergence of the conjugate-gradient regression. To go beyond the scaled adjoint we can use as a preconditioner.
+
+To use as a preconditioner we define implicitly a new set of variables by the substitution .Then .To find instead of we do CG iteration with the operator instead of with .At the end we convert from back to with .
+
+By adjointwt, has physical units inverse to .Thus the transformation has no units so the variables have physical units of data space. Note that after one iteration we have Symes scaling. Sometimes it might be more natural to view the solution with data units than with proper model units .
+
+SPECTRAL PRECONDITIONING
+
+In the regression we often think of the model as white, meaning that it is defined up to the Nyquist frequency on the computational mesh, and we think of the data as red, meaning that it is sampled significantly more densely than the Nyquist frequency. Fitting ,we can probe the operator with random numbers in model space and we can probe the operator with random numbers in data space getting a red model image and a red synthetic data space
+ (3) (4)
+since both and turn white into red. Given we can define a whitening operator in model space and given we can define a whitening operator in data space.
+
+Red-space iteration First we use to implicitly define a new model space (which I will later justify calling the data-colored'' model) by the substitution .Substituting into gives .We could solve this by CG iteration of .The first step is the adjoint. After this step, the data-colored model estimate and model estimate are
+
+ (5)
+which suggests naming the data-colored model.
+
+White-space iteration Next we try the data-space whitener which we obtained by pouring a random-number model into and designing a decon filter on the data out. The regression is red, so it needs a leveling weighting function to whiten it. Using for the weighting function gives
+ (6)
+so CG iterations are done with the operator .The first iteration is the adjoint, namely,
+ (7)
+
+Residual-whitening iteration Gauss says the noise should be whitened. The data whitener might do it, but really we should be using the residual whitener. Thus, after some number of iterations by any method we have a residual and we can find a whitener for it, say .Thus the fitting we should do is
+ (8)
+
+As previously, pouring random numbers in data space into the operator gives a model space from which we can derive a whitener to implicitly define a new model space by .Converting the regression from to gives
+
+ (9)
+The first iteration is now
+ (10)
+This proliferation of interesting methodologies is why we need C++!
+
+APPLICATION: DECONVOLVING VELOCITY SPECTRA
+
+Where might spectral scaling be useful? First I should describe a similar example with a surprising outcome. With Kirchoff operators in PVI and BEI I proposed integrating the velocity transform with the rho filter .Dave Nichols tested this idea and found that the rho filter accelerates the early steps, but retards all the others! This suggests that deconvolution might suffer the same fate. On the other hand, the slowed convergence with might simply be a consequence of Fourier methods spreading signals long distances with wraparounds that would not be part of a decon approach. In any event, improving the first iteration is a worthwhile goal.
+
+The practical goal is not just to handle the simple rho-filter effect, but to cope with truncations and irregular data sampling. The model space is a regular mesh (although the data might be on an irregular one) so deconvolution there always makes sense. To manufacture a striking example, I would consider velocity transformation with a short, wide-offset marine cable, say extending from 1.5 to 2.0 km. The velocity space would be strongly dipped'' so a simple filter should be able to flatten its dip spectrum.

@@ -1,0 +1,103 @@
+# Add decoration at end of all chapters automatically
+
+The accepted answer of this question got me half of the answer I am looking for. I would like to implement this end of chapter decoration automatically for all of my (many) chapters. The MWE is based on the solution provided by touhami:
+
+\documentclass{book}
+\usepackage{kantlipsum}
+\begin{document}
+\chapter{Chapter one}
+\kant[1-3]
+
+%\decoration
+\ifdim\dimexpr\pagegoal-\pagetotal-\baselineskip\relax>.05\textheight
+\begin{center}
+\rule{3cm}{0.5pt}
+\end{center}
+\fi
+\chapter{Chapter two}
+\kant[1-3]
+
+\end{document}
+
+
+Only in this example this yields the decoration only at the end of chapter 1, not of chapter 2 - and not because af the \relax value, I believe. I would like all of my chapters, but excluding the frontmatter and the back matter, to have this decoration. Do I really need to enter this or a custom macro at the end of every chapter manually?
+
+This code will add a decoration at the end of each chapter.
+
+\makedecoration is executed before each \chapter, decorating the previous chapter, and also at the end of the document to decorate the last chapter if backmater is absent. Works also with unnumbered chapters if it is followed by a numbered one.
+
+Frontmatter material such as \tableofcontents or a chapter will not be decorated; nor the back matter.
+
+\documentclass{book}
+\usepackage{kantlipsum}
+
+\usepackage{etoolbox}% needed <<<<<<<<<<<<<
+
+\newcommand{\insertdecoratation}{% define the decoration
+\begin{center}
+\rule{3cm}{0.5pt}
+\end{center}}
+
+\newcommand{\makedecoration}{%
+\ifnum\value{chapter}>1%% decorate from chapter 2 to before last
+\ifdim\dimexpr\pagegoal-\pagetotal-\baselineskip\relax>.05\textheight%
+\insertdecoratation%
+\fi\fi%
+\ifnum\value{chapter}=1%decorate  chapter 1
+\ifdim\dimexpr\pagegoal-\pagetotal-\baselineskip\relax>.05\textheight%
+\insertdecoratation%
+\fi\fi%
+}
+\makeatletter
+\renewcommand\mainmatter{%
+\pretocmd{\chapter}{\makedecoration}{}{}% decorate previous chapter
+\AtEndDocument{\makedecoration}% decorate the last chapter if no back matter
+\cleardoublepage
+\@mainmattertrue
+\pagenumbering{arabic}}
+\renewcommand\backmatter{%
+\makedecoration % decorate last chapter of mainmatter
+\renewcommand{\makedecoration}{}% now do nothing
+\if@openright
+\cleardoublepage
+\else
+\clearpage
+\fi
+\@mainmatterfalse}
+\makeatother
+
+%%************************************************
+
+\begin{document}
+
+\frontmatter
+
+\tableofcontents
+
+\chapter{Introduction}
+\kant[1-2]
+
+\mainmatter
+\chapter{Chapter One}
+\kant[1-3]
+
+\chapter{Chapter Two}
+\kant[1-3]
+
+\chapter{Chapter Three}
+\kant[1-3]
+
+\chapter*{Chapter Four}
+\kant[1-2]
+
+%   BACK MATTER
+\backmatter
+\chapter{Appendix}
+\kant[1-2]
+
+\end{document}
+
+
+• Not tried, but please do. Does this work reliably if chapters are pulled in with \include{...}? (I think it should, but would like that confirmed.) Jul 5 at 18:25
+• @barbara beeton It works with \input{...} but not with include{...} because the latter adds a \clearpage before and after the \input. Jul 5 at 19:18
+• Thanks for checking. That's useful to know, and could be a significant restriction (timewise) on a long book with many chapters. Jul 5 at 21:36

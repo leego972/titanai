@@ -1,0 +1,284 @@
+# Theorem Proving in Lean 4
+
+by Jeremy Avigad, Leonardo de Moura, Soonho Kong and Sebastian Ullrich, with contributions from the Lean Community
+
+This version of the text assumes you’re using Lean 4. See the Setting Up Lean section of the Lean 4 Manual to install Lean. The first version of this book was written for Lean 2, and the Lean 3 version is available here.
+
+# Introduction
+
+## Computers and Theorem Proving
+
+Formal verification involves the use of logical and computational methods to establish claims that are expressed in precise mathematical terms. These can include ordinary mathematical theorems, as well as claims that pieces of hardware or software, network protocols, and mechanical and hybrid systems meet their specifications. In practice, there is not a sharp distinction between verifying a piece of mathematics and verifying the correctness of a system: formal verification requires describing hardware and software systems in mathematical terms, at which point establishing claims as to their correctness becomes a form of theorem proving. Conversely, the proof of a mathematical theorem may require a lengthy computation, in which case verifying the truth of the theorem requires verifying that the computation does what it is supposed to do.
+
+The gold standard for supporting a mathematical claim is to provide a proof, and twentieth-century developments in logic show most if not all conventional proof methods can be reduced to a small set of axioms and rules in any of a number of foundational systems. With this reduction, there are two ways that a computer can help establish a claim: it can help find a proof in the first place, and it can help verify that a purported proof is correct.
+
+Automated theorem proving focuses on the "finding" aspect. Resolution theorem provers, tableau theorem provers, fast satisfiability solvers, and so on provide means of establishing the validity of formulas in propositional and first-order logic. Other systems provide search procedures and decision procedures for specific languages and domains, such as linear or nonlinear expressions over the integers or the real numbers. Architectures like SMT ("satisfiability modulo theories") combine domain-general search methods with domain-specific procedures. Computer algebra systems and specialized mathematical software packages provide means of carrying out mathematical computations, establishing mathematical bounds, or finding mathematical objects. A calculation can be viewed as a proof as well, and these systems, too, help establish mathematical claims.
+
+Automated reasoning systems strive for power and efficiency, often at the expense of guaranteed soundness. Such systems can have bugs, and it can be difficult to ensure that the results they deliver are correct. In contrast, interactive theorem proving focuses on the "verification" aspect of theorem proving, requiring that every claim is supported by a proof in a suitable axiomatic foundation. This sets a very high standard: every rule of inference and every step of a calculation has to be justified by appealing to prior definitions and theorems, all the way down to basic axioms and rules. In fact, most such systems provide fully elaborated "proof objects" that can be communicated to other systems and checked independently. Constructing such proofs typically requires much more input and interaction from users, but it allows you to obtain deeper and more complex proofs.
+
+The Lean Theorem Prover aims to bridge the gap between interactive and automated theorem proving, by situating automated tools and methods in a framework that supports user interaction and the construction of fully specified axiomatic proofs. The goal is to support both mathematical reasoning and reasoning about complex systems, and to verify claims in both domains.
+
+Lean's underlying logic has a computational interpretation, and Lean can be viewed equally well as a programming language. More to the point, it can be viewed as a system for writing programs with a precise semantics, as well as reasoning about the functions that the programs compute. Lean also has mechanisms to serve as its own metaprogramming language, which means that you can implement automation and extend the functionality of Lean using Lean itself. These aspects of Lean are explored in a companion tutorial to this one, Programming in Lean 4, though computational aspects of the system will make an appearance here.
+
+The Lean project was launched by Leonardo de Moura at Microsoft Research Redmond in 2013. It is an ongoing, long-term effort, and much of the potential for automation will be realized only gradually over time. Lean is released under the Apache 2.0 license, a permissive open source license that permits others to use and extend the code and mathematical libraries freely.
+
+To install Lean in your computer consider using the Quickstart instructions. The Lean source code, and instructions for building Lean, are available at https://github.com/leanprover/lean4/.
+
+This tutorial describes the current version of Lean, known as Lean 4.
+
+This book is designed to teach you to develop and verify proofs in Lean. Much of the background information you will need in order to do this is not specific to Lean at all. To start with, you will learn the logical system that Lean is based on, a version of dependent type theory that is powerful enough to prove almost any conventional mathematical theorem, and expressive enough to do it in a natural way. More specifically, Lean is based on a version of a system known as the Calculus of Constructions with inductive types. Lean can not only define mathematical objects and express mathematical assertions in dependent type theory, but it also can be used as a language for writing proofs.
+
+Because fully detailed axiomatic proofs are so complicated, the challenge of theorem proving is to have the computer fill in as many of the details as possible. You will learn various methods to support this in dependent type theory. For example, term rewriting, and Lean's automated methods for simplifying terms and expressions automatically. Similarly, methods of elaboration and type inference, which can be used to support flexible forms of algebraic reasoning.
+
+Finally, you will learn about features that are specific to Lean, including the language you use to communicate with the system, and the mechanisms Lean offers for managing complex theories and data.
+
+Throughout the text you will find examples of Lean code like the one below:
+
+theorem and_commutative (p q : Prop) : p ∧ q → q ∧ p :=
+fun hpq : p ∧ q =>
+have hp : p := And.left hpq
+have hq : q := And.right hpq
+show q ∧ p from And.intro hq hp
+
+
+If you are reading the book inside of VS Code, you will see a button that reads "try it!" Pressing the button copies the example to your editor with enough surrounding context to make the code compile correctly. You can type things into the editor and modify the examples, and Lean will check the results and provide feedback continuously as you type. We recommend running the examples and experimenting with the code on your own as you work through the chapters that follow. You can open this book on VS Code by using the command "Lean 4: Open Documentation View".
+
+## Acknowledgments
+
+This tutorial is an open access project maintained on Github. Many people have contributed to the effort, providing corrections, suggestions, examples, and text. We are grateful to Ulrik Buchholz, Kevin Buzzard, Mario Carneiro, Nathan Carter, Eduardo Cavazos, Amine Chaieb, Joe Corneli, William DeMeo, Marcus Klaas de Vries, Ben Dyer, Gabriel Ebner, Anthony Hart, Simon Hudon, Sean Leather, Assia Mahboubi, Gihan Marasingha, Patrick Massot, Christopher John Mazey, Sebastian Ullrich, Floris van Doorn, Daniel Velleman, Théo Zimmerman, Paul Chisholm, Chris Lovett, and Siddhartha Gadgil for their contributions. Please see lean prover and lean community for an up to date list of our amazing contributors.
+
+# Dependent Type Theory
+
+Dependent type theory is a powerful and expressive language, allowing you to express complex mathematical assertions, write complex hardware and software specifications, and reason about both of these in a natural and uniform way. Lean is based on a version of dependent type theory known as the Calculus of Constructions, with a countable hierarchy of non-cumulative universes and inductive types. By the end of this chapter, you will understand much of what this means.
+
+## Simple Type Theory
+
+"Type theory" gets its name from the fact that every expression has an associated type. For example, in a given context, x + 0 may denote a natural number and f may denote a function on the natural numbers. For those who like precise definitions, a Lean natural number is an arbitrary-precision unsigned integer.
+
+Here are some examples of how you can declare objects in Lean and check their types.
+
+/- Define some constants. -/
+
+def m : Nat := 1       -- m is a natural number
+def n : Nat := 0
+def b1 : Bool := true  -- b1 is a Boolean
+def b2 : Bool := false
+
+/- Check their types. -/
+
+#check m            -- output: Nat
+#check n
+#check n + 0        -- Nat
+#check m * (n + 0)  -- Nat
+#check b1           -- Bool
+#check b1 && b2     -- "&&" is the Boolean and
+#check b1 || b2     -- Boolean or
+#check true         -- Boolean "true"
+
+/- Evaluate -/
+
+#eval 5 * 4         -- 20
+#eval m + 2         -- 3
+#eval b1 && b2      -- false
+
+
+Any text between /- and -/ constitutes a comment block that is ignored by Lean. Similarly, two dashes -- indicate that the rest of the line contains a comment that is also ignored. Comment blocks can be nested, making it possible to "comment out" chunks of code, just as in many programming languages.
+
+The def keyword declares new constant symbols into the working environment. In the example above, def m : Nat := 1 defines a new constant m of type Nat whose value is 1. The #check command asks Lean to report their types; in Lean, auxiliary commands that query the system for information typically begin with the hash (#) symbol. The #eval command asks Lean to evaluate the given expression. You should try declaring some constants and type checking some expressions on your own. Declaring new objects in this manner is a good way to experiment with the system.
+
+What makes simple type theory powerful is that you can build new types out of others. For example, if a and b are types, a -> b denotes the type of functions from a to b, and a × b denotes the type of pairs consisting of an element of a paired with an element of b, also known as the Cartesian product. Note that × is a Unicode symbol. The judicious use of Unicode improves legibility, and all modern editors have great support for it. In the Lean standard library, you often see Greek letters to denote types, and the Unicode symbol → as a more compact version of ->.
+
+#check Nat → Nat      -- type the arrow as "\to" or "\r"
+#check Nat -> Nat     -- alternative ASCII notation
+
+#check Nat × Nat      -- type the product as "\times"
+#check Prod Nat Nat   -- alternative notation
+
+#check Nat → Nat → Nat
+#check Nat → (Nat → Nat)  --  same type as above
+
+#check Nat × Nat → Nat
+#check (Nat → Nat) → Nat -- a "functional"
+
+#check Nat.succ     -- Nat → Nat
+#check (0, 1)       -- Nat × Nat
+#check Nat.add      -- Nat → Nat → Nat
+
+#check Nat.succ 2   -- Nat
+#check Nat.add 3    -- Nat → Nat
+#check Nat.add 5 2  -- Nat
+#check (5, 9).1     -- Nat
+#check (5, 9).2     -- Nat
+
+#eval Nat.succ 2   -- 3
+#eval Nat.add 5 2  -- 7
+#eval (5, 9).1     -- 5
+#eval (5, 9).2     -- 9
+
+
+Once again, you should try some examples on your own.
+
+Let's take a look at some basic syntax. You can enter the unicode arrow → by typing \to or \r or \->. You can also use the ASCII alternative ->, so the expressions Nat -> Nat and Nat → Nat mean the same thing. Both expressions denote the type of functions that take a natural number as input and return a natural number as output. The unicode symbol × for the Cartesian product is entered as \times. You will generally use lower-case Greek letters like α, β, and γ to range over types. You can enter these particular ones with \a, \b, and \g.
+
+There are a few more things to notice here. First, the application of a function f to a value x is denoted f x (e.g., Nat.succ 2). Second, when writing type expressions, arrows associate to the right; for example, the type of Nat.add is Nat → Nat → Nat which is equivalent to Nat → (Nat → Nat). Thus you can view Nat.add as a function that takes a natural number and returns another function that takes a natural number and returns a natural number. In type theory, this is generally more convenient than writing Nat.add as a function that takes a pair of natural numbers as input and returns a natural number as output. For example, it allows you to "partially apply" the function Nat.add. The example above shows that Nat.add 3 has type Nat → Nat, that is, Nat.add 3 returns a function that "waits" for a second argument, n, which is then equivalent to writing Nat.add 3 n.
+
+You have seen that if you have m : Nat and n : Nat, then (m, n) denotes the ordered pair of m and n which is of type Nat × Nat. This gives you a way of creating pairs of natural numbers. Conversely, if you have p : Nat × Nat, then you can write p.1 : Nat and p.2 : Nat. This gives you a way of extracting its two components.
+
+## Types as objects
+
+One way in which Lean's dependent type theory extends simple type theory is that types themselves --- entities like Nat and Bool --- are first-class citizens, which is to say that they themselves are objects. For that to be the case, each of them also has to have a type.
+
+#check Nat               -- Type
+#check Bool              -- Type
+#check Nat → Bool        -- Type
+#check Nat × Bool        -- Type
+#check Nat → Nat         -- ...
+#check Nat × Nat → Nat
+#check Nat → Nat → Nat
+#check Nat → (Nat → Nat)
+#check Nat → Nat → Bool
+#check (Nat → Nat) → Nat
+
+
+You can see that each one of the expressions above is an object of type Type. You can also declare new constants for types:
+
+def α : Type := Nat
+def β : Type := Bool
+def F : Type → Type := List
+def G : Type → Type → Type := Prod
+
+#check α        -- Type
+#check F α      -- Type
+#check F Nat    -- Type
+#check G α      -- Type → Type
+#check G α β    -- Type
+#check G α Nat  -- Type
+
+
+As the example above suggests, you have already seen an example of a function of type Type → Type → Type, namely, the Cartesian product Prod:
+
+def α : Type := Nat
+def β : Type := Bool
+
+#check Prod α β       -- Type
+#check α × β          -- Type
+
+#check Prod Nat Nat   -- Type
+#check Nat × Nat      -- Type
+
+
+Here is another example: given any type α, the type List α denotes the type of lists of elements of type α.
+
+def α : Type := Nat
+
+#check List α    -- Type
+#check List Nat  -- Type
+
+
+Given that every expression in Lean has a type, it is natural to ask: what type does Type itself have?
+
+#check Type      -- Type 1
+
+
+You have actually come up against one of the most subtle aspects of Lean's typing system. Lean's underlying foundation has an infinite hierarchy of types:
+
+#check Type     -- Type 1
+#check Type 1   -- Type 2
+#check Type 2   -- Type 3
+#check Type 3   -- Type 4
+#check Type 4   -- Type 5
+
+
+Think of Type 0 as a universe of "small" or "ordinary" types. Type 1 is then a larger universe of types, which contains Type 0 as an element, and Type 2 is an even larger universe of types, which contains Type 1 as an element. The list is indefinite, so that there is a Type n for every natural number n. Type is an abbreviation for Type 0:
+
+#check Type
+#check Type 0
+
+
+The following table may help concretize the relationships being discussed. Movement along the x-axis represents a change in the universe, while movement along the y-axis represents a change in what is sometimes referred to as "degree".
+
+sortProp (Sort 0)Type (Sort 1)Type 1 (Sort 2)Type 2 (Sort 3)...
+typeTrueBoolNat -> TypeType -> Type 1...
+termtrivialtruefun n => Fin nfun (_ : Type) => Type...
+
+Some operations, however, need to be polymorphic over type universes. For example, List α should make sense for any type α, no matter which type universe α lives in. This explains the type annotation of the function List:
+
+#check List    -- Type u_1 → Type u_1
+
+
+Here u_1 is a variable ranging over type levels. The output of the #check command means that whenever α has type Type n, List α also has type Type n. The function Prod is similarly polymorphic:
+
+#check Prod    -- Type u_1 → Type u_2 → Type (max u_1 u_2)
+
+
+To define polymorphic constants, Lean allows you to declare universe variables explicitly using the universe command:
+
+universe u
+
+def F (α : Type u) : Type u := Prod α α
+
+#check F    -- Type u → Type u
+
+
+You can avoid the universe command by providing the universe parameters when defining F.
+
+def F.{u} (α : Type u) : Type u := Prod α α
+
+#check F    -- Type u → Type u
+
+
+## Function Abstraction and Evaluation
+
+Lean provides a fun (or λ) keyword to create a function from an expression as follows:
+
+#check fun (x : Nat) => x + 5   -- Nat → Nat
+#check λ (x : Nat) => x + 5     -- λ and fun mean the same thing
+#check fun x : Nat => x + 5     -- Nat inferred
+#check λ x : Nat => x + 5       -- Nat inferred
+
+
+You can evaluate a lambda function by passing the required parameters:
+
+#eval (λ x : Nat => x + 5) 10    -- 15
+
+
+Creating a function from another expression is a process known as lambda abstraction. Suppose you have the variable x : α and you can construct an expression t : β, then the expression fun (x : α) => t, or, equivalently, λ (x : α) => t, is an object of type α → β. Think of this as the function from α to β which maps any value x to the value t.
+
+Here are some more examples
+
+#check fun x : Nat => fun y : Bool => if not y then x + 1 else x + 2
+#check fun (x : Nat) (y : Bool) => if not y then x + 1 else x + 2
+#check fun x y => if not y then x + 1 else x + 2   -- Nat → Bool → Nat
+
+
+Lean interprets the final three examples as the same expression; in the last expression, Lean infers the type of x and y from the expression if not y then x + 1 else x + 2.
+
+Some mathematically common examples of operations of functions can be described in terms of lambda abstraction:
+
+def f (n : Nat) : String := toString n
+def g (s : String) : Bool := s.length > 0
+
+#check fun x : Nat => x        -- Nat → Nat
+#check fun x : Nat => true     -- Nat → Bool
+#check fun x : Nat => g (f x)  -- Nat → Bool
+#check fun x => g (f x)        -- Nat → Bool
+
+
+Think about what these expressions mean. The expression fun x : Nat => x denotes the identity function on Nat, the expression fun x : Nat => true denotes the constant function that always returns true, and fun x : Nat => g (f x) denotes the composition of f and g. You can, in general, leave off the type annotation and let Lean infer it for you. So, for example, you can write fun x => g (f x) instead of fun x : Nat => g (f x).
+
+You can pass functions as parameters and by giving them names f and g you can then use those functions in the implementation:
+
+#check fun (g : String → Bool) (f : Nat → String) (x : Nat) => g (f x)
+-- (String → Bool) → (Nat → String) → Nat → Bool
+
+
+You can also pass types as parameters:
+
+#check fun (α β γ : Type) (g : β → γ) (f : α → β) (x : α) => g (f x)
+
+
+The last expression, for example, denotes the function that takes three types, α, β, and γ, and two functions, g : β → γ and f : α → β, and returns the composition of g and f. (Making sense of the type of this function requires an understanding of dependent products, which will be explained below.)
+
+The general form of a lambda expression is fun x : α => t, where the variable x is a "bound variable": it is really a placeholder, whose "scope" does not extend beyond the expression t. For example, the variable b in the expression fun (b : β) (x : α) => b has nothing to do with the constant b declared earlier. In fact, the expression denotes the same function as fun (u : β) (z : α) => u.
+
+Formally, express

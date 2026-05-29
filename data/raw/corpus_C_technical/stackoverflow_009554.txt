@@ -1,0 +1,20 @@
+Question: <p>There is a socket related function call in my code, that function is from another module thus out of my control, the problem is that it blocks for hours occasionally, which is totally unacceptable, How can I limit the function execution time from my code? I guess the solution must utilize another thread.</p>
+
+Answer: <p>Doing this from within a signal handler is dangerous: you might be inside an exception handler at the time the exception is raised, and leave things in a broken state.  For example,</p>
+
+<pre><code>def function_with_enforced_timeout():
+  f = open_temporary_file()
+  try:
+   ...
+  finally:
+   here()
+   unlink(f.filename)
+</code></pre>
+
+<p>If your exception is raised here(), the temporary file will never be deleted.</p>
+
+<p>The solution here is for asynchronous exceptions to be postponed until the code is not inside exception-handling code (an except or finally block), but Python doesn't do that.</p>
+
+<p>Note that this won't interrupt anything while executing native code; it'll only interrupt it when the function returns, so this may not help this particular case.  (SIGALRM itself might interrupt the call that's blocking--but socket code typically simply retries after an EINTR.)</p>
+
+<p>Doing this with threads is a better idea, since it's more portable than signals.  Since you're starting a worker thread and blocking until it finishes, there are none of the usual concurrency worries.  Unfortunately, there's no way to deliver an exception asynchronously to another thread in Python (other thread APIs can do this).  It'll also have the same issue with sending an exception during an exception handler, and require the same fix.</p>

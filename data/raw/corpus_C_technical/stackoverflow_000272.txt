@@ -1,0 +1,40 @@
+Question: <p>What's the best way to sanitise user input for a Python-based web application? Is there a single function to remove HTML characters and any other necessary characters combinations to prevent an <a href="http://en.wikipedia.org/wiki/Cross-site_scripting" rel="nofollow">XSS</a> or SQL injection attack?</p>
+
+Answer: <p>Here is a snippet that will remove all tags not on the white list, and all tag attributes not on the attribues whitelist (so you can't use <code>onclick</code>).</p>
+
+<p>It is a modified version of <a href="http://www.djangosnippets.org/snippets/205/">http://www.djangosnippets.org/snippets/205/</a>, with the regex on the attribute values to prevent people from using <code>href="javascript:..."</code>, and other cases described at <a href="http://ha.ckers.org/xss.html">http://ha.ckers.org/xss.html</a>.<br>
+(e.g. <code>&lt;a href="ja&amp;#x09;vascript:alert('hi')"&gt;</code> or <code>&lt;a href="ja  vascript:alert('hi')"&gt;</code>, etc.)</p>
+
+<p>As you can see, it uses the (awesome) <a href="http://www.crummy.com/software/BeautifulSoup/">BeautifulSoup</a> library.</p>
+
+<pre><code>import re
+from urlparse import urljoin
+from BeautifulSoup import BeautifulSoup, Comment
+
+def sanitizeHtml(value, base_url=None):
+    rjs = r'[\s]*(&amp;#x.{1,7})?'.join(list('javascript:'))
+    rvb = r'[\s]*(&amp;#x.{1,7})?'.join(list('vbscript:'))
+    re_scripts = re.compile('(%s)|(%s)' % (rjs, rvb), re.IGNORECASE)
+    validTags = 'p i strong b u a h1 h2 h3 pre br img'.split()
+    validAttrs = 'href src width height'.split()
+    urlAttrs = 'href src'.split() # Attributes which should have a URL
+    soup = BeautifulSoup(value)
+    for comment in soup.findAll(text=lambda text: isinstance(text, Comment)):
+        # Get rid of comments
+        comment.extract()
+    for tag in soup.findAll(True):
+        if tag.name not in validTags:
+            tag.hidden = True
+        attrs = tag.attrs
+        tag.attrs = []
+        for attr, val in attrs:
+            if attr in validAttrs:
+                val = re_scripts.sub('', val) # Remove scripts (vbs &amp; js)
+                if attr in urlAttrs:
+                    val = urljoin(base_url, val) # Calculate the absolute url
+                tag.attrs.append((attr, val))
+
+    return soup.renderContents().decode('utf8')
+</code></pre>
+
+<p>As the other posters have said, pretty much all Python db libraries take care of SQL injection, so this should pretty much cover you.</p>

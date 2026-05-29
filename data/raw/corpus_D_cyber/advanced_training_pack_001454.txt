@@ -1,0 +1,499 @@
+================================================================================
+TITAN AI — TRAINING PACK 029: PLATFORM ENGINEERING AND INTERNAL DEVELOPER PLATFORMS
+GOLDEN PATHS, SELF-SERVICE INFRASTRUCTURE, DEVELOPER EXPERIENCE, PAVED ROADS
+================================================================================
+
+================================================================================
+PART 1: THE PLATFORM ENGINEERING PHILOSOPHY
+================================================================================
+
+--- WHY PLATFORM ENGINEERING ---
+
+BEFORE PLATFORM ENGINEERING:
+  Every team manages their own:
+  - CI/CD pipeline (duplicated, inconsistent quality)
+  - Docker/Kubernetes configs (copy-pasted, outdated)
+  - Observability setup (each team's own logging format, metrics, no consistency)
+  - Secrets management (mix of hard-coded, k8s secrets, sometimes Vault)
+  - Database provisioning (manual tickets to DBA team)
+  - Security scanning (some teams have it, others don't)
+  - Compliance (each team interprets SOC 2 requirements differently)
+  
+  Result: "Platform tax" — 40-60% of developer time on infrastructure, not product.
+  Security posture: Inconsistent. Some services secure, others not.
+  Onboarding: New engineer needs weeks to learn "how we do things here."
+
+PLATFORM ENGINEERING MODEL:
+  Platform team: Builds and maintains "golden paths" — blessed, opinionated ways to do things.
+  Product teams: Consume platform capabilities via self-service. Focus on product.
+  
+  Golden path: The path of least resistance that happens to also be:
+  - Secure (security controls built in)
+  - Observable (monitoring pre-configured)
+  - Compliant (SOC 2, HIPAA controls embedded)
+  - Efficient (right infrastructure, right size)
+  
+  Key shift: Platform team does not gate or block. They enable.
+  Platform team is like an internal SaaS product. Their customers = product developers.
+  NPS (Net Promoter Score) of the platform = how you measure platform team success.
+
+--- TEAM TOPOLOGIES AND PLATFORM TEAMS ---
+
+TEAM TOPOLOGIES (Matthew Skelton, Manuel Pais):
+
+Stream-aligned team: Owns end-to-end delivery of a product/service.
+  Full stack: Frontend, backend, DB, deployments.
+  Outcome-focused: Feature shipped = success.
+  Anti-pattern: Having them manage their own Kubernetes cluster.
+
+Platform team: Manages shared infrastructure and tooling.
+  Reduces cognitive load of stream-aligned teams.
+  Mission: "Make it easy for stream-aligned teams to be autonomous."
+  Failure mode: Platform team becomes a bottleneck/gatekeeper.
+
+Enabling team: Help stream-aligned teams adopt new capabilities.
+  "Help stream-aligned teams adopt new practices like observability."
+  Temporary by nature. Should work themselves out of a job.
+
+Complicated Subsystem team: Deep expertise for specific complex components.
+  Example: ML platform team, security team, data platform team.
+  Provides components to stream-aligned teams.
+
+================================================================================
+PART 2: INTERNAL DEVELOPER PLATFORM (IDP) COMPONENTS
+================================================================================
+
+--- THE IDP STACK ---
+
+BACKSTAGE (Spotify, open-source IDP):
+
+What it provides:
+  Software Catalog: Inventory of all services, APIs, teams, owners.
+  TechDocs: Technical documentation co-located with service code.
+  Scaffolder: Create new services from templates (golden path scaffolding).
+  Plugins: Integrate with CI/CD, monitoring, security scanning, etc.
+
+Software Catalog usage:
+  Every service defines catalog-info.yaml in its repo:
+  
+  apiVersion: backstage.io/v1alpha1
+  kind: Component
+  metadata:
+    name: payments-service
+    description: "Handles payment processing for checkout"
+    annotations:
+      github.com/project-slug: company/payments-service
+      grafana/dashboard-selector: payments
+      pagerduty.com/service-id: P12345
+      backstage.io/techdocs-ref: dir:.
+    tags:
+      - pci-dss
+      - tier-1
+      - java
+  spec:
+    type: service
+    lifecycle: production
+    owner: payments-team
+    system: checkout
+    dependsOn:
+      - component:order-service
+      - resource:postgres-payments-db
+    providesApis:
+      - payments-api-v2
+  
+  From this: Backstage auto-builds service topology map.
+  Who owns this service? Payments-team.
+  What does it depend on? Order service, Postgres DB.
+  What APIs does it expose? payments-api-v2.
+  PagerDuty: Link directly to escalation policy.
+
+Scaffolder — Service templates:
+  New service request → Developer fills form in Backstage → GitHub repo created automatically.
+  Repo includes: Docker config, Kubernetes manifests, Prometheus metrics, CI pipeline, pre-commit hooks.
+  First deploy: Running in 30 minutes. Compliant from day 1.
+  
+  Template definition:
+  apiVersion: scaffolder.backstage.io/v1beta3
+  kind: Template
+  metadata:
+    name: python-service-template
+    title: Python Microservice
+  spec:
+    owner: platform-team
+    type: service
+    parameters:
+      - title: Service Information
+        properties:
+          serviceName:
+            type: string
+            title: Service Name
+          description:
+            type: string
+          team:
+            type: string
+    steps:
+      - id: fetch-base
+        name: Fetch Base
+        action: fetch:template
+        input:
+          url: ./skeleton  # Directory with template files
+          values:
+            serviceName: ${{ parameters.serviceName }}
+            team: ${{ parameters.team }}
+      
+      - id: publish
+        name: Publish to GitHub
+        action: publish:github
+        input:
+          repoUrl: github.com?owner=company&repo=${{ parameters.serviceName }}
+          defaultBranch: main
+          topics: ['service', '${{ parameters.team }}']
+      
+      - id: register
+        name: Register in Catalog
+        action: catalog:register
+        input:
+          repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+          catalogInfoPath: /catalog-info.yaml
+
+--- SELF-SERVICE INFRASTRUCTURE ---
+
+CROSSPLANE (Kubernetes-native infrastructure provisioning):
+  Extends Kubernetes API with infrastructure resources.
+  Developers request infrastructure via Kubernetes manifests (same as requesting a deployment).
+  Crossplane: Provisions on AWS/Azure/GCP using cloud provider APIs.
+  No Terraform, no tickets, no waiting.
+  
+  Developer requests database:
+  apiVersion: database.crossplane.io/v1alpha1
+  kind: PostgreSQLInstance
+  metadata:
+    name: payments-postgres
+    namespace: production
+  spec:
+    parameters:
+      storageGB: 20
+      instanceClass: db.t3.medium
+      multiAZ: true
+    compositionSelector:
+      matchLabels:
+        provider: aws
+        env: production
+    writeConnectionSecretToRef:
+      name: payments-db-credentials  # Secret auto-created in same namespace
+  
+  Behind the scenes: Platform team defined a "Composition" that:
+  - Creates RDS instance with specific security settings (encryption, backups, VPC)
+  - Enforces: Multi-AZ in production, automated backups, deletion protection
+  - Outputs: Connection string written to K8s secret
+  - No IAM permissions for developer to create RDS directly (only via Crossplane)
+  
+  Benefits:
+  Developer experience: Same Kubernetes YAML they know. Instant.
+  Security: Platform enforces all security controls in Composition.
+  Compliance: RDS always encrypted, always backed up. No way to create non-compliant.
+  Audit: All infrastructure in git. Crossplane state in K8s etcd.
+
+PORT (developer portal):
+  Alternative to Backstage, lower configuration overhead.
+  Pre-built integrations: GitHub, PagerDuty, Datadog, Kubernetes, Jira.
+  Self-service actions: Trigger GitHub Actions, create resources, deploy.
+
+--- PLATFORM AS A PRODUCT METRICS ---
+
+DORA METRICS (DevOps Research and Assessment):
+  Deployment Frequency: How often does each team deploy?
+  Lead Time for Changes: Commit → Production time.
+  Change Failure Rate: What % of deployments cause incidents?
+  Mean Time to Restore (MTTR): How long to recover from incident?
+  
+  Elite performers (top 25%):
+  - Deploy multiple times per day
+  - Lead time < 1 hour
+  - Change failure rate < 5%
+  - MTTR < 1 hour
+  
+  Platform team's job: Improve these metrics for all teams.
+  Track: Across all teams. See impact of platform changes.
+
+DEVELOPER EXPERIENCE METRICS:
+  Onboarding time: Days until new hire makes first production deploy.
+    Target: < 3 days. If weeks: Platform too complex.
+  Self-service success rate: % of infrastructure requests fulfilled without platform team ticket.
+    Target: > 90%. If lower: Too many gaps in self-service.
+  Developer NPS: Survey teams quarterly. Do they like the platform?
+    Below 0: Fix friction before adding features.
+
+================================================================================
+PART 3: CI/CD PLATFORM ENGINEERING
+================================================================================
+
+--- GOLDEN PATH CI/CD PIPELINE ---
+
+COMPLETE PIPELINE STAGES AND TOOLS:
+
+Stage 1: Pre-commit hooks (developer's machine)
+  - Lint: flake8/pylint (Python), ESLint (JS), golint (Go)
+  - Format: black (Python), prettier (JS), gofmt (Go)
+  - Secret scan: gitleaks
+  - Type check: mypy (Python), TypeScript compiler
+  - Time: < 5 seconds. Fast feedback.
+
+Stage 2: PR validation pipeline (triggers on PR open/update)
+  - Unit tests: Full suite. Must pass before merge.
+  - SAST: Semgrep security scan.
+  - Dependency scan: pip-audit/npm audit
+  - Coverage gate: Must maintain or improve coverage threshold.
+  - Build: Verify service builds successfully.
+  - Time: 3-10 minutes.
+
+Stage 3: Integration pipeline (triggers on merge to main)
+  - Integration tests: TestContainers-based tests.
+  - Container build: Build Docker image.
+  - Container scan: Trivy vulnerability scan.
+  - DAST: Automated ZAP scan against staging.
+  - Load test: 5-minute load test to catch regressions.
+  - Time: 15-30 minutes.
+
+Stage 4: Deploy to staging (automatic on integration pass)
+  - Deploy: ArgoCD applies to staging cluster.
+  - Smoke test: Critical paths work?
+  - Synthetic monitors: Key user journeys pass?
+  - Time: 5-10 minutes.
+
+Stage 5: Deploy to production (automatic or manual gate)
+  - Progressive rollout: 5% → 25% → 100% over 30 minutes.
+  - Automated rollback: Error rate spike → immediate rollback.
+  - Time: 30 minutes (including bake time).
+
+GITHUB ACTIONS REUSABLE WORKFLOWS (platform-provided):
+
+Platform team publishes reusable workflow:
+  # In platform team repo: .github/workflows/python-service.yaml
+  name: Python Service Pipeline
+  on:
+    workflow_call:
+      inputs:
+        service_name:
+          required: true
+          type: string
+      secrets:
+        REGISTRY_TOKEN:
+          required: true
+
+  jobs:
+    test:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-python@v4
+          with: {python-version: '3.12'}
+        - run: pip install -r requirements.txt
+        - run: pytest --cov=. --cov-fail-under=80 -x
+    
+    security:
+      needs: test
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Semgrep scan
+          uses: returntocorp/semgrep-action@v1
+          with: {config: "p/python p/security-audit"}
+        - name: Dependency audit
+          run: pip-audit --severity high --exit-code 1
+    
+    build:
+      needs: security
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build and push
+          uses: docker/build-push-action@v5
+          with:
+            push: true
+            tags: registry.company.com/${{ inputs.service_name }}:${{ github.sha }}
+        - name: Scan image
+          run: trivy image --exit-code 1 --severity CRITICAL registry.company.com/${{ inputs.service_name }}:${{ github.sha }}
+
+Product teams use it with 5 lines:
+  # In product team repo: .github/workflows/ci.yaml
+  name: CI
+  on: [push]
+  
+  jobs:
+    build:
+      uses: platform-team/workflows/.github/workflows/python-service.yaml@main
+      with:
+        service_name: payments-service
+      secrets: inherit
+
+Product team gets: Security scan, dependency check, container scan — all built in.
+They wrote 5 lines. Platform team maintains the implementation.
+
+================================================================================
+PART 4: SECRET MANAGEMENT PLATFORM
+================================================================================
+
+--- HASHICORP VAULT — PRODUCTION ARCHITECTURE ---
+
+VAULT USE CASES:
+  Static secrets: API keys, database passwords (store and retrieve).
+  Dynamic secrets: Generate ephemeral credentials on-demand.
+  PKI: Issue and rotate TLS certificates automatically.
+  Encryption as a Service: Encrypt/decrypt data without key management.
+  Secret zero: How does the app authenticate to Vault? (Kubernetes auth, AWS auth)
+
+DYNAMIC SECRETS — THE KILLER FEATURE:
+  Traditional: App has static DB password. Rotate quarterly (painful, often skipped).
+  Vault dynamic: App requests DB credentials on startup. Vault creates new user,
+  gives credentials, sets 1-hour TTL. App uses them. After 1 hour: Revoked.
+  
+  Benefits:
+  - Every app instance has unique credentials
+  - If credentials leaked: Expired in 1 hour
+  - No rotation ceremonies: Always fresh
+  - Audit: Every credential use logged in Vault
+  
+  Setup:
+  vault secrets enable database
+  vault write database/config/payments-db \
+    plugin_name=postgresql-database-plugin \
+    connection_url="postgresql://{{username}}:{{password}}@postgres:5432/payments" \
+    allowed_roles="payments-service" \
+    username="vault" password="vault-password"
+  
+  vault write database/roles/payments-service \
+    db_name=payments-db \
+    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT,INSERT,UPDATE ON payments TO \"{{name}}\";" \
+    default_ttl="1h" max_ttl="24h"
+  
+  # App requests credentials:
+  vault read database/creds/payments-service
+  # Returns: {username: "v-app-abc123", password: "XyZ789...", lease_duration: 3600}
+  # This user exists in PostgreSQL for exactly 1 hour.
+
+KUBERNETES AUTH (how pods authenticate to Vault):
+  Pods don't have passwords. How do they authenticate to Vault?
+  Answer: Kubernetes Service Account tokens (JWT signed by Kubernetes API).
+  
+  vault auth enable kubernetes
+  vault write auth/kubernetes/config \
+    kubernetes_host="https://kubernetes.default.svc" \
+    kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  
+  vault write auth/kubernetes/role/payments-service \
+    bound_service_account_names=payments-service \
+    bound_service_account_namespaces=production \
+    policies=payments-policy \
+    ttl=24h
+  
+  # payments-service policy:
+  vault policy write payments-policy - <<EOF
+  path "database/creds/payments-service" { capabilities = ["read"] }
+  path "secret/data/payments/*" { capabilities = ["read"] }
+  EOF
+  
+  Application flow:
+  1. Pod starts in K8s with service account "payments-service"
+  2. App reads K8s service account token from /var/run/secrets/...
+  3. App sends token to Vault: POST /auth/kubernetes/login
+  4. Vault verifies token with K8s API → Returns Vault token (24h)
+  5. App uses Vault token to read secrets and get DB credentials
+  
+  Zero hardcoded secrets. Zero static passwords. Full audit trail.
+
+--- EXTERNAL SECRETS OPERATOR (ESO) ---
+
+Alternative approach: Keep secrets in AWS Secrets Manager / Azure Key Vault / GCP Secret Manager.
+ESO syncs them into Kubernetes Secrets.
+
+Product team yaml:
+  apiVersion: external-secrets.io/v1beta1
+  kind: ExternalSecret
+  metadata:
+    name: payments-secrets
+  spec:
+    refreshInterval: 1h
+    secretStoreRef:
+      name: aws-secret-store
+      kind: ClusterSecretStore
+    target:
+      name: payments-secrets  # K8s secret name
+    data:
+      - secretKey: DB_PASSWORD
+        remoteRef:
+          key: production/payments/database
+          property: password
+      - secretKey: STRIPE_KEY
+        remoteRef:
+          key: production/payments/stripe
+          property: secret_key
+
+Platform team manages the SecretStore (AWS credentials, permissions).
+Product team just declares what secrets they need.
+No IAM access for product teams to Secrets Manager directly.
+
+================================================================================
+PART 5: PLATFORM SECURITY CONTROLS
+================================================================================
+
+--- POLICY AS CODE AT PLATFORM LEVEL ---
+
+OPA GATEKEEPER (admission controller for Kubernetes):
+  Every resource applied to K8s cluster: Checked against policies.
+  Policy violations: Rejected before they reach the cluster.
+  
+  Required policies in production:
+  - All pods must have resource requests/limits
+  - All pods must run as non-root
+  - All pods must have readiness and liveness probes
+  - Container images must come from approved registry only
+  - No privileged containers
+  - All deployments must have more than 1 replica in production
+  - No :latest image tags (must be pinned to SHA or version)
+  
+  Example policy (deny :latest images):
+  apiVersion: templates.gatekeeper.sh/v1beta1
+  kind: ConstraintTemplate
+  metadata:
+    name: denylatesttag
+  spec:
+    crd:
+      spec:
+        names:
+          kind: DenyLatestTag
+    targets:
+      - target: admission.k8s.gatekeeper.sh
+        rego: |
+          package denylatesttag
+          
+          violation[{"msg": msg}] {
+            container := input.review.object.spec.containers[_]
+            endswith(container.image, ":latest")
+            msg := sprintf("Container '%v' uses :latest tag. Pin to specific version.", [container.name])
+          }
+
+PLATFORM SECURITY POSTURE AUTOMATION:
+  Weekly automated run:
+  - Prowler: Scan all AWS accounts for CIS benchmark compliance
+  - Checkov: Scan all Terraform in all repos
+  - Trivy: Scan all container images in registry
+  - Gitleaks: Scan all repos for secrets
+  
+  Results: Dashboard updated. Owners notified for their services.
+  Trend: Week-over-week compliance score. Visible to leadership.
+  Accountability: Service owner owns compliance for their service.
+  
+  Escalation: Critical findings not remediated in 7 days → Engineering Manager alert.
+  This is: Automated, consistent, no manual effort. Platform team scales to 500 services.
+
+================================================================================
+END OF PACK 029: PLATFORM ENGINEERING
+Total: Platform engineering philosophy vs. Team Topologies, why platform teams exist,
+Backstage (catalog/scaffolder/TechDocs with YAML examples), Crossplane self-service
+infrastructure with Kubernetes-native database provisioning, DORA metrics and developer
+experience metrics, 5-stage golden path CI/CD pipeline, GitHub Actions reusable workflows
+(platform team provides, product team consumes in 5 lines), HashiCorp Vault (dynamic
+secrets, Kubernetes auth with full setup), External Secrets Operator, OPA Gatekeeper
+policies, automated security posture reporting at scale.
+================================================================================

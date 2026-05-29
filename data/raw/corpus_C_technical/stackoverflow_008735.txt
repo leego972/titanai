@@ -1,0 +1,77 @@
+Question: <p>The typical ConfigParser generated file looks like:</p>
+
+<pre><code>[Section]
+bar=foo
+[Section 2]
+bar2= baz
+</code></pre>
+
+<p>Now, is there a way to index lists like, for instance:</p>
+
+<pre><code>[Section 3]
+barList={
+    item1,
+    item2
+}
+</code></pre>
+
+<p>Related question: <a href="http://stackoverflow.com/questions/287757/pythons-configparser-unique-keys-per-section">Pythonâs ConfigParser unique keys per section</a></p>
+
+<p>? Thanks in advance</p>
+
+Answer: <p>One thing a lot of people don't know is that multi-line configuration-values are allowed. For example:</p>
+
+<pre><code>;test.ini
+[hello]
+barlist = 
+    item1
+    item2
+</code></pre>
+
+<p>The value of <code>config.get('hello','barlist')</code> will now be:</p>
+
+<pre><code>"\nitem1\nitem2"
+</code></pre>
+
+<p>Which you easily can split with the splitlines method (don't forget to filter empty items).</p>
+
+<p>If we look to a big framework like Pyramid they are using this technique:</p>
+
+<pre><code>def aslist_cronly(value):
+    if isinstance(value, string_types):
+        value = filter(None, [x.strip() for x in value.splitlines()])
+    return list(value)
+
+def aslist(value, flatten=True):
+    """ Return a list of strings, separating the input based on newlines
+    and, if flatten=True (the default), also split on spaces within
+    each line."""
+    values = aslist_cronly(value)
+    if not flatten:
+        return values
+    result = []
+    for value in values:
+        subvalues = value.split()
+        result.extend(subvalues)
+    return result
+</code></pre>
+
+<p><a href="https://github.com/Pylons/pyramid/blob/1c37b5487d229d1896ec983de1377f3282825739/pyramid/settings.py#L44">Source</a></p>
+
+<p>Myself, I would maybe extend the ConfigParser if this is a common thing for you:</p>
+
+<pre><code>class MyConfigParser(ConfigParser):
+    def getlist(self,section,option):
+        value = self.get(section,option)
+        return list(filter(None, (x.strip() for x in value.splitlines())))
+
+    def getlistint(self,section,option):
+        return [int(x) for x in self.getlist(section,option)]
+</code></pre>
+
+<p>Note that there are a few things to look out for when using this technique</p>
+
+<ol>
+<li>New lines that are items should start with whitespace (e.g. a space or a tab)</li>
+<li>All following lines that start with whitespace are considered to be part of the previous item. Also if it has an = sign or if it starts with a ; following the whitespace.</li>
+</ol>

@@ -1,0 +1,52 @@
+Question: <p>I have a class that I wish to expose as a remote service using pythons SimpleXMLRPCServer. The server startup looks like this:</p>
+
+<pre><code>server = SimpleXMLRPCServer((serverSettings.LISTEN_IP,serverSettings.LISTEN_PORT))
+
+service = Service()
+
+server.register_instance(service)
+server.serve_forever()
+</code></pre>
+
+<p>I then have a ServiceRemote class that looks like this:</p>
+
+<pre><code>def __init__(self,ip,port):
+    self.rpcClient = xmlrpclib.Server('http://%s:%d' %(ip,port))
+
+def __getattr__(self, name):
+    # forward all calls to the rpc client
+    return getattr(self.rpcClient, name)
+</code></pre>
+
+<p>So all calls on the ServiceRemote object will be forwarded to xmlrpclib.Server, which then forwards it to the remote server. The problem is a method in the service that takes named varargs:</p>
+
+<pre><code>@useDb
+def select(self, db, fields, **kwargs):
+    pass
+</code></pre>
+
+<p>The @useDb decorator wraps the function, creating the db before the call and opening it, then closing it after the call is done before returning the result.</p>
+
+<p>When I call this method, I get the error "<strong>call</strong>() got an unexpected keyword argument 'name'". So, is it possible to call methods taking variable named arguments remotely? Or will I have to create an override for each method variation I need.</p>
+
+<hr>
+
+<p>Thanks for the responses. I changed my code around a bit so the question is no longer an issue. However now I know this for future reference if I indeed do need to implement positional arguments and support remote invocation. I think a combination of Thomas and praptaks approaches would be good. Turning kwargs into positional args on the client through xmlrpclient, and having a wrapper on methods serverside to unpack positional arguments.</p>
+
+Answer: <p>As far as I know, the underlying protocol doesn't support named varargs (or any named args for that matter). The workaround for this is to create a wrapper that will take the **kwargs and pass it as an ordinary dictionary to the method you want to call. Something like this</p>
+
+<p>Server side:</p>
+
+<pre><code>def select_wrapper(self, db, fields, kwargs):
+    """accepts an ordinary dict which can pass through xmlrpc"""
+    return select(self,db,fields, **kwargs)
+</code></pre>
+
+<p>On the client side:</p>
+
+<pre><code>def select(self, db, fields, **kwargs):
+    """you can call it with keyword arguments and they will be packed into a dict"""
+    return self.rpcClient.select_wrapper(self,db,fields,kwargs)
+</code></pre>
+
+<p>Disclaimer: the code shows the general idea, you can do it a bit cleaner (for example writing a decorator to do that).</p>

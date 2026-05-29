@@ -1,0 +1,46 @@
+Question: <p>I've written a simple multi-threaded game server in python that creates a new thread for each client connection.  I'm finding that every now and then, the server will crash because of a broken-pipe/SIGPIPE error.  I'm pretty sure it is happening when the program tries to send a response back to a client that is no longer present.</p>
+
+<p>What is a good way to deal with this?  My preferred resolution would simply close the server-side connection to the client and move on, rather than exit the entire program.</p>
+
+<p>PS: <a href="http://stackoverflow.com/questions/108183/how-to-prevent-sigpipes-or-handle-them-properly">This</a> question/answer deals with the problem in a generic way; how specifically should I solve it?</p>
+
+Answer: <p>Assuming that you are using the standard socket module, you should be catching the <code>socket.error: (32, 'Broken pipe')</code> exception (not IOError as others have suggested). This will be raised in the case that you've described, i.e. sending/writing to a socket for which the remote side has disconnected.</p>
+
+<pre><code>import socket, errno, time
+
+# setup socket to listen for incoming connections
+s = socket.socket()
+s.bind(('localhost', 1234))
+s.listen(1)
+remote, address = s.accept()
+
+print "Got connection from: ", address
+
+while 1:
+    try:
+        remote.send("message to peer\n")
+        time.sleep(1)
+    except socket.error, e:
+        if isinstance(e.args, tuple):
+            print "errno is %d" % e[0]
+            if e[0] == errno.EPIPE:
+               # remote peer disconnected
+               print "Detected remote disconnect"
+            else:
+               # determine and handle different error
+               pass
+        else:
+            print "socket error ", e
+        remote.close()
+        break
+    except IOError, e:
+        # Hmmm, Can IOError actually be raised by the socket module?
+        print "Got IOError: ", e
+        break
+</code></pre>
+
+<p>Note that this exception will not always be raised on the first write to a closed socket - more usually the second write (unless the number of bytes written in the first write is larger than the socket's buffer size). You need to keep this in mind in case your application thinks that the remote end received the data from the first write when it may have already disconnected.</p>
+
+<p>You can reduce the incidence (but not entirely eliminate) of this by using <code>select.select()</code> (or <code>poll</code>). Check for data ready to read from the peer before attempting a write. If <code>select</code> reports that there is data available to read from the peer socket, read it using <code>socket.recv()</code>. If this returns an empty string, the remote peer has closed the connection. Because there is still a race condition here, you'll still need to catch and handle the exception.</p>
+
+<p>Twisted is great for this sort of thing, however, it sounds like you've already written a fair bit of code.</p>

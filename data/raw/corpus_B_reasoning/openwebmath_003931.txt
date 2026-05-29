@@ -1,0 +1,155 @@
+# Bigfloat lufact
+
+#1
+
+Has anyone noticed anything odd with lufact on BigFloats? Is there some theoretical weird instability thing I should know about? I am wondering because as I am testing some algorithms I am noticing a pattern that the same methods (ODE solvers) with the same coefficients (some methods are only specified to Float64 precision) suddenly fail if the coefficients are changed to BigFloats. But I can “save” the methods if I change the linear solve from lufact to qrfact.
+
+This is odd and is against my intuition: why would the same numbers give a bad lufact when converted to BigFloat but not as Float64s? If there’s no reasoning for this and it’s likely a problem with the generic fallback I’ll dig into this more and make an MWE. I just wanted to ask first because it might take a bit to pull out an actual example which isn’t integrated with everything else, but I have many different tests showing that it’s only lufact. I know qrfact is more stable, but this seems bizarre to me.
+
+#2
+
+I haven’t seen anything like that. How are the solvers failing? How ill conditioned are the matrices? It would be great if you could provide an example.
+
+#3
+
+I pulled an example out. In this case, it looks like lufact! is the only one correct on BigFloat:
+
+A = 92.317*eye(4)
+b = [0.0970454, 0.00944241, 0.167562, 0.08518]
+println("True solution")
+println(b/92.317)
+
+lufact!(A)
+println("lufact")
+println(A\b)
+
+A = 92.317*eye(4)
+
+qrfact!(A)
+println("qrfact")
+println(A\b)
+
+A = 92.317*eye(4)
+
+svdfact!(A)
+println("svdfact")
+println(A\b)
+
+Abig = big.(A)
+bbig = big.(b)
+
+lufact!(Abig)
+println("lufact bigfloat")
+println(Float64.(Abig\bbig))
+
+Abig = big.(A)
+
+qrfact!(Abig)
+println("qrfact bigfloat")
+println(Float64.(Abig\bbig))
+
+Abig = big.(A)
+
+using GenericSVD
+svdfact!(Abig)
+println("generic svdfact bigfloat")
+println(Float64.(Abig\bbig))
+
+
+This prints out the following:
+
+True solution
+[0.00105122, 0.000102282, 0.00181507, 0.00092269]
+lufact
+[0.00105122, 0.000102282, 0.00181507, 0.00092269]
+qrfact
+[0.00105122, 0.000102282, 0.00181507, 0.00092269]
+svdfact
+[0.00105122, 0.000102282, 0.00181507, 0.00092269]
+lufact bigfloat
+[0.00105122, 0.000102282, 0.00181507, 0.00092269]
+qrfact bigfloat
+[-0.00105122, -0.000102282, -0.00181507, 0.00092269]
+generic svdfact bigfloat
+[0.0485227, 0.00472121, 0.083781, 0.04259]
+
+
+Now I’m getting really confused. There’s definitely something odd in GenericSVD though.
+
+How do you use debuggers?
+#4
+
+You’d have to use the output of the in-place factorization. The input matrix hasn’t changed type and the interpretation of the elements has changed. E.g. for the generic SVD, you’d like to do
+
+julia> A = big.(92.317*eye(4));
+
+julia> F = svdfact!(A);
+
+julia> Float64.(F\b)
+4-element Array{Float64,1}:
+0.00105122
+0.000102282
+0.00181507
+0.00092269
+
+julia> b/92.317
+4-element Array{Float64,1}:
+0.00105122
+0.000102282
+0.00181507
+0.00092269
+
+
+#5
+
+Oh my bad. The real code is actually doing the correct form there. Let me try to find out what’s going on once more.
+
+#6
+
+Aha, I got it:
+
+W = 92.1935*eye(8)
+linsolve_tmp_vec = [0.323673, 0.369958, 0.0735182, 0.409571, 0.46994, 0.335103, 0.0287147, 0.402722]
+vectmp = similar(linsolve_tmp_vec)
+
+pA = lufact!(W)
+A_ldiv_B!(vectmp,pA,linsolve_tmp_vec)
+println((vectmp))
+
+# vectmp == [0.0035108, 0.00401284, 0.000797434, 0.00444251, 0.00509732, 0.00363478, 0.000311461, 0.00436823]
+
+W = big.(92.1935*eye(8))
+linsolve_tmp_vec = [0.323673, 0.369958, 0.0735182, 0.409571, 0.46994, 0.335103, 0.0287147, 0.402722]
+vectmp = similar(linsolve_tmp_vec)
+pA = lufact!(W)
+A_ldiv_B!(vectmp,pA,linsolve_tmp_vec)
+println(Float64.(vectmp))
+
+# vectmp == [0.323673, 0.369958, 0.0735182, 0.409571, 0.46994, 0.335103, 0.0287147, 0.402722]
+
+
+Interestingly, in the bigfloat one we get vectmp == linsolve_tmp_vec (terrible variable names, don’t hate) but not vectmp === linsolve_tmp_vec. So I checked:
+
+println(@which A_ldiv_B!(vectmp,pA,linsolve_tmp_vec))
+A_ldiv_B!(Y::Union{AbstractArray{T,1}, AbstractArray{T,2}} where T, A::Factorization, B::Union{AbstractArray{T,1}, AbstractArray{T,2}} where T) in Base.LinAlg at linalg\factorization.jl:u55
+
+
+which for me is the same as this spot:
+
+I see a copy! there, and so maybe nothing is really being called?
+
+#7
+
+There is a real issue here and it is quite old. The reference to the input array is broken so although the array returned has the right values, the rhs is not getting updated. See https://github.com/JuliaLang/julia/issues/22683
+
+#8
+
+I have a good idea about what went wrong.
+The results to Abig\bbig after qrfact! and svdfact! must be wrong, because of wrong usage.
+You could have written Abig = qrfact!(Abig) etc.
+While the contents of Abig is overwritten, the Abig\big works with the modified Abig (with an ordinary matrix inverse multiplication. In order to call the multiplication of typeof(qrfact!(Abig), it is necessary to have an object of that type, not Matrix{BigFloat}.
+Of course it is better style to use a different variable name for the factorization.
+
+#9
+
+No, read the whole thread. Yes, the first example was botched, but not the later one. It’s an issue in Julia.

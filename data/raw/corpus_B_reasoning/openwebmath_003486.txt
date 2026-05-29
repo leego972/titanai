@@ -1,0 +1,125 @@
+I've been learning Haskell for 2 weeks now which is I'm very new to it.
+
+I would like to have feedback on what is good/bad about my code and how it could I improve in learning functional programming paradigm.
+
+{--
+Number guessing game
+-- Generate a random number between 1 and 100
+-- Ask the user to guess the number
+-- If the user guesses the number, congratulate them
+-- If the user guesses incorrectly, tell them if they guessed too high or too low
+-- If the user runs out of guesses, tell them they lost
+--}
+
+module Main where
+import System.Random
+import System.Exit (die)
+
+message :: String
+message = "Welcome to the number guessing game! \n\
+\You have 10 guesses to guess the number.\n\
+\The computer will generate a random number between 1 and 100.\n\
+\Try to guess it in as few attempts as possible.\n"
+
+putStrLn "Take a guess: "
+input <- getLine
+
+let number = read input :: Integer
+if number < 1 || number > 100
+then do
+putStrLn "Number must be between 1 and 100"
+else return number
+
+playGame :: Integer -> IO ()
+playGame secretNumber = counter 1
+where
+counter getTries = do
+let maxGeusses = 10
+putStrLn $"You have " ++ show (maxGeusses - getTries) ++ " tries left.\n" guess <- askNumber if guess == secretNumber && getTries <= maxGeusses then do putStrLn "You guessed the number!" die "You won!" else if getTries < maxGeusses then do if guess > secretNumber then do putStrLn "Your guess was too high\n" >> counter (getTries + 1) playGame secretNumber else do putStrLn "Your guess was too low\n" >> counter (getTries + 1) playGame secretNumber else do die "You lost!" main :: IO () main = do putStrLn message secretNumber <- randomRIO (1, 100):: IO Integer playGame secretNumber  2 Answers This is pretty good for your first project! And it mostly works! Wall Using the option -Wall will get the compiler to complain more about little ambiguities in your code, kinda like a linter. In this case it alerts that it's filling in the type of counter for us; we can shut it up by adding counter :: Int -> IO () right about it inside the where clause. Style • Why is counter called that? It contain most of the game! Maybe you can give it a better name. If not, the traditional name for a recursive sub-function that does all the work is "go". (I don't like it, but it's convention.) • Why is getTries called that? It's neither a function nor an IO. • Using >> like that is kinda out of place. It's the same as just having the two expressions as seperate lines of the do block. That's what do is for, to safe us having to use lots of >>s and >>=s. • On the flip side, it'd be pretty normal to skip the variable input altogether. Remember that monads are functors; we can just write number <- read <$> getLine. If you prefer number :: Integer <- read <$> getLine, you'll need to add -XScopedTypeVariables to your compiler options. • The IO expression counter (renamed go) never "returns". I'll talk more below about whether that's good in itself; the point here is that it makes the recursive calls to playGame secretNumber unreachable. It's good to treat unreachable code as a bug and squash it. • For a human-interactive CLI tool, it's nice to be able to edit the input before hitting enter. Poking about for two seconds did not find me a working off-the shelf solution, which is annoying but neither your problem nor mine. • Be clear about what you're importing; either qualify the import or explicitly import just the names you want. This makes it easier for new people to figure out where stuff comes from. • maxGeusses is spelled wrong. Also, move it up to the where clause so it's not cluttering up the do block. Behavior • Why are you using die? That clearly shows up as an error (*** Exception: ExitFailure 1), which isn't appropriate even when the player looses. Probably System.Exit has some other command for non-failure exiting, but you shouldn't need it; just let the program finish naturally (i.e. let program flow get to the end of main). • Be more careful with read, it will crash your program if it can't parse the string. readMaybe works. Actually dealing with the Maybe makes the function look pretty ugly. Finding pleasant ways to talk about things like failure is its own learning-curve in Haskell. • While not technically wrong, it's kinda sketchy the way you're checking the number of guesses twice. A lot can go wrong in a recursive function; doing a thing right once is preferable. For example, as written, it will sometimes say you have 0 guesses left; what does that mean? In this case, we can do it all the way up as a guard on the definition of go. Here's what I came up with while trying out all the above: module Main where import System.Random (randomRIO) import Text.Read (readMaybe) message :: String message = "Welcome to the number guessing game! \n\ \You have 10 guesses to guess the number.\n\ \The computer will generate a random number between 1 and 100.\n\ \Try to guess it in as few attempts as possible." askNumber :: IO Integer askNumber = do putStrLn "Take a guess: " maybeNumber :: Maybe Integer <- readMaybe <$> getLine
+maybe recurseIfUnparseable recurseIfOutOfRange maybeNumber
+where recurseIfUnparseable = do putStrLn "Only enter integers!"
+recurseIfOutOfRange n
+| n < 1 || n > 100 = do putStrLn "Number must be between 1 and 100"
+| otherwise        = return n
+
+playGame :: Integer -> IO ()
+playGame secretNumber = go 0
+where maxGuesses = 10
+go :: Integer -> IO ()
+go failureCount
+| maxGuesses <= failureCount = putStrLn "You lost!"
+| otherwise = do
+putStrLn $"You have " ++ show (maxGuesses - failureCount) ++ " tries left." guess <- askNumber if guess == secretNumber then putStrLn "You guessed the number; you won!" else do putStrLn (if guess > secretNumber then "Your guess was too high." else "Your guess was too low.") go (failureCount + 1) main :: IO () main = do putStrLn message secretNumber <- randomRIO (1, 100):: IO Integer playGame secretNumber  • This is very helpful, thanks a lot. Do you have a book that you recommend that I can read. – JHV Jun 15 at 4:49 • I'm not the person who wrote this post, but I really like "Learn You a Haskell for Great Good!" by Miran Lipovaca: learnyouahaskell.com Jun 15 at 14:21 • "Learn You A Haskell" is good; oldschool but well liked. Possibly too introductory for OP, but I don't know. Jun 15 at 23:31 • One small improvement would be to conditionally print "try" or "tries" to avoid printing "You have 1 tries left." Also, you mean, "even when the player loses," not "looses." Jun 16 at 15:19 Aside from what @ShapeOfMatter have already said. I'd suggest to force yourself into pure functions as much as you can. This is the way functional is design for. Notice that when you make a guess you have four possible outcomes: Either you win, loose, guess too high or guess to low. You can express that as a enumeration (ADT in Haskell), then you can neatly define the playRound function which given the neccesary information produces a result. What's left is calling that function over and over again, and produce the corresponding messages to the user, making the validations out of range and input should be a number. This is done via pattern matching easily. {-# LANGUAGE TypeApplications #-} Module Main where import System.Random import Text.Read (readMaybe) -- Check @ShapeofMatter answer for this data EndGame = Win | Lose | TooHigh | TooLow -- The pure function for one guess. Clear and simple playRound :: Int -> Int -> Int -> EndGame playRound numguess solution guess | numguess <= 0 = Lose | guess > solution = TooHigh | guess < solution = TooLow | solution == guess = Win -- This function just executes playRound given users input. -- It makes some validations you can even factor out in other function playGame :: Int -> Int -> IO () playGame guesses_left solution = do putStrLn$ "\nYou have " ++ show guesses_left ++ " tries left."
+putStrLn "Take a guess: "
+input <- readMaybe @Int <\$> getLine
+case input of
+Nothing -> do
+putStrLn "input isn't a number"
+playGame guesses_left solution
+
+-- Input is out of range
+Just guess | (guess < 1 || guess > 100) -> do
+putStrLn "Number must be between 1 and 100"
+playGame guesses_left solution
+
+-- Input is ok
+Just guess -> do
+case playRound guesses_left solution guess of
+Lose -> putStrLn "You lost!"
+Win -> do
+putStrLn "You guessed the number!"
+putStrLn "You Won!"
+TooHigh -> do
+putStrLn "Your guess was too high"
+playGame (guesses_left - 1) solution
+TooLow -> do
+putStrLn "Your guess was too low"
+playGame (guesses_left - 1) solution
+
+message :: String
+message = "Welcome to the number guessing game! \n\
+\You have 10 guesses to guess the number.\n\
+\The computer will generate a random number between 1 and 100.\n\
+\Try to guess it in as few attempts as possible.\n"
+
+main :: IO ()
+main = do
+putStrLn message
+-- putStrLn "Set the max number of guesses:"
+secretNumber <- randomRIO (1, 100) :: IO Int
+playGame 10 secretNumber
+
+
+
+Edit:
+
+Notice that guards can be used within pattern matching as normal guards, making code more succint. I didn't use it in the first solution because didn't want to introduce too much syntactic overhead. In general, whenever you find if .. then .. else .. you can substitute it with guards or with pattern matching on booleans. Many times it will improve readability, but not always... so just choose the option that reads better.
+
+If you have nested if .. then .. else .. I think it is somehow a code smell. The rule of thumb which works for me is "don't use if .. then .. else .. unless it clearly improves readability". The reason for that is because branching is much more clear when you have many equations via guards or pattern matching instead of a huge expression in a single if .. then .. else ..
+
+.
+.
+.
+Just guess
+| guess < 1 || guess > 100 -> do       -- Input is out of range
+putStrLn "Number must be between 1 and 100"
+playGame guesses_left solution
+| otherwise -> do                      -- Input is ok
+case playRound guesses_left solution guess of
+Lose -> putStrLn "You lost!"
+Win -> do
+putStrLn "You guessed the number!"
+putStrLn "You Won!"
+TooHigh -> do
+putStrLn "Your guess was too high"
+playGame (guesses_left - 1) solution
+TooLow -> do
+putStrLn "Your guess was too low"
+playGame (guesses_left - 1) solution
+
+• thanks a lot this is very big help, I'm new to FP do you have a resources to recommend to dig deeper into FP like principles of this paradigm, concepts, etc
+– JHV
+Jun 15 at 10:01
+• Nice use of type application on readMaybe! Try help new people notice and understand cool features like that. I also really like the way you pattern-matched input with a guard to flatten out the validation logic. Jun 15 at 23:28
+• @ShapeOfMatter thanks!, actually guards work within pattern matching as regular. I've added an Edit section explaining why if then else isn't a good idea in many cases. Also I provide a rewrite of the guard case so you can see there is nothing special with using guards within pattern matching ;) Jun 16 at 6:45
+• @ShapeOfMatter oh! I was thinking you are the OP, sorry hahahaha. Still usefull edit though Jun 16 at 6:48

@@ -1,0 +1,60 @@
+This is an old revision of the document!
+
+# NGS Read Mapping Software on Mogon
+
+As a first introduction into NGS alignment software tools we recommend reading this short blog post. Or in other words: It might be, that the list of supported tools grows and grows, due to your requests, but will never really cover everybody's favorite tool.
+
+Notwithstanding, own benchmarks a first impression can be found in the same blog.
+
+BWA is one mapping tool, particularly to map “low-divergent sequences against a large reference genome”. Modules on Mogon can be found as1):
+
+bio/BWA
+
+#### The Wrapper Script
+
+To leverage the task from 1 (or a few) samples to be mapped to several in parallel, we provide a wrapper script, which is available as a module:
+
+bio/parallel_BWA
+
+The code is under version management and hosted internally, here.
+
+The wrapper script will submit a job, it is not intended to be just within a SLURM environment, but rather creates one.
+
+Calling parallel_BWA -h will display a help message with all the options, the script provides. Likewise, the call parallel_BWA –credits will display credits and a version history.
+
+$parallel_BWA [options] <referencedir> <inputdir> Limitations: • The wrapper recognizes FASTQ files with suffixes “*.gz”, “*.fastq” or “*.fq” and will allways assume FASTQ files (compressed or uncompressed). • The number of processes (and therefore nodes) is limited to the number of samples. • The wrapper only works for paired end sequencing data, where the file tuples are designated with the following strings “_1” and “_2” or “_R1” and “_R2”, respectively. • BWA does not scale well to big data. It is better to split input to chuncks of ~1GB (take this with a grain of salt: there are not scaling tests, yet) • BWA does not scale well beyond a NUMA block (8 threads on Mogon I) • There are only a few options, as internally the wrapper calls bwa mem (or bwa aln in the single end case) and only sets up a few things to yield performance. About Arguments: • referencedir needs to be the (relative) path to a directory containing an indexed BWA reference • inputdir needs to be a (relative) path to a directory containing all inputs. Subdirectories and files containing the string unpaired are ignored; this is to support preprocessing with the trimmomatic module. The options: • parallel_BWA attempts to deduce your SLURM account. This may fail, in which case -A, –account needs to be supplied. • -N,–nodes allows to reserve more than 1 node (the default). This may speed up the screening; see the limitations above. • -d,–dependency, list of comma separated jobids, the job will wait for to finish • -l,–runlimit, this defaults to 300 minutes. • -p,–partition, the default is nodeshort or parallel on Mogon2, no smp-partition should be choosen. • -t,–threads, BWA can work in parallel. Please consult the manual. The default is 8. • -o,–outdir output directory path (default is the current working directory) • –single (no arguments) to evaluate single end data • –args to supply additional flags, e. g. –args=“-l 1024 -n 0.02” for BWA - note the quotation marks, they are necessary. Output: • Per input tuple (paired sequencing data, only) a BAM file with the prefix of the input will be written. In the case of single end data, there will be one output per input, only. Barracuda is a GPU-accelerated implementation of BWA and can be found on Mogon as the module bio/barracuda It does not support bwa mem … but rather leverages bwa aln … to GPUs. #### The Wrapper Script To leverage the task from 1 (or a few) samples to be mapped to several in parallel, we provide a wrapper script, which is available as a module: bio/parallel_Barracuda Calling parallel_Barracuda -h will display a help message with all the options, the script provides. Likewise, the call parallel_Barracuda –credits will display credits and a version history. The script, after loading the module, can then be run like: $ parallel_Barracuda [options] <referencedir> <inputdir>
+
+Limitations:
+
+• See the parallel_BWA wrapper
+• Also: The script will only use the m2_gpu partition and therefore needs an account with the m2_ prefix.
+
+• referencedir needs to be the (relative) path to a directory containing an indexed BWA reference. No symbolic links are allowed.
+• inputdir needs to be a (relative) path to a directory containing all inputs. Subdirectories and files containing the string unpaired are ignored; this is to support preprocessing with the trimmomatic module.
+
+The options:
+
+• parallel_BWA attempts to deduce your SLURM account. This may fail, in which case -A, –account needs to be supplied.
+• -d,–dependency, list of comma separated jobids, the job will wait for to finish
+• -l,–runlimit, this defaults to 300 minutes.
+• -o,–outdir output directory path (default is the current working directory)
+
+Output:
+
+• Per input tuple (paired sequencing data, only) a BAM file with the prefix of the input will be written. In the case of single end data, there will be one output per input, only.
+
+#### The Wrapper Script
+
+Bowtie2 is a well known read aligner with a focus on gapped alignments.
+
+As preliminary scaling tests indicate that the program can scale to a full node and is still reasonably fast, no wrapper script has been installed as a module, so far2). Instead, a few samples are given:
+
+#### The Wrapper Script
+
+segemehl seems to be a pretty good alignment tool, mentioned here, due to the blog which is cited below.
+
+There will be no wrapper script for segemehl: If this comparison bears any truth, the software might be really good. But also pretty memory hungry. And several tens GB / core is just too mutch. If you want to try segemehl, be sure to write your own wrapper script (perhaps stage-in the reference to a local scratch, not the ramdisk) and reserve sufficient memory. Be aware that you will be accounted for the pro-longed run time and memory.
+
+This part needs some more time to be finished ….
+
+1)

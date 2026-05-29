@@ -1,0 +1,83 @@
+# ROC: difference between discrete and continuous?
+
+Using the ROC function in the R package TTR, there is a choice between continuous (the default) and discrete, but with no guidance on which you choose when. In the code the difference is:
+
+roc <- x/lag(x) - 1
+
+
+versus:
+
+roc <- diff(log(x))
+
+
+I admit my maths is weak but aren't they the same thing?
+
+cbind(ROC(x,type='continuous'),ROC(x,type='discrete'),log(x))
+
+
+gives:
+
+2012-08-16 19:00:00             NA             NA 8.673855
+2012-08-17 07:00:00  0.00008549566  0.00008549932 8.673940
+2012-08-17 08:00:00  0.00000000000  0.00000000000 8.673940
+2012-08-17 09:00:00 -0.00085528572 -0.00085492006 8.673085
+2012-08-17 10:00:00  0.00034220207  0.00034226063 8.673427
+2012-08-17 11:00:00 -0.00102695773 -0.00102643059 8.672400
+
+
+There is a subtle difference, but is it a real difference or an artifact of floating point calculation?
+
+It seems like Quantmod: what's the difference between ROC(Cl(SPY)) and ClCl(SPY) is almost asking the same thing. But the answers there seem to be saying that with one you would sum the returns, and with the other you multiply them. That is clearly not going to be the case for the above numbers.
+
+(BTW, no-one answered his question (in the comments) as to which form is expected by the PerformanceAnalytics package, which might have given a clue as to which you choose when.)
+
+Here is the test data for the above:
+
+structure(c(5848, 5848.5, 5848.5, 5843.5, 5845.5, 5839.5), class = c("xts",
+"zoo"), .indexCLASS = c("POSIXct", "POSIXt"), .indexTZ = "", tclass = c("POSIXct",
+"POSIXt"), tzone = "", index = structure(c(1345143600, 1345186800,
+1345190400, 1345194000, 1345197600, 1345201200), tzone = "", tclass = c("POSIXct",
+"POSIXt")), .Dim = c(6L, 1L), .Dimnames = list(NULL, "Close"))
+
+-
+PerformanceAnalytics can use either discrete or log returns. It can also perform simple or geometric chaining. These two things are easily confused. If you have log returns, you almost certainly want to use simple chaining. If you have discrete (often called simple) returns, you may want either geometric chaining or simple chaining, depending on your input data and the analysis that you want to do. –  Brian G. Peterson Sep 4 '12 at 15:58
+
+The difference is not an artifact of floating point arithmetic; it's a difference in compounding frequency. The returns in your example are fairly close to zero, so they don't look that different. Larger changes in price will cause larger differences between the two calculation methods.
+
+Pat Burns wrote a nice blog post about the difference between arithmetic and log returns called, A tale of two returns. I suggest you read the entire thing, but the relevant portions are:
+
+• log returns are always smaller than simple returns
+• simple returns aggregate across assets
+• log returns aggregate across time
+• The log return of a short position is the negative of the log return of the long position. The relationship of the simple return of a short position relative to that of the long position is a little more complicated: $-R / (R + 1)$
+
+So, the difference between summing and multiplying the returns clearly is a big difference between the two methods. Regarding PerformanceAnalytics, it seems that most of the functions assume arithmetic returns. Remember, you have the source code, so you can always see the exact calculations being used to generate each functions' results.
+
+-
+Thanks Joshua. The article was also very useful in pointing out the terminology, which was where a lot of my confusion had come from! (discrete == simple == arithmetic) (continuous == log == geometric) –  Darren Cook Sep 4 '12 at 0:56
+BTW, re: PerformanceAnalytics, "most of the functions assume arithmetic returns". I now notice user508's comment at quant.stackexchange.com/a/1082/1587 says "PerformanceAnalytics defaults to log returns." :-( –  Darren Cook Sep 4 '12 at 1:00
+@DarrenCook: user508 is probably referring to Return.Calculate and Calculate.Returns. Most PerformanceAnalytics functions that take a return vector have default to simple returns (and therefore geometric chaining). –  Joshua Ulrich Sep 4 '12 at 15:04
+
+The difference is real, though it is very small if your return on capital is small. Let's say value of your asset went up from 10.03 to 10.05:
+
+Here is my python code:
+
+>>> from math import log
+>>> 10.05 / 10.03 - 1
+0.001994017946161719
+>>> log(10.05) - log(10.03)
+0.001992032531240806
+
+
+The ROC is small, and difference between two methods is small. But if the price of your stock went up from 100 to 500:
+
+>>> 500.0/100.0 - 1
+4.0
+>>> log(500) - log(100)
+1.6094379124340996
+
+
+ROC is large, and the difference between the methods is large.
+
+-
+Thanks, that is a very clear example. –  Darren Cook Sep 4 '12 at 1:00

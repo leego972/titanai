@@ -1,0 +1,134 @@
+• Create Account
+
+## Windowed mode beyond desktop resolution issue
+
+Old topic!
+
+Guest, the last post of this topic is over 60 days old and at this point you may not reply in this topic. If you wish to continue this conversation start a new topic.
+
+9 replies to this topic
+
+### #1Tispe  Members
+
+Posted 29 October 2013 - 05:05 PM
+
+Hello
+
+If I set my game to a windowed resolution (1920x1080) which makes the window(client area + border area) larger than the monitor resolution(1920x1080) then Windows will automatically "crop" down the window size to fit inside the desktop. This causes the client area to be compressed causing image distortions and positioning errors.
+
+Is there a way to allow "larger then desktop" resolution windows without this client area compression?
+
+### #2Tom KQT  Members
+
+Posted 30 October 2013 - 12:26 AM
+
+That's still the "better" behaviour, for me IIRC it was crashing on some computers (not on all).
+
+I don't know how do force windows to allow you to do this (if it even is possible), but are you sure you need it? If you just want to make a client area of the same size as your resolution, you can create a window without border and the title bar.
+
+### #3Tispe  Members
+
+Posted 30 October 2013 - 12:40 AM
+
+I don't really need it because most players would not use a window that is larger then the desktop. But, if the user accidentally choses a larger then desktop resolution I don't want a distorted client area. My Gui code also kinda breaks because I assume the width/height to be the value they were set to be, not the cropped values Windows forces them to be.
+
+I can probably "check" the client area size after changing the resolution and see if they match up with what I set it be and do a new resolution change to those values. But that seems way big of a hassle for something Windows messes up. Plus, if the user wants a window with 1920x1080 client resolution I should not force him to have a "1912x1056" resolution. Yes the window will be offscreen but atleast the buttons will work properly and the client area won't be distorted.
+
+### #4Tom KQT  Members
+
+Posted 30 October 2013 - 01:31 AM
+
+It seems to be doable, look here for example: http://stackoverflow.com/questions/445893/create-window-larger-than-desktop-display-resolution. (Search for the answer that contains SWP_NOSENDCHANGING.)
+
+Anyway, Windows don't allow windows larger than screen (unless you bypass it using the above-mentioned solution - which I personaly haven't tried!) and that's probably for a good reason, so I personally would follow that restriction and prevent the user to choose a larger window than possible. Regardless how complicated the code would be ;)
+
+A window larger than screen may actually behave badly, because the OS doesn't expect to have such windows. You won't be able to resize it by dragging the borders at the very least.
+
+Edited by Tom KQT, 30 October 2013 - 01:32 AM.
+
+### #5N.I.B.  Members
+
+Posted 30 October 2013 - 03:12 AM
+
+I can probably "check" the client area size after changing the resolution
+
+Doing that is about 5 lines of code. It's a good practice anyway, why are you so reluctant to do it?
+
+But that seems way big of a hassle for something Windows messes up.
+
+Windows doesn't mess up anything. You assume something that is not correct, it's not Windows fault.
+
+Edited by satanir, 30 October 2013 - 03:13 AM.
+
+### #6Tispe  Members
+
+Posted 30 October 2013 - 04:03 AM
+
+If I set some parameters to a window using SetWindowPos() I expect that window to do what I say. If I have to double check that every simple function I call actually does its job then the application would be overly bloated. I can see that most HRESULTs need checking before proceeding but not in this case.
+
+Going to try the SWP_NOSENDCHANGING flag later when I get home. I think I should have to send a flag if I WANTED windows to resize, not the other way around.
+
+### #7Tom KQT  Members
+
+Posted 30 October 2013 - 04:54 AM
+
+Actually everything is working correctly. You called SetWindowPos and it did its job without errors. When the function tries to change position or size of a window, it's said that it will send the WM_WINDOWPOSCHANGING message. And the default handler of that message checks the size and fixes it if it's out of limits (it uses the WM_GETMINMAXINFO message). That actually is what that message was made for - to give you (or the system) a way how to easily check the validity of newly set window size - and to do whatever you need as a reaction to it.
+
+But nobody prevents you from handling WM_WINDOWPOSCHANGING yourself. And you even can use a flag when calling SetWindowPos to disable sending WM_WINDOWPOSCHANGING.
+
+You want something what's not allowed by default. But you still have ways how to do it. So I don't understand why are you complaining ;)
+
+Edited by Tom KQT, 30 October 2013 - 04:57 AM.
+
+### #8Tispe  Members
+
+Posted 30 October 2013 - 05:02 AM
+
+My only complaint is that it tries to restrict the window size unless I tell it not to. It complicates things in my opinion.
+
+### #9Tispe  Members
+
+Posted 30 October 2013 - 08:42 AM
+
+Ok, SWP_NOSENDCHANGING works, but it is not a cure! It only prevents WM_WINDOWPOSCHANGING from being sent from SetWindowPos(), it does not prevent WM_WINDOWPOSCHANGING from being sent at another time by the OS.
+
+You see, I can SetWindowPos() with this flag and get a 1920x1080 client area window. But as soon as I want to drag that window around on the desktop the OS sends another WM_WINDOWPOSCHANGING message messing it up again.
+
+I have to capture the message in the winproc function and prevent it from doing anything.
+
+LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+switch(message){
+case WM_WINDOWPOSCHANGING:
+return 0;		       //We stop the message here!
+break;
+.
+.
+.
+.
+.
+.
+}
+
+
+Edited by Tispe, 30 October 2013 - 08:43 AM.
+
+### #10Tom KQT  Members
+
+Posted 30 October 2013 - 11:01 AM
+
+My only complaint is that it tries to restrict the window size unless I tell it not to. It complicates things in my opinion.
+
+Complicates for you because you want to allow something what's not allowed by default and what programmers usually don't want. The point is that it simplifies things for most people and complicates for a minority ;)
+
+Ok, SWP_NOSENDCHANGING works, but it is not a cure! It only prevents WM_WINDOWPOSCHANGING from being sent from SetWindowPos(), it does not prevent WM_WINDOWPOSCHANGING from being sent at another time by the OS.
+
+You see, I can SetWindowPos() with this flag and get a 1920x1080 client area window. But as soon as I want to drag that window around on the desktop the OS sends another WM_WINDOWPOSCHANGING message messing it up again.
+
+I have to capture the message in the winproc function and prevent it from doing anything.
+
+That's exactly what I said. That trick allows you to create a large window. And I warned you that the window will bring you more problems (I named resizing, that was the most obvious one). I also said that you can process the message on your own and disable the resizing ;)
+
+Old topic!
+
+Guest, the last post of this topic is over 60 days old and at this point you may not reply in this topic. If you wish to continue this conversation start a new topic.

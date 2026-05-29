@@ -1,0 +1,221 @@
+## Sunday, June 29, 2014
+
+### Of Binary Bombs (the secret)
+
+So far, I've described six stages of this bomb along with their solution. These stages have built up in difficulty while describing often used programming constructs such as: string comparison, arrays, a switch statement, recursion, lookup tables, linked lists, and here in the final stage a binary search tree.
+
+While solving the 6th phase will successfully defuse the bomb there is a curious section of code executed at the end. The most important thing to notice is that we can not trigger the bomb from this point on; the entire function will only jump to a graceful exit unless we unlock the secrets. Recall the code for sym.phase_defused:
+
+Initially, there is a check for the total number of lines entered so far; until this point that check has failed. Here the jump is bypassed and execution proceeds to call to sscanf. Two important arguments to sscanf here are: the format string: str._d_s (%d %s) and 0x804b770. From that first argument we can infer the types that will be read and the second indicates from where we will read that data. Unlike in prior phases, there is no input line read to start this phase so 0x804b770 must already have data located in it.
+
+If we look at what is stored there we find nothing special - certainly not something that looks like a number followed by a string.
+
+This analysis is using a static binary, however, so this memory may get filled in at runtime. We have looked at each function in turn and the only changes in memory are driven by the inputs we provide. So where, is this address in memory? If we look for known addresses around this we see that 0x804b770 is located at sym.input_strings+240. Remember in phase 2 we determined that sym.input_strings was a global array of 80-byte character arrays to hold the inputs we provide. So 240 bytes beyond that is the 4th solution we provided (the number 9). There was no string after that but that is part of the secret...
+
+The sym.read_line grabs the entire input line and in phase 4 sscanf only looked for %d which leaves the remainder of the buffer untouched. Nothing prevents us from providing some trailing values after the number so long as there is a space between them.
+
+Supposing we did provide a trailing string the next step is to check that string against str.austinpowers. So that is the secret to accessing the secret phase: update the 4th input to be '9 austinpowers'.
+
+The secret phase reads in an additional line from the input stream and converts it to a long value using strtol. That value is decremented and compared against 0x3e8 (1000) - the bomb is triggered if our decremented value is greater than that. If the input passes that check we enter the final function: sym.fun7. Prior to going into detail, however, it is important to note that the return value from this function needs to be 0x7 to avoid triggering the bomb. The initial value to sym.fun7 is sym.n1 (0x0804b320).
+
+This is a recursive function very similar to the one explained in stage 4. To understand what is happening with the control flow it is important to first understand what is contained in sym.n1. However, unlike stage 4 this variable name gives us little indication of what the memory may contain.
+
+Looking at the first 16 bytes of that memory location we see the values are (after adjusting for endianess and assuming 32-byte values): 0x24, 0x0804b314, 0x0804b308, 0x0. The second two look very much like memory addresses in a range very close to sym.n1.
+
+Following these two addresses we arrive at a very similar layout. This begins to resemble a recursive data structure most people will recognize: a binary tree. In C it is represented as:
+
+struct bst {
+int value;
+struct bst *left, *right;
+};
+
+
+Mapping out the entire tree yields the following:
+
+Now, that will make it easier to follow the control flow in sym.fun7 but there are still some pieces that are needed before a solution can be derived directly. Back in sym.fun7, there is an initial check for a nil next pointer and then the remainder of the function follows a pre-order traversal of the binary search tree.
+
+The main concern at this point is understanding how the return value is calculated. Ultimately, we need to understand when the return value will be 7 so that we can provide input that will force a return at that particular point. The control flow on the left subtree either continues down the next left subtree when the argument node value is less than the current node or the right subtree if the value is greater than the current node. If the value is equal to the current node, eax is set to zero and the function returns.
+
+The return path from a left tree traversal simply doubles the value of eax and returns to the caller. The return from the right subtree is a little more interesting - in addition to eax being doubled it is also incremented by one prior to returning to the caller. Since eax is used to hold intermediate memory addresses, the calculation probably only makes sense when the search value is found in the tree (thus setting eax to 0).
+
+Since a found value returns 0 initially any return from a left subtree will only propagate the zero value; in order to get to seven we need to rely on the increment on the return path of the right subtree path. The only path that leads to the target return value is the one from the rightmost leaf in the tree.
+
+To force a return value of 7 we must provide a value of 1001.
+
+## Tuesday, June 10, 2014
+
+### Of Binary Bombs (part 6)
+
+In the last installment (phase 5) Dr. Evil used masking and a lookup table to try and defeat any secret agent. I will continue on here with the final phase of this binary bomb: phase 6. (This isn't really the final stage - check out the secret stage)
+
+Our input string is loaded into the edx register as usual but then there is a strange reference to a sym.node1 that gets loaded into local stack space. That makes our first order of business to find what is stored in sym.node1.
+
+The name node1 gives a fairly blatant hint at how we should look at this memory (without the symbols, this task would be a whole lot less straightforward). The first several bytes are pretty sparse: interpreting as 32-bit values we get 0xfd (253), 0x01 (1), and then the value 0x0804b260 (this is stored in little endian). That looks like another memory address; lets see.
+
+Same structure. 0x02d5 (725), 0x02 (2), 0x0804b254. And the pattern continues. I'll take a leap and say that we have something that looks like the following C structure:
+
+struct list_ {
+int value_;
+int index_;
+struct list_ *next_;
+};
+
+
+I'm going to walk the list for a while to collect the values (and verify the counter continues in order). That results in the following (value_,index_) pairs starting from sym.node1.
+
+(253, 1)
+(725, 2)
+(301, 3)
+(997, 4)
+(212, 5)
+(432, 6)
+
+
+The list is terminated at that point with a null next_ pointer. At this point, the values of the list are known so it is appropriate to resume walking the body of sym.phase_6.
+
+Currently, the input string is loaded into edx and the linked list is stored in a local value; next a local buffer is loaded to eax and sym.read_six_numbers is called. I described this function in phase 2 and we can expect that the local buffer will contain our six input numbers after the call. I have a guess at this point what they should be but I want to verify first to avoid any of Dr. Evil's tricks.
+
+The remainder of this phase can be broken down into four distinct loops. They are:
+1. Verify the input values
+2. Collect the nodes of the above list according to the input values
+3. Reorder the original list with that collection
+4. Verify the resulting list
+While the input verification has a nested loop it is the most straightforward of the steps: it checks that all values are unique and less than 7.
+
+Initially, collecting nodes according to the input values is a little harder to grasp as it too is a nested loop construct but is now dealing with offsetting into structures and moving memory locations (C pointers) around.
+
+Specifically, the commented line below walks the linked list. This is something that would have not been evident had I not understood the memory in sys.node1.
+
+    mov eax, [edx+ecx]
+lea esi, [esi]
+mov esi, [esi+0x8]  ; this uses the 'next' pointer
+inc ebx
+cmp ebx, eax
+
+
+The third step, reordering the original list, is short and looks simple enough but took me some time to fully grok. I needed to understand that the previous step was storing local copies of the nodes in the original list. From that the original list is overwirtten here in the order specified by the input.
+
+Finally, the overwritten list is checked to ensure that the value_ elements are arranged in decreasing order.
+
+With that final piece of information the necessary input sequence becomes clear - the solution is to provide index_ values that order the value_ members from largest to smallest.
+
+Below is a mapping of this functionality to some C code that it may have come from.
+
+struct list_ {
+int value_, index_;
+struct list_ *next;
+};
+
+void phase_6 (const char * input) {
+
+int i = 0;
+struct list_ *list = ..., *node = list;
+int values[6] = {0};
+struct list_ *nodes[6] = {0};
+
+// 0x08048db8 - 0x08048e00
+for (; i < 6; ++i) {
+int j = i + 1;
+if (values[i] > 6) explode_bomb ();
+for (; j < 6; ++j)
+if (values[i] == values[j])
+explode_bomb ();
+}
+
+// 0x08048e02 - 0x08048e42
+for (i = 0 ; i < 6; ++i) {
+node = list;
+while (node) {
+if (node->index_ == values[i]) {
+nodes[i] = node;
+break;
+}
+node = node->next;
+}
+}
+
+// 0x08048e44 - 0x08048e60
+i = 1;
+list = nodes[0];
+node = list;
+while (i <= 5) {
+node->next = nodes[i];
+node = node->next;
+++i;
+}
+node->next = 0;
+
+// 0x08048e67 - 0x08048e85
+node = list;
+for (i = 0; i < 5; ++i)
+if (node->value_ < node->next->value_)
+explode_bomb ();
+
+}
+
+## Tuesday, June 3, 2014
+
+### Of Binary Bombs (part 5)
+
+Part 4 detailed a recursive function that calculated the nth entry into the Fibonacci sequence. Here we continue with the next stage to defeating Dr. Evil.
+
+There is a familiar face here: sym.string_length. Recall in phase 1 I glazed over sym.string_not_equal which had buried inside a call to sym.string_length - if you've been following along at home this is not a surprise. The result of this call (which expects our input string as an argument) should be 6.
+
+    cmp eax, 0x6
+
+
+This is our first clue to solving the riddle.
+
+Peeking ahead a little there are two memory locations referenced directly: sym.array.123 and str.giants. Before we get too far into the details of sym.phase_5 lets look at what each of these contain. Using the memory printing capabilities of radare2 we can do this with: px @ sym.array.123 and ps @ str.giants to get the hex and ASCII representations, respectively.
+
+Not surprisingly str.giants contains the string 'giants' and the content of sym.array.123 is listed below:
+
+Alright, now that we've got some context lets continue with the code.
+
+    lea ecx, [ebp-0x8]      ; load an empty local array
+mov esi, sym.array.123  ; set a pointer to the first element of the memory above
+mov al, [edx+ebx]       ; target of the jump below
+and al, 0xf
+movsx eax, al
+mov al, [eax+esi]
+mov [edx+ecx], al
+inc edx
+cmp edx, 0x5
+jle 0x8048d57
+
+
+After loading the address of a local array the code enters a loop from 0 to 5 (for the six characters of our input). The body of that loop does the following:
+
+Selects the nth byte from the user input string, masks off the bottom 4 bits, and then uses that as an index into sym.array.123. The byte at that index is then copied to the local array.
+
+    mov al, [edx+ebx]
+and al, 0xf
+movsx eax, al
+mov al, [eax+esi]
+mov [edx+ecx], al
+
+
+In C, that might look similar to
+
+char array123[] = "isrveawhobpnutfg", local[6] = {0}, *input = ...;
+int i = 0;
+
+for (; i < 6; ++i)
+local[i] = array123[input[i] & 0xf];
+
+
+After the loop the local array is null terminated and compared against str.giants; matching strings avoids triggering the bomb. Now all we need is to determine what indices from sym.array.123 yield the string 'giants.'
+
+Recall the memory stored in sym.array.123 - isrveawhobpnutfg. The necessary index sequence then becomes: 0xf, 0x0, 0x5, 0xb, 0xd, 0x1. Since our ASCII input is masked we need to find ASCII strings with lower-order bits matching these values. I list the valid combinations (for printable ASCII) below:
+
+0xf : / ? O _ o
+0x0 : 0 @ P  p
+0x5 : % 5 E U e u
+0xb : + ; K [ k {
+0xd : - = M ] m }
+0x1 : ! 1 A Q a q
+`
+
+Any combination of those values should be a valid input to solve this stage. Let's try one: 'opekma'
+
+Sweet, almost there. Next up is phase 6 the [supposed] last stage...

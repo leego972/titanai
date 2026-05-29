@@ -1,0 +1,42 @@
+Question: <p>I have a j2me client that would post some chunked encoded data to a webserver. I'd like to process the data in python. The script is being run as a CGI one, but apparently apache will refuse a chunked encoded post request to a CGI script. As far as I could see mod_python, WSGI and FastCGI are no go too.</p>
+
+<p>I'd like to know if there is a way to have a python script process this kind of input. I'm open to any suggestion (e.g. a confoguration setting in apache2 that would assemble the chunks, a standalone python server that would do the same, etc.) I did quite a bit of googling and didn't find anything usable, which is quite strange.</p>
+
+<p>I know that resorting to java on the server side would be a solution, but I just can't imagine that this can't be solved with apache + python.</p>
+
+Answer: <p>I had the exact same problem a year ago with a J2ME client talking to a Python/Ruby backend. The only solution I found which <em>doesn't</em> require application or infrastructure level changes was to use a relatively unknown feature of mod_proxy.</p>
+
+<p>Mod_proxy has the ability to buffer incoming (chunked) requests, and then rewrite them as a single request with a Content-Length header before passing them on to a proxy backend. The neat trick is that you can create a tiny proxy configuration which passes the request back to the same Apache server. i.e. Take an incoming chunked request on port 80, "dechunk" it, and then pass it on to your non-HTTP 1.1 compliant server on port 81.</p>
+
+<p>I used this configuration in production for a little over a year with no problems. It looks a little something like this:</p>
+
+<pre><code>ProxyRequests Off
+
+&lt;Proxy http://example.com:81&gt;
+  Order deny,allow
+  Allow from all
+&lt;/Proxy&gt;
+
+&lt;VirtualHost *:80&gt;
+  SetEnv proxy-sendcl 1
+  ProxyPass / http://example.com:81/
+  ProxyPassReverse / http://example.com:81/
+  ProxyPreserveHost On
+  ProxyVia Full
+
+  &lt;Directory proxy:*&gt;
+    Order deny,allow
+    Allow from all
+  &lt;/Directory&gt;
+
+&lt;/VirtualHost&gt;
+
+Listen 81
+
+&lt;VirtualHost *:81&gt;
+  ServerName example.com
+  # Your Python application configuration goes here
+&lt;/VirtualHost&gt;
+</code></pre>
+
+<p>I've also got a full writeup of the problem and my solution detailed <a href="http://www.atnan.com/2008/8/8/transfer-encoding-chunked-chunky-http">on my blog</a>.</p>

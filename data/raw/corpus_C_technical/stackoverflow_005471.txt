@@ -1,0 +1,112 @@
+Question: <p>I still haven't got my head around decorators in Python.</p>
+
+<p>I've already started using a lot of closures to do things like customize functions and classes in my coding.</p>
+
+<p>Eg.</p>
+
+<pre><code>class Node :
+    def __init__(self,val,children) :
+        self.val = val
+        self.children = children
+
+def makeRunner(f) :
+    def run(node) :
+        f(node)
+        for x in node.children :
+            run(x)
+    return run
+
+tree=Node(1,[Node(2,[]),Node(3,[Node(4,[]),Node(5,[])])])
+
+def pp(n) : print "%s," % n.val
+printTree = makeRunner(pp)
+printTree(tree)
+</code></pre>
+
+<p>As far as I can see, decorators are just a different syntax for doing something similar. </p>
+
+<p>Instead of </p>
+
+<pre><code>def pp(n) : print "%s," % n.val
+printTree = makeRunner(pp)
+</code></pre>
+
+<p>I would write :</p>
+
+<pre><code>@makeRunner
+def printTree(n) : print "%s," % n.val
+</code></pre>
+
+<p>Is this all there is to decorators? Or is there a fundamental difference that I've missed? </p>
+
+Answer: <p>Following up Dutch Master's AOP reference, you'll find that using decorators becomes especially useful when you start <strong>adding parameters</strong> to modify the behaviour of the decorated function/method, and reading that above the function definition is so much easier.</p>
+
+<p>In one project I recall, we needed to supervise tons of celery tasks and so we came up with the idea of using a decorator to plug-and-tweak as required, which was something like:</p>
+
+<pre><code>class tracked_with(object):
+    """
+    Method decorator used to track the results of celery tasks.
+    """
+    def __init__(self, model, unique=False, id_attr='results_id',
+                 log_error=False, raise_error=False):
+        self.model = model
+        self.unique = unique
+        self.id_attr = id_attr
+        self.log_error = log_error
+        self.raise_error = raise_error
+
+    def __call__(self, fn):
+
+        def wrapped(*args, **kwargs):
+            # Unique passed by parameter has priority above the decorator def
+            unique = kwargs.get('unique', None)
+            if unique is not None:
+                self.unique = unique
+
+            if self.unique:
+                caller = args[0]
+                pending = self.model.objects.filter(
+                    state=self.model.Running,
+                    task_type=caller.__class__.__name__
+                )
+                if pending.exists():
+                    raise AssertionError('Another {} task is already running'
+                                         ''.format(caller.__class__.__name__))
+
+            results_id = kwargs.get(self.id_attr)
+            try:
+                result = fn(*args, **kwargs)
+
+            except Retry:
+                # Retry must always be raised to retry a task
+                raise
+
+            except Exception as e:
+                # Error, update stats, log/raise/return depending on values
+                if results_id:
+                    self.model.update_stats(results_id, error=e)
+                if self.log_error:
+                    logger.error(e)
+                if self.raise_error:
+                    raise
+                else:
+                    return e
+
+            else:
+                # No error, save results in refresh object and return
+                if results_id:
+                    self.model.update_stats(results_id, **result)
+                return result
+
+        return wrapped
+</code></pre>
+
+<p>Then we simply decorated the <code>run</code> method on the tasks with the params required for each case, like:</p>
+
+<pre><code>class SomeTask(Task):
+
+    @tracked_with(RefreshResults, unique=True, log_error=False)
+    def run(self, *args, **kwargs)...
+</code></pre>
+
+<p>Then changing the behaviour of the task (or removing the tracking altogether) meant tweaking one param, or commenting out the decorated line. Super easy to implement, but more importantly, <strong>super easy to understand</strong> on inspection.</p>

@@ -1,0 +1,39 @@
+Question: <p>I have a python fuse project based on the Xmp example in the fuse documentation. I have included a small piece of the code to show how this works. For some reason get_file does get called and the class gets created, but instead of fuse calling .read() on the class from get_file (file_class) fuse keeps calling Dstorage.read() which defeats the purpose in moving the read function out of that class.</p>
+
+<pre><code>class Dstorage(Fuse, Distributor):
+    def get_file(self, server, path, flags, *mode):
+        pass
+        # This does some work and passes back an instance of
+        # a class very similar to XmpFile
+
+    def main(self, *a, **kw):
+        self.file_class = self.get_file
+        return Fuse.main(self, *a, **kw)
+</code></pre>
+
+<p>I have my code hosted on launchpad, you can download it with this command.<br />
+<strike>bzr co https://code.launchpad.net/~asa-ayers/+junk/dstorage</strike><br />
+bzr branch lp:~asa-ayers/dstorage/trunk  </p>
+
+<p><strong>solution:</strong><br />
+I used a proxy class that subclasses the one I needed and in the constructor I get the instance of the class I need and overwrite all of the proxy's methods to simply call the instance methods.</p>
+
+Answer: <p>Looking at the code of the Fuse class (which is a maze of twisty little passages creating method proxies), I see this bit (which is a closure used to create a setter inside <code>Fuse.MethodProxy._add_class_type</code>, line 865):</p>
+
+<pre><code>        def setter(self, xcls):
+
+            setattr(self, type + '_class', xcls)
+
+            for m in inits:
+                self.mdic[m] = xcls
+
+            for m in proxied:
+                if hasattr(xcls, m):
+                    self.mdic[m] = self.proxyclass(m)
+</code></pre>
+
+<p>When you do <code>self.file_class = self.get_file</code>, this gets called with <code>self.get_file</code>, which is a bound method. The loop over proxied attributes is expecting to be able to get the attributes off the class you set, to put them into its <code>mdic</code> proxy dictionary after wrapping them, but they aren't there, because it's a bound method, rather than a class. Since it can't find them, it reverts to calling them on <code>Dstorage</code>.</p>
+
+<p>So, long story short, you can't use a callable that returns an instance (kind of a pseudo-class) instead of a class here, because Fuse is introspecting the object that you set to find the methods it should call. </p>
+
+<p>You need to assign a class to <code>file_class</code> - if you need to refer back to the parent instance, you can use the nested class trick they show in the docs.</p>

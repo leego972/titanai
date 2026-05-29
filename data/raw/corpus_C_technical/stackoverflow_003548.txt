@@ -1,0 +1,30 @@
+Question: <p>My production system occasionally exhibits a memory leak I have not been able to reproduce in a development environment.  I've used a <a href="http://stackoverflow.com/questions/110259/python-memory-profiler">Python memory profiler</a> (specifically, Heapy) with some success in the development environment, but it can't help me with things I can't reproduce, and I'm reluctant to instrument our production system with Heapy because it takes a while to do its thing and its threaded remote interface does not work well in our server.</p>
+
+<p>What I think I want is a way to dump a snapshot of the production Python process (or at least gc.get_objects), and then analyze it offline to see where it is using memory.  <a href="http://stackoverflow.com/questions/141802/how-do-i-dump-an-entire-python-process-for-later-debugging-inspection">How do I get a core dump of a python process like this?</a>  Once I have one, how do I do something useful with it?</p>
+
+Answer: <p>Using Python's <code>gc</code> garbage collector interface and <code>sys.getsizeof()</code> it's possible to dump all the python objects and their sizes. Here's the code I'm using in production to troubleshoot a memory leak:</p>
+
+<pre><code>rss = psutil.Process(os.getpid()).get_memory_info().rss
+# Dump variables if using more than 100MB of memory
+if rss &gt; 100 * 1024 * 1024:
+    memory_dump()
+    os.abort()
+
+def memory_dump():
+    dump = open("memory.pickle", 'w')
+    for obj in gc.get_objects():
+        i = id(obj)
+        size = sys.getsizeof(obj, 0)
+        #    referrers = [id(o) for o in gc.get_referrers(obj) if hasattr(o, '__class__')]
+        referents = [id(o) for o in gc.get_referents(obj) if hasattr(o, '__class__')]
+        if hasattr(obj, '__class__'):
+            cls = str(obj.__class__)
+            cPickle.dump({'id': i, 'class': cls, 'size': size, 'referents': referents}, dump)
+</code></pre>
+
+<p>Note that I'm only saving data from objects that have a <code>__class__</code> attribute because those are the only objects I care about. It should be possible to save the complete list of objects, but you will need to take care choosing other attributes. Also, I found that getting the referrers for each object was extremely slow so I opted to save only the referents. Anyway, after the crash, the resulting pickled data can be read back like this:</p>
+
+<pre><code>dump = open("memory.pickle")
+while dump:
+    obj = cPickle.load(dump)
+</code></pre>

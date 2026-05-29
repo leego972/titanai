@@ -1,0 +1,52 @@
+Question: <p>After a bind a method to an event of a Tkinter element is there a way to get the method back?</p>
+
+<pre><code>&gt;&gt;&gt; root = Tkinter.Tk()
+&gt;&gt;&gt; frame = Tkinter.Frame(root, width=100, height=100)
+&gt;&gt;&gt; frame.bind('&lt;Button-1&gt;', lambda e: pprint('Click')) # function needed
+&gt;&gt;&gt; frame.pack()
+&gt;&gt;&gt; bound_event_method = frame.???
+</code></pre>
+
+Answer: <p>The standard way to do this in Tcl/Tk is trivial: you use the same bind command but without the final argument. </p>
+
+<pre><code>bind .b &lt;Button-1&gt; doSomething
+puts "the function is [bind .b &lt;Button-1&gt;]"
+=&gt; the function is doSomething
+</code></pre>
+
+<p>You can do something similar with Tkinter but the results are, unfortunately, not quite as usable:</p>
+
+<pre><code>e1.bind("&lt;Button-1&gt;",doSomething)
+e1.bind("&lt;Button-1&gt;")
+=&gt; 'if {"[-1208974516doSomething %# %b %f %h %k %s %t %w %x %y %A %E %K %N %W %T %X %Y %D]" == "break"} break\n'
+</code></pre>
+
+<p>Obviously, Tkinter is doing a lot of juggling below the covers. One solution would be to write a little helper procedure that remembers this for you:</p>
+
+<pre><code>def bindWidget(widget,event,func=None):
+    '''Set or retrieve the binding for an event on a widget'''
+
+    if not widget.__dict__.has_key("bindings"): widget.bindings=dict()
+
+    if func:
+        widget.bind(event,func)
+        widget.bindings[event] = func
+    else:
+        return(widget.bindings.setdefault(event,None))
+</code></pre>
+
+<p>You would use it like this:</p>
+
+<pre><code>e1=Entry()
+print "before, binding for &lt;Button-1&gt;: %s" % bindWidget(e1,"&lt;Button-1&gt;")
+bindWidget(e1,"&lt;Button-1&gt;",doSomething)
+print " after, binding for &lt;Button-1&gt;: %s" % bindWidget(e1,"&lt;Button-1&gt;")
+</code></pre>
+
+<p>When I run the above code I get:</p>
+
+<pre><code>before, binding for &lt;Button-1&gt;: None
+ after, binding for &lt;Button-1&gt;: &lt;function doSomething at 0xb7f2e79c&gt;
+</code></pre>
+
+<p>As a final caveat, I don't use Tkinter much so I'm not sure what the ramifications are of dynamically adding an attribute to a widget instance. It seems to be harmless, but if not you can always create a global dictionary to keep track of the bindings.</p>

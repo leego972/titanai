@@ -1,0 +1,61 @@
+# Electricity Usage in a High-rise Condo Complex pt 6 (discussion of model)
+
+In Part 4 of this series, I created a Bayesian model in Stan. A member of the Stan team, Bob Carpenter, has been so kind as to send me some comments via email, and has given permission to post them on the blog. This is a great opportunity to get some expert insights! I’ll put his comments as block quotes:
+
+That’s a lot of iterations! Does the data fit the model well?
+
+I hadn’t thought about this. Bob noticed in both the call and the summary results that I’d run Stan for 300,000 iterations, and it’s natural to wonder, “Why so many iterations? Was it having trouble converging? Is something wrong?” The stan command defaults to four chains, each with 2,000 iterations, and one of the strengths of Stan‘s HMC algorithm is that the iterations are a bit slower than other methods but it mixes much faster so you don’t need nearly as many iterations. So 300,000 is a bit excessive. It turns out that if I run for 2,000 iterations, it takes 28 seconds on my laptop and mixes well. Most of the 28 seconds is taken up by compiling the model, since I can get 10,000 iterations in about 40 seconds.
+
+So why 300,000 iterations? For the silly reason that I wanted lots of samples to make the CI’s in my plot as smooth as possible. Stan is pretty fast, so it only took a few minutes, but I hadn’t thought of implication of appearing to need that many iterations to converge.
+
+# Electricity Usage in a High-rise Condo Complex pt 5
+
+Last time, we modeled the Association’s electricity expenditure using Bayesian Analysis. Besides the fact that MCMC and Bayesian are sexy and resume-worthy, what have we gained by using Stan? MCMC runs more slowly than alternatives, so it had better be superior in other ways, and in this posting, we’ll look at an example of how. I’d recommend pulling the previous posting up in another browser window or tab, and position the “Inference for Stan model” table so that you can quickly consult it in the following discussion.
+
+If you look closely at the numbers, you may notice that the high season (warmer-high, ratetemp 3, beta[3]) appears to have a lower slope than the mid season (warmer-low, ratetemp 2, beta[2]), as was the case in an earlier model. This seems backwards: the high season should cost more per additional kWh, and thus should have a higher slope. This raises two questions: 1) is the apparent slope difference real, and 2) if it is real, is there some real-world basis for this counter-intuitive result?
+
+# Electricity Usage in a High-rise Condo Complex pt 4
+
+This is the fourth article in the series, where the techiness builds to a crescendo. If this is too statistical/programming geeky for you, the next posting will return to a more investigative and analytical flavor. Last time, we looked at a fixed-effects model:
+
+m.fe <- lm (dollars ~ 1 + regime + ratetemp * I(dca - 55))
+
+which looks like a plausible model and whose parameters are all statistically significant. A question that might arise is: why not use a hierarchical (AKA multilevel, mixed-effects) model instead? While we’re at it, why not go full-on Bayesian as well? It just so happens that there is a great new tool called Stan which fits the bill and which also has an rstan package for R.
+
+# Bayesian Data Analysis 3
+
+In the first posting of this series, I simply applied Bayes Rule repeatedly: Posterior $\propto$ Prior $\times$ Likelihood. I didn’t have to know anything about conjugate priors, hyperparameters, sufficient statistics, parametric forms, or anything beyond the basics. I got a reasonable posterior for $\theta$ and used that to find the correct answer. Why go beyond this?
+
+Well, first, there’s really no good way for me to communicate my $\theta$ distribution to anyone else. It’s a (long) vector of values, and that’s the weakness of a non-parametric system: there is no well-known function and no sufficient statistics to easily describe what I’ve discovered. (Of course, it’s possible that there is no well-know function that’s appropriate, in which case the simulation method is actually the only option.)
+
+Second, my posterior density is discrete. This works reasonably well for the exercise I attempted, but it’s still a discrete approximation which is less precise and can suffer from simulation-related issues (number of samples, etc) that have nothing to do with my proposed model.
+
+Third, if an analytical method can be used, it may be possible to directly calculate a final posterior without repeated applications of Bayes Rule. As I mentioned in the previous posting, Gelman got an answer of Gamma(238, 10) analytically, not through approximations and simulation. If we look in Wikipedia, we can find that the conjugate prior for $\theta$, the parameter of a Poisson distribution, is the Gamma ($\alpha, \beta$) distribution, and given our series of $n$ accident counts and an initial (posterior) $\alpha$ and $\beta$, the posterior density is Gamma ($\alpha - \sum_{i=1}^{n} \mathrm {accident}_i, \beta + n$)
+
+# Bayesian Data Analysis 2
+
+In the last post (Bayesian Data Analysis 1), I ran a Bayesian data analysis using a simple, first-principles approach. Armed with only the fact that a Poisson distribution is appropriate for modeling airplane accidents, Bayes Rule, and R, we got the correct answer to the problem through non-parametric simulation.
+
+Before we get into precision and the other topics in the list of issues to explore, let’s tie up one loose end. I could have gotten the right answer for the wrong reason, so let’s look at the posterior distribution of $\theta$ as compared to the provided answer to make sure we’re close. In the answer, Gelman looks at the parametrical form for $\theta$ and considers conjugate priors and analytically determines that the correct parametric posterior distribution is a Gamma function with $\alpha=238$ and $\beta=10$. (More on this in the next posting.) So I simulated out 20,000 samples from that distribution:
+
+rgam <- rgamma (20000, 238, 10)
+
+And then we can compare our posterior distribution with the official, parametric distribution:
+
+Looks reasonably close (though biased by about 0.25) and it didn’t take a lot of fancy machinery to pull off. So why not use this method as our default? Why talk of things like conjugate priors and hyper parameters? And did we just get lucky with numeric precision because we only had 10 accidents and hence only 10 applications of Bayes Rule? Let’s cover that in the next posting, and finish this one with a graph of our answer (not $\theta$ but the predictive distribution of accidents) with the 95% CI :
+
+# Bayesian Data Analysis 1
+
+I’ve read quite a few presentations on Bayesian data analysis, but I always seem to fall into the crack between the first, one-step problem (the usual being how likely you are to have a disease), and more advanced problems that involve conjugate priors and quite a few other concepts. So, when I was recently reading Bayesian Data Analysis[1], I decided to tackle Exercise 13 from Chapter 2 using only Bayes rule updates and simulation. I think it’s been illuminating, so decided to write it up here, using my favorite tool R.
+
+Exercise 13 involves annual airline accidents from 1976 to 1985, modeled as a Poisson$(\theta)$ distribution. The data is :
+
+accidents <- c(24, 25, 31, 31, 22, 21, 26, 20, 16, 22)
+
+A little playing around with graphs and R‘s dpois gives me the impression that $\theta$ is probably around 24, but I’ll make three priors (for $\theta$):
+
+r <- seq (10, 45, 0.2) theta1 <- dnorm (r, 15, 5) theta1 <- theta1 / sum (theta1) theta2 <- dnorm (r, 35, 6) theta2 <- theta2 / sum (theta2) theta3 <- 20 - abs (r - mean (r)) theta3 <- theta3 / sum (theta3)
+
+Where theta1 is probably low, theta2 is probably high, and theta3 is not even parametric. (More on this later.) I normalized them to create proper priors so that they graph well together, but that wasn’t necessary. Remember, I’m doing all of my calculations over the discretized range, $r$. Plotting the theta’s together:
+
+So let’s run the numbers (accidents) through a repeated set of Bayes Rule updates to get a posterior distribution for $\theta$ based on the prior distribution, theta1:

@@ -1,0 +1,170 @@
+Tensor Network Theory Library  Beta release 1.2.1 A library of routines for performing TNT-based operations
+Time evolution
+
+## Detailed Description
+
+This section describes MPS functions which are useful for performing time evolution using the TEBD algorithm, although they are not limited to this.
+
+## Functions
+
+void tntMpoPropST2scConnect (tntNetwork mpo, tntNetwork PropB, tntNetwork PropT)
+
+double tntMpoPropSTscContract (tntNetwork mpoProp, int chi)
+
+tntNodeArray tntMpsCreatePropArray (unsigned L, tntComplex h, tntNodeArray *nnl, tntNodeArray *nnr, tntComplexArray *nnparam, tntNodeArray *os, tntComplexArray *osparam)
+
+tntNetwork tntMpsPropArrayToST2sc (tntNodeArray Proparr)
+
+void tntMpsPropST2scConnect (tntNetwork mps, tntNetwork Prop)
+
+double tntMpsPropSTscContract (tntNetwork mpsProp, int chi)
+
+tntNode tntMpsPropTwoSite (tntNode *Alp, tntNode *Arp, int chi, double *err)
+
+## Function Documentation
+
+ void tntMpoPropST2scConnect ( tntNetwork mpo, tntNetwork PropB, tntNetwork PropT )
+
+Connects networks created using tntMpsCreatePropST2sc() to an MPO network. It removes the singleton legs from the propagator network and connects the bottom propogator to the downward set of physical legs, and a conjugate copy to the upward set of physical legs. Note in the convention used in the library, the bottom facing legs are those that belong to the 'ket' and the top propagator are those that belong to the 'bra'.
+
+The MPO passed as an argument is used, so the connections on the physical legs are modified by the function, and they must initially be unconnected. A copy of the propagator network is connected, so the propagator network passed in the arguments is unchanged by the function.
+
+Functions tntMpoPropST2scProduct() for then taking the product of the network with an MPS.
+Returns
+No return value
+Parameters
+ mpo The network representing the MPO PropB The network representing the propagator to contract to the bottom (ket) legs PropT The network representing the propagator to contract to the top (bra) legs
+
+Definition at line 27 of file tntMpoST2sc.c.
+
+Referenced by tntMpoPropST2scProduct().
+
+ double tntMpoPropSTscContract ( tntNetwork mpoProp, int chi )
+
+Performs a single sweep in one direction of a Suzuki-Trotter staircase sweep, contracting the propagators with the MPO nodes. The direction is determined by the connections of the network.
+
+The connections of the network must be as follows for a left to right sweep:
+
+and as follows for a right to left sweep:
+
+Any node connected to the downwards facing legs of the propagator network or upward legs of the conjugate propagator netowrk are unaffected by the function.
+
+Returns
+The truncation error for that sweep, which is the sum of the truncation error for all SVDS. The truncation error for each SVD can be defined in a few different ways - see the documentation for tntTruncType() for more details.
+Parameters
+ mpoProp Network representing the MPO connected to the staircase. Will be changed by the function, by applying the propagator. chi The maximum internal dimension. All SVD's will be truncated to this value.
+
+Definition at line 113 of file tntMpoST2sc.c.
+
+Referenced by tntMpoPropST2scProduct().
+
+ tntNodeArray tntMpsCreatePropArray ( unsigned L, tntComplex h, tntNodeArray * nnl, tntNodeArray * nnr, tntComplexArray * nnparam, tntNodeArray * os, tntComplexArray * osparam )
+
+Creates an array of propagators (length $$L-1$$) required for evolution under a site-wide operator $$\hat{O}$$ formed from a sum of nearest-neighbour and onsite terms.
+
+$\hat{O} = \sum_{j=0}^{L-2}\sum_i^{n_n}\alpha_{i,j}\hat{o}^l_{i}\otimes\hat{o}^r_i + \sum_{j=0}^{L-1}\sum_i^{n_o}\beta_{i,j}\hat{o}^s_{i}$
+
+Nearest-neighbour operators $$\hat{o}^l_{i}$$ and $$\hat{o}^r_i$$ should be provided in arrays nnl and nnr respectively both having length $$n_n$$. Onsite operators $$\hat{o}^s_{i}$$ should be provided in array os having length $$n_o$$. The operators should be single-site operators or product MPOs, i.e. no internal legs, and two physical legs with the legs labelled as follows:
+
+All the operators should have the same dimension for the physical legs.
+
+The parameters $$\alpha_{i,j}$$ and $$\beta_{i,j}$$ for the nearest neighbour are onsite terms are supplied in matrices nnparam and osparam respectively. The matrix must have a number of rows equal to the length $$n_n, n_o$$ of its respective operators array, but there are two options for the number of columns:
+
+1. All the parameters are uniform accross the lattice. In this case the parameters array should have one column (which is the default behaviour if it is created with only one dimension specified). The parameter $$\alpha_{i,j}$$ or $$\beta_{i,j}$$ should be in position i,1 in the matrix for all sites.
+2. One or more of the parameters can vary accross the lattice. In this case the parameters matrix should have L-1 columns for nearest neighbour operators and L columns for onsite operators. The parameter $$\alpha_{i,j}$$ or $$\beta_{i,j}$$ for operator i and site j should be at position i,j in the matrix. Any uniform operators should have identical entries for all the sites.
+
+The two-site operator for the nearest-neighbour terms is simply formed from the supplied arguments as
+
+$\hat{T}^n_{j,j+1} = \sum_i^{n_n}\alpha_{i,j}\hat{o}^l_i\otimes\hat{o}^r_i$
+
+for each pair of sites $$j,j+1$$.
+
+The two-site operator for the on-site terms is formed from the supplied arguments as
+
+$\hat{T}^s_{j,j+1} = \frac{1}{2}\sum_i^{n_o}\left[(\beta_{i,j}+\delta_{0,j}\beta_{i,0})\hat{o}^s_i\otimes\mathbb{1}+(\beta_{i,j+1}+\delta_{L-1,j+1}\beta_{i,L-1})\mathbb{1}\otimes\hat{o}^s_i\right]$
+
+for each pair of sites $$j,j+1$$ i.e. the onsite terms are distributed symmetrically amongst the two-site terms.
+
+The propagator $$\hat{P}_{j,j+1}$$ in array entry j is then related to the operators $$\hat{T}_{j,j+1}=\hat{T}^n_{j,j+1}+\hat{T}^s_{j,j+1}$$ by:
+
+$\hat{P}_{j,j+1} = \mathrm{exp}\left[-\mathrm{i}\Re(h)\hat{T}_{j,j+1} \right]\times\mathrm{exp}\left[-\Im(h)\hat{T}_{j,j+1} \right].$
+
+The parameter $$h$$ is a uniform scale factor, which is usually related to the time step in simulations (e.g. half the time-step for second order decompositions). The propagators will then have four physical legs, each physical leg having the same dimension as the original physical legs, which are labelled as follows:
+
+Returns
+Returns the propagator for each pair of sites in an array.
+Parameters
+ L Length of system. h Uniform scale factor to apply to all terms. See the main description for information on how real and imaginary parts are applied nnl Array of nearest-neighbour operators for left site. Send NULL if there are no nearest neighbour terms. Unchanged by function - copies are used. nnr Array of nearest-neighbour operators for right site. Send NULL if there are no nearest neighbour terms. Unchanged by function - copies are used. nnparam Array of parameters for nearest-neighbour operators. Send NULL if there are no nearest neighbour terms. os Array of onsite operators. Send NULL if there are no on-site operators. Unchanged by function - copies are used. osparam Parameters for the on-site operators. Send NULL if there are no on-site operators.
+
+Definition at line 75 of file tntMpsCreatePropagator.c.
+
+Referenced by tntMpsCreatePropST2sc().
+
+ tntNetwork tntMpsPropArrayToST2sc ( tntNodeArray Proparr )
+
+Creates a network of two-site terms representing a site-wide propagator from an array of propagators decomposed using a Suzuki-Trotter second-order staircase expansion. Array entry j is assumed to contain the two-site propagator for sites $$j,j+1$$, and two copies of the propagator are placed in the network i.e. one for a right to left sweep, and one for a left-to-right sweep. Such an array can be created using tntMpsCreatePropArray(), although it does not have to be (e.g. the nodes could be loaded from an initialisation file instead). The final network has the following form:
+
+The orange diamonds represent the start and end of the network i.e. the network starts at the top-most propagator and ends at the bottom-most propagator.
+
+Returns
+A network representing the site-wide propagator
+Parameters
+ Proparr Array of propagators. Uncahnged by the function - copies of all nodes are used.
+
+Definition at line 115 of file tntMpsCreateSTstaircase.c.
+
+Referenced by tntMpsCreatePropST2sc().
+
+ void tntMpsPropST2scConnect ( tntNetwork mps, tntNetwork Prop )
+
+Connects a network created using tntMpsCreatePropST2sc() to an MPS network. It removes the singleton legs from the propagator network, and the start and end legs of the complete network are those that originally belonged to the MPS, as shown below.
+
+Note the orange diamonds represent the start and end of the network.
+
+The MPS passed as an argument is used, so the connections on the physical legs are modified by the function, and they must initially be unconnected. A copy of the propagator network is connected, so the propagator network passed in the arguments is unchanged by the function.
+
+Functions tntMpsPropST2scProduct() for then taking the product of the network with an MPS.
+Returns
+No return value
+Parameters
+ mps The network representing the MPS Prop The network representing the propagator
+
+Definition at line 31 of file tntMpsST2sc.c.
+
+Referenced by tntMpsPropST2scProduct().
+
+ double tntMpsPropSTscContract ( tntNetwork mpsProp, int chi )
+
+Performs a single sweep in one direction of a Suzuki-Trotter staircase sweep, contracting the propagators with the MPS nodes. The direction is determined by the connections of the network.
+
+The connections of the network must be as follows for a left to right sweep:
+
+and as follows for a right to left sweep:
+
+Any node connected to the downwards facing legs of the propagator network are unaffected by the function.
+
+The `twist' or orthogonality centre is moved as the two-site gates are swept across. After completion of a left to right sweep the orthogonality centre will be on the last site, and after the completion of a right to left sweep the orthogonality centre will be on the first site.
+
+Returns
+The truncation error for that sweep, which is the sum of the truncation error for all SVDS. The truncation error for each SVD can be defined in a few different ways - see the documentation for tntTruncType() for more details.
+Parameters
+ mpsProp Network representing the MPS connected to the staircase. Will be changed by the function, by applying the propagator. chi The maximum internal dimension. All SVD's will be truncated to this value.
+
+Definition at line 97 of file tntMpsST2sc.c.
+
+Referenced by tntMpsPropST2scProduct().
+
+ tntNode tntMpsPropTwoSite ( tntNode * Alp, tntNode * Arp, int chi, double * err )
+
+Performs the local contraction of two MPS nodes with the propagator, then factorises back into two unitary MPS nodes and a central node of singular values.
+
+Returns
+The node representing the matrix of singular values
+Parameters
+ Alp Points to the left node of the pair Arp Points to the right node of the pair chi The maximum internal dimension for the SVD err Total truncation error
+
+Definition at line 157 of file tntMpsST2sc.c.
+
+References tntNodeFindConn(), and tntNodeSVD().
+
+Referenced by tntMpsPropSTscContract().

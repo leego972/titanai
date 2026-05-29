@@ -1,0 +1,60 @@
+# Replacement for GraphJoin
+
+According to MathWorld >> GraphJoin, Mathematica could compute the join of two graphs with the GraphJoin command, part of Combinatorica. This command no longer works as of v10, and I cannot find a replacement. I want something like:
+
+GraphJoin[PathGraph[{a, b}], PathGraph[{c, d, e}]]
+
+To produce $G_1+G_2$ below.
+
+## GraphComputationGraphJoin
+
+GraphComputationGraphJoin[PathGraph[{a, b}], PathGraph[{c, d, e}],
+VertexLabels -> "Name", ImagePadding -> 10,
+GraphLayout -> "MultipartiteEmbedding"]
+
+
+This undocumented function works in both version 9.0 and version 11.3.
+
+• Thanks! Knew it had to be somewhere, but it sure isn't documented anywhere that I could find. – Bryan Clair Jan 2 '18 at 6:30
+• @Bryan, my pleasure. Thank you for the accept. – kglr Jan 2 '18 at 6:32
+• Unrelated question: Do you know if there's a fast way to retrieve EdgeCapacity, comparable to how GraphComputationWeightValues retrieves EdgeWeight much faster than PropertyValue or Options can? – Szabolcs Jan 2 '18 at 9:14
+• @Szabolcs, i don't remember seeing any function that does it; and I think I learned about GraphComputationWeightValues from a post of yours. – kglr Jan 2 '18 at 9:34
+
+The function you reference still works fine, but it is part of the Combinatorica package. You need to load the package first, and work with Combinatorica's own graph datatype. Combinatorica precedes Mathematica's built-in graph datatype by many years, and is not interoperable with it.
+
+That said, it is relatively easy to implement an equivalent function for built-in Graph objects as well:
+
+graphJoin1[g1_?GraphQ, g2_?GraphQ, opt : OptionsPattern[]] :=
+GraphUnion[
+GraphDisjointUnion[g1, g2],
+CompleteGraph[{VertexCount[g1], VertexCount[g2]}],
+opt
+]
+
+graphJoin1[PathGraph[{a, b}], PathGraph[{c, d, e}],
+VertexLabels -> "Name", GraphLayout -> "MultipartiteEmbedding"]
+
+
+If you want to preserve vertex names (when the original vertex sets are disjoint), you can write a slightly more complicated function:
+
+graphJoin2[g1_?GraphQ, g2_?GraphQ, opt : OptionsPattern[]] :=
+With[{g = graphJoin1[g1, g2, opt], vl1 = VertexList[g1], vl2 = VertexList[g2]},
+If[DisjointQ[vl1, vl2],
+g
+]
+]
+
+
+This solution uses only supported and documented functionality.
+
+The original version of this answer used the implementation
+
+graphJoin[g1_?UndirectedGraphQ, g2_?UndirectedGraphQ, opt : OptionsPattern[Graph]] :=
+Graph[
+Join[
+EdgeList@IndexGraph[g1],
+EdgeList@IndexGraph[g2, VertexCount[g1] + 1],
+EdgeList@CompleteGraph[{VertexCount[g1], VertexCount[g2]}]
+],
+opt
+]

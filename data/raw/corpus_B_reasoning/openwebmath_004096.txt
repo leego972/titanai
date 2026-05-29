@@ -1,0 +1,127 @@
+## Friday, April 23, 2010
+
+### GameBoy Camera Prototyping
+
+Updated 9/9/2010: Source Code is now available on Google Code.
+
+Holy TTL, Batman. My cobbled-together code and circuitry works! I just took my first Game Boy Camera picture.  Here are all the secrets I know of for interfacing a Game Boy Camera (Mitsubishi M64282FP) to a microcontroller.
+
+First picture!
+
+The actual scene
+
+Summary Version
+
+With Game Boy Camera, Ardweeny running tweaked version of code here, HP 1650A Logic Analyzer to get the timing right, Java Swing desktop application based on code here, and after fixing goofed up wiring and timing it works!  Some tweaking of camera configurations and it now takes some nice shots, and the flame detection software does its job with real images, too!
+
+Really Important Tips
+• Timing is key when interfacing with the M64282FP
+• But, you can also clock the M64282FP as slow as you need to
+• Setting the bias (dc offset) voltage to 1.0V is mandatory (the chip outputs 2Vp-p)
+• Setting the black level offset correctly is important
+• The camera actually spits out 128x128 pixels, but the last 5 rows are junk
+• Setting the gain too high can cause odd pixel artifacts (MSB truncation?)
+
+The Long Version
+
+Game Boy Camera
+First, I cut wires off of the 9-pin connector, one by one, and spliced them to longer wires and attached each to a small breadboard with 9-pin header so I could plug the camera into my protoboard.
+
+Microcontroller
+The Ardweeny from Solarbotics that I recently ordered and assembled lends itself well to rapid prototyping. It's Arduino-compatible running an ATmega328P MCU.
+
+The first step was getting the code put together and getting the timing signals right to activate the Game Boy Camera (Mitsubishi M64282FP image sensor chip aka "Artificial Retina").
+
+I started with code here plus the datasheet. I copied the code into my Arduino IDE and tweaked it as necessary to get it to compile. Then tweaked some more to get the timing right. Along the way, I merged several functions so signal timing was more obvious to me as I read the source.
+
+I ran the code, and... it didn't work. I wasn't getting any response from the image sensor... until I realized I'd crossed a couple of wires on the protoboard. Fixing that, the data came streaming through on the Arduino IDE Serial Monitor.  My Arduino code can be found here.
+
+Mitsubishi M64282FP Timing
+I've found two versions of the datasheet so far and the timing is a bit ambiguous so let me provide the following hints. If you're in the middle of working with one of these cameras, all this will mean something. Otherwise it won't...
+• RESET/XRST has to be low on the rising edge of XCK
+• Raise LOAD high as you clear the last bit of each register you send
+• START has to be high before rixing XCK
+• Send START once
+• READ goes high on rising XCK
+• Read VOUT analog values shortly after you set XCK low
+Logic Analyzer
+In debugging and fixing the timing, the HP 1650A Logic Analyzer that I recently put in operation was absolutely invaluable. I can't imagine trying to debug the issues I encountered without a logic analyzer.
+
+Ardweeny Under Test
+
+Checking Signal Timing
+
+PC Software
+Next up, capture the serial data and display it as a picture on the screen. I started with code here and decided to take a dive into the NetBeans IDE. I like it so far. Lighter weight than Eclipse, more intuitive to use, and it has a really nice GUI designer built in. I found it rather familiar after having worked with Xcode while equipping Pokey with a Bluetooth modem (a series of articles coming soon).
+
+I created a new project, designed a GUI from scratch using the IDE, then copied the relevant code into the appropriate spots. Did a few tweaks to get it to talk to the software on the Arduino.  Finally got an image to display on the screen--consisting only of lines and gibberish. Not the real picture. Crap!
+
+The preliminary version of the M64282FP datasheet suggested the cause might be a timing issue when reading the analog pixel data. The datasheet I'd been using was ambiguous on that issue.
+
+I tweaked the code to read Vout (analog) shortly after dropping XCK and... Shazam!  The image at the top of this article appeared.
+
+After the time put in bashing through, seeing that image was nothing short of miraculous!  The source code and NetBeans project files for the PC client are here.
+
+Configuring the Camera
+Getting that first readable image was great, but the second one sucked, with bizarre artifacts where bright spots should appear (see below).
+
+There's no way my simple bright-spot detection algorithm could correctly handle this mess of pixels. I had to learn more about how the camera settings worked.
+
+Artifacts from high gain and MSB truncation
+
+To help with troubleshooting, I extended the functionality of the client significantly, providing a means of setting the relevant camera registers and displaying a histogram below the picture.
+
+One last article I found on the camera held a revelation. The Vout voltage is 2 volts peak to peak!  So one has to configure the voltage offset register V for 1.0V, a value of 7 per the datasheet, to get positive signals that the ADC can handle. Doing so immediately yielded a better result.
+
+Then I discovered that the bright artifacts disappeared when setting the camera's gain above 0. It dawned on me that I am using a 10-bit ADC but passing an 8-bit value to the Java Application; I was truncating the most significant bits, which mattered at higher gains with higher maximum voltages. That explained everything.
+
+I found that you can either continue to use the lowest 8-bits and set the gain to 0, or rotate off the lowest two bits, then increase the gain substantially, and possibly also tweak Vref and offset to maximize the dynamic range of the picture.. bottom line, just be careful of the resolution of your ADC and the data types (signed, unsigned, int, char, short) used to store the results.
+
+The black level in the image is set by the offset register O in 32mV increments plus or minus. If the offset is too low, and the image is underexposed.  I had strange white pixel artifacts appear where the darkest parts of the picture are supposed to be. Setting the black level a little higher solved the problem.  Apparently the "negative" voltage values were being converted to an unsigned value and became high value pixels (white) which you can kind of see when you look at the histogram.
+
+Offset Too Low + Underexposed
+
+Using the histogram feature made it easy to quickly dial in a decent exposure. Ideally, software auto exposure would be great, but for the narrower purpose of finding the candle, manually calibrating the camera for competition conditions will probably be adequate.  Depends on how much time I have for refinement.
+
+Correct Exposure... Finally!
+
+So does it work?  Can the camera see a candle?  Does the flame detection software work?
+
+Nothing like a blogging cliffhanger, huh?  Click here to find out what happened.
+
+Updated 9/9/2010: Source Code is now available on Google Code.
+
+1. Hey, thanks for your work on this. I'm having some issues getting the java gui to run
+
+J:\Documents and Settings\jarrod\Desktop>java GBCam.jar
+Exception in thread "main" java.lang.NoClassDefFoundError: GBCam/jar
+Caused by: java.lang.ClassNotFoundException: GBCam.jar
+at java.net.URLClassLoader$1.run(Unknown Source) at java.security.AccessController.doPrivileged(Native Method) at java.net.URLClassLoader.findClass(Unknown Source) at java.lang.ClassLoader.loadClass(Unknown Source) at sun.misc.Launcher$AppClassLoader.loadClass(Unknown Source)
+Could not find the main class: GBCam.jar. Program will exit.
+
+Cheers. Jarrod
+
+2. @Jarrod: Try
+
+java -jar GBCam.jar
+
+On some operating systems you can double-click the jar file, too.
+
+3. ok, slightly different error with that.
+
+J:\Documents and Settings\jarrod\Desktop>java -jar GBCam.jar
+Launching GBCamApp...
+java.lang.NoClassDefFoundError: org/jdesktop/application/SingleFrameApplication
+at gbcam.Launcher.main(Launcher.java:19)
+Caused by: java.lang.ClassNotFoundException: Failure to load: org.jdesktop.application.SingleFrameApplication
+... 8 more
+
+4. Rats. Looks like the jar is missing some important libraries. :( I'll try to get it updated sometime in the next several weeks. The big Sparkfun AVC is on April 23, so once I'm done with that I should have time to look into this.
+
+In the meantime, if you check out the source and compile under NetBeans IDE, it 'should' work...
+
+5. Do you recall having any problems with the exposure time not working at all?
+
+I'm having issues where my image seems to be live data from the sensor and I must finish reading all pixels before moving the image, else it's all blurry. I'd've thought it would have buffered the data otherwise the exposure time would be useless.
+
+Also I don't know what you mean by the value in the V register must be 7 to get a 1.0V offset. As far as I can tell, the V register is the reference voltage register and a value of 7 would be 3.5V. Did you mean the O register?

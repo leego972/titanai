@@ -1,0 +1,43 @@
+# find | xargs … Like a Boss
+
+March 9, 2012
+By
+
+(This article was first published on Getting Genetics Done, and kindly contributed to R-bloggers)
+
+*Edit March 12* Be sure to look at the comments, especially the commentary on Hacker News - you can supercharge the find|xargs idea by using find|parallel instead.
+---
+
+Do you ever discover a trick to do something better, faster, or easier, and wish you could reclaim all the wasted time and effort before your discovery? I've had this happen many times - learning how to use vim, learning about querying relational databases, switching from EndNote to Mendeley, etc.
+
+Now I wish I could reclaim all the time I spent writing perl code to do something that find|xargs can do much more easily. I'll lead you through an example using a problem I ran into and solved easily with find|xargs.
+
+The problem:
+
+I'm doing an RNA-seq experiment where I have three replicates {1,2,3} for two conditions {C,M}. I've run Tophat to align the raw reads to a reference genome, and saved the output of each run to a separate directory. Within those directories I have an alignment (accepted_hits.bam) and some other stuff.
+
+Now, I want to assemble transcripts separately for each alignment. All the alignments are 1 directory deep in the tophat output directory. Furthermore, I want to submit a separate job for each assembly onto our cluster using qsub. In a former life I would have wrapped a perl script around this to write shell scripts that the scheduler would run, and then write a second perl script that would submit all the jobs to the scheduler.
+
+Here's a command that will do it all in one go:
+
+PROCS=8; find pwd -name "accepted_hits.bam" | xargs -i echo qsub -l ncpus=$PROCS -- which cufflinks -p$PROCS -o {}-cufflinks -g genes.gtf {} | sh
+
+So let's break this down one piece at a time to see what's going on here.
+
+First the find command. If I want to find all the files in the current directory recursively through any subdirectory, I can use the find command with the -name argument. You can see that find is searching "." (the current directory), and is returning the path (relative to ".") for each file it finds.
+
+But if I'm submitting jobs to a scheduler, I want to use the full absolute path. You can modify find's output by telling it to search in "." but give it the full path. Even better, tell find to search in pwd (those are backticks, usually above the tab key. The shell will run the pwd command, and insert that output into the find command. See below.
+
+Now, here's where xargs comes in. xargs lets you build new commands based on the standard input. In other words, you can build a command to run on each line that gets piped to xargs. Use the -i option to create a command for each individual line on the pipe, and use {} as a placeholder. The example below should help.
+
+So here's whats going on. In the first step, I'm piping the output of find into xargs, and xargs is creating a new command that will echo "somecommand {}", where {} is a placeholder for what gets piped into xargs. So you can replace somecommand with anycommand -any -options -you -want, and echo all that back out to the STDOUT.
+
+The second part simply pipes whatever is echo'd to the STDIN to the bash shell ( | sh). So bash will run each command it receives on the pipe. Since somecommand doesn't exist, I'm getting an error.
+
+Below, I'm building the command to run cufflinks on each alignment, and dump that output back out to a new directory based on the pattern of the alignment (bam) file name. But since in the next step I want to parallelize this on the cluster, and the cluster won't know that cufflinks is in my path, I need to tell it where to find cufflinks. I could give it the path, but I would rather use the backtick trick I showed you above to let the shell tell the shell where cufflinks resides by using which cufflinks.
+
+In the final piece, I'm adding a few more components.
+
+First, I'm setting a shell variable called PROCS. I can access this variable later by using $PROCS. This is how many CPUs I want to allocate to each assembly job. The ";" separates two commands. Instead of using xargs to build a cufflinks command to run at the shell directly, I'm using xargs to build a qsub command that will qsub these jobs to the cluster. To qsub something from the command line, the syntax is qsub -- myprog -o -p -t arg1 arg2 Where are the PBS directives to qsub (like the number of processors I want, the amount of RAM I require, etc). myprog is the program you're running. -o, -p, -t are options to myprog, and arg1 and arg2 are the arguments to myprog. The two hyphens are required between the qsub options and the commands you actually want to run. So in the command above, I'm using xargs to build up a qsub command, substituting$PROCS (8 here) for the number of CPUs I require, calling cufflinks from the full path using the backtick trick, telling cufflinks that I want \$PROCS (8) processors, use genes.gtf for reference annotation based transcript (RABT) assembly, and run all that cufflinks stuff on the supplied alignment.
+
+In summary, this one-liner will submit six 8-processor jobs. It sure beats writing perl scripts. There are a zillion other uses for piping together find with xargs. If you have a useful one-liner, please share it in the comments. Happy piping!

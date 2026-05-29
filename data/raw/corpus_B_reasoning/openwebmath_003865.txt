@@ -1,0 +1,69 @@
+# Automatically coloring plot labels the same as the plotted curves
+
+Here is an example of a ListLinePlot. How can get the text of the PlotLabels option to be the same as the colors automatically assigned to the curves by the PlotTheme option?
+
+num = 10;
+data1 = N@Sin@Range[num];
+data2 = N@Cos@Range[num];
+mark = ToString @@@ {Last@data1, Last@data2};
+
+ListLinePlot[{data1, data2},
+Frame -> True,
+GridLines -> Automatic,
+GridLinesStyle -> Directive[Gray, Dotted],
+PlotRange -> All,
+PlotTheme -> "Web",
+PlotLegends -> Placed[SwatchLegend[mark], {Top, Left}],
+PlotLabels -> mark,
+InterpolationOrder -> 2,
+ImageSize -> Large
+]
+
+
+Although the user can do this mannually like this here,
+
+{Style[text1, color1], Style[text2, color2]}
+
+
+when data set count increases, it becomes increasingly more difficult to give the colors values that the PlotTheme option assigned.
+
+I am eliminating what I consider extraneous details from your code, but I an generalizing the data to an arbitrary number of curves.
+
+With[{nDiv = 10, nCurv = 3},
+data =
+Table[N @ Sin[u + h], {h, Subdivide[π/2, nCurv - 1]}, {u, Subdivide[2 π, nDiv]}]];
+
+plt = ListLinePlot[data, PlotTheme -> "Web"];
+
+lbls =
+MapThread[Style[Last[#1], #2, 14] &, {data, Cases[plt, RGBColor[__], ∞]}];
+
+ListLinePlot[data,
+PlotTheme -> "Web",
+PlotLabels -> lbls,
+ImageSize -> Large]
+
+
+### Update
+
+The OP expresses worry about the performance cost of evaluating the plot twice. Since the 1st plot is not rendered to the screen, its evaluation is not as expensive as a fully rendered plot. However, if the data sets being plotted are very large, it might be profitable to restrict the 1st evaluation to the 1st three points in each data set. Like so:
+
+With[{dta = Take[#, 3] & /@ data},
+plt = ListLinePlot[dta, PlotTheme -> "Web"]];
+
+• Great! but ListLinePlot shall be executed twice, I doubt the performace go down. – Jerry Apr 16 '17 at 15:00
+• why plt/.{PlotLabels->lbls} doesn't work? – Jerry Apr 16 '17 at 15:05
+• @Jerry. Take a look at FullForm[plt]. – m_goldberg Apr 16 '17 at 15:10
+• @Jerry. I don't know how to do it without re-evaluating the plot. However, when the plot is not rendered on the screen as in the 1st evaluation, it takes far less time than a rendered plot, so the performance hit is not as severe as you might think. – m_goldberg Apr 16 '17 at 15:20
+• @Jerry You can avoid evaluating the plot twice, which is usually quick for ListLinePlot but not always quick for other plotter, with the following: theme = "Web"; styles = "DefaultPlotStyle" /. (Method /. ChartingResolvePlotTheme[theme, ListLinePlot]); lbls = MapThread[Style[Last[#1], #2, 14] &, {data, PadRight[{}, {Length@data}, styles]}]; – Michael E2 Apr 16 '17 at 16:18
+
+Very neat, but the proposed code seems to go wrong in Mathematica 12.0 because "Cases" gives a list of colours which is too long. Below an ad hoc solution which works here but I don't know how robust it is:
+
+With[{nDiv = 10, nCurv = 3},
+data = Table[
+N@Sin[u + h], {h, Subdivide[π/2, nCurv - 1]}, {u,
+Subdivide[2 π, nDiv]}]];
+
+plt = ListLinePlot[data, PlotTheme -> "Web"];
+
+`

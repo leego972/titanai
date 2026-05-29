@@ -1,0 +1,31 @@
+# Trusted Domain Exchange Environment
+
+In the health system I work for, we have been tasked with taking our old AD domain and making it work within the new domain. Eventually, all computers will be converted to the new domain, but there are steps along the way before that date. One of those stages was to use Exchange from the other domain. We will call this DomainB.com. The domain here at our local hospital is DomainA.com.
+
+We have a trust relationship between DomainA and DomainB. This allows DomainA computers to authenticate against DomainB. However, it isn’t without its issues. When adding Exchange accounts from DomainB into DomainA while still logging into DomainA, Outlook doesn’t play well. The first problem we had was AutoDiscover. AutoDiscover isn’t quite setup correctly on at DomainB as the normal search pattern for the discovery won’t find the autodiscover.xml file with the way the domains are named. And with the trust, SCP doesn’t work correctly. The second problem is passwords. We had to add the password for DomainB into the password vault in Windows 7 (similar to Windows XP). The third problem was the Out-Of-Office (OOF) and Availability Services (AS). Both of these did not work. For the last two months, we have been telling our users that it won’t work until we are in DomainB so they will have to use OWA for those features.
+
+Thursday last week, my CEO pulled me into his office and asked if there was anything that could be done for the Free/Busy (FB) information. I told him the same speel I have been telling everyone else. Gotta wait for DomainB. All night I started crunching ideas. Over the course of Friday and Monday, I finally solved it. All services are now working. So, on to how I did it…
+
+### AutoDiscover
+
+The IT department of DomainB wasn’t particularly helpful and was giving me the same speel I was giving everyone else. Because the OWA URL used a non-standard URL, AutoDiscover would never find the XML file. If you were on DomainB, it would find it via SCP (Service Connection Point). But since we are on DomainA, we don’t have rights to DomainB’s SCPs. So I found a way to force Outlook 2010 to use a local XML file.
+
+HKEY_CURRENT_USER\Software\Microsoft\Office\14.0\Outlook\AutoDiscover\”PreferLocalXML”=dword:1
+HKEY_CURRENT_USER\Software\Microsoft\Office\14.0\Outlook\AutoDiscover\”DomainB.com”=”\\path\to\file.xml”
+
+Since AutoDiscover.xml is dynamically generated upon viewing, you can’t really just copy and paste the contents from the real file. You have to redirect.
+
+<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+<Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+<Account>
+<AccountType>email</AccountType>
+<Action>redirectUrl</Action>
+<RedirectUrl>https://remote.DomainB.com/autodiscover/autodiscover.xml</RedirectUrl>
+</Account>
+</Response>
+</Autodiscover>
+
+This works by responding back with all the URLs necessary for OOF, FB, AS, etc. This is of course assuming that the Exchange server is correct and has FQDNs. This also pulled other settings such as Personal Archive folders.
+
+Once Outlook reads from this file when setting up an email account, everything is built out without the need for further configuration in Outlook.

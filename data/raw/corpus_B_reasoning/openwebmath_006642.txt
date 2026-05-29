@@ -1,0 +1,185 @@
+emacs-orgmode
+[Top][All Lists]
+
+## Re: [PATCH v2] Add new entity \-- serving as markup separator/escape sym
+
+ From: Samuel Wales Subject: Re: [PATCH v2] Add new entity \-- serving as markup separator/escape symbol Date: Fri, 29 Jul 2022 17:22:16 -0700
+
+i am not in a position to judge \-- but i like the idea of not having
+zws be used, and expect you have thought it out.
+
+just an idea: something approximately like this might work, or
+something like john kitchen's poc implementation of it might.  this is
+called extensible syntax.  one of the goals of es is to reduce the
+proliferation of org syntax and other stuff.
+
+es was proposed long ago, but i was unable to sufficiently follow up
+for unrelated reasons.  i have lots of replies and lots of further
+work on it but that's neither here nor there in this case.
+
+[other stuff includes but is not limited to increase reusability and
+reliability of code to implement things you want to do with syntax
+such as whether to show it, add a subfeature, export it variantly in
+different exporters, escape it, quote it, pretty-print it, etc.; allow
+user to do this so org is not burdened by it; etc.  terms to look up
+in the mailing list archives include extensible syntax, parsing risk,
+and id markers.]
+
+$[emphasis :position beg :type bold :display "*"]bold text$[emphasis
+:position end :type bold :display "*"]
+
+alternatively:
+
+$()... other than the basics, such as sexp, i do NOT care about the details of the$[] low level syntax in general OR the arglist details in this
+particular case.  those can change according to consensus or
+implementation needs etc.  instead, it is getting the concept across
+that matters to me.  one key thing about es is that when we want a new
+feature, we do not need new org syntax for that new feature.  OR for
+new subfeatures.  we just do something like this:
+
+\$[extended-timestamp :whatever yes :displays-as interval]
+
+or whatever.  this has nothing to do with bold emphasis.  it is an
+unrelated feature, using the same outer syntax.  another completely
+unrelated feature i'd strongly like, for emacs in general, is id
+markers.  that too can be done with this syntax.
+
+it looks verbose to 3rd party tools but is parseable by them.  this
+example displays as * to the user.  parseable as lisp sexp data using
+lisp tools.  it is meant to be vaguely reminiscent of a cl function
+call while still not likely to occur naturally.
+
+it would of course not be typed by the user directly but by some
+completion thing.
+
+i am not doing well so i am unlikely to be able to respond much or at
+all to queries.  please take it easy on me if this rubs you the wrong
+way.  it is just an idea and it does not have to be the answer.
+
+merely saying that once implemented, could solve this problem and ALSO
+later problems.  in fact, we discussed coloring of text using this
+syntax.  although with various understandings of it.  that's kinda
+similar to emphasis.
+
+On 7/29/22, Ihor Radchenko <yantar92@gmail.com> wrote:
+> Max Nikulin <manikulin@gmail.com> writes:
+>
+>>>> The good point in your patch is that \- is still work as shy hyphen
+>>>> (that, by the way, may be used in some cases instead of zero width
+>>>> space: *intra*\-word). On the other hand I have managed to find a case
+>>>> when your approach is not ideal:
+>>>>
+>>>> *\--scratch\--*
+>>>>
+>>>> <p>
+>>>
+>>> Well. I think that it is impossible to use the same escape construct to
+>>> both force emphasis and escape it.
+>>
+>> Let's articulate the problem as follows: when some characters ("*". "/".
+>> etc.) besides used literally are overloaded with 2 additional roles that
+>> are start emphasis group and terminate emphasis group, in addition to
+>> lightweight markup heuristics, it is necessary to provide a way to
+>> disambiguate which of 3 roles is associated with particular character.
+>>
+>> "Activate" and "deactivate" characters or entities for emphasis markers
+>> are alternative and perhaps not so clear terms have used before.
+>>
+>> The advantage of zero width space is that "[:space:]" is part of
+>> PREMATCH and POSTMATCH (outer) regexps in
+>> org-emphasis-regexp-components' and "[:space:]" is forbidden at the
+>> inner borders of emphasized span of text. The latter is mostly
+>> meaningful, however I am unsure if bold space has the same width as
+>> regular one, and space in fixed width font is certainly distinct.
+>>
+>> The problem with the "\--" entity is that it is not handled properly at
+>> the start of emphasis region. It neither disables emphasis nor parsed as
+>> complete entity, instead it becomes combination of "\-" shy hyphen and
+>> literal "-".
+>>
+>> Unsure if it can be solved consistently. Possible ways:
+>> - It addition to space-like (in respect to current regexp) entity add
+>> another one that acts as a part of word, but like "\--" stripped from
+>> output. Likely it should be accompanied by more changes in the parser
+>> and regexps.
+>> - Provide some new explicit syntax for literal character, start of
+>> emphasis group, end of emphasis group.
+>
+> The fact that \-- was not parsed in your example is because entities
+> cannot be directly followed by a letter (see 12.4 Special Symbols).
+>
+> You need
+>
+> *\--{}scratch\--*
+>
+> Concerning the 3 listed roles of the *_/+ markup, I propose to simplify
+> the problem a bit and not try to make \-- serve as a proper escape symbol.
+>
+>  ("slash" "/" nil "/" "/" "/" "/")
+>  ("plus" "+" nil "+" "+" "+" "+")
+>  ("under" "\\_" nil "_" "_" "_" "_")
+>  ("equal" "=" nil "=" "=" "=" "=")
+>  ("star" "\\star" t "*" "*" "*" "⋆")
+>
+> Then, your example should better be written as
+>
+> \star{}scratch\star
+>
+> \-- may better work between markup, not inside.
+>
+>> Concerning zero width space workaround, I may be wrong, but Nicolas
+>> might consider using U+200B zero width space as the escape character for
+>> itself: single one is filtered out during export, double zero width
+>> space becomes single character. (I do not like this kind of "white
+>> space" programming language".)
+>
+> This is too complex, IMHO.
+> If desired, we can again go the entity road and introduce
+> \zws entity.
+>
+> Note that we already have
+>
+>  ("nbsp" "~" nil "&nbsp;" " " " " " ")
+>  ("ensp" "\\hspace*{.5em}" nil "&ensp;" " " " " " ")
+>  ("emsp" "\\hspace*{1em}" nil "&emsp;" " " " " " ")
+>  ("thinsp" "\\hspace*{.2em}" nil "&thinsp;" " " " " " ")
+>
+> Generally, it is a good idea to advertise entities in the manual.
+> Zero-width space is not only limited, it is impossible to use, e.g. in
+> tables when you want to quote "|". The only solution is using \vert or
+> \vbar entity.
+>
+>> Another question is whether U+2060 word
+>> joiner (or some other character) should be added either as alternative
+>> to zero width space or to allow =    verbatim    = fixed width text
+>> surrounded by fixed width spaces.
+>
+> This particular example is tricky.
+> If we put escape symbol _inside_ the verbatim, it is never possible to
+> know if the user intents to use that symbol literally or not.
+> But non-space before/after opening/closing markup char is hard-coded and
+> changing it is fragile.
+>
+> Instead of using some kind of "escape" symbol here, I suggest turning to
+> the idea about inline special blocks. We can introduce a more verbose
+> markup that will allow spaces inside at the beginning/end of the
+> contents.
+>
+> https://orgmode.org/list/87a6b8pbhg.fsf@posteo.net
+> Manuel Macías [ML:Org mode] (2022) About 'inline special blocks'
+>
+> Instead of using the tricky *bold text*, we may allow _*{bold text}*_ or
+> something similar, with _name{...}name_ being inline special block.
+>
+> Best,
+> Ihor
+>
+>
+
+--
+The Kafka Pandemic
+
+A blog about science, health, human rights, and misopathy:
+https://thekafkapandemic.blogspot.com
+
+`

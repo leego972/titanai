@@ -1,0 +1,64 @@
+Question: <p>Why won't this work?  I'm trying to make an instance of a class delete itself.</p>
+
+<pre><code>&gt;&gt;&gt; class A():
+    def kill(self):
+    	del self
+
+
+&gt;&gt;&gt; a = A()
+&gt;&gt;&gt; a.kill()
+&gt;&gt;&gt; a
+&lt;__main__.A instance at 0x01F23170&gt;
+</code></pre>
+
+Answer: <p>I think I've finally got it!
+Take a look a this code:</p>
+
+<pre><code>import weakref
+
+class InsaneClass():
+    _alive = []
+    def __new__(cls):
+        self = super().__new__(cls)
+        InsaneClass._alive.append(self)
+
+        return weakref.proxy(self)
+
+    def commit_suicide(self):
+        self._alive.remove(self)
+
+instance = InsaneClass()
+instance.commit_suicide()
+print(instance)
+
+# Raises Error: ReferenceError: weakly-referenced object no longer exists
+</code></pre>
+
+<p>When the object is created in the <code>__new__</code> method, the instance is replaced by a weak reference proxy and only one reference is kept in the _alive class attribute.</p>
+
+<h3>What is a weak-reference?</h3>
+
+<p>Weak-reference is a reference which does not count as a reference when garbage collector collects the object. Consider this example:</p>
+
+<pre><code>&gt;&gt;&gt; class Test(): pass
+
+&gt;&gt;&gt; a = Test()
+&gt;&gt;&gt; b = Test()
+
+&gt;&gt;&gt; c = a
+&gt;&gt;&gt; d = weakref.proxy(b)
+&gt;&gt;&gt; d
+&lt;weakproxy at 0x10671ae58 to Test at 0x10670f4e0&gt; 
+# The weak reference points to the Test() object
+
+&gt;&gt;&gt; del a
+&gt;&gt;&gt; c
+&lt;__main__.Test object at 0x10670f390&gt; # c still exists
+
+&gt;&gt;&gt; del b
+&gt;&gt;&gt; d
+&lt;weakproxy at 0x10671ab38 to NoneType at 0x1002050d0&gt; 
+# d is now only a weak-reference to None. The Test() instance was garbage-collected
+</code></pre>
+
+<p>So the only strong reference to the instance is stored in the _alive class atribute. And when the commit_suicide() method removes the reference the instance is garbage-collected.</p>

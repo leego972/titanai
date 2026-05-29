@@ -1,0 +1,227 @@
+Public Group
+
+[Java] Most Efficient Way To Iterate Through A File ?
+
+This topic is 1025 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+Recommended Posts
+
+I have a large configuration file I need to read into memory when my plugin boots up.
+
+Right now I have a very long switch statement loop that seems to take a while to process all the lines in the config file.
+
+What would be the most efficient way to iterate through a 'plain text' [*1] file in Java to reduce the loading times as much as possible? ( without over complicating the code base to the point of becoming unreadable ).
+
+Note - the file is only opened once. All the relevant data is dumped into a list, THAN processed in the switch loop.
+
+*1 - the text file is not formatted in .xml or any other type of markup language
+
+Edited by Code Fox
+
+Share on other sites
+
+I have a large configuration file I need to read into memory when my plugin boots up.
+
+Right now I have a very long switch statement loop that seems to take a while to process all the lines in the config file.
+
+What would be the most efficient way to iterate through a 'plain text' [*1] file in Java to reduce the loading times as much as possible? ( without over complicating the code base to the point of becoming unreadable ).
+
+Note - the file is only opened once. All the relevant data is dumped into a list, THAN processes.
+
+*1 - the text file is not formatted in .xml or any other type of markup language
+
+You have a property file which results in a map (key->value).
+
+Quick idea:
+
+Then sort the key-set and process the config like this:
+
+Map<String,String> properties = ...from file...
+Set<String> keySet = new TreeSet<String>(properties.keys());
+Iterator<String> it = keySet.iterator();
+
+String key = it.hasNext() ? it.next() : "end_reached";
+if("first_param".equals(key)) {
+// do something
+// next key
+key = it.hasNext() ? it.next() : "end_reached";
+}
+
+if("second_param".equals(key)) {
+// do something
+// next key
+key = it.hasNext() ? it.next() : "end_reached";
+}
+...
+if("last_param".equals(key)) {
+// do something
+// next key
+key = it.hasNext() ? it.next() : "end_reached";
+}
+
+if(!"end_reached".equals(key)) {
+// there's an unknown parameter, config file might be corrupt
+}
+
+Edited by Ashaman73
+
+Share on other sites
+
+Your file is obviously formatted in some kind of language since you're parsing it into some kind of configuration, it has some structure. The format of the file can matter a lot in how efficient it is to parse it (for instance, an INI file or any basic key-value store, compared to an XML file). Whether it can be streamed in, if it needs to be validated according to a schema, etc, etc... some formats are inherently less efficient than others, and so on... besides the usual transport layer considerations of course.
+
+I don't know how big your configuration file is but if it takes "a while" to load it I'd say it's either huge or you're spending too much time loading the file for some reason and not enough time actually parsing it. Maybe show your code or something?
+
+Share on other sites
+
+To be pedantic, its not reading the file from disk that's slow, its whatever parsing you're doing.  If your parsing is structured mostly as "read this byte/char, then decide what to do with it; now I have all the bytes/chars, then decide what to do with that." then its going to tend to be slower than if you can take bigger chunks at a time.
+
+Beware any string handling you might be doing too -- as far as I know Java strings are immutable, which means that every time you append a character to an existing string, what happens behind the scenes is a new string is allocated, the contents of the old string are copied, then the new character, then the old string is (probably) released to be garbage collected -- lots and lots of small collections result. You may not be affected, but be aware of the invisible costs of string handling (by the way, lots of languages have this kind of invisible overhead if you use the builtin string classes -- some languages offer classes like C#s StringBuilder to help combat it).
+
+Share on other sites
+
+Be very careful with allocations as this is Java.
+
+If you are parsing the file by creating an enormous number of temporary objects and throwing them away, that is wasteful and can be incredibly slow.
+
+Unfortunately the language design of Java makes that the easiest way to go. If you're using third-party libraries they likely are using those terrible techniques of not managing memory well.
+
+Once Upon a Time (about five years back) I was assigned to fix a tool that needed to go through a big collection of data in a file, about 15MB data file. Basically this was the consolidated master resources list for the game, and the tool needed to validate that every model, texture, animation, script, and audio file was present.   It took over a half hour to open and process the file, mostly because it was parsing and allocating everything as it went, spending time doing allocations and releases of tiny strings, calling constructors and destructors, testing the file system for existence of file names to ensure they were valid, and on rare occasion actually doing work.
+
+By the simple process of reusing buffers of objects and loading in larger batches plus caching file system tests, I was able to drop it down from a half hour to about a minute and a half.  It took a few design changes to use a recycling pool of objects, but within about two days it was easy enough to find and eliminate the problems.
+
+From the short description given, it seems you are likely suffering the same problem.
+
+In that case, build a factory method to construct AND RELEASE objects, but instead of allocating with new, attempt to reuse from within a pool. Do not ever use strings, which are of the devil in Java, instead use and reuse byte arrays. Find any other slow operations -- in my case that was checking for the existence of a file -- and attempt to either eliminate the work, or to cache the results, or to spawn a small worker thread to do the work asynchronously.
+
+Share on other sites
+
+Beware any string handling you might be doing too -- as far as I know Java strings are immutable, which means that every time you append a character to an existing string, what happens behind the scenes is a new string is allocated, the contents of the old string are copied, then the new character, then the old string is (probably) released to be garbage collected -- lots and lots of small collections result. You may not be affected, but be aware of the invisible costs of string handling (by the way, lots of languages have this kind of invisible overhead if you use the builtin string classes -- some languages offer classes like C#s StringBuilder to help combat it).
+
+Be very careful with allocations as this is Java.
+
+I strongly disagree, this is just not true at all
+
+[spoiler]
+public class TestChamber {
+public static ArrayList<String> stringContainer;
+
+public static void main(String[] args) {
+long start = System.nanoTime();
+for (int i = 0; i <= 10; i++) {
+test(1000000);
+}
+long end = System.nanoTime();
+System.out.println(">>> Running time " + ((end - start) / 1000000000)
++ "seconds");
+}
+
+private final static void test(int numberOfAllocations) {
+stringContainer = new ArrayList<>(numberOfAllocations);
+long combinedTime = 0;
+
+for (long i = 0; i < numberOfAllocations; i++) {
+combinedTime += allocate();
+}
+
+System.out.println("---------");
+System.out.println("Total:   " + (combinedTime / 1000000000d)
++ "seconds");
+System.out.println("Average: " + (combinedTime / numberOfAllocations)
++ "nanoseconds");
+}
+
+private final static long allocate() {
+double r = Math.random();
+
+long start = System.nanoTime();
+String string = Double.toString(r);
+long end = System.nanoTime();
+
+/*
+* Add to something to avoid possible JVM code improvements which might
+* affect runtime
+*/
+
+return end - start;
+}
+}
+
+[/spoiler]
+
+> On the first run this code allocates 1Million random strings (on my laptop) in 0.9 seconds(!!!) with an average speed of 917 nanoseconds (!!!) per allocation
+The whole code runs in 15seconds (10.000.000 strings).
+> allocating 10million empty strings needed
+0.04 to 0.2 seconds
+> combining 10million times two strings "string = s1 + s2" needed
+0.08 to 1.15 seconds
+
+Of course the whole speedtest varies a lot by the size of each string but in this test every string has about 18-22characters which should be enough.
+
+I don't know what the OP is actually doing, but if he isn't reading in over 10.000.000 string values which took in my test above about 15seconds on my laptop this shouldn't matter at all.
+
+some languages offer classes like C#s StringBuilder to help combat it).
+
+Yes, both C# as well as Java offer a "StringBuilder" which is a very good way to tackle this, agree.
+StringBuilders, however, are sadly not handled similar like primitive types as it is the case with normal Strings.
+I.e. "stringbuilder1 + stringbuilder2" won't work or using StringBuilder in a switch statement :/
+_______________________________________________________________________________________________________________
+
+@TS
+Now what I actually believe is the source of all evil is, that you are doing a lot of (unnescessary) String comparisons, searching for character sequences, splitting strings and stuff like that.
+The solution to that is overthinking your data-format and parsing-logic from the ground up.
+There is not much to say without more information on your side besides that Strings in Java are UTF-16 encoded and string/character operations of any kind can be very heavy. Edited by IceCave
+
+Share on other sites
+
+You're right that its not purely due to visible string allocation, but I'd wager its still a significant portion -- the invisible kind. You talk about string comparisons, character sequences, splitting strings -- all of those produce allocations of their own, behind the scenes. The invisibility of them makes them something worth being concerned about, and its not inconceivable that millions of invisible allocations could arise from a largish config file, if it were processed in a pathologically-bad (but all too common) way.
+
+Furthermore, I'll point out that by the looks of it, your benchmark almost certainly isn't capturing GC time since A) Java garbage collection (like most) is non-deterministic, and B) your container of strings outlives your ending timestamp anyways. Heck, without printing out a random sampling of the stored strings, you can't even really be sure the compiler hasn't elided them away entirely. Neither do your pure allocations reflect the constant copying of data that would be incurred by common parse-by-one patterns (as I said earlier -- read an additional character and decide whether we have enough to do something with it). I don't mean to pick on you, and I don't even mean to pick on Java, but without seeing OP's code, your isolated micro-benchmark doesn't really tell us anything about how allocations might be affecting OP's code.
+
+Share on other sites
+Without further information, it's difficult to give possible further directions.
+In general, you'd start with measuring some times, to get an idea of how close you are. Eg load+process versus load+nothing, perhaps also with some fast block load from the Internet or so.
+The latter would give a lower limit.
+
+In general, it's much better if you process the file while reading it. Disk systems are slow, why not use that time to process its contents.
+There are two other reasons for doing that.
+- It would reduce or kill the need for the long list of storage that you have now, which cannot hurt.
+- Many OSes do automagic read-ahead. If you ask for one disk block of a file, they already fetch the next one, so by the time you're done with the processing the previous block, it's already there. Of course that fails, if processing is a NOP-operation.
+
+If you parse the file yourself, you can look into using a lex/yacc like solution instead, which tends to be optimized for speed, in particular character handling, which tends to be the bottleneck in lex-generated scanners.
+
+Share on other sites
+
+Yes, disks are slow relative to memory and CPU speeds.
+
+But disks are much faster than are being described.  While no file sizes and times were given, different types of disks (slow spindle disks, fast spindle disks, ssd disks, thumb drives, etc) have performance that shouldn't be too painful.
+
+It is common to see spindle disks with 30MB/s or 50MB/s.  Better SSD drives routinely reach 300MB/s, newer ones routinely sit around 500MB/s.  Then there are the high performance PCI card drives that are currently around 3GB/s. (Yes, gigabytes per second.)
+
+A text configuration file should not be "painful" to load. Even if the configuration file is 5 or 10 megabytes in size, the time spent actually loading the file should be a fraction of a second. It may be a large fraction of a second like 1/3 second for a slow spindle drive, but not to the point of being "painful".
+
+When files take a long time to load, unless you're loading up gigabytes of files, facing a "painful" loading time likely comes from time spent doing processing and manipulating data, not so much time transferring data from the hardware.
+
+Java is particularly well known for flooding the world with copies of strings. (Profiling and debugging one tool, I found a vendor's library that in a matter of seconds started triggering garbage collection as it had filled memory with substrings, and surprisingly generated over a quarter million copies of the string "YES", all waiting for GC to clean it up.)  While some strings are automatically interned, it is trivially easy to fill memory with copies of the strings and pieces of strings because so many library functions think nothing of allocating yet another copy of a string.
+
+1. 1
+2. 2
+Rutin
+19
+3. 3
+JoeJ
+16
+4. 4
+5. 5
+
+• 35
+• 23
+• 13
+• 13
+• 17
+• Forum Statistics
+
+• Total Topics
+631702
+• Total Posts
+3001812
+×

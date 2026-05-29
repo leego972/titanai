@@ -1,0 +1,76 @@
+Question: <p>While I was investigating a problem I had with lexical closures in Javascript code, I came along this problem in Python:</p>
+
+<pre><code>flist = []
+
+for i in xrange(3):
+    def func(x): return x * i
+    flist.append(func)
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>Note that this example mindfully avoids <code>lambda</code>. It prints "4 4 4", which is surprising. I'd expect "0 2 4". </p>
+
+<p>This equivalent Perl code does it right:</p>
+
+<pre><code>my @flist = ();
+
+foreach my $i (0 .. 2)
+{
+    push(@flist, sub {$i * $_[0]});
+}
+
+foreach my $f (@flist)
+{
+    print $f-&gt;(2), "\n";
+}
+</code></pre>
+
+<p>"0 2 4" is printed.</p>
+
+<p>Can you please explain the difference ?</p>
+
+<p><hr /></p>
+
+<p>Update: </p>
+
+<p>The problem <strong>is not</strong> with <code>i</code> being global. This displays the same behavior:</p>
+
+<pre><code>flist = []
+
+def outer():
+    for i in xrange(3):
+        def inner(x): return x * i
+        flist.append(inner)
+
+outer()
+#~ print i   # commented because it causes an error
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>As the commented line shows, <code>i</code> is unknown at that point. Still, it prints "4 4 4".</p>
+
+Answer: <p>look at this:</p>
+
+<pre><code>for f in flist:
+    print f.func_closure
+
+
+(&lt;cell at 0x00C980B0: int object at 0x009864B4&gt;,)
+(&lt;cell at 0x00C980B0: int object at 0x009864B4&gt;,)
+(&lt;cell at 0x00C980B0: int object at 0x009864B4&gt;,)
+</code></pre>
+
+<p>It means they all point to the same i variable instance, which will have a value of 2 once the loop is over.</p>
+
+<p>A readable solution:</p>
+
+<pre><code>for i in xrange(3):
+        def ffunc(i):
+            def func(x): return x * i
+            return func
+        flist.append(ffunc(i))
+</code></pre>

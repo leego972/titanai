@@ -1,0 +1,34 @@
+Question: <p>I have a two way foreign relation similar to the following</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True)
+
+class Child(models.Model):
+  name = models.CharField(max_length=255)
+  myparent = models.ForeignKey(Parent)
+</code></pre>
+
+<p>How do I restrict the choices for Parent.favoritechild to only children whose parent is itself?  I tried</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True, limit_choices_to = {"myparent": "self"})
+</code></pre>
+
+<p>but that causes the admin interface to not list any children.</p>
+
+Answer: <p>The new "right" way of doing this, at least since Django 1.1 is by overriding the AdminModel.formfield_for_foreignkey(self, db_field, request, **kwargs).  </p>
+
+<p>See <a href="http://docs.djangoproject.com/en/1.2/ref/contrib/admin/#django.contrib.admin.ModelAdmin.formfield_for_foreignkey">http://docs.djangoproject.com/en/1.2/ref/contrib/admin/#django.contrib.admin.ModelAdmin.formfield_for_foreignkey</a></p>
+
+<p>For those who don't want to follow the link below is an example function that is close for the above questions models.</p>
+
+<pre><code>class MyModelAdmin(admin.ModelAdmin):
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "favoritechild":
+            kwargs["queryset"] = Child.objects.filter(myparent=request.object_id)
+        return super(MyModelAdmin, self).formfield_for_manytomany(db_field, request, **kwargs)
+</code></pre>
+
+<p>I'm only not sure about how to get the current object that is being edited.  I expect it is actually on the self somewhere but I'm not sure.</p>

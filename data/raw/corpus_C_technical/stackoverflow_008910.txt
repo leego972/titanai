@@ -1,0 +1,44 @@
+Question: <p>I'm developing a Django app, and I'm trying to use Python's logging module for error/trace logging.  Ideally I'd like to have different loggers configured for different areas of the site.  So far I've got all of this working, but one thing has me scratching my head.</p>
+
+<p>I have the root logger going to sys.stderr, and I have configured another logger to write to a file.  This is in my settings.py file:</p>
+
+<pre><code>sviewlog = logging.getLogger('MyApp.views.scans')
+view_log_handler = logging.FileHandler('C:\\MyApp\\logs\\scan_log.log')
+view_log_handler.setLevel(logging.INFO)
+view_log_handler.setFormatter(logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s'))
+sviewlog.addHandler(view_log_handler)
+</code></pre>
+
+<p>Seems pretty simple.  Here's the problem, though: whatever I write to the sviewlog gets written to the log file twice.  The root logger only prints it once.  It's like addHandler() is being called twice.  And when I put my code through a debugger, this is exactly what I see.  The code in settings.py is getting executed twice, so two FileHandlers are created and added to the same logger instance.  But why?  And how do I get around this?</p>
+
+<p>Can anyone tell me what's going on here?  I've tried moving the sviewlog logger/handler instantiation code to the file where it's used (since that actually seems like the appropriate place to me), but I have the same problem there.  Most of the examples I've seen online use only the root logger, and I'd prefer to have multiple loggers.</p>
+
+Answer: <p>Reviving an old thread, but I was experiencing duplicate messages while using Django 1.3 Python logging with the <a href="http://docs.python.org/library/logging.config.html#configuration-dictionary-schema">dictConfig format</a>.  </p>
+
+<p>The <code>disable_existing_loggers</code> gets rid of the duplicate handler/logging problem with multiple settings.py loads, but you can still get duplicate log messages if you don't specify the <code>propagate</code> boolean appropriately on the specific <code>logger</code>.  Namely, make sure you set <code>propagate=False</code> for child loggers.  E.g.,</p>
+
+<pre><code>'loggers': {
+    'django': {
+        'handlers':['null'],
+        'propagate': True,
+        'level':'INFO',
+    },
+    'django.request': {
+        'handlers': ['console'],
+        'level': 'ERROR',
+        'propagate': False,
+    },
+    'project': {
+        'handlers': ['console', 'project-log-file'],
+        'level': 'DEBUG',
+        'propagate': True,
+    },
+    'project.customapp': {
+        'handlers': ['console', 'customapp-log-file'],
+        'level': 'DEBUG',
+        'propagate': False,
+    },
+}
+</code></pre>
+
+<p>Here, <code>project.customapp</code> sets <code>propagate=False</code> so that it won't be caught by the <code>project</code> logger as well.  The <a href="http://docs.djangoproject.com/en/dev/topics/logging/">Django logging docs</a> are excellent, as always.</p>

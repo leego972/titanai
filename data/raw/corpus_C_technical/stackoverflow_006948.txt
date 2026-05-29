@@ -1,0 +1,98 @@
+Question: <p>What is the most elegant way to check if the directory a file is going to be written to exists, and if not, create the directory using Python? Here is what I tried:</p>
+
+<pre><code>filename = "/my/directory/filename.txt"
+dir = os.path.dirname(filename)
+
+try:
+    os.stat(dir)
+except:
+    os.mkdir(dir)       
+
+f = file(filename)
+</code></pre>
+
+<p>Somehow, I missed <code>os.path.exists</code> (thanks kanja, Blair, and Douglas). This is what I have now:</p>
+
+<pre><code>def ensure_dir(f):
+    d = os.path.dirname(f)
+    if not os.path.exists(d):
+        os.makedirs(d)
+</code></pre>
+
+<p>Is there a flag for "open", that makes this happen automatically?</p>
+
+Answer: <h1>Insights on the specifics of this situation</h1>
+
+<p>You give a particular file at a certain path and you pull the directory from the file path. Then after making sure you have the directory, you attempt to open a file for reading. To comment on this code:</p>
+
+<blockquote>
+<pre><code>filename = "/my/directory/filename.txt"
+dir = os.path.dirname(filename)
+</code></pre>
+</blockquote>
+
+<p>We want to avoid overwriting the builtin function, <code>dir</code>. Also, <code>filepath</code> or perhaps <code>fullfilepath</code> is probably a better semantic name than <code>filename</code> so this would be better written:</p>
+
+<pre><code>import os
+filepath = '/my/directory/filename.txt'
+directory = os.path.dirname(filepath)
+</code></pre>
+
+<p>Your end goal is to open this file, you initially state, for writing, but you're essentially approaching this goal (based on your code) like this, which opens the file for <strong>reading</strong>:</p>
+
+<blockquote>
+<pre><code>if not os.path.exists(directory):
+    os.makedirs(directory)
+f = file(filename)
+</code></pre>
+</blockquote>
+
+<h2>Assuming opening for reading</h2>
+
+<p>Why would you make a directory for a file that you expect to be there and be able to read? </p>
+
+<p>Just attempt to open the file.</p>
+
+<pre><code>with open(filepath) as my_file:
+    do_stuff(my_file)
+</code></pre>
+
+<p>If the directory or file isn't there, you'll get an <code>IOError</code> with an associated error number: <code>errno.ENOENT</code> will point to the correct error number regardless of your platform. You can catch it if you want, for example:</p>
+
+<pre><code>import errno
+try:
+    with open(filepath) as my_file:
+        do_stuff(my_file)
+except IOError as error:
+    if error.errno == errno.ENOENT:
+        print 'ignoring error because directory or file is not there'
+    else:
+        raise
+</code></pre>
+
+<h2>Assuming we're opening for writing</h2>
+
+<p>This is <em>probably</em> what you're wanting.</p>
+
+<p>In this case, we probably aren't facing any race conditions. So just do as you were, but note that for writing, you need to open with the <code>w</code> mode (or <code>a</code> to append). It's also a Python best practice to use the context manager for opening files.</p>
+
+<pre><code>import os
+if not os.path.exists(directory):
+    os.makedirs(directory)
+with open(filepath, 'w') as my_file:
+    do_stuff(my_file)
+</code></pre>
+
+<p>However, say we have several Python processes that attempt to put all their data into the same directory. Then we may have contention over creation of the directory. In that case it's best to wrap the <code>makedirs</code> call in a try-except block.</p>
+
+<pre><code>import os
+import errno
+if not os.path.exists(directory):
+    try:
+        os.makedirs(directory)
+    except OSError as error:
+        if error.errno != errno.EEXIST:
+            raise
+with open(filepath, 'w') as my_file:
+    do_stuff(my_file)
+</code></pre>

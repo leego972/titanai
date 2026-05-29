@@ -1,0 +1,57 @@
+Question: <p>I have a dict, which I need to pass key/values as keyword arguments.. For example..</p>
+
+<pre><code>d_args = {'kw1': 'value1', 'kw2': 'value2'}
+example(**d_args)
+</code></pre>
+
+<p>This works fine, <em>but</em> if there are values in the d_args dict that are not accepted by the <code>example</code> function, it obviously dies.. Say, if the example function is defined as <code>def example(kw2):</code></p>
+
+<p>This is a problem since I don't control either the generation of the <code>d_args</code>, or the <code>example</code> function.. They both come from external modules, and <code>example</code> only accepts some of the keyword-arguments from the dict..</p>
+
+<p>Ideally I would just do</p>
+
+<pre><code>parsed_kwargs = feedparser.parse(the_url)
+valid_kwargs = get_valid_kwargs(parsed_kwargs, valid_for = PyRSS2Gen.RSS2)
+PyRSS2Gen.RSS2(**valid_kwargs)
+</code></pre>
+
+<p>I will probably just filter the dict, from a list of valid keyword-arguments, but I was wondering: <strong>Is there a way to programatically list the keyword arguments the a specific function takes?</strong></p>
+
+Answer: <p>A little nicer than inspecting the code object directly and working out the variables is to use the inspect module.</p>
+
+<pre><code>&gt;&gt;&gt; import inspect
+&gt;&gt;&gt; def func(a,b,c=42, *args, **kwargs): pass
+&gt;&gt;&gt; inspect.getargspec(func)
+(['a', 'b', 'c'], 'args', 'kwargs', (42,))
+</code></pre>
+
+<p>If you want to know if its callable with a particular set of args, you need the args without a default already specified.  These can be got by:</p>
+
+<pre><code>def getRequiredArgs(func):
+    args, varargs, varkw, defaults = inspect.getargspec(func)
+    if defaults:
+        args = args[:-len(defaults)]
+    return args   # *args and **kwargs are not required, so ignore them.
+</code></pre>
+
+<p>Then a function to tell what you are missing from your particular dict is:</p>
+
+<pre><code>def missingArgs(func, argdict):
+    return set(getRequiredArgs(func)).difference(argdict)
+</code></pre>
+
+<p>Similarly, to check for invalid args, use:</p>
+
+<pre><code>def invalidArgs(func, argdict):
+    args, varargs, varkw, defaults = inspect.getargspec(func)
+    if varkw: return set()  # All accepted
+    return set(argdict) - set(args)
+</code></pre>
+
+<p>And so a full test if it is callable is :</p>
+
+<pre><code>def isCallableWithArgs(func, argdict):
+    return not missingArgs(func, argdict) and not invalidArgs(func, argdict)
+</code></pre>
+
+<p>(This is good only as far as python's arg parsing.  Any runtime checks for invalid values in kwargs obviously can't be detected.)</p>

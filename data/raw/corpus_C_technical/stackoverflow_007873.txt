@@ -1,0 +1,57 @@
+Question: <p>I am trying to write a decorator to do logging:</p>
+
+<pre><code>def logger(myFunc):
+    def new(*args, **keyargs):
+        print 'Entering %s.%s' % (myFunc.im_class.__name__, myFunc.__name__)
+        return myFunc(*args, **keyargs)
+
+    return new
+
+class C(object):
+    @logger
+    def f():
+        pass
+
+C().f()
+</code></pre>
+
+<p>I would like this to print:</p>
+
+<pre><code>Entering C.f
+</code></pre>
+
+<p>but instead I get this error message:</p>
+
+<pre><code>AttributeError: 'function' object has no attribute 'im_class'
+</code></pre>
+
+<p>Presumably this is something to do with the scope of 'myFunc' inside 'logger', but I've no idea what.</p>
+
+Answer: <p>Claudiu's answer is correct, but you can also cheat by getting the class name off of the <code>self</code> argument.  This will give misleading log statements in cases of inheritance, but will tell you the class of the object whose method is being called.  For example:</p>
+
+<pre><code>from functools import wraps  # use this to preserve function signatures and docstrings
+def logger(func):
+    @wraps(func)
+    def with_logging(*args, **kwargs):
+        print "Entering %s.%s" % (args[0].__class__.__name__, func.__name__)
+        return func(*args, **kwargs)
+    return with_logging
+
+class C(object):
+    @logger
+    def f(self):
+        pass
+
+C().f()
+</code></pre>
+
+<p>As I said, this won't work properly in cases where you've inherited a function from a parent class; in this case you might say</p>
+
+<pre><code>class B(C):
+    pass
+
+b = B()
+b.f()
+</code></pre>
+
+<p>and get the message <code>Entering B.f</code> where you actually want to get the message <code>Entering C.f</code> since that's the correct class.  On the other hand, this might be acceptable, in which case I'd recommend this approach over Claudiu's suggestion.</p>

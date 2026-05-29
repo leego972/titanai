@@ -1,0 +1,36 @@
+Question: <p>What is the most elegant way to check if the directory a file is going to be written to exists, and if not, create the directory using Python? Here is what I tried:</p>
+
+<pre><code>filename = "/my/directory/filename.txt"
+dir = os.path.dirname(filename)
+
+try:
+    os.stat(dir)
+except:
+    os.mkdir(dir)       
+
+f = file(filename)
+</code></pre>
+
+<p>Somehow, I missed <code>os.path.exists</code> (thanks kanja, Blair, and Douglas). This is what I have now:</p>
+
+<pre><code>def ensure_dir(f):
+    d = os.path.dirname(f)
+    if not os.path.exists(d):
+        os.makedirs(d)
+</code></pre>
+
+<p>Is there a flag for "open", that makes this happen automatically?</p>
+
+Answer: <p>I see two answers with good qualities, each with a small flaw, so I will give my take on it:</p>
+
+<p>Try <a href="https://docs.python.org/2/library/os.path.html#os.path.exists"><code>os.path.exists</code></a>, and consider <a href="https://docs.python.org/2/library/os.html#os.makedirs"><code>os.makedirs</code></a> for the creation.</p>
+
+<pre><code>if not os.path.exists(directory):
+    os.makedirs(directory)
+</code></pre>
+
+<p>As noted in comments and elsewhere, there's a race condition - if the directory is created between the <code>os.path.exists</code> and the <code>os.makedirs</code> calls, the <code>os.makedirs</code> will fail with an <code>OSError</code>. Unfortunately, blanket-catching <code>OSError</code> and continuing is not foolproof, as it will ignore a failure to create the directory due to other factors, such as insufficient permissions, full disk, etc.</p>
+
+<p>One option would be to trap the <code>OSError</code> and examine the embedded error code, if one knew what's what (on my OS, 13 seems to indicate that permission is denied, and 17 that the file exists - it's not clear that that's even remotely portable, but is explored in <a href="http://stackoverflow.com/questions/273698/is-there-a-cross-platform-way-of-getting-information-from-pythons-oserror">Is there a cross-platform way of getting information from Pythonâs OSError</a>). Alternatively, there could be a second <code>os.path.exists</code>, but suppose another created the directory after the first check, then removed it before the second one - we could still be fooled. </p>
+
+<p>Depending on the application, the danger of concurrent operations may be more or less than the danger posed by other factors such as file permissions. The developer would have to know more about the particular application being developed and its expected environment before choosing an implementation.</p>

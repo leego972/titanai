@@ -1,0 +1,199 @@
+# Robustness of Conditional GANs to Noisy Labels
+
+We study the problem of learning conditional generators from noisy labeled samples, where the labels are corrupted by random noise. A standard training of conditional GANs will not only produce samples with wrong labels, but also generate poor quality samples. We consider two scenarios, depending on whether the noise model is known or not. When the distribution of the noise is known, we introduce a novel architecture which we call Robust Conditional GAN (RCGAN). The main idea is to corrupt the label of the generated sample before feeding to the adversarial discriminator, forcing the generator to produce samples with clean labels. This approach of passing through a matching noisy channel is justified by corresponding multiplicative approximation bounds between the loss of the RCGAN and the distance between the clean real distribution and the generator distribution. This shows that the proposed approach is robust, when used with a carefully chosen discriminator architecture, known as projection discriminator. When the distribution of the noise is not known, we provide an extension of our architecture, which we call RCGAN-U, that learns the noise model simultaneously while training the generator. We show experimentally on MNIST and CIFAR-10 datasets that both the approaches consistently improve upon baseline approaches, and RCGAN-U closely matches the performance of RCGAN.
+
+## Authors
+
+• 4 publications
+• 10 publications
+• 4 publications
+• 39 publications
+• ### Stabilizing GAN Training with Multiple Random Projections
+
+Training generative adversarial networks is unstable in high-dimensions ...
+
+05/22/2017 ∙ by Behnam Neyshabur, et al. ∙ 0
+
+read it
+
+• ### Robust conditional GANs under missing or uncertain labels
+
+Matching the performance of conditional Generative Adversarial Networks ...
+
+06/09/2019 ∙ by Kiran Koshy Thekumparampil, et al. ∙ 9
+
+read it
+
+• ### Improving Detection of Credit Card Fraudulent Transactions using Generative Adversarial Networks
+
+In this study, we employ Generative Adversarial Networks as an oversampl...
+
+07/07/2019 ∙ by Hung Ba, et al. ∙ 0
+
+read it
+
+• ### The Implicit Metropolis-Hastings Algorithm
+
+Recent works propose using the discriminator of a GAN to filter out unre...
+
+06/09/2019 ∙ by Kirill Neklyudov, et al. ∙ 0
+
+read it
+
+• ### Limited Gradient Descent: Learning With Noisy Labels
+
+Label noise may handicap the generalization of classifiers, and it is an...
+
+11/20/2018 ∙ by Yi Sun, et al. ∙ 14
+
+read it
+
+• ### Adversarially-Trained Normalized Noisy-Feature Auto-Encoder for Text Generation
+
+This article proposes Adversarially-Trained Normalized Noisy-Feature Aut...
+
+11/10/2018 ∙ by Xiang Zhang, et al. ∙ 0
+
+read it
+
+• ### Adaptive Divergence for Rapid Adversarial Optimization
+
+Adversarial Optimization (AO) provides a reliable, practical way to matc...
+
+12/01/2019 ∙ by Maxim Borisyak, et al. ∙ 0
+
+read it
+
+##### This week in AI
+
+Get the week's most popular data science and artificial intelligence research sent straight to your inbox every Saturday.
+
+## 1 Introduction
+
+Conditional generative adversarial networks (GAN) have been widely successful in several applications including improving image quality, semi-supervised learning, reinforcement learning, category transformation, style transfer, image de-noising, compression, in-painting, and super-resolution
+
+[30, 13, 48, 36, 26, 58]. The goal of training a conditional GAN is to generate samples from distributions satisfying certain conditioning
+
+on some correlated features. Concretely, given samples from joint distribution of a data point
+
+and a label , we want to learn to generate samples from the true conditional distribution of the real data . A canonical conditional GAN studied in literature is the case of discrete label [30, 36, 35, 32]. Significant progresses have been made in this setting, which are typically evaluated on the quality of the conditional samples. These include measuring inception scores and intra Fréchet inception distances, visual inspection on downstream tasks such as category morphing and super resolution [32], and faithfulness of the samples as measured by how accurately we can infer the class that generated the sample [36].
+
+We study the problem of training conditional GANs with noisy discrete labels. By noisy labels, we refer to a setting where the label for each example in the training set is randomly corrupted. Such noise can result from an adversary deliberately corrupting the data [7] or from human errors in crowdsourced label collection [12, 18]. This can be modeled as a random process, where a clean data point and its label are drawn from a joint distribution with classes. For each data point, the label is corrupted by passing through a noisy channel represented by a row-stochastic confusion matrix defined as . This defines a joint distribution for the data point and a noisy label : . If we train a standard conditional GAN on noisy samples, then it solves the following optimization:
+
+ minG∈GmaxD∈FV(G,D)=E(x,˜y)∼˜PX,˜Y[ϕ(D(x,˜y))]+Ez∼N,y∼˜P˜Y[ϕ(1−D(G(z;y),y))] (1)
+
+where is a function of choice, and are the discriminator and the generator respectively optimized over function classes and of our choice, and
+
+is the distribution of the latent random vector. For typical choices of
+
+, for example , and large enough function classes and , the optimal conditional generator learns to generate samples from , the corrupted conditional distribution. In other words, it generates samples from classes other than what it is conditioned on. As the learned distribution exhibits such a bias, we call this naive approach the Biased GAN. Under this setting, there is a fundamental question of interest: can we design a novel conditional GAN that can generate samples from the true conditional distribution , even when trained on noisy samples?
+
+Several aspects of this problem make it challenging and interesting. First, the performance of such robust GAN should depend on how noisy the channel is. If is rank-deficient, for instance, then there are multiple distributions that result in the same distribution after the corruption, and hence no reliable learning of the true distribution is possible. We would ideally want a theoretical guarantee that shows such trade-off between and the robustness of GANs. Next, when the noise is from errors in crowdsourced labels, we might have some access to the confusion matrix from historical data. On other cases of adversarial corruption, we might not have any information of . We want to provide robust solutions to both. Finally, an important practical challenge in this setting is to correct the noisy labels in the training data. We address all such variations in our approaches and make the following contributions.
+
+Our contributions. We introduce two architectures to train conditional GANs with noisy samples.
+
+First, when we have the knowledge of the confusion matrix , we propose RCGAN (Robust Conditional GAN) in Section 2. We first prove that minimizing the RCGAN loss provably recovers the clean distribution (Theorem 2), under certain conditions on the class of discriminators we optimize over (Assumption 1). We show that such a condition on is also necessary, as without it, the training loss can be arbitrarily small while the generated distribution can be far from the real (Theorem 3). The assumption leads to our particular choice of the discriminator in RCGAN, called projection discriminator [32] that satisfies all the conditions (Remark 2). Finally, we provide a finite sample generalization bound showing that the loss minimized in training RCGAN does generalize, and results in the learned distribution being close to the clean conditional distribution (Theorem 4). Experimental results in benchmark datasets confirm that RCGAN is robust against noisy samples, and improves significantly over the naive Biased GAN.
+
+Secondly, when we do not have access to , we propose RCGAN-U (RCGAN with Unknown noise distribution) in Section 4. We provide experimental results showing that performance gains similar to that of RCGAN can be achieved. Finally, we showcase the practical use of thus learned conditional GANs, by using it to fix the noisy labels in the training data. Numerical experiments confirm that the RCGAN framework provides a more robust approach to correcting the noisy labels, compared to the state-of-the-art methods that rely only on discriminators.
+
+Related work. Two popular training methods for generative models are variational auto-encoders [22] and adversarial training [14]. The adversarial training approach has made significant advances in several applications of practical interest. [37, 2, 5] propose new architectures that significantly improve the training in practical image datasets. [58, 16] propose new architectures to transfer the style of one image to the other domain. [26, 43] show how to enhance a given image with learned generator, by enhancing the resolution or making it more realistic. [27, 50] show how to generate videos and [51, 1] demonstrate that 3-dimensional models can be generated from adversarial training. [23] proposes a new architecture encoding causal structures in conditional GANs. [42] introduces the state-of-the-art conditional independence tester. On a different direction, several recent approaches showcase how the manifold learned by the adversarial training can be used to solve inverse problems [9, 57, 53, 49].
+
+Conditional GANs have been proposed as a successful tool for various applications, including class conditional image generation [36], image to image translation [21], and image generation from text [38, 55]. Most of the conditional GANs incorporate the class information by naively concatenating it to the input or feature vector at some middle layer [30, 13, 38, 55]. AC-GANs [36]
+
+creates an auxiliary classifier to incorporate class information. Projection discriminator GAN
+
+[32] takes an inner product between the embedded class vector and the feature vector. A recent work [31] which proposes spectral normalization shows that high quality image generation on -class ILSVRC2012 dataset [39] can be achieved using projection conditional discriminator.
+
+Robustness of (unconditional) GANs against adversarial or random noise has recently been studied in [10, 52]. [52] studies an adversary attacking the output of the discriminator, perturbing the discriminator output with random noise. The proposed architecture of RCGAN is inspired by a closely related work of AmbientGAN in [10]. AmbientGAN is a general framework addressing any corruption on the data itself (not necessarily just the labels). Given a corrupted samples with known corruption, AmbientGAN applies that corruption to the output of the generator before feeding them to the discriminator. This has shown to successfully de-noise images in several practical scenarios.
+
+Motivated by the success of AmbientGAN in de-noising, we propose RCGAN. An important distinction is that we make specific architectural choices guided by our theoretical analysis that gives a significant gain in practice as shown in Section 6. Under the scenario of interest with noisy labels, we provide sharp analyses for both the population loss and the finite sample loss. Such sharp characterizations do not exist for the more general AmbientGAN scenarios. Further, our RCGAN-U does not require the knowledge of the confusion matrix, departing from the AmbientGAN approach. Training classifiers from noisy labels is a closely related problem. Recently, [34, 20] proposed a theoretically motivated classifier which minimizes the modified loss in presence of noisy labels and showed improvement over the robust classifiers [29, 45, 46].
+
+Notation. For a vector , is the standard -norm. For a matrix , let denote the operator norm. Then , and
+
+, the maximum singular value.
+
+is all ones vector with appropriate dimensions and
+
+is identity matrix with appropriate dimensions.
+
+. For a vector , () is its -th coordinate.
+
+## 2 Our first architecture: RCGAN
+
+Training a conditional GAN with noisy samples results in a biased generator. We propose Robust Conditional GAN (RCGAN) architecture which has the following pre-processing, discriminator update, and generator update steps. We assume in this section that the confusions matrix is known (and the marginal can easily be inferred), and address the case of unknown in Section 4.
+
+Pre-processing: We train a classifier to predict the noisy label given under a loss , trained on , where
+
+is a parametric family of classifiers (typically neural networks) and
+
+is the joint distribution of real and corresponding real noisy .
+
+D-step: We train on the following adversarial loss. In the second term below, is generated according to and corresponding noisy labels are generated by corrupting the according to the conditional distribution which is the -th row of the confusion matrix (assumed to be known):
+
+ maxD∈FE(x,˜y)∼˜PX,˜Y[ϕ(D(x,˜y))]+Ez∼N,y∼PY˜y|y∼Cy[ϕ(1−D(G(z;y),˜y))],
+
+where is the true marginal distribution of the labels, is the distribution of the latent random vector, and is a family of discriminators.
+
+G-step: We train on the following loss with some :
+
+ minG∈GEz∼N,y∼PY˜y|y∼Cy[ϕ(1−D(G(z;y),˜y))+λℓ(h∗(G(z;y)),y)], (2)
+
+where is a family of generators. The idea of using auxiliary classifiers have been used to improve the quality of the image and stability of the training, for example in auxiliary classifier GAN (AC-GAN) [36], and improve the quality of clustering in the latent space [33]. We propose an auxiliary classifiers , mitigating a permutation error, which we empirically identified on naive implementation of our idea with no regularizers.
+
+Permutation regularizer (controlled by ). Permutation error occurs if, when asked to produce samples from a target class, the trained generator produces samples dominantly from a single class but different from the target class. We propose a regularizer , which predicts the noisy label . As long as the confusion matrix is diagonally dominant, which is a necessary condition for identifiability, this regularizer encourages the correct permutation of the labels.
+
+Theoretical motivation for RCGAN. When , we get the standard conditional GAN update steps, albeit one which tries to minimize discriminator loss between the noisy real distribution and the distribution of the generator when the label is passed through the same noisy channel parameterized by . The main idea of RCGAN is to minimize a certain divergence between noisy real data and noisy generated data. For example, the choice of bounded functions and identity map leads to a total variation minimization; The loss minimized in the G-step is the total variation between the two distributions with corrupted labels, up to some scaling and some shift. If we choose and , then we are minimizing the Jensen-Shannon divergence , where
+
+denotes the Kullback-Leibler divergence. The following theorem provides approximation guarantees for some common divergence measures over noisy channel, justifying our proposed practical approach. We refer to Appendix
+
+B for a proof.
+
+###### Theorem 1.
+
+Let and be two distributions on . Let be the corresponding distributions when samples from are passed through the noisy channel given by the confusion matrix (as defined in Section 1). If is full-rank, we get,
+
+ dTV(˜P,˜Q)≤ (3) 18dJS(˜P∥∥˜Q)2≤ (4)
+
+To interpret this theorem, let denote the distribution of the generator. The theorem implies that when the noisy generator distribution becomes close to the noisy real distribution in total variation or in Jensen-Shannon divergence, then the generator distribution must be close to the distribution of real data in the same metric. This justifies the use of the proposed architecture RCGAN. In practice, we minimize the sample divergence of the two distributions, instead of the population divergence as analyzed in the above theorem. However, these standard divergences are known to not generalize in training GANs [3]. To this end, we provide in Section 3 analyses on neural network distances, which are known to generalize, and provide finite sample bounds.
+
+## 3 Theoretical Analysis of RCGAN
+
+It was shown in [3] that standard GAN losses of Jensen-Shannon divergence and Wasserstein distance both fail to generalize with a finite number of samples. On the other hand, more recent advances in analyzing GANs in [56, 6, 4] show promising generalization bounds by either assuming Lipschitz conditions on the generator model or by restricting the analysis to certain classes of distributions. Under those assumptions, where JS divergence generalizes, Theorem 1 justifies the use of the proposed RCGAN. However, those require the distribution to be Gaussian, mixture of Gaussians, or output of a neural network generator, for example in [4].
+
+In this section, we provide analyses of RCGAN on a distance that generalizes without any assumptions on the distribution of the real data as proven in [3]: neural network distance. Formally, consider a class of real-valued functions and a function which is either convex or concave. The neural network distance is defined as
+
+ (5)
+
+where is the distribution of the real data, is that of the generated data, and is the constant correction term to ensure that . We further assume that includes three constant functions , , and , in order to ensure that and , as shown in Lemma 1 in the Appendix.
+
+The proposed RCGAN with approximately minimizes the neural network distance between the two corrupted distributions. In practice, is a parametric family of functions from a specific neural network architecture that the designer has chosen. In theory, we aim to identify how the choice of class provides the desired approximation bounds similar to those in Theorem 1, but for neural network distances. This analysis leads to the choice of projection discriminator [32] to be used in RCGAN (Remark 2). On the other hand, we show in Theorem 3 that an inappropriate choice of the discriminator architecture can cause non-approximation. Further, we provide the sample complexity of the approximation bounds in Theorem 4.
+
+We refer to the un-regularized version with
+
+as simply RCGAN. In this section, we focus on a class of loss functions called Integral Probability Metrics (IPM) where
+
+[44]. This is a popular choice of loss in GANs in practice [47, 2, 8] and in analyses [4]. We write the induced neural network distance as , dropping the in the notation.
+
+### 3.1 Approximation bounds for neural network distances
+
+We define an operation over a matrix and a class of functions on as
+
+ T∘F≜{f∈F|f(x,y)=∑˜y∈[m]Ty˜yf(x,˜y)}. (6)
+
+This makes it convenient to represent the neural network distance corrupted by noise with a confusion matrix , where is the probability a label is corrupted as . Formally, it follows from (5) and (6) that . We refer to Appendix E for a proof. For to be a good approximation of , we show that the following condition is sufficient.
+
+###### Assumption 1.
+
+We assume that the class of discriminator functions can be decomposed into three parts such that is any constant and
+
+• satisfies the inclusion condition:
+
+ T∘F1⊆F1, (7)
+
+for all ; and
+
+• satisfies the label invariance condition: there exists a class of sets of functions, parametrized by , such that
+
+ F2={αf(x,y)|f(x,y)=f(x),f(x)∈F(x),α∈[0,1]}. (8)
+
+We discuss the necessity and practical implications of this assumption in Section 3.2, and give examples satisfying these assumptions in Remarks 2 and 3. Notice that a trivial class with a single constant zero function satisfies both inclusion and label invariance conditions. For example, we can choose and also choose to set either or , in which case only needs to satisfy either one of the conditions in Assumption 1. The flexibility that we gain by allowing the set addition is critical in applying these conditions to practical discriminators, especially in proving Remark 2. Note that i

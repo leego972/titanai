@@ -1,0 +1,108 @@
+Question: <p>for working with MS word files in python, there is python win32 extensions, which can be used in windows. How do I do the same in linux?
+Is there any library?</p>
+
+Answer: <p>Is this an old question?
+I believe that such thing does not exist.
+There are only answered and unanswered ones.
+This one is pretty unanswered, or half answered if you wish.
+Well, methods for reading *.docx (MS Word 2007 and later) documents without using COM interop are all covered.
+But methods for extracting text from *.doc (MS Word 97-2000), using Python only, lacks.
+Is this complicated?
+To do: not really, to understand: well, that's another thing.</p>
+
+<p>When I didn't find any finished code, I read some format specifications and dug out some proposed algorithms in other languages.</p>
+
+<p>MS Word (*.doc) file is an OLE2 compound file.
+Not to bother you with a lot of unnecessary details, think of it as a file-system stored in a file. It actually uses FAT structure, so the definition holds. (Hm, maybe you can loop-mount it in Linux???)
+In this way, you can store more files within a file, like pictures etc.
+The same is done in *.docx by using ZIP archive instead.
+There are packages available on PyPI that can read OLE files. Like (olefile, compoundfiles, ...)
+I used compoundfiles package to open *.doc file.
+However, in MS Word 97-2000, internal subfiles are not XML or HTML, but binary files.
+And as this is not enough, each contains an information about other one, so you have to read at least two of them and unravel stored info accordingly.
+To understand fully, read the PDF document from which I took the algorithm.</p>
+
+<p>Code below is very hastily composed and tested on small number of files.
+As far as I can see, it works as intended.
+Sometimes some gibberish appears at the start, and almost always at the end of text.
+And there can be some odd characters in-between as well.</p>
+
+<p>Those of you who just wish to search for text will be happy.
+Still, I urge anyone who can help to improve this code to do so.</p>
+
+<pre><code>
+doc2text module:
+"""
+This is Python implementation of C# algorithm proposed in:
+http://b2xtranslator.sourceforge.net/howtos/How_to_retrieve_text_from_a_binary_doc_file.pdf
+
+Python implementation author is Dalen Bernaca.
+Code needs refining and probably bug fixing!
+As I am not a C# expert I would like some code rechecks by one.
+Parts of which I am uncertain are:
+    * Did the author of original algorithm used uint32 and int32 when unpacking correctly?
+      I copied each occurence as in original algo.
+    * Is the FIB length for MS Word 97 1472 bytes as in MS Word 2000, and would it make any difference if it is not?
+    * Did I interpret each C# command correctly?
+      I think I did!
+"""
+
+from compoundfiles import CompoundFileReader, CompoundFileError
+from struct import unpack
+
+__all__ = ["doc2text"]
+
+def doc2text (path):
+    text = u""
+    cr = CompoundFileReader(path)
+    # Load WordDocument stream:
+    try:
+        f = cr.open("WordDocument")
+        doc = f.read()
+        f.close()
+    except: cr.close(); raise CompoundFileError, "The file is corrupted or it is not a Word document at all."
+    # Extract file information block and piece table stream informations from it:
+    fib = doc[:1472]
+    fcClx  = unpack("L", fib[0x01a2l:0x01a6l])[0]
+    lcbClx = unpack("L", fib[0x01a6l:0x01a6+4l])[0]
+    tableFlag = unpack("L", fib[0x000al:0x000al+4l])[0] & 0x0200l == 0x0200l
+    tableName = ("0Table", "1Table")[tableFlag]
+    # Load piece table stream:
+    try:
+        f = cr.open(tableName)
+        table = f.read()
+        f.close()
+    except: cr.close(); raise CompoundFileError, "The file is corrupt. '%s' piece table stream is missing." % tableName
+    cr.close()
+    # Find piece table inside a table stream:
+    clx = table[fcClx:fcClx+lcbClx]
+    pos = 0
+    pieceTable = ""
+    lcbPieceTable = 0
+    while True:
+        if clx[pos]=="\x02":
+            # This is piece table, we store it:
+            lcbPieceTable = unpack("l", clx[pos+1:pos+5])[0]
+            pieceTable = clx[pos+5:pos+5+lcbPieceTable]
+            break
+        elif clx[pos]=="\x01":
+            # This is beggining of some other substructure, we skip it:
+            pos = pos+1+1+ord(clx[pos+1])
+        else: break
+    if not pieceTable: raise CompoundFileError, "The file is corrupt. Cannot locate a piece table."
+    # Read info from pieceTable, about each piece and extract it from WordDocument stream:
+    pieceCount = (lcbPieceTable-4)/12
+    for x in xrange(pieceCount):
+        cpStart = unpack("l", pieceTable[x*4:x*4+4])[0]
+        cpEnd   = unpack("l", pieceTable[(x+1)*4:(x+1)*4+4])[0]
+        ofsetDescriptor = ((pieceCount+1)*4)+(x*8)
+        pieceDescriptor = pieceTable[ofsetDescriptor:ofsetDescriptor+8]
+        fcValue = unpack("L", pieceDescriptor[2:6])[0]
+        isANSII = (fcValue & 0x40000000) == 0x40000000
+        fc      = fcValue & 0xbfffffff
+        cb = cpEnd-cpStart
+        enc = ("utf-16", "cp1252")[isANSII]
+        cb = (cb*2, cb)[isANSII]
+        text += doc[fc:fc+cb].decode(enc, "ignore")
+    return "\n".join(text.splitlines())
+</code></pre>

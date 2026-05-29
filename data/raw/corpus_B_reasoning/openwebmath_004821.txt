@@ -1,0 +1,116 @@
+# Optimizers¶
+
+class geoopt.optim.RiemannianAdam(*args, stabilize=None, **kwargs)[source]
+
+Riemannian Adam with the same API as torch.optim.Adam.
+
+Parameters: Other Parameters: params (iterable) – iterable of parameters to optimize or dicts defining parameter groups lr (float (optional)) – learning rate (default: 1e-3) betas (Tuple[float, float] (optional)) – coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999)) eps (float (optional)) – term added to the denominator to improve numerical stability (default: 1e-8) weight_decay (float (optional)) – weight decay (L2 penalty) (default: 0) amsgrad (bool (optional)) – whether to use the AMSGrad variant of this algorithm from the paper On the Convergence of Adam and Beyond (default: False) stabilize (int) – Stabilize parameters if they are off-manifold due to numerical reasons every stabilize steps (default: None – no stabilize)
+step(closure=None)[source]
+
+Performs a single optimization step.
+
+Parameters: closure (callable, optional) – A closure that reevaluates the model and returns the loss.
+class geoopt.optim.RiemannianLineSearch(params, line_search_method='armijo', line_search_params=None, cg_method='steepest', cg_kwargs=None, compute_derphi=True, transport_grad=False, transport_search_direction=True, fallback_stepsize=1, stabilize=None)[source]
+
+Riemannian line search optimizer.
+
+We try to minimize objective $$f\colon M\to \mathbb{R}$$, in a search direction $$\eta$$. This is done by minimizing the line search objective
+
+$\phi(\alpha) = f(R_x(\alpha\eta)),$
+
+where $$R_x$$ is the retraction at $$x$$. Its derivative is given by
+
+$\phi'(\alpha) = \langle\mathrm{grad} f(R_x(\alpha\eta)),\, \mathcal T_{\alpha\eta}(\eta) \rangle_{R_x(\alpha\eta)},$
+
+where $$\mathcal T_\xi(\eta)$$ denotes the vector transport of $$\eta$$ to the point $$R_x(\xi)$$.
+
+The search direction $$\eta$$ is defined recursively by
+
+$\eta_{k+1} = -\mathrm{grad} f(R_{x_k}(\alpha_k\eta_k)) + \beta \mathcal T_{\alpha_k\eta_k}(\eta_k)$
+
+Here $$\beta$$ is the scale parameter. If $$\beta=0$$ this is steepest descent, other choices are Riemannian version of Fletcher-Reeves and Polak-Ribière scale parameters.
+
+Common conditions to accept the new point are the Armijo / sufficient decrease condition:
+
+$\phi(\alpha)\leq \phi(0)+c_1\alpha\phi'(0)$
+
+And additionally the curvature / (strong) Wolfe condition
+
+$\phi'(\alpha)\geq c_2\phi'(0)$
+
+The Wolfe conditions are more restrictive, but guarantee that search direction $$\eta$$ is a descent direction.
+
+The constants $$c_1$$ and $$c_2$$ satisfy $$c_1\in (0,1)$$ and $$c_2\in (c_1,1)$$.
+
+Parameters: params (iterable) – iterable of parameters to optimize or dicts defining parameter groups line_search_method (('wolfe', 'armijo', or callable)) – Which line_search_method to use. If callable it should be any method of signature (phi, derphi, **kwargs) -> step_size, where phi is scalar line search objective, and derphi is its derivative. If no suitable step size can be found, the method should return None. The following arguments are always passed in **kwargs: * phi0: float, Value of phi at 0 * old_phi0: float, Value of phi at previous point * derphi0: float, Value derphi at 0 * old_derphi0: float, Value of derphi at previous point * old_step_size: float, Stepsize at previous point If any of these arguments are undefined, they default to None. Additional arguments can be supplied through the line_search_params parameter line_search_params (dict) – Extra parameters to pass to line_search_method, for the parameters available to strong Wolfe see strong_wolfe_line_search(). For Armijo backtracking parameters see armijo_backtracking(). cg_method (('steepest', 'fr', 'pr', or callable)) – Method used to compute the conjugate gradient scale parameter beta. If ‘steepest’, set the scale parameter to zero, which is equivalent to doing steepest descent. Use ‘fr’ for Fletcher-Reeves, or ‘pr’ for Polak-Ribière (NB: this setting requires an additional vector transport). If callable, it should be a function of signature (params, states, **kwargs) -> beta, where params are the parameters of this optimizer, states are the states associated to the parameters (self._states), and beta is a float giving the scale parameter. The keyword arguments are specified in optional parameter cg_kwargs. Paremeters (Other) – ---------------- – compute_derphi (bool, optional) – If True, compute the derivative of the line search objective phi for every trial step_size alpha. If alpha is not zero, this requires a vector transport and an extra gradient computation. This is always set True if line_search_method=’wolfe’ and False if ‘armijo’, but needs to be manually set for a user implemented line search method. transport_grad (bool, optional) – If True, the transport of the gradient to the new point is computed at the end of every step. Set to True if Polak-Ribière is used, otherwise defaults to False. transport_search_direction (bool, optional) – If True, transport the search direction to new point at end of every step. Set to False if steepest descent is used, True Otherwise. fallback_stepsize (float) – fallback_stepsize to take if no point can be found satisfying line search conditions. See also step() (default: 1) stabilize (int) – Stabilize parameters if they are off-manifold due to numerical reasons every stabilize steps (default: None – no stabilize) cg_kwargs (dict) – Additional parameters to pass to the method used to compute the conjugate gradient scale parameter.
+last_step_size
+
+Last step size taken. If None no suitable step size was found, and consequently no step was taken.
+
+Type: int or None
+step_size_history
+
+List of all step sizes taken so far.
+
+Type: List[int or None]
+line_search_method
+Type: callable
+line_search_params
+Type: dict
+cg_method
+Type: callable
+cg_kwargs
+Type: dict
+fallback_stepsize
+Type: float
+step(closure, force_step=False, recompute_gradients=False, no_step=False)[source]
+
+Do a linesearch step.
+
+Parameters: closure (callable) – A closure that reevaluates the model and returns the loss. force_step (bool (optional)) – If True, take a unit step of size self.fallback_stepsize if no suitable step size can be found. If False, no step is taken in this situation. (default: False) recompute_gradients (bool (optional)) – If True, recompute the gradients. Use this if the parameters have changed in between consecutive steps. (default: False) no_step (bool (optional)) – If True, just compute step size and do not perform the step. (default: False)
+class geoopt.optim.RiemannianSGD(params, lr, momentum=0, dampening=0, weight_decay=0, nesterov=False, stabilize=None)[source]
+
+Riemannian Stochastic Gradient Descent with the same API as torch.optim.SGD.
+
+Parameters: Other Parameters: params (iterable) – iterable of parameters to optimize or dicts defining parameter groups lr (float) – learning rate momentum (float (optional)) – momentum factor (default: 0) weight_decay (float (optional)) – weight decay (L2 penalty) (default: 0) dampening (float (optional)) – dampening for momentum (default: 0) nesterov (bool (optional)) – enables Nesterov momentum (default: False) stabilize (int) – Stabilize parameters if they are off-manifold due to numerical reasons every stabilize steps (default: None – no stabilize)
+step(closure=None)[source]
+
+Performs a single optimization step (parameter update).
+
+Parameters: closure (callable) – A closure that reevaluates the model and returns the loss. Optional for most optimizers.
+
+Note
+
+Unless otherwise specified, this function should not modify the .grad field of the parameters.
+
+class geoopt.optim.SparseRiemannianAdam(params, lr=0.001, betas=(0.9, 0.999), eps=1e-08, amsgrad=False)[source]
+
+In this variant, only moments that show up in the gradient get updated, and only those portions of the gradient get applied to the parameters.
+
+Parameters: Other Parameters: params (iterable) – iterable of parameters to optimize or dicts defining parameter groups lr (float (optional)) – learning rate (default: 1e-3) betas (Tuple[float, float] (optional)) – coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999)) eps (float (optional)) – term added to the denominator to improve numerical stability (default: 1e-8) amsgrad (bool (optional)) – whether to use the AMSGrad variant of this algorithm from the paper On the Convergence of Adam and Beyond (default: False) stabilize (int) – Stabilize parameters if they are off-manifold due to numerical reasons every stabilize steps (default: None – no stabilize)
+step(closure=None)[source]
+
+Performs a single optimization step (parameter update).
+
+Parameters: closure (callable) – A closure that reevaluates the model and returns the loss. Optional for most optimizers.
+
+Note
+
+Unless otherwise specified, this function should not modify the .grad field of the parameters.
+
+class geoopt.optim.SparseRiemannianSGD(params, lr, momentum=0, dampening=0, nesterov=False, stabilize=None)[source]
+
+Implements lazy version of SGD algorithm suitable for sparse gradients.
+
+In this variant, only moments that show up in the gradient get updated, and only those portions of the gradient get applied to the parameters.
+
+Parameters: Other Parameters: params (iterable) – iterable of parameters to optimize or dicts defining parameter groups lr (float) – learning rate momentum (float (optional)) – momentum factor (default: 0) dampening (float (optional)) – dampening for momentum (default: 0) nesterov (bool (optional)) – enables Nesterov momentum (default: False) stabilize (int) – Stabilize parameters if they are off-manifold due to numerical reasons every stabilize steps (default: None – no stabilize)
+step(closure=None)[source]
+
+Performs a single optimization step (parameter update).
+
+Parameters: closure (callable) – A closure that reevaluates the model and returns the loss. Optional for most optimizers.
+
+Note
+
+Unless otherwise specified, this function should not modify the .grad field of the parameters.

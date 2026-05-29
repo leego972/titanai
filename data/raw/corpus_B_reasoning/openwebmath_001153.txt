@@ -1,0 +1,160 @@
+Course:CPSC522/Rao Blackwellized Particle Filtering
+
+Rao Blackwellized Particle Filtering for Grid Mapping
+
+Monte Carlo methods are a common approach for large dimensional problems such as grid mapping, Rao-Blackwellized Particle Filters aim to do the needed sampling as efficiently as possible.
+
+Principal Author: Jocelyn Minns
+
+Collaborators:
+
+Abstract
+
+Rao-Blackwellized Particle Filters (RBPF) incorporates the Rao–Blackwell theorem to improve the sampling done in a particle filter by marginalizing out some variables. Particle filters alone struggle in high dimensional spaces since a large number of particles must be used, but with improved RBPFs the amount of particles needed decreases greatly.
+
+The two papers discussed are:
+
+1. Rao-Blackwellised Particle Filtering for Dynamic Bayesian Networks[1]
+2. Improved Techniques for Grid Mapping With Rao-Blackwellized Particle Filters [2]
+
+Builds on
+
+Particle fillers are a Monte Carlo methods that are used to update nonlinear system that can be modelled as a Hidden Markov network.
+
+Background
+
+Particle Filters
+
+Main article: Particle fillers
+
+Particle filtering is used to estimate the updated state of a system given noisy sensor data and noisy state transition information. Unlike other filters, such as a Kalman Filter, particle filtering works with nonlinear systems and non-Gaussian noise distributions.
+
+The system must first be modelled as a hidden Markov model where the observed value are the measurements ${\displaystyle y_{t}}$ and the hidden variables are the true values ${\displaystyle z_{t}}$. It is also needed to define the transition probability density ${\displaystyle p(z_{t}|z_{t-1})}$ with an initial probability density ${\displaystyle p(z_{0})}$ and the conditional distribution ${\displaystyle p(y_{t}|z_{t})}$.
+
+Initially, a set of N particles are sampled from the initial probability density ${\displaystyle p(x_{0})}$. The size of the set of particles will depend on the complexity of the problem and the accuracy that is desired. For the initial set, all particles will be given equal weight. Meaning each particle is equally likely to be the true status of the system.
+
+The algorithm for a particle filter can be described in three steps:
+
+1. Sample a new set of particles given the weights of the previous particles. Particles with a heaver weight will be sampled more often.
+2. Sample the updated state given the previous state and the current measurement data${\displaystyle p(z_{t}|z_{t-1},y_{k})}$
+3. Update the weights of each particle ${\displaystyle w=p(y_{t}|z_{t})}$ and normalize the weights.
+
+Given a large enough set of particles, this method has been shown to be effective in estimating state transitions for a variety of nonlinear problems.
+
+Rao-Blackwell theorem
+
+Main article: Rao-Blackwell theorem
+
+The Rao-Blackwell theorem states that given any kind of estimator${\displaystyle \delta (X)}$ of a parameter ${\displaystyle \theta }$ then the conditional expectation of ${\displaystyle \delta (X)}$ given a sufficient statistic ${\displaystyle T(X)}$ is typically a better estimator of ${\displaystyle \theta }$.
+
+While this may seem to be a simple statement, in practice the improvement of the estimator can be very large.
+
+Papers
+
+Paper 1: Rao-Blackwellised Particle Filtering for Dynamic Bayesian Networks
+
+The aim of Rao-Blackwellised Particle Filtering is to find an estimator of the conditional distribution ${\displaystyle p(y_{t}|z_{t})}$ such that less particles will be required to reach the same accuracy as a typical particle filter.
+
+The objective remains the same as a particle filter: to estimate the distribution ${\displaystyle p(z_{t}|y_{1:t})}$.
+
+The posterior gives the recession:
+
+${\displaystyle p(z_{0:t}|y_{1:t})=p(z_{0:t-1}|y_{1:t-1}){\frac {p(y_{t}|z_{t})p(z_{t}|z_{t-1})}{p(y_{t}|y_{1:t-1})}}}$
+
+However, this cannot be solved analytically hence why sampling is typically used. To decrease the state space into something that will be easier to sample from, they break the hidden variables ${\displaystyle z}$ into two groups: ${\displaystyle r_{t}}$ and ${\displaystyle x_{t}}$ such that ${\displaystyle p(z_{t}|z_{t-1})=p(x_{t}|r_{t-1:t},x_{t-1})p(r_{t}|r_{t-1})}$. The original problem assumes no structure to the hidden variables, but by breaking them into two groups as stated above, they can determine part of the posterior ${\displaystyle p(x_{0:t}|y_{1:t},r_{0:t})}$ analytically then marginalize out the variables ${\displaystyle x_{0:t}}$.
+
+The posterior can be decompose as such:
+
+${\displaystyle p(r_{0:t},x_{0:t}|y_{1:t})=p(x_{0:t}|y_{1:t},r_{0:t})p(r_{0:t}|y_{1:t})}$
+
+The dimensions of ${\displaystyle p(r_{0:t}|y_{1:t})}$ are smaller than the original ${\displaystyle p(r_{0:t},x_{0:t}|y_{1:t})}$ so they can obtain better results.
+
+Rao-Blackwellisation
+
+For sampling, It is needed to define an estimator for ${\displaystyle p(r_{0:t},x_{0:t}|y_{1:t})}$.
+
+First they define an estimate of any function f of the hidden variables as
+
+${\displaystyle {\overline {I_{N}}}(f)={\frac {1}{N}}\sum (f(r_{0:t}^{(i)},x_{0:t}^{(i)}))}$
+
+The paper goes on to use the Central Limit theorem to prove why this is an estimate, but that has been excluded from this page as it is unnecessary to understand the implementation of RBPF.
+
+Since each particle may not have even weights, they replace the ${\displaystyle {\frac {1}{N}}}$ factor with the normalized weights of each particle giving:
+
+${\displaystyle {\hat {I}}_{N}^{1}(f)=\sum ({\tilde {w}}_{0:t}^{(i)}f(r_{0:t}^{(i)},x_{0:t}^{(i)}))}$
+
+However, since they have shown that they can marginalize out ${\displaystyle x_{0:t}}$, they can write a Rao-Blackwell estimator as
+
+${\displaystyle {\hat {I}}_{N}^{2}(f)={\frac {\sum \mathbb {E} _{p(x_{0:t}|y_{1:t},r_{0:t}^{(i)})}(f(r_{0:t}^{(i)},x_{0:t}))w(r_{0:t}^{(i)})}{\sum w(r_{0:t}^{(i)})}}}$
+
+Using this estimator can be proven to reduce the number of particles needed to reach a desired level of accuracy.
+
+Algorithm
+
+The algorithm for Rao-Blackwellised Particle Filtering can be described as three steps:
+
+1. Sequential importance sampling step where they sample N particles from our given estimator, then compute and normalize their importance weights
+2. Selection step where resample N particles based on the weights calculated above
+3. Apply the transition step based on the probability distribution ${\displaystyle p(r_{0:t}|y_{1:t})}$
+Application for Grid Mapping
+A Factorial HMM with 3 hidden chains
+
+This form of filtering has been shown to be useful in Simultaneous Localization and Mapping (SLAM) of a grid. Consider a robot that can move in a discrete, dimensional grid. Both the motors of the robot and the sensors are imperfect and have some noise to their readings. Say you want to colour the map grid as the robot moves around the room to indicate obstacle that it should avoid. Let ${\displaystyle L_{t}}$ be the location at time t, ${\displaystyle M_{t}(i)}$ be the colour of grid cell i and time t. The hidden Markov network is show in the figure for a 3 cell grid. ${\displaystyle Y}$ is the observation model.
+
+Murphy describes using RBPF for this purpose further in his paper[3]. For this problem, if ${\displaystyle L_{0:t}}$ is known then that they can marginalize out ${\displaystyle M_{t}}$ analytically and only sample the reduced state space ${\displaystyle L_{t}}$.
+
+This paper only tested the problem on a ${\displaystyle 10\times 10}$ grid map which in comparison to real world problems, is unrealistically small. This experiment does show to give equivalent results as other methods while requiring few particles.
+
+Paper 2: Improved Techniques for Grid Mapping With Rao-Blackwellized Particle Filters
+
+The original paper outlined the RBPF problem as a general solution for any problem that uses particle filters, even though they chose to use SLAM to evaluate the method. The second paper focuses only on the SLAM problem and improves the performance of the filter only for SLAM problems were the observation data is highly accurate as it would be if the robot was using a Laser Range Finder (LRF).
+
+With this, they propose two approaches to improve RBPF:
+
+1. A proposal distribution that considers the accuracy of the observed readings
+2. An adaptive resampling technique that reduces the risk of particle depletion.
+Improved Proposal Distribution
+Likelihood of each sensor measurements. L is the location given from the LRF and is far more accurate than the motion model itself
+
+In the original RBPF algorithm, the particles are updated using the odometry motion model as the proposal distribution ${\displaystyle p(x_{t}|x_{t-1},u_{t-1})}$ where ${\displaystyle u_{t-1}}$ is the odometry measurements at time t-1. Then the weights of each particle are determined by both the sensor measurements and the odometry measurements. However, the sensor measurements are far more accurate than the odometry measurements, meaning particle weights can differ significantly from each other. The figure shows the difference in the models. To overcome this problem, they incorporate the sensor readings into the proposal such as ${\displaystyle p(x_{t}|m_{t-1},x_{t-1},z_{t},u_{t-1})}$ where ${\displaystyle z_{t}}$ is the sensor readings at time t.
+
+This model may then be hard to sample since ${\displaystyle z_{t}}$ is focused on such small area. To simplify the computation, they use the samples to estimate a Gaussian distribution with parameters
+
+${\displaystyle \mu _{t}^{(i)}={\frac {1}{\eta ^{(i)}}}\sum x_{j}p(z_{t}|m_{t-1}^{(i)},x_{j})p(x_{j}|x_{j-1}^{(i)},u_{t-1})}$
+
+${\displaystyle \Sigma _{t}^{(i)}={\frac {1}{\eta ^{(i)}}}\sum x_{j}p(z_{t}|m_{t-1}^{(i)},x_{j})p(x_{j}|x_{j-1}^{(i)},u_{t-1})(x_{j}-\mu _{t}^{(i)})(x_{j}-\mu _{t}^{(i)})^{T}}$
+
+Where
+
+${\displaystyle \eta ^{(i)}=p(z_{t}|m_{t-1}^{(i)},x_{j})p(x_{j}|x_{j-1}^{(i)},u_{t-1})}$
+
+This does limit the type of noise that can be expected from the sensor though, which was one of the main advantages of using a particle filter, but since they are only focusing on LRF sensors, this is not an unreasonable assumption.
+
+Since the samples are now highly focused on one area, they now must deal with the risk of particle depletion. This occurs when particles become overconfident in their positions and are incorrect due to poor observations or too small of an overlapping area between successive scans.
+
+To mitigate this occurrence, they propose adding a resampling step based on a parameter ${\displaystyle N_{eff}}$ such that
+
+${\displaystyle N_{eff}={\frac {1}{\sum ({\tilde {w}}^{(i)})^{2}}}}$
+
+where ${\displaystyle {\tilde {w}}^{(i)}}$ are normalized weights. This means that as the weights grow and become more confident, ${\displaystyle N_{eff}}$ will drop. Once ${\displaystyle N_{eff}}$ drops below the threshold N/2 where N is the number of particles, then they will resample the particles. In the extensive testing done, this was shown to help decrease the risk of particle depletion.
+
+Evaluation
+
+To evaluate this improved RBFP, testing was done are three different locations: Intel Reseach Lab, Freibugrg Campus, and MIT Killian Court. These location varied in size, moving obstacles, and types of locations environments such as indoor vs outdoor maps. Each environment was tested multiple times with different sizes of particle sets to see the map accuracy that was able to be achieved.
+
+Outdoor environments proved to be an issue since LRF have a limited range and open areas such as a parking lot caused the robot to get lost.
+
+In all these experiments, the number of particles needed decrease by approximately one order of magnitude. As expected, smaller maps with fewer moving obstacles required the lease particles and larger maps required more. This was tested against the leading SLAM algorithm at the time known as FastSLAM [4].
+
+Conclusion
+
+The difference between the two papers shows the transition from theory to application. The first paper proposed the RBPF providing a large amount of mathematical background and performing 'toy' experiments to show that the theory did have promise. The second paper took the theory and looked at what could be done to improve it in the real world environments. Doing this came with its own limitations such that this approach would not transfer easily to another similar application if it does not fit model given. This means that someone may choose to create their own improved RBPF for their own system and disregard the approaches proposed by the second paper. For further studies, it would be interesting to see if the RBPF could be improved for a general case without adding application specific limitation.
+
+Annotated Bibliography
+
+1. Arnaud Doucet, Nando de Freitas, Kevin Murphy, and Stuart Russell. 2000. Rao-blackwellised particle filtering for dynamic Bayesian networks. In Proceedings of the Sixteenth conference on Uncertainty in artificial intelligence (UAI'00), Craig Boutilier and Moisés Goldszmidt (Eds.). Morgan Kaufmann Publishers Inc., San Francisco, CA, USA, 176-183.
+2. G. Grisetti, C. Stachniss and W. Burgard, "Improved Techniques for Grid Mapping With Rao-Blackwellized Particle Filters," in IEEE Transactions on Robotics, vol. 23, no. 1, pp. 34-46, Feb. 2007. doi: 10.1109/TRO.2006.889486
+3. Kevin P. Murphy. 1999. Bayesian map learning in dynamic environments. In Proceedings of the 12th International Conference on Neural Information Processing Systems (NIPS'99), S. A. Solla, T. K. Leen, and K. Müller (Eds.). MIT Press, Cambridge, MA, USA, 1015-1021.
+4. D. Hahnel, W. Burgard, D. Fox and S. Thrun, "An efficient fastSLAM algorithm for generating maps of large-scale cyclic environments from raw laser range measurements," Proceedings 2003 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS 2003) (Cat. No.03CH37453), 2003, pp. 206-211 vol.1.
+
+ Permission is granted to copy, distribute and/or modify this document according to the terms in Creative Commons License, Attribution-NonCommercial-ShareAlike 3.0. The full text of this license may be found here: CC by-nc-sa 3.0

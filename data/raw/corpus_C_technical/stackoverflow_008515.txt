@@ -1,0 +1,38 @@
+Question: <p>Does anyone know how the built in dictionary type for python is implemented?  My understanding is that it is some sort of hash table, but I haven't been able to find any sort of definitive answer.</p>
+
+Answer: <p>Here is everything about Python dicts that I was able to put together (probably more than anyone would like to know; but the answer is comprehensive). </p>
+
+<ul>
+<li>Python dictionaries are implemented as <strong>hash tables</strong>.</li>
+<li>Hash tables must allow for <strong>hash collisions</strong> i.e. even if two distinct keys have the same hash value, the table's implementation must have a strategy to insert and retrieve the key and value pairs unambiguously.</li>
+<li>Python <code>dict</code> uses <strong>open addressing</strong> to resolve hash collisions (explained below) (see <a href="http://hg.python.org/cpython/file/52f68c95e025/Objects/dictobject.c#l296">dictobject.c:296-297</a>).</li>
+<li>Python hash table is just a contiguous block of memory (sort of like an array, so you can do an <code>O(1)</code> lookup by index). </li>
+<li><strong>Each slot in the table can store one and only one entry.</strong> This is important.</li>
+<li>Each <strong>entry</strong> in the table actually a combination of the three values: <strong>&lt; hash, key, value ></strong>. This is implemented as a C struct (see <a href="http://hg.python.org/cpython/file/52f68c95e025/Include/dictobject.h#l51">dictobject.h:51-56</a>).</li>
+<li><p>The figure below is a logical representation of a Python hash table. In the figure below, <code>0, 1, ..., i, ...</code> on the left are indices of the <strong>slots</strong> in the hash table (they are just for illustrative purposes and are not stored along with the table obviously!).</p>
+
+<pre><code># Logical model of Python Hash table
+-+-----------------+
+0| &lt;hash|key|value&gt;|
+-+-----------------+
+1|      ...        |
+-+-----------------+
+.|      ...        |
+-+-----------------+
+i|      ...        |
+-+-----------------+
+.|      ...        |
+-+-----------------+
+n|      ...        |
+-+-----------------+
+</code></pre></li>
+<li><p>When a new dict is initialized it starts with 8 <em>slots</em>. (see <a href="http://hg.python.org/cpython/file/52f68c95e025/Include/dictobject.h#l49">dictobject.h:49</a>)</p></li>
+<li>When adding entries to the table, we start with some slot, <code>i</code>, that is based on the hash of the key. CPython initially uses <code>i = hash(key) &amp; mask</code> (where <code>mask = PyDictMINSIZE - 1</code>, but that's not really important). Just note that the initial slot, i, that is checked depends on the <em>hash</em> of the key.</li>
+<li>If that slot is empty, the entry is added to the slot (by entry, I mean, <code>&lt;hash|key|value&gt;</code>). But what if that slot is occupied!? Most likely because another entry has the same hash (hash collision!)</li>
+<li>If the slot is occupied, CPython (and even PyPy) compares the <strong>the hash AND the key</strong> (by compare I mean <code>==</code> comparison not the <code>is</code> comparison)  of the entry in the slot against the key of the current entry to be inserted (<a href="http://hg.python.org/cpython/file/52f68c95e025/Objects/dictobject.c#l337">dictobject.c:337,344-345</a>). If <em>both</em> match, then it thinks the entry already exists, gives up and moves on to the next entry to be inserted. If either hash or the key don't match, it starts <strong>probing</strong>. </li>
+<li>Probing just means it searches the slots by slot to find an empty slot. Technically we could just go one by one, <code>i+1, i+2, ...</code> and use the first available one (that's linear probing). But for reasons explained beautifully in the comments (see <a href="http://hg.python.org/cpython/file/52f68c95e025/Objects/dictobject.c#l33">dictobject.c:33-126</a>), CPython uses <strong>random probing</strong>. In random probing, the next slot is picked in a pseudo random order. The entry is added to the first empty slot. For this discussion, the actual algorithm used to pick the next slot is not really important (see <a href="http://hg.python.org/cpython/file/52f68c95e025/Objects/dictobject.c#l33">dictobject.c:33-126</a> for the algorithm for probing). What is important is that the slots are probed until first empty slot is found.</li>
+<li>The same thing happens for lookups, just starts with the initial slot i (where i depends on the hash of the key). If the hash and the key both don't match the entry in the slot, it starts probing, until it finds a slot with a match. If all slots are exhausted, it reports a fail.</li>
+<li>BTW, the <code>dict</code> will be resized if it is two-thirds full. This avoids slowing down lookups. (see <a href="http://hg.python.org/cpython/file/52f68c95e025/Include/dictobject.h#l64">dictobject.h:64-65</a>)</li>
+</ul>
+
+<p>NOTE: I did the research on Python Dict implementation in response to my own <a href="http://stackoverflow.com/questions/9010222/">question</a> about how multiple entries in a dict can have same hash values. I posted a slightly edited version of the response here because all the research is very relevant for this question as well.</p>

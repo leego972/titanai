@@ -1,0 +1,104 @@
+Question: <p>This is a pretty straight forward attempt. I haven't been using python for too long. Seems to work but I am sure I have much to learn. Someone let me know if I am way off here. Needs to find patterns, write the first line which matches, and then add a summary message for remaining consecutive lines which match pattern and return modified string.</p>
+
+<p>Just to be clear...regex <code>.*Dog.*</code> would take </p>
+
+<pre><code>Cat
+Dog
+My Dog
+Her Dog
+Mouse
+</code></pre>
+
+<p>and return </p>
+
+<pre><code>Cat
+Dog
+::::: Pattern .*Dog.* repeats 2 more times.
+Mouse
+
+
+#!/usr/bin/env python
+#
+
+import re
+import types
+
+def remove_repeats (l_string, l_regex):
+   """Take a string, remove similar lines and replace with a summary message.
+
+   l_regex accepts strings and tuples.
+   """
+
+   # Convert string to tuple.
+   if type(l_regex) == types.StringType:
+      l_regex = l_regex,
+
+
+   for t in l_regex:
+      r = ''
+      p = ''
+      for l in l_string.splitlines(True):
+         if l.startswith('::::: Pattern'):
+            r = r + l
+         else:
+            if re.search(t, l): # If line matches regex.
+                m += 1
+                if m == 1: # If this is first match in a set of lines add line to file.
+                   r = r + l
+                elif m &gt; 1: # Else update the message string.
+                   p = "::::: Pattern '" + t + "' repeats " + str(m-1) +  ' more times.\n'
+            else:
+                if p: # Write the message string if it has value.
+                   r = r + p
+                   p = ''
+                m = 0
+                r = r + l
+
+      if p: # Write the message if loop ended in a pattern.
+          r = r + p
+          p = ''
+
+      l_string = r # Reset string to modified string.
+
+   return l_string
+</code></pre>
+
+Answer: <p>First, your regular expression will match more slowly than if you had left off the greedy match.</p>
+
+<pre><code>.*Dog.*
+</code></pre>
+
+<p>is equivalent to</p>
+
+<pre><code>Dog
+</code></pre>
+
+<p>but the latter matches more quickly because no backtracking is involved.  The longer the strings, the more likely "Dog" appears multiple times and thus the more backtracking work the regex engine has to do.  As it is, ".*D" virtually guarantees backtracking.</p>
+
+<p>That said, how about:</p>
+
+<pre><code>#! /usr/bin/env python
+
+import re            # regular expressions
+import fileinput    # read from STDIN or file
+
+my_regex = '.*Dog.*'
+my_matches = 0
+
+for line in fileinput.input():
+    line = line.strip()
+
+    if re.search(my_regex, line):
+    	if my_matches == 0:
+    		print(line)
+    	my_matches = my_matches + 1
+    else:
+    	if my_matches != 0:
+    		print('::::: Pattern %s repeats %i more times.' % (my_regex, my_matches - 1))
+    	print(line)
+    	my_matches = 0
+</code></pre>
+
+<p>It's not clear what should happen with non-neighboring matches.</p>
+
+<p>It's also not clear what should happen with single-line matches surrounded by non-matching lines.  Append "Doggy" and "Hula" to the input file and you'll get the matching message "0" more times.</p>

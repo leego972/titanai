@@ -1,0 +1,148 @@
+Question: <p>Why does the following behave unexpectedly in Python?</p>
+
+<pre><code>&gt;&gt;&gt; a = 256
+&gt;&gt;&gt; b = 256
+&gt;&gt;&gt; a is b
+True           # This is an expected result
+&gt;&gt;&gt; a = 257
+&gt;&gt;&gt; b = 257
+&gt;&gt;&gt; a is b
+False          # What happened here? Why is this False?
+&gt;&gt;&gt; 257 is 257
+True           # Yet the literal numbers compare properly
+</code></pre>
+
+<p>I am using Python 2.5.2. Trying some different versions of Python, it appears that Python 2.3.3 shows the above behaviour between 99 and 100.</p>
+
+<p>Based on the above, I can hypothesize that Python is internally implemented such that "small" integers are stored in a different way than larger integers and the <code>is</code> operator can tell the difference. Why the leaky abstraction? What is a better way of comparing two arbitrary objects to see whether they are the same when I don't know in advance whether they are numbers or not?</p>
+
+Answer: <blockquote>
+  <h1>Python's âisâ operator behaves unexpectedly with integers?</h1>
+</blockquote>
+
+<p>Let me emphasize: <strong><em>Do not use <code>is</code> to compare integers.</em></strong></p>
+
+<p>This isn't behavior you should have any expectations about.</p>
+
+<p>Instead, use <code>==</code> and <code>!=</code> to compare for equality and inequality, respectively.</p>
+
+<p>To know this, you need to know the following.</p>
+
+<p>First, what does <code>is</code> do? It is a comparison operator. From the <a href="https://docs.python.org/2/reference/expressions.html#not-in" rel="nofollow">documentation</a>:</p>
+
+<blockquote>
+  <p>The operators <code>is</code> and <code>is not</code> test for object identity: <code>x is y</code> is true
+  if and only if x and y are the same object. <code>x is not y</code> yields the
+  inverse truth value.</p>
+</blockquote>
+
+<p>And so the following are equivalent. </p>
+
+<pre><code>&gt;&gt;&gt; a is b
+&gt;&gt;&gt; id(a) == id(b)
+</code></pre>
+
+<p>From the <a href="https://docs.python.org/library/functions.html#id" rel="nofollow">documentation</a>:</p>
+
+<blockquote>
+  <p><strong><code>id</code></strong>
+  Return the âidentityâ of an object. This is an integer (or long
+  integer) which is guaranteed to be unique and constant for this object
+  during its lifetime. Two objects with non-overlapping lifetimes may
+  have the same <code>id()</code> value.</p>
+</blockquote>
+
+<p>Note that the fact that the id of an object in CPython (the reference implementation of Python) is the location in memory is an implementation detail. Other implementations of Python (such as Jython or IronPython) could easily have a different implementation for <code>id</code>.</p>
+
+<p>So what is the use-case for <code>is</code>?  <a href="https://www.python.org/dev/peps/pep-0008/#programming-recommendations" rel="nofollow">PEP8 describes</a>:</p>
+
+<blockquote>
+  <p>Comparisons to singletons like None should always be done with is or
+  is not , never the equality operators.</p>
+</blockquote>
+
+<h1>The Question</h1>
+
+<p>You ask, and state, the following question (with code):</p>
+
+<blockquote>
+  <p><strong>Why does the following behave unexpectedly in Python?</strong></p>
+
+<pre><code>&gt;&gt;&gt; a = 256
+&gt;&gt;&gt; b = 256
+&gt;&gt;&gt; a is b
+True           # This is an expected result
+</code></pre>
+</blockquote>
+
+<p>It is <em>not</em> an expected result. Why is it expected? It only means that the integers valued at <code>256</code> referenced by both <code>a</code> and <code>b</code> are the same instance of integer. Integers are immutable in Python, thus they cannot change. This should have no impact on any code. It should not be expected. It is merely an implementation detail. </p>
+
+<p>But perhaps we should be glad that there is not a new separate instance in memory every time we state a value equals 256. </p>
+
+<blockquote>
+<pre><code>&gt;&gt;&gt; a = 257
+&gt;&gt;&gt; b = 257
+&gt;&gt;&gt; a is b
+False          # What happened here? Why is this False?
+</code></pre>
+</blockquote>
+
+<p>Looks like we now have two separate instances of integers with the value of <code>257</code> in memory. Since integers are immutable, this wastes memory. Let's hope we're not wasting a lot of it. We're probably not. But this behavior is not guaranteed.</p>
+
+<blockquote>
+<pre><code>&gt;&gt;&gt; 257 is 257
+True           # Yet the literal numbers compare properly
+</code></pre>
+</blockquote>
+
+<p>Well, this looks like your particular implementation of Python is trying to be smart and not creating redundantly valued integers in memory unless it has to. You seem to indicate you are using the referent implementation of Python, which is CPython. Good for CPython. </p>
+
+<p>It might be even better if CPython could do this globally, if it could do so cheaply (as there would a cost in the lookup), perhaps another implementation might. </p>
+
+<p>But as for impact on code, you should not care if an integer is a particular instance of an integer. You should only care what the value of that instance is, and you would use the normal comparison operators for that, i.e. <code>==</code>.</p>
+
+<h2>What <code>is</code> does</h2>
+
+<p><code>is</code> checks that the <code>id</code> of two objects are the same. In CPython, the <code>id</code> is the location in memory, but it could be some other uniquely identifying number in another implementation. To restate this with code:</p>
+
+<pre><code>&gt;&gt;&gt; a is b
+</code></pre>
+
+<p>is the same as</p>
+
+<pre><code>&gt;&gt;&gt; id(a) == id(b)
+</code></pre>
+
+<h2>Why would we want to use <code>is</code> then?</h2>
+
+<p>This can be a very fast check relative to say, checking if two very long strings are equal in value. But since it applies to the uniqueness of the object, we thus have limited use-cases for it. In fact, we mostly want to use it to check for <code>None</code>, which is a singleton (a sole instance existing in one place in memory). We might create other singletons if there is potential to conflate them, which we might check with <code>is</code>, but these are relatively rare. Here's an example (will work in Python 2 and 3) e.g.</p>
+
+<pre><code>SENTINEL_SINGLETON = object() # this will only be created one time.
+
+def foo(keyword_argument=None):
+    if keyword_argument is None:
+        print('no argument given to foo')
+    bar()
+    bar(keyword_argument)
+    bar('baz')
+
+def bar(keyword_argument=SENTINEL_SINGLETON):
+    # SENTINEL_SINGLETON tells us if we were not passed anything
+    # as None is a legitimate potential argument we could get.
+    if keyword_argument is SENTINEL_SINGLETON:
+        print('no argument given to bar')
+    else:
+        print('argument to bar: {0}'.format(keyword_argument))
+
+foo()
+</code></pre>
+
+<p>Which prints:</p>
+
+<pre><code>no argument given to foo
+no argument given to bar
+argument to bar: None
+argument to bar: baz
+</code></pre>
+
+<p>And so we see, with <code>is</code> and a sentinel, we are able to differentiate between when <code>bar</code> is called with no arguments and when it is called with <code>None</code>. These are the primary use-cases for <code>is</code> - do <em>not</em> use it to test for equality of integers, strings, tuples, or other things like these.</p>

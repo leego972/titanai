@@ -1,0 +1,220 @@
+Kinetic Component Analysis
+
+Interesting paper from Marcos Lopez de Prado http://papers.ssrn.com/sol3/papers.cfm?abstract_id=2422183 Python code included.I am a novice python coder ,there are few things I can't figure out.It calls libraries that are complicated.Someone may find the paper and the code interesting.
+
+17 responses
+
+Hi tovim,
+
+have you found a pratical example of KCA python code ? http://www.quantresearch.info/KCA_1.py.txt
+
+I don't know that's mean exactly in the paper by :
+
+3 args
+Numpy array t conveys the index of observations.
+Numpy array z passes the observations.
+Scalar q provides a seed value for initializing the EM estimation of the states covariance
+
+t is my timeserie ? but for z anq ?
+
+thanks for you help.
+Regards
+
+Great paper, thanks, not sure how I missed this.
+
+Simon if you found how use it !! tell me please :)
+
+I haven't read the paper yet, it looks like it's just a kalman filter for a model of position, velocity and acceleration of the underlying process?
+
+Simon,
+
+I have you tried the python code ?
+
+Yes, I have explored it.
+
+Simon,
+
+How you use it ? you can paste a sample of code ?
+
+Regards
+Ludo.
+
+also played around with it but can't find what all the parameters mean
+
+16
+Backtest from to with initial capital
+Total Returns
+--
+Alpha
+--
+Beta
+--
+Sharpe
+--
+Sortino
+--
+Max Drawdown
+--
+Benchmark Returns
+--
+Volatility
+--
+ Returns 1 Month 3 Month 6 Month 12 Month
+ Alpha 1 Month 3 Month 6 Month 12 Month
+ Beta 1 Month 3 Month 6 Month 12 Month
+ Sharpe 1 Month 3 Month 6 Month 12 Month
+ Sortino 1 Month 3 Month 6 Month 12 Month
+ Volatility 1 Month 3 Month 6 Month 12 Month
+ Max Drawdown 1 Month 3 Month 6 Month 12 Month
+# Backtest ID: 56bc6af051c47412aff18808
+There was a runtime error.
+
+Well for starters, we probably want to use filter not smooth, since we are trying to prevent forward snooping. Second, if feeding it intraday data, we need to be adjusting the H/A/Q matrices for the differing time steps overnight/weekend. In fact, in my investigation, I was trying to modify dt to be higher in the mornings and afternoons, rather than lunch time, to reflect the higher trading activity. I made another post about that I think, but nobody had any ideas. :)
+
+Lastly, I think that the Q matrix needs to be properly specified with the correlated noise based on the position/velocity/acceleration model, rather than just a diagonal matrix with some random time-invariant q that you pick.
+
+I will probably go back to this at some point, but I got distracted by other things.
+
+# Here is a graphic demo for fitKCA.
+
+# fitKCA by MLdP on 02/22/2014 <[email protected]>
+# Kinetic Component Analysis
+# demo by Hayek
+import numpy as np
+from pykalman import KalmanFilter
+#-----------------------------------------------
+def fitKCA(t,z,q,fwd=0):
+'''
+Inputs:
+t: Iterable with time indices
+z: Iterable with measurements
+q: Scalar that multiplies the seed states covariance
+fwd: number of steps to forecast (optional, default=0)
+Output:
+x[0]: smoothed state means of position velocity and acceleration
+x[1]: smoothed state covar of position velocity and acceleration
+Dependencies: numpy, pykalman
+'''
+#1) Set up matrices A,H and a seed for Q
+h=(t[-1]-t[0])/t.shape[0]
+A=np.array([[1,h,.5*h**2],
+[0,1,h],
+[0,0,1]])
+Q=q*np.eye(A.shape[0])
+#2) Apply the filter
+kf=KalmanFilter(transition_matrices=A,transition_covariance=Q)
+#3) EM estimates
+kf=kf.em(z)
+#4) Smooth
+x_mean,x_covar=kf.smooth(z)
+#5) Forecast
+for fwd_ in range(fwd):
+x_mean_,x_covar_=kf.filter_update(filtered_state_mean=x_mean[-1], \
+filtered_state_covariance=x_covar[-1])
+x_mean=np.append(x_mean,x_mean_.reshape(1,-1),axis=0)
+x_covar_=np.expand_dims(x_covar_,axis=0)
+x_covar=np.append(x_covar,x_covar_,axis=0)
+#6) Std series
+x_std=(x_covar[:,0,0]**.5).reshape(-1,1)
+for i in range(1,x_covar.shape[1]):
+x_std_=x_covar[:,i,i]**.5
+x_std=np.append(x_std,x_std_.reshape(-1,1),axis=1)
+return x_mean,x_std,x_covar
+def demo_KCA( ):
+"""  By Hayek """
+from numpy import zeros
+from numpy.random import rand
+import matplotlib.pyplot as plt
+N_K = 100
+t = zeros( N_K )
+z = zeros( [ N_K, 3 ] )
+for k in range( N_K ):
+t[ k ] = k
+z[ k, : ] = [ 0.005 * k ** 2 + 0.05 * k + 0.5 + 10 * rand(1)[0],
+0.01 * k + 0.05, 0.01 ]
+# Second order ploynoimial, its vel and acc; sth like x_mean.
+x_mean, x_std, x_covar = fitKCA( t, z[ :, 0 ], 1 )
+fig = plt.figure( )
+ax1 = fig.add_axes( [0.1, 0.1, 0.8, 0.8] )
+l_0, l_1 = ax1.plot(
+np.arange( N_K ), z[ :, 0 ], 'r' ,
+np.arange( N_K ), x_mean[ :, 0 ], 'g' )
+fig.legend( ( l_0, l_1 ),
+( u'Noised second order ploynoimial',
+u'After Kalman filter' ),
+'upper left' )
+if __name__ == "__main__":
+demo_KCA( )
+
+
+Applying to any instrument (like SPY closing price) shows velocity and acceleration equal to zero. Any idea why?. The position part is working.
+
+I read this paper last month, but have not yet coded it as I've not finished the other parts of a PCA algo.
+Note that the paper was updated in June 2016, so may be somewhat different than the version referenced in this original post.
+
+Hayek von's code is adapted from what Lopez de Prado published here
+You may find some help at that link.
+
+If you want more specific help, then you'll have to post a back test.
+
+I read this paper last month, but have not yet coded it as I've not finished the other parts of a PCA algo.
+Also, Lopez de Prado's code makes calls to a purchased library (Canopy), so I'll have to write some equivalent routines.
+
+Note that the paper was updated in June 2016, so may be somewhat different than the version referenced in this original post.
+
+Hayek von's code is adapted from what Lopez de Prado published here
+You may find some help at that link.
+
+If you want more specific help, then you'll have to post a back test.
+
+Anyone figure out how to use this thing? They claim more accuracy than FFT and LOWESS, so could be very interesting.
+
+Maybe Thomas Wiecki is looking for something to do :)
+
+It was cool as an example of a more complex Kalman filter, but didn't work very well. A better-specified linear model would probably work better; there's no reason to assume that stocks have acceleration and velocity/momentum.
+
+As I mentioned earlier, the matrix for the noise propagation is wrong. I am not certain whether people just use independent noise in a dependent linear system because it works just as well? But I didn't bother deriving the precise one.
+
+This is an amazing paper. I tried it on commodity futures now that Quantopian supports futures data. Between 1.5 to 2 Sharpe based on how much vol I am willing to take. Much better than moving averages for momentum. Here is my modified code. I am using the acceleration of acceleration as well because acceleration is a trading signal in my algo.
+
+def fitKCA(t,z,q,fwd=0):
+'''
+Inputs:
+t: Iterable with time indices
+z: Iterable with measurements
+q: Scalar that multiplies the seed states covariance
+fwd: number of steps to forecast (optional, default=0) '''
+#1) Set up matrices A,H and a seed for Q
+h=1. / t.shape[0]
+A=np.array([[1,h,.5*h**2, 0.33*h**3],
+[0,1,h,h**2],
+[0,0,1,h],
+[0,0,0,1]])
+Q=q*np.eye(A.shape[0])
+#2) Apply the filter
+kf=KalmanFilter(transition_matrices=A,transition_covariance=Q)
+#3) EM estimates
+kf=kf.em(z)
+#4) Smooth
+x_mean,x_covar=kf.smooth(z)
+#5) Forecast
+for fwd_ in range(fwd):
+x_mean_,x_covar_=kf.filter_update(filtered_state_mean=x_mean[-1],
+filtered_state_covariance=x_covar[-1])
+x_mean=np.append(x_mean,x_mean_.reshape(1,-1),axis=0)
+x_covar_=np.expand_dims(x_covar_,axis=0)
+x_covar=np.append(x_covar,x_covar_,axis=0)
+#6) Std series
+x_std=(x_covar[:,0,0]**.5).reshape(-1,1)
+for i in range(1,x_covar.shape[1]):
+x_std_=x_covar[:,i,i]**.5
+x_std=np.append(x_std,x_std_.reshape(-1,1),axis=1)
+return x_mean,x_std,x_covar
+
+
+Hi All,
+
+Can you confirm me that the KCA isn't casual ?
+
+Thx.
+Regards.

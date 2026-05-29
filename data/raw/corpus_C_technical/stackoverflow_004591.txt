@@ -1,0 +1,33 @@
+Question: <p>I have a log file being written by another process which I want to watch for changes. Each time a change occurrs I'd like to read the new data in to do some processing on it.</p>
+
+<p>What's the best way to do this? I was hoping there'd be some sort of hook from the PyWin32 library. I've found the <code>win32file.FindNextChangeNotification</code> function but have no idea how to ask it to watch a specific file.</p>
+
+<p>If anyone's done anything like this I'd be really grateful to hear how...</p>
+
+<p><strong>[Edit]</strong> I should have mentioned that I was after a solution that doesn't require polling.</p>
+
+<p><strong>[Edit]</strong> Curses! It seems this doesn't work over a mapped network drive. I'm guessing windows doesn't 'hear' any updates to the file the way it does on a local disk.</p>
+
+Answer: <p>Here's an example geared toward watching input files that write no more than one line per second but usually a lot less.  The goal is to append the last line (most recent write) to the specified output file.  I've copied this from one of my projects and just deleted all the irrelevant lines.  You'll have to fill in or change the missing symbols. </p>
+
+<pre><code>from PyQt5.QtCore import QFileSystemWatcher, QSettings, QThread
+from ui_main_window import Ui_MainWindow   # Qt Creator gen'd 
+
+class MainWindow(QMainWindow, Ui_MainWindow):
+    def __init__(self, parent=None):
+        QMainWindow.__init__(self, parent)
+        Ui_MainWindow.__init__(self)
+        self._fileWatcher = QFileSystemWatcher()
+        self._fileWatcher.fileChanged.connect(self.fileChanged)
+
+    def fileChanged(self, filepath):
+        QThread.msleep(300)    # Reqd on some machines, give chance for write to complete
+        # ^^ About to test this, may need more sophisticated solution
+        with open(filepath) as file:
+            lastLine = list(file)[-1]
+        destPath = self._filemap[filepath]['dest file']
+        with open(destPath, 'a') as out_file:               # a= append
+            out_file.writelines([lastLine])
+</code></pre>
+
+<p>Of course, the encompassing QMainWindow class is not strictly required, ie. you can use QFileSystemWatcher alone. </p>

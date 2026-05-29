@@ -1,0 +1,55 @@
+Question: <p>I need a real DBA's opinion. Postgres 8.3 takes 200 ms to execute this query on my Macbook Pro while Java and Python perform the same calculation in under 20 ms (350,000 rows):</p>
+
+<pre><code>SELECT count(id), avg(a), avg(b), avg(c), avg(d) FROM tuples;
+</code></pre>
+
+<p>Is this normal behaviour when using a SQL database?</p>
+
+<p>The schema (the table holds responses to a survey):</p>
+
+<pre><code>CREATE TABLE tuples (id integer primary key, a integer, b integer, c integer, d integer);
+
+\copy tuples from '350,000 responses.csv' delimiter as ','
+</code></pre>
+
+<p>I wrote some tests in Java and Python for context and they crush SQL (except for pure python):</p>
+
+<pre><code>java   1.5 threads ~ 7 ms    
+java   1.5         ~ 10 ms    
+python 2.5 numpy   ~ 18 ms  
+python 2.5         ~ 370 ms
+</code></pre>
+
+<p>Even sqlite3 is competitive with Postgres despite it assumping all columns are strings (for contrast: even using just switching to numeric columns instead of integers in Postgres results in 10x slowdown)</p>
+
+<p>Tunings i've tried without success include (blindly following some web advice):</p>
+
+<pre><code>increased the shared memory available to Postgres to 256MB    
+increased the working memory to 2MB
+disabled connection and statement logging
+used a stored procedure via CREATE FUNCTION ... LANGUAGE SQL
+</code></pre>
+
+<p>So my question is, is my experience here normal, and this is what I can expect when using a SQL database?  I can understand that ACID must come with costs, but this is kind of crazy in my opinion.  I'm not asking for realtime game speed, but since Java can process millions of doubles in under 20 ms, I feel a bit jealous. </p>
+
+<p>Is there a better way to do simple OLAP on the cheap (both in terms of money and server complexity)?  I've looked into Mondrian and Pig + Hadoop but not super excited about maintaining yet another server application and not sure if they would even help.</p>
+
+<hr>
+
+<p>No the Python code and Java code do all the work in house so to speak.  I just generate 4 arrays with 350,000 random values each, then take the average.  I don't include the generation in the timings, only the averaging step.  The java threads timing uses 4 threads (one per array average), overkill but it's definitely the fastest.</p>
+
+<p>The sqlite3 timing is driven by the Python program and is running from disk (not :memory:)</p>
+
+<p>I realize Postgres is doing much more behind the scenes, but most of that work doesn't matter to me since this is read only data.</p>
+
+<p>The Postgres query doesn't change timing on subsequent runs.</p>
+
+<p>I've rerun the Python tests to include spooling it off the disk.  The timing slows down considerably to nearly 4 secs.  But I'm guessing that Python's file handling code is pretty much in C (though maybe not the csv lib?) so this indicates to me that Postgres isn't streaming from the disk either (or that you are correct and I should bow down before whoever wrote their storage layer!)</p>
+
+Answer: <p>I'm a MS-SQL guy myself, and we'd use <a href="http://msdn.microsoft.com/en-us/library/ms178015.aspx" rel="nofollow">DBCC PINTABLE</a> to keep a table cached, and <a href="http://msdn.microsoft.com/en-us/library/ms184361.aspx" rel="nofollow">SET STATISTICS IO</a> to see that it's reading from cache, and not disk. </p>
+
+<p>I can't find anything on Postgres to mimic PINTABLE, but <a href="http://www.postgresql.org/docs/current/static/pgbuffercache.html" rel="nofollow">pg_buffercache</a> seems to give details on what is in the cache - you may want to check that, and see if your table is actually being cached.</p>
+
+<p>A quick back of the envelope calculation makes me suspect that you're paging from disk. Assuming Postgres uses 4-byte integers, you have (6 * 4) bytes per row, so your table is a minimum of (24 * 350,000) bytes ~ 8.4MB. Assuming 40 MB/s sustained throughput on your HDD, you're looking at right around 200ms to read the data (which, <a href="http://stackoverflow.com/questions/51553/why-are-sql-aggregate-functions-so-much-slower-than-python-and-java-or-poor-man#51668" rel="nofollow">as pointed out</a>, should be where almost all of the time is being spent). </p>
+
+<p>Unless I screwed up my math somewhere, I don't see how it's possible that you are able to read 8MB into your Java app and process it in the times you're showing - unless that file is already cached by either the drive or your OS.</p>

@@ -1,0 +1,38 @@
+Question: <p>When writing a batch file to automate something on a Windows box, I've needed to pause its execution for several seconds (usually in a test/wait loop, waiting for a process to start). At the time, the best solution I could find uses ping (I kid you not) to achieve the desired effect. I've found a better write-up of it <a href="http://malektips.com/dos0017.html">here</a>, which describes a callable "wait.bat", implemented as follows:</p>
+
+<pre><code>@ping 127.0.0.1 -n 2 -w 1000 &gt; nul
+@ping 127.0.0.1 -n %1% -w 1000&gt; nul
+</code></pre>
+
+<p>You can then include calls to wait.bat in your own batch file, passing in the number of seconds to sleep.</p>
+
+<p><a href="http://malektips.com/xp_dos_0002.html">Apparently the Windows 2003 Resource Kit provides a Unix-like sleep command</a> (at last!). In the meantime, for those of us still using Windows&nbsp;XP, Windows 2000 or (sadly) <a href="http://en.wikipedia.org/wiki/Windows_NT">Windows NT</a>, is there a better way?</p>
+
+<p>I modified the <code>sleep.py</code> script in the <a href="http://stackoverflow.com/questions/166044/sleeping-in-a-dos-batch-file#166290">accepted answer</a>, so that it defaults to one second if no arguments are passed on the command line:</p>
+
+<pre class="lang-py prettyprint-override"><code>import time, sys
+
+time.sleep(float(sys.argv[1]) if len(sys.argv) &gt; 1 else 1)
+</code></pre>
+
+Answer: <p>I like <a href="http://stackoverflow.com/a/6806192/2020158">Aacini's response</a>.  I added to it to handle the day and also enable it to handle <a href="http://en.wikipedia.org/wiki/Centisecond" rel="nofollow" title="Centisecond">centiseconds</a> (<code>%TIME%</code> outputs <code>H:MM:SS.CC</code>):</p>
+
+<pre><code>:delay
+SET DELAYINPUT=%1
+SET /A DAYS=DELAYINPUT/8640000
+SET /A DELAYINPUT=DELAYINPUT-(DAYS*864000)
+
+::Get ending centisecond (10 milliseconds)
+FOR /F "tokens=1-4 delims=:." %%A IN ("%TIME%") DO SET /A H=%%A, M=1%%B%%100, S=1%%C%%100, X=1%%D%%100, ENDING=((H*60+M)*60+S)*100+X+DELAYINPUT
+SET /A DAYS=DAYS+ENDING/8640000
+SET /A ENDING=ENDING-(DAYS*864000)
+
+::Wait for such a centisecond
+:delay_wait
+FOR /F "tokens=1-4 delims=:." %%A IN ("%TIME%") DO SET /A H=%%A, M=1%%B%%100, S=1%%C%%100, X=1%%D%%100, CURRENT=((H*60+M)*60+S)*100+X
+IF DEFINED LASTCURRENT IF %CURRENT% LSS %LASTCURRENT% SET /A DAYS=DAYS-1
+SET LASTCURRENT=%CURRENT%
+IF %CURRENT% LSS %ENDING% GOTO delay_wait
+IF %DAYS% GTR 0 GOTO delay_wait
+GOTO :EOF
+</code></pre>

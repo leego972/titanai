@@ -1,0 +1,49 @@
+# Transfer function estimation from frequency response
+
+Let's assume that we know that we are dealing with a SISO second order system for which we have the frequency response (magnitude and phase for a known frequency range ω). What methods would people use to fit the frequency response to a transfer function (i.e. transfer-function estimation)? How does this process look like?
+
+Also, this looks like a one-liner in Matlab (see tfest). Is there a Python equivalent?
+
+Here you find an extensive discussion about transfer function estimation and even source code.
+
+Your problem can be expressed as $$F(2j \pi f_i) \approx g_i$$, where $$f_i$$, $$g_i$$ are your measurements, and you also you can expresss $$F(s) = N(s) / D(s)$$ as a parametric function, then the parameters may be adjusted with curve fit.
+
+Python provides curve_fit, that can be directly applied to this problem as in this answer, with the difference that you want to apply for x in the imaginary axis. This can be improved by also passing the gradient in terms of the parameters as well.
+
+Maybe you prefer to express your function in terms of poles and zeros, this may be specially convenient if you want to ensure stability (you can add to your cost function the Lagrangian Multiplier for $$real(p) < 0$$)
+
+def pztf(omega, h, p, z):
+num = np.prod(1j*omega[None,:] - p[:, None], axis=0);
+den = np.prod(1j*omega[None,:] - z[: None], axis=0);
+return h * num ./ den
+
+
+Maybe you want to fit the logarithm of this, this may produce a better fit in the low gain frequencies.
+
+There are also more analytic approaches. The so called Levy method is interesting, $$F(s) = \frac{N(s)}{D(s)}$$ is equivalent to $$F(s) D(s) - N(s) = 0$$ this can be expressed as least square fitting.
+
+This is biased in the sense that the errors close to the poles receives less weight, this can be mitigated by solving using $$D_0(s) = 1$$, and iteratively refining it by iteratively fitting
+
+$$\frac{1}{D_{i-1}(s)}\left( F(s) D_i(s) - N_i(s) \right) = 0$$
+
+when it converges after some iterations we have $$D_{i-1}(s) \approx D_i(s)$$ we have
+
+$$\frac{1}{D_{i-1}(s)}\left( F(s) - N_i(s) \right) \approx F(s) - \frac{N_i(s)}{D_{i-1}(s)}$$
+
+That corresponds to the original problem (without the $$D(s)$$ factor).
+
+If you want better accuracy in different frequencies. You achieve this by multiplying the whole expression by a given $$W(s)$$, then te fitting iteration becomes
+
+$$\frac{W(s)}{D_{i-1}(s)}\left( F(s) D_i(s) - N_i(s) \right) = 0$$
+
+You may want to check the Welch method to estimate the PSD, see the following link that describes the function : https://fr.mathworks.com/help/signal/ref/pwelch.html The output transfer function estimate, H, is calculated by dividing Pyx by Pxx. Pyx is the PSD of the input and output signals cross-correlation and Pxx is the input signal's auto-correlation.
+
+Here is a use case in which the Welch method has been used to estimate a transfer function : https://fr.mathworks.com/help/dsp/ref/discretetransferfunctionestimator.html Depending on system's frequency response, you will have to tune the algorithm ( overlapping, number of points .. ) .
+
+I have used the Welch PSD estimate by the past for a similar use case to estimate the frequency response of a high order analog filter.
+
+Check this exchange too for a similar question : getting frequency response from input and output signal
+
+I hope it helps.
+
+Regards, MF

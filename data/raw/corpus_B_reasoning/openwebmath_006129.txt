@@ -1,0 +1,123 @@
+Legend ‘-DynamicLegend’ semi-documented feature
+
+In one of my projects, I had to build a GUI in which users could interactively add and remove plot lines from an axes. The problem was that the legend needed to be kept in constant sync with the currently-displayed plot lines. This can of course be done programmatically, but a much simpler solution was to use legend‘s semi-documented ‘-DynamicLegend’ feature. Here’s a simple example:
+
+x=0:.01:10; plot(x, sin(x), 'DisplayName','sin'); legend('-DynamicLegend');   hold all; % add new plot lines on top of previous ones plot(x, cos(x), 'DisplayName','cos');
+
+We can see how the dynamic legend automatically keeps in sync with its associated axes contents when plot lines are added/removed, even down to the zoom-box lines… The legend automatically uses the plot lines ‘DisplayName’ property where available, or a standard ‘line#’ nametag where not available:
+
+Dynamic legend
+
+DynamicLegend works by attaching a listener to the axes child addition/deletion callback (actually, it works on the scribe object, which is a large topic for several future posts). It is sometimes necessary to selectively disable the dynamic behavior. For example, in my GUI I needed to plot several event lines which looked alike, and so I only wanted the first line to be added to the legend. To temporarily disable the DynamicLegend listener, do the following:
+
+% Try to disable this axes's legend plot-addition listener legendAxListener = []; try legendListeners = get(gca,'ScribeLegendListeners'); legendAxListener = legendListeners.childadded; set(legendAxListener,'Enable','off'); catch % never mind... end   % Update the axes - the legend will not be updated ...   % Re-enable the dynamic legend listener set(legendAxListener,'Enable','on');
+
+Unfortunately, this otherwise-useful DynamicLegend feature throws errors when zooming-in on bar or stairs graphs. This can be replicated by:
+
+figure; bar(magic(4)); %or: stairs(magic(3),magic(3)); legend('-DynamicLegend'); zoom on; % Now zoom-in using the mouse to get the errors on the Command Window
+
+The fix: modify %MATLABROOT%\toolbox\matlab\scribe\@scribe\@legend\init.m line #528 as follows:
+
+%old: str = [str(1:insertindex-1);{newstr};str(insertindex:length(str))];   %new: if size(str,2)>size(str,1) str=[str(1:insertindex-1),{newstr},str(insertindex:length(str))]; else str=[str(1:insertindex-1);{newstr};str(insertindex:length(str))]; end
+
+The origin of the bug is that bar and stairs generate hggroup plot-children, which saves the legend strings column-wise rather than the expected row-wise. My fix solves this, but I do not presume this solves all possible problems in all scenarios (please report if you find anything else).
+
+Semi-documented
+
+The DynamicLegend feature is semi-documented. This means that the feature is explained in a comment within the function (which can be seen via the edit(‘legend’) command), that is nonetheless not part of the official help or doc sections. It is an unsupported feature originally intended only for internal Matlab use (which of course doesn’t mean we can’t use it). This feature has existed many releases back (Matlab 7.1 for sure, perhaps earlier), so while it may be discontinued in some future Matlab release, it did have a very long life span… The down side is that it is not supported: I reported the bar/stairs issue back in mid-2007 and so far this has not been addressed (perhaps it will never be). Even my reported workaround in January this year went unanswered (no hard feelings…).
+
+DynamicLegend is a good example of a useful semi-documented feature. Some other examples, which I may cover in future posts, include text(…,‘sc’), drawnow(‘discard’), several options in pan and datacursormode etc. etc.
+
+There are also entire semi-documented functions: many of the uitools (e.g., uitree, uiundo), as well as hgfeval and others.
+
+Have you discovered any useful semi-documented feature or function? If so, then please share your finding in the comments section below.
+
+Related posts:
+
+1. Multi-column (grid) legend This article explains how to use undocumented axes listeners for implementing multi-column plot legends...
+2. Undocumented feature list A list of undocumented MATLAB features can be retrieved. Here's how... ...
+3. Transparent legend Matlab chart legends are opaque be default but can be made semi- or fully transparent. ...
+4. Undocumented feature() function Matlab's undocumented feature function enables access to some internal experimental features...
+5. Plot performance Undocumented inner plot mechanisms can be used to significantly improved plotting performance...
+6. Context-Sensitive Help Matlab has a hidden/unsupported built-in mechanism for easy implementation of context-sensitive help...
+
+ Print
+
+17 Responses to Legend ‘-DynamicLegend’ semi-documented feature
+
+1. Thanks for this tip.
+I was in a similar need, and was getting the legend cell via get, appending the new string, and setting the cell back.
+
+leghandle = findall(gcf, 'tag', 'legend'); legstr = get(leg,'String'); % ensure legstr is a cell, not a string if ischar(legstr), legstr = mat2cell(legstr); end legstr(end+1) = {'New legend string'};
+
+This seems much simpler.
+
+2. Pietro says:
+
+I was looking for an undocumented matlab feature named ‘feature’ and google luckied me here. Maybe you know something about. I tried
+
+which feature
+
+and I found out this ‘feature’ is an undocumented built-in function.
+
+How I got across it?
+
+I typed configinfo.m M-file attached to Matlab white paper on performance.
+
+Nice blog, useful even for a beginner in Matlab as I am.
+
+• Yair Altman says:
+
+Thanks Pietro.
+
+I plan to write a post about some of feature‘s features in the future. Keep a look-out for this on this blog. You can see this in my TODO list.
+
+So much to do, so little time…
+
+Yair
+
+3. Pingback: uitree | Undocumented Matlab
+
+4. Stephan says:
+
+I was searching for a way to use a legend’s “refresh” function (that is available when right-clicking on the legend with the mouse) in a script. When I came across this post I first thought this was the way Matlab implemented the “refresh” functionality.
+However, ‘DynamicLegend’ only seems to react to additions or deletions to the axes: switching the ‘Visibility’ of a line to ‘off’ or switching the legend entry off by
+
+set(get(get(line_handle,'Annotation'),'LegendInformation'),'IconDisplayStyle','off')
+
+is ignored by the ‘DynamicLegend’ feature. The “refresh” function correctly removes the corresponding legend entry in these cases.
+Do you know how to use “refresh” from the command line?
+
+• @Stephan – yes: You can access the Refresh uicontextmenu item (and any other context-menu item) directly from the legend axes, and then run it via the hgfeval function, as follows:
+
+hLegend = findall(gcf,'tag','legend'); uic = get(hLegend,'UIContextMenu'); uimenu_refresh = findall(uic,'Label','Refresh'); callback = get(uimenu_refresh,'Callback'); hgfeval(callback,[],[]);
+
+For the record, this invokes the refresh_cb function within %matlabroot%/toolbox/matlab/scribe/@scribe/@legend/methods.m. You can place a breakpoint there to see exactly what it does internally.
+
+5. Andy says:
+
+I got the same Problem/Question as Stephan I do plot all data in the Fig however only some data is visible but in the legend all data even the one not visible is listed. Only by right klick an refresh I can get rid of them however I can’t do that with every single file….
+
+Hope there will be a solution in the future.
+
+• @Stephan and @Andy – the Legend’s DynamicLegend functionality only listens to newly-created axes children (in %matlabroot%/toolbox/matlab/scribe/@scribe/@legend/init.m line 102 [for R2012aPR]), and axes children deletions (in %matlabroot%/toolbox/matlab/scribe/@scribe/@legend/methods.m line 1281 [R2012aPR again]).
+
+It should be relatively easy to modify any of these two places to listen to changes in the Visible property of axes children. I described the mechanism for doing this in several articles (here for example).
+
+6. sunny says:
+
+wow, i never knew there was a function like this and i have been thinking on how to program it. thanks, this is gonna save me lots of time
+
+7. Teodor says:
+
+Hi. Thank you for this post. At the moment I am a bit stuck as trying to get the ‘ScribeLegendListeners’ throws a ‘MATLAB:class:InvalidProperty’ exception. There seem to be no such property…
+
+My University is using Matlab-R2011a. Could it be something related to their installation?
+
+What I am doing is using -DynamicLegend for plotting data in multiple iterations. However, I need to remove from the legend some plotted lines.
+
+Could you recommend other solutions? Thank you.
+
+• @Teodor – try placing a drawnow after plotting the lines and before trying to access the hidden ScribeLegendListeners property. It is also possible that you are trying to access this property on a handle of another object (maybe one of the line plots, or a figure, or another axes), rather than the handle of the axes that holds the plots for the requested legend.
+
+8. Pingback: treeTable | Undocumented Matlab

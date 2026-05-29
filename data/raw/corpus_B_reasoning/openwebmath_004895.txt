@@ -1,0 +1,56 @@
+# Additivity of sample (rather than population) variances
+
+I'm trying to use the fact that variances are additive to derive the variance of an unknown random variable.
+
+Say that A and B are both independent normally distributed random variables. A third variable C is the sum of A and B (C = A + B). Since A and B are independent and variances are additive,
+
+var(C) = var(A) + var(B).
+
+Let's say that I know var(C) and var(B), but not var(A) (A is latent while C and B are known). I want to derive var(A). With some rearrangement of the above, we have
+
+var(A) = var(C) - var(B).
+
+This seems straightforward to me, however putting this into practice has given me a bit of trouble. Let's say a, b, and c are samples from A, B, and C, respectively. Given finite sample sizes, there are scenarios where var(b) is greater than var(c) (when the sample size is quite small), just by chance (giving negative values for var(a), which is, of course, nonsensical).
+
+Here is a simulated dataset (in R) that illustrates this case (where a derived var(a) is negative).
+
+#set simulation parameters
+set.seed(15)
+#sample size
+n <- 15
+
+#we won't generate values for b, but we'll assume that the standard deviation of b = 1
+sigma_b <- 1
+
+#generate data for a (we are operating under the assumption that this is latent but sim it here to generate c)
+a <- rnorm(n, 0, 1)
+
+#generate data for c - center each value for c on corresponding a and add some 'error' that has sd = sigma_b (1)
+c <- rnorm(n, a, sigma_b)
+#standard deviation for c
+sigma_c <- sd(c)
+
+#get derived sigma_a from additive variance principle
+sigma_a_der <- sqrt(sigma_c^2 - sigma_b^2)
+
+#returns NaN, because sigma_c > sigma_b
+sigma_c
+sigma_b
+
+#true sigma_a
+sigma_a_true <- sd(a)
+
+
+It's now clear to me that you can't apply the additive variance principle to sample variances in this way. Is there any way of incorporating the fact that these are sample (and not population) variances when trying to derive either var(A) (population variance) or var(a) (sample variance)? In other words, can I get an estimate of var(A) or var(a) with some uncertainty (either analytically or through simulation)? Is there a sampling distribution for var(A) in terms of var(C) and var(B)?
+
+To put this into context, let's say I have one realization of a, b, and c (a single sample from each). My principal goal is to get some estimate of var(a) (with uncertainty), given var(c) and var(b), to use as a prior for the variance in a Bayesian framework (of course, understanding the issues associated with using data to set priors).
+
+I thought that perhaps I could use the fact that $$\frac{(n-1)}{S^2} \sigma^2 \sim \chi_{n-1}^{2}$$ (where $$\sigma^2$$ is the sample variance, $$S^2$$ is the population variance, and $$n$$ is the sample size) to get at this using simulation, but still can't seem to fix issues with negative values when the sample size is small (as in the above N = 15 example). Any thoughts greatly appreciated.
+
+EDIT: Fixed error in equation in last paragraph; added clarification on goals
+
+• It's not really clear what the question is here, but sample variance is just an unbiased estimate of the 'true' variance. Try running your simulation, but instead observe var(c)-var(a)-1. The average result will be 0. The fact that that your estimate of the sample variance is less than one sometimes is just a result of it being an unbiased estimate. – Forrest Jun 1 at 3:03
+• n-denominator sample variances "add". Bessel-corrected (n-1 denominator) sample variances don't (not quite). – Glen_b Jun 1 at 4:26
+• The sum of two independent chi-squared distributions is a chi-squared distribution (add the DFs). However the difference of two chi-squared distributions is not chi-squared and may take negative values. // Similar problem arises trying to estimate the the batch variance $\sigma_B^2$ in a one-way random effects ANOVA model where total variance of $Y_{ij}$ the $j$th obs from the $i$th batch is $\sigma_B^2 + \sigma^2.$ Total variance and error variance can be estimated (from data and ANOVA residuals, respectively), but $\sigma_B^2$ not so easily. – BruceET Jun 1 at 4:42
+• In R, x1 = rchisq(10^5,20); x2 = rchisq(10^5,15); mean(x1 - x2 < 0) returned $\approx 0.27$ on one run. That is $P(X_1-X_2 < 0) \approx 0.27.$ Of course, $E(X_1 - X_2) = 5$ and $Var(X_1 - X_2) = 40+30=70.$ – BruceET Jun 1 at 4:54
+• @Forrest Thanks, added some clarifying statements to the question. I'm more interested in the variance of a single realization rather than the long-term behavior (maybe it's not possible to do what I'd like). – Caseyy Jun 1 at 18:03

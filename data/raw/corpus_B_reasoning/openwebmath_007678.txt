@@ -1,0 +1,123 @@
+# Month: September 2017
+
+## BSides STL – Find the Flag – Decoding
+
+Find the flag hidden in this program!
+
+This challenge starts with a file called flag.exe
+
+After running it, I checked for any recently changed files, no dice.
+
+### Binwalk Output
+
+Looking at the output and, wow! We got a QR code!
+
+And scanning that gives us the flag!
+FLAG(YOUFOUNDTHEICON-BSIDESSTL-2017)
+~T
+
+### Running flag.exe
+
+Alright, let’s throw it in Kali and do some analysis.
+
+Aha! Binwalk says there’s a PNG in there! Lets extract it!
+
+binwalk --dd=".*" flag.exe
+Posted by Tanner in CTF, Posts
+
+## Tokyo Westerns – My Simple Cipher – Crypto
+
+To start off, we are given a text file containing some encrypted data and the program that was used to encrypt the data. The encryption program is as follows:
+
+import sys
+import random
+
+key = sys.argv[1]
+flag = '**CENSORED**'
+
+assert len(key) == 13
+assert max([ord(char) for char in key]) < 128
+assert max([ord(char) for char in flag]) < 128
+
+message = flag + "|" + key
+
+encrypted = chr(random.randint(0, 128))
+
+for i in range(0, len(message)):
+encrypted += chr((ord(message[i]) + ord(key[i % len(key)]) + ord(encrypted[i])) % 128)
+
+print(encrypted.encode('hex'))
+
+Now we know how it was encrypted and how the plaintext is structured! Let’s take a look at the encrypted data.
+
+enc = 7c 15 3a 47 4b 6a 2d 3f 7d 3f 73 28 70 3e 6c 2d 24 3a 08 3e 2e 77 3c 45 54 77 48 66 7c 15 11 33 3f 4f 74 5e
+
+• enc[1:7] is “TWCTF{” this is our flag format
+• enc[20:22] is “}|” this is the end of the flag and the separator between the flag and the key
+• enc[22:] is the encrypted key
+
+So now we need to figure out how to reverse the encryption algorithm.
+
+encrypted += chr((ord(message[i]) + ord(key[i % len(key)]) + ord(encrypted[i])) % 128)
+
+Because we know the first part of the flag, we can use that to retrieve a partial key! That is done through the magic of math
+
+$$E_{n+1} = \left ( P_{n} + K_{n \mod 13} + E_{n} \right ) \mod 128$$
+
+Because of the nature of the input, we can make an educated guess about the values of the above equation pre-mod.
+
+$$w = \left ( E_n + M_n \right )\mod 128$$
+$$g = E_{n+1}$$
+$$k_n = \left\{\begin{matrix}128-w+g & w>g\\ g-w & w \leq g\end{matrix}\right.$$
+
+Or if you’d rather read a program,
+
+encrypted = "7C153A474B6A2D3F7D3F7328703E6C2D243A083E2E773C45547748667C1511333F4F745E"
+
+hexbytes = [encrypted[i:i+2] for i in range(0,len(encrypted),2)]
+
+key = ""
+
+message = "TWCTF{"
+
+work = work%128
+if work > goal:
+out = 128-work+goal
+else:
+out = goal-work
+
+return(out)
+
+i = len(message)-1
+
+for i,byte in enumerate(hexbytes):
+work = int(byte,16) + ord(message[i])
+goal = int(hexbytes[i+1],16)
+
+print(chr(getadd(work,goal)), end="")
+
+Running through this will give us the first 6 characters of the key, which happen to be “ENJ0YH” at this point, we made an educated guess that the whole key was “ENJ0YHACKING!” and ran a decryption program
+
+encrypted = "7C153A474B6A2D3F7D3F7328703E6C2D243A083E2E773C45547748667C1511333F4F745E"
+
+hexbytes = [encrypted[i:i+2] for i in range(0,len(encrypted),2)]
+
+message = ""
+
+key = "ENJ0YHACKING!"
+
+key = [ord(c) for c in key]
+
+work = work%128
+if work > goal:
+out = 128-work+goal
+else:
+out = goal-work
+
+return(out)
+
+for i,byte in enumerate(hexbytes[:-1]):
+work = key[i%13] + int(hexbytes[i],16)
+goal = int(hexbytes[i+1],16)
+
+print(message)

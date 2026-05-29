@@ -1,0 +1,74 @@
+# How to transform an image into a probability density function?
+
+I'd like to use the Metropolis algorithm to randomly generate points with density according to the brightness of an image. I just need to transform a binary image into a pdf function to use this answer.
+
+First attempt:
+
+img = ColorNegate@ColorConvert[ImageResize[lena[], 50], "Grayscale"];
+dims = ImageDimensions[img];
+data = Flatten[
+Table[{{i, j}, PixelValue[img, {i, j}]}, {i, dims[[1]]}, {j,
+dims[[2]]}], 1];
+f = Interpolation[data]
+
+ContourPlot[f[x, y], {x, 1, dims[[1]]}, {y, 1, dims[[2]]}]
+
+Metropolis /:
+RandomDistributionVector[
+Metropolis[pdf_, u0_, s_: 1, n0_: 100, chains_: 200], n_Integer,
+prec_?Positive] :=
+Module[{u, du, p, p1, accept, cpdf},
+cpdf = Compile @@ {{#, _Real} & /@ #, pdf @@ #,
+RuntimeAttributes -> {Listable}, RuntimeOptions -> "Speed"} &[
+Unique["x", Temporary] & /@ u0];
+u = ConstantArray[u0, chains];
+p = cpdf @@ Transpose[u];
+(Join @@
+Table[du =
+RandomVariate[
+NormalDistribution[0, s], {chains, Length[u0]}];
+p1 = cpdf @@ Transpose[u + du];
+accept = UnitStep[p1/p - RandomReal[{0, 1}, chains]];
+p += (p1 - p) accept;
+u += du accept, {Ceiling[(n0 + n)/chains]}])[[n0 + 1 ;;
+n0 + n]]];
+
+p = RandomVariate[Metropolis[f, {25, 25}], 30000];
+ListPlot[p, AspectRatio -> Automatic]
+
+• Why not use HistogramDistribution[] or SmoothKernelDistribution[]? Related to this, look up the docs for ImageHistogram[]. – J. M.'s ennui Aug 14 '15 at 15:35
+• @Guesswhoitis. There are no examples in the Docs for a 3d histogram from a black and white image... – M.R. Aug 14 '15 at 15:58
+• If the intensity represents the PDF magnitude and not the raw data then HistogramDistribution and similar are not what you want. – rhermans Aug 14 '15 at 16:03
+
+If you don't care about the algorithm and only want to sample points with density according to image brightness, you could just use RandomChoice:
+
+using a test image that looks a little bit like a PDF:
+
+img = Image[
+Rescale[Array[
+Sin[#1^2]*Cos[#2 + Sin[#1/5]] + Exp[-(#1^2 + #2^2)/2] &, {512,
+512}, {{-2., 4.}, {-3., 3.}}]]];
+
+
+I can then sample random pixel indices weighted by the corresponding pixel brightness:
+
+weights = Flatten[ImageData[img]];
+sample = RandomChoice[weights -> Range[Length[weights]], 10000];
+
+
+And convert indices back to coordinates:
+
+{w, h} = ImageDimensions[img];
+pts = Transpose[{Mod[sample, w], h - Floor[sample/N[w]]}];
+
+
+(this is blazingly fast. Sampling 10^6 points takes about 0.2 seconds.)
+
+Show[img, Graphics[{Red, PointSize[Small], Opacity[.5], Point[pts]}]]
+
+
+ADD: If you really want to use the MH algorithm, why not use ImageValue directly, instead of creating an interpolation function?
+
+pdf = Function[{x, y}, ImageValue[img, {x, y}]];
+ContourPlot[pdf[x, y], {x, 0, 511}, {y, 0, 511}]
+`

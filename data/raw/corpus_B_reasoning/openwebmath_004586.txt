@@ -1,0 +1,120 @@
+# Check if a postcode is in a list
+
+I'm looking for improvement / advice / reviews on how I can improve this code. I feel like there is a better way or more efficient way of doing this and I am over looking it.
+
+The Plugin I made is very simple:
+
+1. It stores a list of Postcodes that the admin inputs into a textarea - 1 Per Line.
+2. Plugin creates a text input on the front end that allows their customers to search if their postcode is in the list with Ajax.
+
+The Plugin has a few options to allow the admin to customize the look and functionality of the plugin. Below is the function that takes the postcode and searches the list:
+
+function sapc_ajax_check() {
+$checker_defaults = get_option( 'sapc_checker_settings_options' );$found = 0; $msg = '';$passed = 0;
+if (!empty( $_POST ) && isset($_POST['action']) && strcmp($_POST['action'], 'sapc_ajax_check') === 0) { if(isset($_POST['pc'])){
+if(isset($_POST['verify-int']) &&$_POST['verify-int'] == 'on'){
+if(is_numeric($_POST['pc']) && is_int((int)$_POST['pc'])){
+$passed = 1; } }elseif($checker_defaults['verify-int'] == 'on'){
+$passed = 1; }else{$passed = 1;}
+if($passed === 1){$temp_l = $checker_defaults['postcodes'];$postcode_l = explode(PHP_EOL, $temp_l); if(is_array($postcode_l) && !empty($postcode_l)){ foreach($postcode_l as $i=>$temp_p){
+if( strpos($temp_p, ':') !== false) {$v = explode(':', $temp_p); if(strcmp($v[0], $_POST['pc']) === 0){$found = 1;
+$msg .=$v[1] .', ';
+}
+}else{
+if(strcmp($temp_p,$_POST['pc']) === 0){
+$found = 1;$msg .= $temp_p .', '; } } } if($msg != ''){
+$msg = substr($msg, 0, strlen($msg) - 2); } }else{$msg ='Error: Try Again';}
+}else{$msg ='Error: Invalid Postcode';} }else{$msg ='Error: No Postcode';}
+}else{$msg = 'Error: No Data';} if($found == 0){
+}else{
+echo json_encode(array('Success', $msg), JSON_FORCE_OBJECT); } die(); }  There are 2 sets of variables. 1. First set is the default settings from the admin options page, this helps with placing widgets and allows admins to set their own defaults. Postcodes can only be set here. 2. Second set is from the widget instance which allows admins to personalize each widget if need be. I'll explain some of the variables. $_POST['pc'] = Postcode from User
+
+$_POST['verify-int'] = Option to check if postcode is all integers - Passed from Postcode Widget $checker_defaults['postcodes'] = list of postcodes
+
+Postcode List accepts the following formats:
+
+Postcode:Surbubr Postcode
+
+(1 per line)
+
+What can I do to make this function more efficient and more cleaner? If you need anything else please let me know I think I've covered everything.
+
+Inside of a function call, avoid echoing. By hardcoding echoes, you prevent the "silent" usage of the function. It may be necessary in the future to present the output in more than one format, so use a return inside the function declaration and perform the echo on the function call.
+
+Empty on $_POST is an imprecise way of checking for expected submission data. strcmp() provides greater specificity than your condition logic requires. For your logic, just check if the input is identical to the string without a function call. Condense conditionals within the same block that have the same outcome. Multiple conditions lead to $passed = 1 so they can be consolidated. I didn't really bother to understand the conditional logic behind $passed = 1 but it should certainly be refined. Refine your validation check on $_POST['pc']. You are checking if is_numeric(), that's fine. Then checking if the value that is cast as (int) is an integer -- um, at this point of course it is, it has no choice. Better yet, why not just make a single check with ctype_digit()? You might also like to check that the strlen() is valid (only you will know if/how to design this for your region). If you want to check the quality and length of the postcode value, perhaps it would be more sensible to use preg_match() where you can design robust/flexible validation with a single function call (again, only you can determine this).
+
+$temp_l and $temp_p are poor variable naming choices. As a new dev to your script, I don't instantly know what they contains (I can venture a guess, but don't ask devs to do this). Try to practice a more literal naming convention. Furthermore, try to avoid declaring single-use variables ($temp_l). Often, fewer variables will lead to fewer typos/mistakes, concise code, and improved readability. When data needs some explaining, use commenting. *notes: 1. I have read some cases where declaring a variable prior to a foreach loop can improve performance 2. Some devs don't like to see functions fed to a foreach loop, I can respect this and I don't typically do this in my own projects. There is no use in checking if the return value from explode() is an array. It returns an array by design, so you can remove that check. Even if you explode a empty string with PHP_EOL, you will not get a true evaluation from empty(), so that check is pointless to write. At the end of the day, if you try to use foreach() on an empty array, it simply won't iterate -- no worries. If you have no intentions of using $i in your foreach loop, don't bother to declare it. I don't like single-use variables; I super don't like no-use variables.
+
+How to get the substring before the first occurrence of a character without explode()? strstr() with a true third parameter. Otherwise, explode has to create an array enroute to delivering the string that you need. My suggested snippet will attempt to extract the substring before the first colon, if there is no colon the full string will be used.
+
+By storing qualifying matches as an array, you can avoid having to trim any trailing delimiters from your output string. In fact, return the data without delimiters as an array so that you can easily adjust the way that your qualifying values are delimited.
+
+Strictly speaking, having zero qualifying results from a postcode search doesn't mean that there was an "Error", so just have your function calling script accommodate for "Successful" yet "Empty" results.
+
+I can't imagine a benefit from JSON_FORCE_OBJECT.
+
+die() in nearly every scenario should be avoided.
+
+Suggested Code Overhaul:
+
+function sapc_ajax_check() {
+$checker_defaults = get_option('sapc_checker_settings_options'); if (!isset($_POST['action']) ||  $_POST['action'] !== 'sapc_ajax_check') {$errors[] = 'Missing required submission data';
+}
+if (!isset($_POST['pc'])) {$errors[] = 'Missing postcode value';
+}
+if (isset($_POST['verify-int']) &&$_POST['verify-int'] === 'on' && ctype_digit($_POST['pc'])) {$errors[] = 'Invalid postcode value';
+}
+if (isset($errors)) { return json_encode(['Error',$errors]);
+}
+
+$result = []; foreach (explode(PHP_EOL,$checker_defaults['postcodes']) as $postcode) {$before_colon = strstr($postcode, ':', true);$postcode = ($before_colon === false ?$postcode : $before_colon); if ($postcode === $_POST['pc'])) {$result[] = $postcode; } } return json_encode(['Success',$result]);
+}
+
+
+Much cleaner right?
+
+• Looks much cleaner thank you. After the other answers I had started working on something similar to yours with the exception of using ctype_digit, strstr and the foreach. Glad I was heading in the right direction. Definitely all makes sense now it's in front of me. Much appreciated. – Second2None Jan 31 at 1:41
+
+It looks like you could benefit by trying to avoid the arrowhead anti-pattern.
+
+This occurs when you check the validity of your inputs before proceeding to do the work within the conditional body, and can lean to hard to read code when there are many conditionals to check, each relying on the previous condition passing.You end up with "wide" code due to the arrow shape, and there can be a lot of lines between where a condition fails, and how it is handled.
+
+/* arrowhead code */
+
+if (input !== null) {
+if (input.property !== null) {
+if (checkIfValid(input.property) > 0) {
+
+// do the work
+
+} else {
+// handle invalid property
+} else {
+// no property
+} else {
+// no input
+}
+
+
+This can be prevented with a "fail fast" approach. Instead of checking that a condition is valid and putting everything in its body, try checking if the condition is invalid, and if so, handle it (by logging a message in this case), and exit the function. Then check if the next condition is invalid, etc. Once you've confirmed the inputs are valid in this fail fast logic at the top, you can do the real work in a less deeply nested block that is easier to read and understand.
+
+/* arrowhead removed */
+
+if (input === null) {
+// no input
+}
+if (input.property !== null) {
+// no property
+}
+if (checkIfValid(input.property) <= 0) {
+// handle invalid property
+}
+
+// do the work
+
+
+I agree with the advice in the answer by user4963355. In this presentation about cleaning up code Rafael Dohms talks about limiting the indentation level to one per method and avoiding the else keyword. (see the slides here).
+
+One other suggestion I have is whenever you find an element to add to the message, e.g. values in $v[1] or $temp_p, instead of appending them to $msg, push them into an array. Instead of checking if $found is 0, you can check if the length of the array is 0 (using count()). If it is not 0, construct the message using implode(). That way there is no need to remove excess characters from the end of the string and you can use the semantics of "found" using count().
+
+• Yes pushing to array and imploding is a much better idea. Thanks for the link will check it out. – Second2None Jan 30 at 22:19

@@ -1,0 +1,64 @@
+Question: <p>I have a class that I wish to expose as a remote service using pythons SimpleXMLRPCServer. The server startup looks like this:</p>
+
+<pre><code>server = SimpleXMLRPCServer((serverSettings.LISTEN_IP,serverSettings.LISTEN_PORT))
+
+service = Service()
+
+server.register_instance(service)
+server.serve_forever()
+</code></pre>
+
+<p>I then have a ServiceRemote class that looks like this:</p>
+
+<pre><code>def __init__(self,ip,port):
+    self.rpcClient = xmlrpclib.Server('http://%s:%d' %(ip,port))
+
+def __getattr__(self, name):
+    # forward all calls to the rpc client
+    return getattr(self.rpcClient, name)
+</code></pre>
+
+<p>So all calls on the ServiceRemote object will be forwarded to xmlrpclib.Server, which then forwards it to the remote server. The problem is a method in the service that takes named varargs:</p>
+
+<pre><code>@useDb
+def select(self, db, fields, **kwargs):
+    pass
+</code></pre>
+
+<p>The @useDb decorator wraps the function, creating the db before the call and opening it, then closing it after the call is done before returning the result.</p>
+
+<p>When I call this method, I get the error "<strong>call</strong>() got an unexpected keyword argument 'name'". So, is it possible to call methods taking variable named arguments remotely? Or will I have to create an override for each method variation I need.</p>
+
+<hr>
+
+<p>Thanks for the responses. I changed my code around a bit so the question is no longer an issue. However now I know this for future reference if I indeed do need to implement positional arguments and support remote invocation. I think a combination of Thomas and praptaks approaches would be good. Turning kwargs into positional args on the client through xmlrpclient, and having a wrapper on methods serverside to unpack positional arguments.</p>
+
+Answer: <p>Using the above advice, I created some working code.</p>
+
+<p>Server method wrapper:</p>
+
+<pre><code>def unwrap_kwargs(func):
+    def wrapper(*args, **kwargs):
+        print args
+        if args and isinstance(args[-1], list) and len(args[-1]) == 2 and "kwargs" == args[-1][0]:
+            func(*args[:-1], **args[-1][1])
+        else:
+            func(*args, **kwargs)
+    return wrapper
+</code></pre>
+
+<p>Client setup (do once):</p>
+
+<pre><code>_orig_Method = xmlrpclib._Method
+
+class KeywordArgMethod(_orig_Method):     
+    def __call__(self, *args, **kwargs):
+        args = list(args) 
+        if kwargs:
+            args.append(("kwargs", kwargs))
+        return _orig_Method.__call__(self, *args)
+
+xmlrpclib._Method = KeywordArgMethod
+</code></pre>
+
+<p>I tested this, and it supports method with fixed, positional and keyword arguments.</p>

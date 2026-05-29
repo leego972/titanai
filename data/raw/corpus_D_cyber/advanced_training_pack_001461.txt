@@ -1,0 +1,472 @@
+================================================================================
+TITAN AI — TRAINING PACK 036: THREAT INTELLIGENCE PLATFORMS AND OPERATIONS
+INTELLIGENCE CYCLE, MISP, OPENCTI, STIX/TAXII, APT PROFILING, CTI PROGRAM BUILD
+================================================================================
+
+================================================================================
+PART 1: CYBER THREAT INTELLIGENCE FUNDAMENTALS
+================================================================================
+
+--- THE INTELLIGENCE CYCLE ---
+
+PLANNING AND DIRECTION:
+  Define intelligence requirements (IRs): What specific questions need answering?
+  Priority Intelligence Requirements (PIRs): Most critical questions for decision-making.
+  
+  Examples of well-formed IRs:
+  "What malware families is APT41 currently deploying against financial institutions?"
+  "Which vulnerabilities are being actively exploited against our technology stack?"
+  "What initial access methods are ransomware groups using in our sector?"
+  
+  Bad IR: "Tell us everything about threats" — not actionable, no focus.
+
+COLLECTION:
+  Sources mapped to each IR. Different sources for different questions.
+  
+  Technical indicators (IoC feeds): IP/domain/hash. Answers: "Is this IOC active?"
+  Adversary infrastructure: Shodan, Censys, passive DNS. Answers: "What does their infrastructure look like?"
+  Dark web monitoring: Forums, markets, Telegram channels. Answers: "Are we being discussed?"
+  Malware repositories: MalwareBazaar, VirusTotal, hybrid-analysis. Answers: "What is this sample?"
+  Vendor reports: Mandiant, CrowdStrike, Recorded Future. Answers: "What is APT X doing?"
+
+PROCESSING:
+  Raw data → Structured intelligence.
+  Normalize IOCs: Remove duplicates, standardize formats.
+  Enrich: Resolve domains, lookup ASNs, identify infrastructure clusters.
+  Correlate: Connect IOCs to known campaigns/actors.
+  Score: Confidence level, relevance, freshness.
+
+ANALYSIS:
+  Diamond Model: Adversary ↔ Capability ↔ Infrastructure ↔ Victim. Map relationships.
+  Kill Chain mapping: Which phase do these indicators apply to? Weaponization, delivery, etc.
+  Attribution: Who is behind this? Evidence-based, confidence-stated.
+  Predictive: Based on past behavior, what might this actor do next?
+
+DISSEMINATION:
+  Format appropriate to audience:
+  Executive: Business impact, risk, recommended decisions. No technical detail.
+  SOC/IR: Specific IOCs, detection rules, priority alerts. Actionable now.
+  Red team: TTPs, infrastructure patterns, tools. For simulation.
+  
+  Timeliness: Intelligence aged beyond window of relevance = worthless.
+  An IOC shared 30 days after observation: Attacker moved infrastructure. Useless.
+
+FEEDBACK:
+  Did the intelligence answer the requirement?
+  Were the IOCs accurate? False positive rate?
+  Was dissemination timely?
+  Update: Collection plan, source priorities, processing rules.
+
+--- INTELLIGENCE TYPES ---
+
+STRATEGIC (months, years):
+  Who: Nation-state actors, criminal ecosystems.
+  Threat trends: What sectors are targeted? What capabilities are emerging?
+  Geopolitical context: How do current events affect cyber threat landscape?
+  Audience: CISO, board, strategic planning.
+  
+OPERATIONAL (weeks, months):
+  Specific campaigns: Active threat actors targeting your sector.
+  Campaign infrastructure: C2 servers, delivery domains.
+  TTPs: How are specific actors operating right now?
+  Audience: Threat intelligence team, SOC manager, IR team.
+
+TACTICAL (hours, days):
+  IOCs: Malicious IPs, domains, file hashes, email subjects, URLs.
+  YARA rules: Detect specific malware families.
+  Sigma rules: Detect specific attack behaviors in logs.
+  Audience: SOC analysts, SIEM rules, firewall blocklists.
+
+================================================================================
+PART 2: MISP — MALWARE INFORMATION SHARING PLATFORM
+================================================================================
+
+--- MISP ARCHITECTURE ---
+
+MISP: Open-source threat intelligence platform.
+Sharing: Between organizations, ISACs, government CERTs.
+Structure: Events → Attributes → Tags → Galaxy clusters.
+
+EVENT: Container for related intelligence.
+  Title: "APT41 Operation ShadowBrass — Q1 2025"
+  Date: When observed.
+  Distribution: This organization, community, all, custom sharing group.
+  TLP: Traffic Light Protocol marking.
+  Info: Free-text description.
+
+ATTRIBUTE: Individual data point within event.
+  Types: ip-dst, domain, md5, sha256, email-src, url, yara, snort, filename, etc.
+  Value: The actual IOC value.
+  Category: Network activity, Payload delivery, External analysis, etc.
+  IDS flag: Should this be pushed to detection systems?
+  Comment: Context about this attribute.
+  Confidence: High/Medium/Low.
+
+TAGS: Machine-readable labels.
+  TLP:RED, TLP:AMBER, TLP:GREEN, TLP:WHITE
+  MITRE ATT&CK technique: misp-galaxy:mitre-attack-pattern="T1566.001"
+  Sector: finance, healthcare, government
+  Custom: internal:investigated, internal:false-positive
+
+GALAXY CLUSTERS: Complex structured intelligence objects.
+  Actor galaxy: APT41, Lazarus, FIN7 — with known TTPs, aliases, country.
+  Tool galaxy: Cobalt Strike, Mimikatz, njRAT — with related attributes.
+  ATT&CK galaxy: Full MITRE ATT&CK technique catalog with details.
+  Ransomware galaxy: Known ransomware families with technical details.
+
+MISP API USAGE:
+
+  import requests
+  
+  MISP_URL = "https://misp.company.com"
+  MISP_KEY = "YOUR_AUTH_KEY"
+  
+  headers = {
+      "Authorization": MISP_KEY,
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+  }
+  
+  # Search for events related to a specific IOC
+  def search_ioc(value):
+      response = requests.post(
+          f"{MISP_URL}/attributes/restSearch",
+          json={"value": value, "type": "ip-dst", "returnFormat": "json"},
+          headers=headers, verify=False
+      )
+      return response.json()['response']['Attribute']
+  
+  # Add new event with IOCs
+  def add_event(title, iocs):
+      event = {
+          "Event": {
+              "info": title,
+              "distribution": 1,  # This community
+              "threat_level_id": 2,  # Medium
+              "analysis": 1,  # Ongoing
+              "Attribute": [
+                  {"type": "ip-dst", "category": "Network activity",
+                   "value": ioc["ip"], "to_ids": True}
+                  for ioc in iocs if ioc.get("ip")
+              ]
+          }
+      }
+      response = requests.post(f"{MISP_URL}/events", json=event, headers=headers, verify=False)
+      return response.json()
+  
+  # Export as SIEM rules
+  def export_for_siem(event_id):
+      response = requests.get(
+          f"{MISP_URL}/events/restSearch/download/snort/json/1",
+          json={"eventid": event_id},
+          headers=headers, verify=False
+      )
+      return response.text  # Snort/Suricata rules
+
+MISP CORRELATION ENGINE:
+  When you add an attribute: MISP automatically checks if same value exists elsewhere.
+  "This IP appears in 12 other events" → Related campaigns. Shared infrastructure.
+  Builds: Actor infrastructure graph automatically from shared events.
+
+SHARING GROUPS AND TLP:
+  TLP:RED: No sharing beyond recipient. Direct conversation only.
+  TLP:AMBER: Share within organization and trusted partners with need-to-know.
+  TLP:AMBER+STRICT: Share within organization only.
+  TLP:GREEN: Share within community. Not publicly.
+  TLP:CLEAR: No restrictions. Public.
+  
+  MISP sharing groups: Define exactly which organizations can see an event.
+  ISAC (Information Sharing and Analysis Center): Industry-specific sharing groups.
+  FS-ISAC: Financial services. H-ISAC: Healthcare. E-ISAC: Energy.
+
+================================================================================
+PART 3: STIX AND TAXII
+================================================================================
+
+--- STIX 2.1 — STRUCTURED THREAT INFORMATION EXPRESSION ---
+
+STIX: Standard format for cyber threat intelligence.
+Machine-readable. Enables automated sharing and processing.
+
+STIX DOMAIN OBJECTS (SDOs):
+  Attack-pattern: MITRE ATT&CK technique.
+  Campaign: Set of related adversary activities with common goal.
+  Course-of-action: Mitigation or remediation action.
+  Identity: Organization or individual.
+  Indicator: Pattern for detecting malicious activity.
+  Infrastructure: Command and control, hosting.
+  Intrusion-set: Named threat actor grouping (APT29).
+  Malware: Specific malware family.
+  Threat-actor: Individual or group.
+  Tool: Legitimate tool used by attackers (Mimikatz, PSExec).
+  Vulnerability: CVE reference.
+  Observed-data: Raw observed information (network traffic, file).
+
+STIX RELATIONSHIP OBJECTS (SROs):
+  Relationship: How two objects relate.
+  Sighting: Indicator was seen in the wild.
+
+STIX EXAMPLE — APT CAMPAIGN:
+  {
+    "type": "bundle",
+    "id": "bundle--abc123",
+    "objects": [
+      {
+        "type": "threat-actor",
+        "id": "threat-actor--apt41",
+        "name": "APT41",
+        "aliases": ["Double Dragon", "BARIUM", "Winnti"],
+        "country": "CN",
+        "goals": ["espionage", "financial-crime"],
+        "sophistication": "advanced",
+        "resource_level": "government"
+      },
+      {
+        "type": "malware",
+        "id": "malware--speculoos",
+        "name": "SPECULOOS",
+        "malware_types": ["backdoor"],
+        "is_family": true,
+        "description": "Linux backdoor used by APT41 targeting network devices"
+      },
+      {
+        "type": "relationship",
+        "id": "relationship--001",
+        "relationship_type": "uses",
+        "source_ref": "threat-actor--apt41",
+        "target_ref": "malware--speculoos"
+      },
+      {
+        "type": "indicator",
+        "id": "indicator--ip",
+        "name": "APT41 C2 IP",
+        "pattern": "[ipv4-addr:value = '1.2.3.4']",
+        "pattern_type": "stix",
+        "valid_from": "2025-01-01T00:00:00Z",
+        "valid_until": "2025-04-01T00:00:00Z",
+        "indicator_types": ["malicious-activity"]
+      },
+      {
+        "type": "relationship",
+        "relationship_type": "indicates",
+        "source_ref": "indicator--ip",
+        "target_ref": "malware--speculoos"
+      }
+    ]
+  }
+
+TAXII 2.1 — TRANSPORT FOR STIX:
+  TAXII: API spec for sharing STIX over HTTP.
+  Collections: Named groups of STIX objects.
+  GET /api/v2/collections/          → List available collections
+  GET /api/v2/collections/{id}/objects/?added_after=2025-01-01T00:00:00Z
+  → Get new objects since date (incremental updates)
+
+  Python TAXII client:
+  from taxii2client.v21 import Server
+  
+  server = Server("https://cti-taxii.mitre.org/taxii/",
+                  user="username", password="password")
+  
+  for collection in server.api_roots[0].collections:
+      print(f"Collection: {collection.title}")
+      
+  # Get ATT&CK Enterprise data from MITRE TAXII server
+  enterprise = server.api_roots[0].collections[0]
+  attack_data = enterprise.get_objects()
+  
+  for obj in attack_data.objects:
+      if obj.type == "attack-pattern":
+          print(f"Technique: {obj.name} ({obj.external_references[0].external_id})")
+
+================================================================================
+PART 4: APT PROFILING AND ATTRIBUTION
+================================================================================
+
+--- BUILDING AN ADVERSARY PROFILE ---
+
+PROFILE COMPONENTS:
+  1. Aliases: All known names for the group.
+  2. Attribution: Country, government/criminal/hacktivist, confidence level.
+  3. Motivations: Espionage, financial, destructive, hacktivism.
+  4. Target sectors: Finance, government, defense, healthcare, energy.
+  5. Target geographies: Specific countries, regions.
+  6. Initial access: Spear phishing, supply chain, valid accounts, vulnerabilities.
+  7. Tools: Custom malware, commodity tools, LOLBINs.
+  8. Infrastructure: Hosting patterns, domain patterns, ASNs used.
+  9. Timeline: When first seen, notable campaigns.
+  10. Relationships: Shared tools/infrastructure with other actors.
+
+DIAMOND MODEL APPLICATION:
+  
+                    Adversary
+                   /          \
+                  /            \
+    Infrastructure ──────── Capability
+                  \            /
+                   \          /
+                    Victim
+  
+  APT41 Diamond:
+  Adversary: APT41 (Double Dragon) — China, MPS/MSS-linked.
+  Capability: SPECULOOS, DUSTPAN, DEADEYE, Cobalt Strike, supply chain attacks.
+  Infrastructure: Compromised NAS devices as relays, legitimate cloud services, DDNS.
+  Victim: Healthcare, TMT, government, gaming companies. US, EU, South/Southeast Asia.
+  
+  Meta-features:
+  Timestamp: Active since 2012.
+  Phase: Multiple kill chain phases (persistent, long-dwell).
+  Direction: State-sponsored + financial crime simultaneously (unique).
+  Methodology: Supply chain, spear phishing, SQL injection, zero-days (used several).
+  Resources: Government-backed. Significant zero-day budget.
+
+ATTRIBUTION CONFIDENCE LEVELS:
+  Nation-state attribution: Use vocabulary, not claims.
+  HIGH CONFIDENCE: Multiple corroborating sources, technical + HUMINT evidence.
+  MEDIUM CONFIDENCE: Strong technical evidence, single source for some claims.
+  LOW CONFIDENCE: Circumstantial, single source, possible false flag.
+  
+  Rules for attribution:
+  Correlation ≠ attribution. Multiple actors share tools (leaked/sold).
+  Language in malware ≠ author nationality (deliberate obfuscation).
+  Infrastructure hosting ≠ operator location.
+  Require: Multiple independent technical indicators + contextual evidence.
+
+APT29 (COZY BEAR) PROFILE:
+  Attribution: Russia, SVR (Foreign Intelligence Service). HIGH CONFIDENCE.
+  Aliases: Cozy Bear, The Dukes, Office Monkeys, YTTRIUM.
+  Motivations: Espionage. Geopolitical intelligence collection.
+  Targets: US/EU government, think tanks, political organizations, energy.
+  
+  Signature TTPs:
+  WellMess/WellMail: Custom malware. C2 via HTTP/HTTPS.
+  MiniDuke: Custom malware. PDF delivery. Twitter/GitHub C2 (domain fronting via legitimate services).
+  Steganography: Hide C2 communication in images (Twitter posts).
+  Supply chain: SolarWinds SUNBURST (2020) — compromised build server, inserted backdoor.
+  NOBELIUM campaign: Compromised MSP (Constant Contact) to reach downstream targets.
+  
+  SUNBURST technical:
+  - Compromised SolarWinds Orion build process (legitimate software supply chain)
+  - Backdoor included in signed updates
+  - 18,000+ organizations received the backdoor
+  - Dormant for 2 weeks after install (avoid sandbox detection)
+  - Domain generation algorithm for initial C2 check-in
+  - Only activated on: Government + Fortune 500 targets (not all 18K)
+  - Lateral movement to cloud: Compromised SAML signing cert → forge tokens for all users
+
+APT41 FINANCIAL CRIME COMPONENT:
+  Unique: State-sponsored for espionage AND criminal for financial gain simultaneously.
+  
+  Criminal activities:
+  - Video game currency theft: Compromise game company servers, steal virtual currency, sell.
+  - Ransomware: Deployed Maze ransomware against non-espionage targets.
+  - Cryptocurrency exchange attacks.
+  - Skimming malware on e-commerce sites.
+  
+  Timing: Criminal operations on personal time, espionage for government.
+  Evidence: Different operational security (worse for criminal ops), different hours.
+
+================================================================================
+PART 5: BUILDING A CTI PROGRAM
+================================================================================
+
+--- CTI PROGRAM MATURITY MODEL ---
+
+LEVEL 1 — REACTIVE (most organizations):
+  IOC ingestion: Receive threat feeds, block IOCs in firewall/proxy.
+  Incident-driven: Research only when breach occurs.
+  No proactive collection. No analysis. Pure consumption.
+  
+  Tooling: Firewall, SIEM with threat feed integration.
+  Team: Part-time analyst who "does CTI" alongside other roles.
+
+LEVEL 2 — OPERATIONAL:
+  Regular threat reporting: Weekly/monthly internal reports.
+  Sector-specific intelligence: Subscribe to ISAC. Track relevant APTs.
+  Integration: IOCs automatically pushed to security tools.
+  Hunt program: Proactive hunting based on CTI.
+  
+  Tooling: MISP or TIP (Threat Intelligence Platform), SIEM, EDR.
+  Team: 1-2 dedicated CTI analysts.
+
+LEVEL 3 — STRATEGIC:
+  Intelligence drives security decisions: Budget, architecture, risk.
+  Red team intel: Simulate specific actors targeting the organization.
+  External sharing: Contribute to ISAC, government sharing programs.
+  Finished intelligence: Products tailored to different audiences.
+  
+  Tooling: Commercial TIP (Recorded Future, ThreatConnect), MISP, custom tooling.
+  Team: CTI team lead + analysts + OSINT specialists.
+
+LEVEL 4 — ADVANCED:
+  Original research: Internal vulnerability research, reverse engineering.
+  Attribution analysis: Develop assessments, share with community.
+  Influence operations: Track and counter disinformation.
+  Partnership: Formal relationships with government, peer organizations, vendors.
+  
+  Tooling: All of above + malware lab + intelligence analysis workstations.
+  Team: Full CTI capability. 5+ people.
+
+--- THREAT INTELLIGENCE PLATFORM (TIP) COMPARISON ---
+
+RECORDED FUTURE:
+  Strength: Real-time data. 10M+ sources. Machine learning risk scores.
+  Unique: Web, dark web, and technical telemetry in one platform.
+  Modules: Vulnerability intelligence (CVE risk scoring), brand intelligence, SecOps.
+  
+  Risk score example:
+  CVE published → RF analyzes: Is it being discussed on dark web? Is there PoC?
+  Are threat actors mentioning it? → Score: Critical (90+) = patch now.
+  Standard CVSS 7.5 → RF says risk 95 = it's being actively exploited. Prioritize over other 7.5s.
+
+THREATCONNECT:
+  Strength: Workflow automation. Case management. Playbooks.
+  Strong: SOAR integration. Analyst productivity.
+  Unique: CAL (Collective Analytics Layer) — aggregate enrichment from community.
+
+ANOMALI THREATSTREAM:
+  Strength: IOC management at scale. Feed aggregation.
+  Integrations: 180+ technology integrations (SIEM, firewall, etc.)
+  Strong: Automating IOC distribution to security tools.
+
+OPENCTI (OPEN SOURCE):
+  Modern architecture. Connectors ecosystem. GraphQL API.
+  Strong: STIX 2.1 native. Full relationship graph.
+  Cost: Free. Self-hosted. Requires operational resources.
+  
+  OpenCTI connector example (auto-import Mitre ATT&CK):
+  MITRE ATT&CK connector → pulls from MITRE TAXII server → imports all techniques into OpenCTI.
+  Campaign connector → links actors to techniques → visual kill chain mapping.
+
+--- DARK WEB MONITORING OPERATIONS ---
+
+WHAT TO MONITOR:
+  Organization name: Detect if company mentioned in breach discussions.
+  Executive names: Target for spear phishing, credential theft.
+  Domain names: "company.com" credentials in leaked databases.
+  Product names: Vulnerabilities being sold for your specific products.
+  Ransomware group blogs: Victim naming before/after ransom paid.
+  Credential markets: Genesis Market, Russian Market — stolen credentials for your domain.
+
+OPERATIONAL APPROACH:
+  DO NOT: Access dark web from corporate infrastructure.
+  DO NOT: Register accounts using real identity or corporate email.
+  Use: Dedicated infrastructure. Tor Browser. Operational separation.
+  
+  Monitoring services:
+  Kela Darkbeast, Cobwebs Technologies, Intel 471 (commercial).
+  Flare.io (automated dark web monitoring).
+  DarkOwl Vision (largest dark web index).
+  
+  Manual approaches: Tor Browser, OnionScan for .onion indexing.
+
+================================================================================
+END OF PACK 036: THREAT INTELLIGENCE
+Total: Intelligence cycle (planning/collection/processing/analysis/dissemination/
+feedback), strategic/operational/tactical types, MISP (events/attributes/tags/galaxy,
+API usage, sharing groups/TLP), STIX 2.1 (full SDO catalog, worked APT example bundle),
+TAXII 2.1 with Python client, Diamond Model with APT41 example, attribution confidence
+levels and rules, APT29 full profile (SUNBURST technical breakdown), APT41 dual-use
+profile, CTI program maturity model (4 levels), TIP comparison (Recorded Future/
+ThreatConnect/Anomali/OpenCTI), dark web monitoring operations.
+================================================================================

@@ -1,0 +1,62 @@
+# Logit - probit regression
+
+I was running regression of - determinants of acceptance into a social science college. I found this unrelated paper (Screenshot of relevant page attached herewith). Here, they have computed logit and probit regression at probabilities =0.5 and 0.8 and compared it with linear probability regression.
+
+I was wondering can we do the same in stata? (Can we run logistic regression in stata at a particular probability say 0.5)
+
+I tried to look this problem over the internet but couldn't find any useful resource on this.
+
+The authors are evaluating the marginal effects at the two levels of probability. It's just the derivative of the conditional probability for the logit or probit model times the corresponding coefficient. I knew this because the multiplicative factors on the index function coefficients (.25, .4, .16, .28) correspond to those derivatives. You can do this with lincom or margins of an expression in Stata.
+
+This is an old fashioned approach to showing marginal effects that was more popular when statistical software was less developed.
+
+Edit:
+
+In response your comment, here is some code showing this calculation using lincom and margins on the cars dataset. I think you are mistaken about what these commands can accomplish. You can find the derivation of the marginal effect for logit here and probit here. There is some code at the end showing how to calculate the average marginal effects, which should have correct larger SEs, will also handle categorical variables correctly, and are arguably more representative of your data that the approach in this paper. Moreover, their approach in the paper treats the categorical variables as if they were continuous, which can be odd.
+
+#delimit;
+sysuse auto, clear;
+
+/* OLS */
+regress foreign c.mpg, robust;
+margins, dydx(mpg);
+
+/* Logit MEs at p = 0.5 and p = 0.8 */
+logit foreign c.mpg, nolog;
+/* NB: these SEs are too small */
+lincom .5*(1-.5)*_b[mpg];
+lincom .8*(1-.8)*_b[mpg];
+margins, expression(.8*(1-.8)*_b[mpg]);
+
+/* Probit MEs at p = 0.5 and p = 0.8 */
+probit foreign c.mpg, nolog;
+/* NB: these SEs are too small */
+lincom =normalden(invnormal(.5))'*_b[mpg];
+lincom =normalden(invnormal(.8))'*_b[mpg];
+margins, expression(normalden(invnormal(.8))*_b[mpg]);
+
+/* Plot for all possible values of p (not just 0.5 and 0.8) */
+tw
+(function y = .0312915)
+(function y = x*(1-x)*.1597621, range(0 1))
+(function y = normalden(invnormal(x))*.0960601, range(0 1))
+, ylab(#10, angle(horizontal) grid)
+ytitle("Change in Probability")
+xlab(#10, grid)
+xtitle("Predicted Probability of Foreign Origin")
+xline(.5 .8, lpatter(dash))
+title("Marginal Effect of an One Additional MPG at Different Pr(Foreign)", span size(medium))
+legend(label(1 "OLS ME" ) label(2 "Logit ME") label(3 "Probit ME") rows(1));
+
+/* Average Marginal Effects with continuous and categorical covariates */
+gen high_mpg = mpg>21;
+logit foreign c.weight i.high_mpg, nolog;
+margins, dydx(*);
+
+
+The general plot looks like this, which shows that the effect depends on the baseline probability for logit and probit, but not for OLS, where the ME is constant. That is, the effect is biggest for observations that are likely to go either way and smallest for the very likely and very unlikely observations in the non-OLS models:
+
+• Thanks you so much. Dec 6, 2019 at 7:24
+• I looked into the commands that you provided. I don't know how that is useful. Lincom is used to compare variables and not model, not the way I want. Margin compute odd ratios at different values of independent variable and not for specific values of dependent variable. Dec 6, 2019 at 16:48
+• @ElinaGilbert I added some more material in response to your concerns. Dec 6, 2019 at 21:39
+• Great explanation indeed! Dec 7, 2019 at 8:33

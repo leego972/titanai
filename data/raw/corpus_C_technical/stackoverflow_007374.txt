@@ -1,0 +1,70 @@
+Question: <p>I read the part of <a href="http://docs.python.org/library/configparser.html">the docs</a> and saw that the <code>ConfigParser</code> returns a list of key/value pairs for the options within a section. I figured that keys did not need to be unique within a section, otherwise the parser would just return a mapping. I designed my config file schema around this assumption, then sadly realized that this is not the case:</p>
+
+<pre><code>&gt;&gt;&gt; from ConfigParser import ConfigParser
+&gt;&gt;&gt; from StringIO import StringIO
+&gt;&gt;&gt; fh = StringIO("""
+... [Some Section]
+... spam: eggs
+... spam: ham
+... """)
+&gt;&gt;&gt; parser = ConfigParser()
+&gt;&gt;&gt; parser.readfp(fh)
+&gt;&gt;&gt; print parser.items('Some Section')
+[('spam', 'ham')]
+</code></pre>
+
+<p>Then I went back and found the part of the docs that I <em>should</em> have read:</p>
+
+<blockquote>
+  <p>Sections are normally stored in a
+  builtin dictionary. An alternative
+  dictionary type can be passed to the
+  ConfigParser constructor. For example,
+  if a dictionary type is passed that
+  sorts its keys, the sections will be
+  sorted on write-back, as will be the
+  keys within each section.</p>
+</blockquote>
+
+<p>To keep my existing configuration file scheme (which I really like now ;) I'm thinking of passing a mapping-like object as mentioned above that accumulates values instead of clobbering them. Is there a simpler way to prevent key/value collapse that I'm missing? Instead of making a crazy adapter (that could break if <code>ConfigParser</code>'s implementation changes) should I just write a variant of the <code>ConfigParser</code> itself?</p>
+
+<p>I feel like this may be one of those 'duh' moments where I'm only seeing the difficult solutions.</p>
+
+<p><strong>[Edit:]</strong> Here's a more precise example of how I'd like to use the same key multiple times:</p>
+
+<pre><code>[Ignored Paths]
+ignore-extension: .swp
+ignore-filename: tags
+ignore-directory: bin
+</code></pre>
+
+<p>I dislike the comma-delimited-list syntax because it's hard on the eyes when you scale it to many values; for example, a comma delimited list of fifty extensions would not be particularly readable.</p>
+
+Answer: <p>ConfigParser isn't designed to handle such conditions. Furthermore, your config file doesn't make sense to me.</p>
+
+<p>ConfigParser gives you a dict-like structure for each section, so when you call parser.items(section), I'm expecting similar output to dict.items(), which is just a list of key/value tuples. I would never expect to see something like:</p>
+
+<pre><code>[('spam', 'eggs'), ('spam', 'ham')]
+</code></pre>
+
+<p>Not to mention, how would you expect the following to behave?:</p>
+
+<pre><code>parser.get('Some Section', 'spam')
+</code></pre>
+
+<p>Which is the intended way to retrieve values.</p>
+
+<p>If you want to store multiple values for the same key, I would suggest something like this in your config file:</p>
+
+<pre><code>[Some Section]
+spam: eggs, ham
+</code></pre>
+
+<p>And this in your code:</p>
+
+<pre><code>spam_values = [v.strip() for v in parser.get('Some Section', 'spam').split(',')]
+</code></pre>
+
+<p>Of course, this will only work for values that don't contain commas themselves or handle quoting. For that, you should employ a more advanced technique (see <a href="http://stackoverflow.com/questions/118096/how-can-i-parse-a-comma-delimited-string-into-a-list-caveat">this</a> and <a href="http://stackoverflow.com/questions/118458/how-can-i-join-a-list-into-a-string-caveat">this</a>).</p>
+
+<p>EDIT: If you don't mind the extra dependency, You could check out <a href="http://www.voidspace.org.uk/python/configobj.html">ConfigObj</a>, which natively supports lists as a value type.</p>

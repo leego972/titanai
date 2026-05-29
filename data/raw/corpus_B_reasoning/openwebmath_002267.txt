@@ -1,0 +1,79 @@
+# Any papers regarding different/inconsistent action space in Reinforcement Learning? [closed]
+
+This question is regarding Reinforcement Learning and different/inconsistent action space for every/some states.
+
+## What do I mean by different/inconsistent action space?
+
+Let say you have an MDP where the number of actions varies between states (for example like in Figure 1 or Figure 2). We can express "inconsistent action space" formally as $$\forall s \in S: \exists s' \in S: A(s) \neq A(s') \wedge s \neq s'$$
+
+That is, for every state, there exists some other state which do not have the same action set. In the figures (1, 2) there's a relatively small amount of actions per state. Instead imagine states $$s \in S$$ with $$m_s$$ number of actions, where $$1 \leq m_s \leq n$$ and $$n$$ is a really large integer.
+
+## Environment
+
+To get a better grasp of the question, here's an environment example. Take Figure 1 and let it explode into a really large directed acyclic graph with a source node, huge action space and a target node. The goal is to traverse a path, starting at any start node, such that we'll maximize the reward which we'll only receive at the target node. At every state, we can call a function $$M : s \rightarrow A'$$ that takes a state as input and returns a valid number of actions.
+
+## Approches
+
+1. A naive approach to this problem (discussed here and here) is to define the action set equally for every state, return a negative reward whenever the performed action $$a \notin A(s)$$ and move the agent into the same state, thus letting the agent "learn" what actions are valid in each state. This approach has two obvious drawbacks:
+
+• Learning $$A$$ takes time, especially when the Q-values are not updated until either termination or some statement is fulfilled (like in experience replay)
+
+• We know $$A$$, why learn it?
+
+2. Another approach (first answer here, also very much alike proposals from papers such as Deep Reinforcement Learning in Large Discrete Action Spaces and Discrete Sequential Prediction of continuous action for Deep RL) is to instead predict some scalar in continuous space and, by some method, map it into a valid action. The papers are discussing how to deal with large discrete action spaces and the proposed models seem to be a somewhat solution for this problem as well.
+
+3. Another approach that came across was to, assuming the number of different action set $$n$$ is quite small, have functions $$f_{\theta_1}$$, $$f_{\theta_2}$$, ..., $$f_{\theta_n}$$ that returns the action regarding that perticular state with $$n$$ valid actions. In other words, the performed action of a state $$s$$ with 3 number of actions will be predicted by $$\underset{a}{\text{argmax}} \ f_{\theta_3}(s, a)$$.
+
+None of the approaches (1, 2 or 3) are found in papers, just pure speculations. I've searched a lot, but I cannot find papers directly regarding this matter.
+
+Does anyone know any papers, or having other approaches, regarding different/inconsistent action space?
+
+• Have a similar issue, and my immediate thoughts are to perform some transformation of the problem into a domain where the action space is fixed. For instance, if I am working in active learning, where the action is to select an example from a unlabelled training dataset (without replacement), then perhaps a different formulation where the action is to select a class, or point in data space might work as well (this will have a fixed/static action space) Dec 14 '19 at 23:28
+• I have the same question. The best answer I have found is the following paper: Learning Action Representation for Reinforcement Learning Jan 23 '20 at 9:17
+• How about your master thesis? Have you figured out methods to solve your question or anything else you want to share? I found the most related works as listed below are large action spaces. May 11 '20 at 19:40
+• @DongDongChen we used a modified version of the arxiv.org/pdf/1512.07679.pdf paper, along with an ILP solver, which worked ok for us in the thesis. However, I think our version was very specific to our instance of the problem and was hard to generalize. May 11 '20 at 22:08
+
+1. Does anyone know any paper regarding this subject?
+
+I'm not familiar with any off the top of my head... I do know that the vast majority of Reinforcement Learning literature focuses on settings with a fixed action space (like robotics where your actions determine how you attempt to move / rotate a particular part of the robot, or simple games where you always have the same set of actions to move and maybe ''shoot'' or ''use'' etc.). Another common class of settings is where the action space can easily be treated as if it always were the same (by enumerating all actions that every could be legal in some state), and filtering out illegal actions in some sort of post-processing steps (e.g. RL work in board games).
+
+So... there might be something out there, but it's certainly not common. Most RL people like to involve as little domain knowledge as possible, and I suppose that a function that generates a legal set of actions given a particular state can very much be considered to be domain knowledge.
+
+1. Is the terminology wrong? "Inconsistant", "Irregular", "Different"... ?
+
+I wouldn't use inconsistent, because that word can be interpreted as implying that something would be "wrong" or "ill-defined". I would say that you have a variable action set (the action set varies per state). When I search for that, there aren't a lot of results either though... but I think that term would be more promising.
+
+1. Anyone having another approach worth digging into?
+
+The problem you describe is mostly a problem in Reinforcement Learning with function approximation, in particular function approximation using Neural Networks. If you can get away with using tabular RL algorithms, the problem instantly disappears. For example, a table of $$Q(s, a)$$ values as commonly used in the tabular, value-based algorithms does not need to contain entries for all possible $$(s, a)$$ pairs; it's fine if it only contains entries for $$(s, a)$$ pairs such that $$a$$ is legal in $$s$$.
+
+Variable action spaces primarily turn into a problem in Deep RL approaches, because we normally work with a fixed neural network architecture. A DQN-style algorithm involves neural networks that take feature vectors describing states $$s$$ as inputs, and provide $$Q(s, a)$$ estimates as outputs. This immediately implies that we need one output node for every action, which means you have to enumerate all the actions... which is where your problem comes in. Similarly, policy gradient methods traditionally also require one output node per action, which again means you have to be able to enumerate all the actions in advance (when determining the network architecture).
+
+If you still want to use Neural Networks (or other kinds of function approximators with similar kinds of inputs and outputs), the key to addressing your problem (if none of the suggestions you've already listed in the question are to your liking) is to realize that you'll have to find a different way to formulate your inputs and outputs, such that you are no longer required to enumerate all actions in advance.
+
+The only way I can think of doing that really is if you are able to compute meaningful input features for complete state-action pairs $$(s, a)$$. If you can do that, then you could, for example, build neural networks which:
+
+• Take a feature vector $$x(s, a)$$ as input, which describes (hopefully in some meaningful way) the full pair of the state $$s$$ and the action $$a$$
+• Produce a single $$\hat{Q}(s, a)$$ estimate as output, for the specific pair of state + action given as input, rather than producing multiple outputs.
+
+If you can do that, then in any given state $$s$$ you can simply loop through all the legal actions $$A(s)$$, compute $$\hat{Q}(s, a)$$ estimates for them all (note: we now require $$\lvert A(s) \rvert$$ passes through the network rather than just a single pass as would normally be required in DQN-style algorithms), and otherwise proceed similarly to standard DQN-style algorithms.
+
+Obviously the requirement of having good input features for actions is not always going to be satisfied... but I doubt there are many good ways to get around that. It's very similar to the situation with states really. In tabular RL, we enumerate all states (and all actions). With function approximation, we usually still enumerate all actions, but avoid the enumeration of all states by replacing them with meaningful feature vectors (which enables generalization across states). If you want to avoid enumerating actions, you'll in a very similar way have to have some way of generalizing across actions, which again means you need features to describe actions.
+
+• This is great feedback and interesting thoughts, thanks for that. I find many papers regarding "large action space"'s, which is in pretty much the same issue. I think the paper "Discrete Sequential Prediction of continuous action for Deep RL" is very interesting since it predicts a sequence of actions using Recurrent Neural Networks instead, which solves the fixed network issue. We will do our master thesis in this subject and I hope we'll collect more information in this matter. Dec 17 '18 at 7:41
+• I am trying to do this state-action representation and create a DQN-like network that would output the Q-value of the x(s,a), like a regression problem. Having read the tf_agents documentation, I do not think that I can model it with this. Is there a way to model it with tf_agents or should I do it from scratch ? Jul 8 '20 at 16:45
+• @ddaedalus Hmmm I'm not sure, I'm not super familiar with tf_agents. I must say that I don't believe I've ever seen anyone in the literature actually doing this thing with state-action pairs being the inputs, rather than states inputs and actions outputs. Almost everyone in all the literature always seems to assume they can just predetermine the number of actions. So, since this is so rarely done in the literature, it would indeed be very well possible that it's not easily supported by such frameworks and requires more work from scratch Jul 8 '20 at 17:32
+• In my case, every action is different from the other. If you choose an action, then it cannot be appeared again. Also from each state, you always have different actions or actions that you have seen again but not taken yet. Do you think that I could create an environment that inherits from gym environment? I doubt that because of what you said. Jul 8 '20 at 17:48
+• @ddaedalus Again not 100% sure... I'm thinking that might be possible though. If I remember correctly, you do have to predefine your action space in advance, but it does not have to be discrete; you can specify continuous action spaces, which is used for all these continuous control envs (the ones where you have to make all sorts of robots learn how to walk etc.). I suppose that in your situation you'll also have to find some action representation (probably with binary or numeric features). If you have upper/lower bounds on your feature values, you can define your action space with that? Jul 8 '20 at 18:14
+
+(3) Another approach that came across was to, assuming the number of different action set $$n$$ is quite small, have functions $$f_{\theta_1}$$, $$f_{\theta_2}$$, ..., $$f_{\theta_n}$$ that returns the action regarding that perticular state with $$n$$ valid actions. E.i, the performed action of a state $$s$$ with 3 number of actions will be predicted by $$\underset{a}{\text{argmax}} \ f_{\theta_3}(s, a)$$.
+
+That sounds pretty complicated and the number of different action sets is usually very high, even for simplest games. Imagine checkers, ignore promotions and jumping for simplicity and there are some $$7 \cdot 4 \cdot 2=56$$ possible actions (which is fine), but the number of different sets of these actions is much higher. It's actually difficult to compute how many such sets are possible in a real game - it's surely much less than $$2^{56}$$, but also surely far too big for being practical.
+
+1. Anyone having another approach worth digging into?
+
+Assuming the number of actions is not too big, you can simply ignore actions which don't apply in a given state. That's different from learning - you don't have to learn returning negative award for illegal actions, you simply don't care and select the legal action returning the best award.
+
+$$\forall s \in S: \exists s' \in S: A(s) \neq A(s') \wedge s \neq s'$$
+$$\forall s \in S: \exists s' \in S: A(s) \neq A(s')$$
+$$|A(s)|_{s \in S} > 1$$

@@ -1,0 +1,73 @@
+Question: <p>I start by creating a string variable with some <strong>non-ascii</strong> <em>utf-8</em> encoded data on it:</p>
+
+<pre><code>&gt;&gt;&gt; text = 'Ã¡'
+&gt;&gt;&gt; text
+'\xc3\xa1'
+&gt;&gt;&gt; text.decode('utf-8')
+u'\xe1'
+</code></pre>
+
+<p>Using <code>unicode()</code> on it raises errors...</p>
+
+<pre><code>&gt;&gt;&gt; unicode(text)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+UnicodeDecodeError: 'ascii' codec can't decode byte 0xc3 in position 0: 
+                    ordinal not in range(128)
+</code></pre>
+
+<p>...but if I know the encoding I can use it as second parameter:</p>
+
+<pre><code>&gt;&gt;&gt; unicode(text, 'utf-8')
+u'\xe1'
+&gt;&gt;&gt; unicode(text, 'utf-8') == text.decode('utf-8')
+True
+</code></pre>
+
+<p>Now if I have a class that returns this text in the <code>__str__()</code> method:</p>
+
+<pre><code>&gt;&gt;&gt; class ReturnsEncoded(object):
+...     def __str__(self):
+...         return text
+... 
+&gt;&gt;&gt; r = ReturnsEncoded()
+&gt;&gt;&gt; str(r)
+'\xc3\xa1'
+</code></pre>
+
+<p><code>unicode(r)</code> seems to use <code>str()</code> on it, since it raises the same error as <code>unicode(text)</code> above:</p>
+
+<pre><code>&gt;&gt;&gt; unicode(r)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+UnicodeDecodeError: 'ascii' codec can't decode byte 0xc3 in position 0: 
+                    ordinal not in range(128)
+</code></pre>
+
+<p>Until now everything is as planned!</p>
+
+<p><strong>But as no one would ever expect, <code>unicode(r, 'utf-8')</code> won't even try:</strong></p>
+
+<pre><code>&gt;&gt;&gt; unicode(r, 'utf-8')
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: coercing to Unicode: need string or buffer, ReturnsEncoded found
+</code></pre>
+
+<p>Why? Why this inconsistent behavior? Is it a bug? is it intended? Very awkward.</p>
+
+Answer: <p><code>unicode</code> does not guess the encoding of your text. If your object can print itself as <code>unicode</code>, define the <code>__unicode__()</code> method that returns a Unicode string.</p>
+
+<p><hr /></p>
+
+<p>The secret is that <code>unicode(r)</code> is not actually calling <code>__str__()</code> itself. Instead, it's looking for a <code>__unicode__()</code> method. The default implementation of <code>__unicode__()</code> will call <code>__str__()</code> and then attempt to decode it using the <code>ascii</code> charset. When you pass the encoding, <code>unicode()</code> expects the first object to be something that can be decoded -- that is, an instance of <code>basestring</code>.</p>
+
+<p><hr /></p>
+
+<blockquote>
+  <p>Behavior is weird because it tries to decode as ascii if I don't pass 'utf-8'. But if I pass 'utf-8' it gives a different error...</p>
+</blockquote>
+
+<p>That's because when you specify "utf-8", it treats the first parameter as a string-like object to be decoded. Without it, it treats the parameter as an object to be coerced to unicode.</p>
+
+<p>I do not understand the confusion. If you know that the object's <code>text</code> attribute will always be UTF-8 encoded, just define <code>__unicode__()</code> and then everything will work fine.</p>

@@ -1,0 +1,61 @@
+Question: <p>I have a log file being written by another process which I want to watch for changes. Each time a change occurrs I'd like to read the new data in to do some processing on it.</p>
+
+<p>What's the best way to do this? I was hoping there'd be some sort of hook from the PyWin32 library. I've found the <code>win32file.FindNextChangeNotification</code> function but have no idea how to ask it to watch a specific file.</p>
+
+<p>If anyone's done anything like this I'd be really grateful to hear how...</p>
+
+<p><strong>[Edit]</strong> I should have mentioned that I was after a solution that doesn't require polling.</p>
+
+<p><strong>[Edit]</strong> Curses! It seems this doesn't work over a mapped network drive. I'm guessing windows doesn't 'hear' any updates to the file the way it does on a local disk.</p>
+
+Answer: <pre><code>ACTIONS = {
+  1 : "Created",
+  2 : "Deleted",
+  3 : "Updated",
+  4 : "Renamed from something",
+  5 : "Renamed to something"
+}
+FILE_LIST_DIRECTORY = 0x0001
+
+class myThread (threading.Thread):
+    def __init__(self, threadID, fileName, directory, origin):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.fileName = fileName
+        self.daemon = True
+        self.dir = directory
+        self.originalFile = origin
+    def run(self):
+        startMonitor(self.fileName, self.dir, self.originalFile)
+
+def startMonitor(fileMonitoring,dirPath,originalFile):
+    hDir = win32file.CreateFile (
+        dirPath,
+        FILE_LIST_DIRECTORY,
+        win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+        None,
+        win32con.OPEN_EXISTING,
+        win32con.FILE_FLAG_BACKUP_SEMANTICS,
+        None
+    )
+    # Wait for new data and call ProcessNewData for each new chunk that's
+    # written
+    while 1:
+        # Wait for a change to occur
+        results = win32file.ReadDirectoryChangesW (
+            hDir,
+            1024,
+            False,
+            win32con.FILE_NOTIFY_CHANGE_LAST_WRITE,
+            None,
+            None
+        )
+        # For each change, check to see if it's updating the file we're
+        # interested in
+        for action, file_M in results:
+            full_filename = os.path.join (dirPath, file_M)
+            #print file, ACTIONS.get (action, "Unknown")
+            if len(full_filename) == len(fileMonitoring) and action == 3:
+                #copy to main file
+                ...
+</code></pre>

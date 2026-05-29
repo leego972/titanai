@@ -1,0 +1,93 @@
+# gluonts.nursery.anomaly_detection.supervised_metrics package¶
+
+gluonts.nursery.anomaly_detection.supervised_metrics.aggregate_precision_recall(labels_pred_iterable: Iterable, precision_recall_fn: Callable = <function buffered_precision_recall>) → Tuple[float, float][source]
+
+Computes aggregate range-based precision recall metrics for the given prediction labels.
+
+Parameters
+• labels_pred_iterable – An iterable that gives 2-tuples of boolean lists corresponding to true_labels and pred_labels respectively.
+
+• precision_recall_fn – Function to call in order to get the precision, recall metrics.
+
+Returns
+
+Return type
+
+A tuple containing average precision and recall in that order.
+
+gluonts.nursery.anomaly_detection.supervised_metrics.aggregate_precision_recall_curve(label_score_iterable: Iterable, thresholds: Optional[numpy.array] = None, partial_filter: Optional[Callable] = None, singleton_curve: bool = False, precision_recall_fn: Callable = <function buffered_precision_recall>, n_jobs: int = -1)[source]
+
+Computes aggregate range-based precision recall curves over a data set, iterating over individual time series. Optionally takes partially constructed filter that converts given scores/thresholds to anomaly labels. See gluonts.nursery.anomaly_detection.supervised_metrics.filters for example filters.
+
+Parameters
+• label_score_iterable (Iterable) – An iterable that gives 2-tuples of np.arrays (of identical length), corresponding to true_labels and pred_scores respectively.
+
+• thresholds (np.array) – An np.array of score thresholds for which to compute precision recall values. If the filter_type argument is provided, these are the threshold values of the filter. If not, they will be applied as a single step hard threshold to predicted scores.
+
+• partial_filter (Callable) – Partial constructor for a “filter” object. If provided, this function can be called with a “score_threshold” to return labels used for precision and recall computation. If not provided, labels will be assigned with a hard threshold. See gluonts.nursery.anomaly_detection.supervised_metrics.filters for example filters.
+
+• singleton_curve (bool) – If true, range-based precision recall will not be computed
+
+• precision_recall_fn – Function to call in order to get the precision, recall metrics.
+
+• n_jobs (int) – How many concurrent threads for parallelization, default is -1 (use all cpu available)
+
+Returns
+
+• (Same as output of sklearn.metrics.precision_recall_curve)
+
+• precision (array, shape = [n_thresholds + 1]) – Precision values such that element i is the precision of predictions with score >= thresholds[i] and the last element is 1.
+
+• recall (array, shape = [n_thresholds + 1]) – Decreasing recall values such that element i is the recall of predictions with score >= thresholds[i] and the last element is 0.
+
+• thresholds (array, shape = [n_thresholds <= len(np.unique(scores))]) – Increasing thresholds on the decision function used to compute precision and recall.
+
+gluonts.nursery.anomaly_detection.supervised_metrics.buffered_precision_recall(real_ranges: List[range], pred_ranges: List[range], buffer_length: int = 5) → Tuple[float, float][source]
+
+Implements a new range-based precision recall metric, that measures how well anomalies (real_ranges) are caught with labels (pred_ranges).
+
+We extend anomaly ranges by a number of time steps (buffer_length) to accomodate those raised with a lag. For example, if an annotator has marked range(5, 9), and the model has labeled range(11, 13) as an anomaly, we would often like to mark this as a correctly raised anomaly. There are two reasons for this. (i) Human annotators often draw boxes around anomalies with a certain “margin,” i.e., with a lead and a lag around the true anomaly. (ii) The low-pass filter raises anomalies with a certain latency.
+
+Therefore, this function looks for intersections between “extended” anomaly ranges, those with a buffer of buffer_length added after the annotated range, and the predicted ranges. Any intersection is counted as a success. More precisely,
+
+• If an “extended” anomaly range intersects with any labeled range, it’s “caught.” If an anomaly intersects with no predicted range, it’s not caught. Recall is, n_caught_anomalies / n_all_anomalies.
+
+• If a predicted range intersects with any “extended” anomaly range, it’s a good alarm. Precision is n_good_pred_ranges / n_pred_ranges.
+
+Note that the numerators (numbers of true positives) are different for precision and recall. This is since an anomaly can be caught by multiple pred ranges, as well as a pred range marking two separate anomalies. This function allows for this behavior. Moreover, a prediction range is either “good” (it intersects with an extended anomaly range, and is a “true positive predicted range”) or or “bad” (false positive). This is different than segment_precision_recall, since there a predicted range is counted towards true positives and false positives at the same time if it spans the intersection of an anomaly segment and a non-anomaly segment.
+
+Parameters
+• real_ranges (List[range]) – Python range objects representing ground truth anomalies (e.g., as annotated by human labelers). Ranges must ve non-overlapping and in sorted order.
+
+• pred_ranges (List[range]) – Python range objects representing labels produced by the model. Ranges must be non-overlapping and in sorted order.
+
+• buffer_length (int) – The number of time periods which a predicted range is allowed lag after an anomaly, for which it will be marked as a “good” raise. For example, if the actual range is range(5,7) and the predicted range is range(8, 9), this prediction will be deemed accurate with a buffer length of 2 or above.
+
+Returns
+
+• precision (float) – Precision. Ratio of predicted ranges that overlap with an (extended) anomaly range.
+
+• recall (float) – Recall. Ratio of (extended) anomaly ranges that were caught by (overlaps with) at least one prediction range.
+
+gluonts.nursery.anomaly_detection.supervised_metrics.segment_precision_recall(real_ranges: List[range], pred_ranges: List[range]) → Tuple[float, float][source]
+
+Segment based metric is less lenient than the range based metric.
+
+This metric counts
+
+• a ground truth anomaly range as true-positive as long as there is an overlapping predicted
+
+anomaly range; it does not penalize the position of the overlap. If there is no overlapping predicted range for given ground truth range, then it counts as one false-negative irrespective of its size.
+
+• a predicted anomaly range as false positive if it has a nonempty overlap with a “normal” range.
+
+Parameters
+• real_ranges – List of ranges corresponding to ground truth anomalies.
+
+• pred_ranges – List of predicted anomaly ranges.
+
+Returns
+
+Return type
+
+Tuple containing segment based precision and recall.

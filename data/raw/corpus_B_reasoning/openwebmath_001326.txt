@@ -1,0 +1,137 @@
+# Lower Bounds for Symbolic Computation on Graphs: Strongly Connected Components, Liveness, Safety, and Diameter
+
+A model of computation that is widely used in the formal analysis of reactive systems is symbolic algorithms. In this model the access to the input graph is restricted to consist of symbolic operations, which are expensive in comparison to the standard RAM operations. We give lower bounds on the number of symbolic operations for basic graph problems such as the computation of the strongly connected components and of the approximate diameter as well as for fundamental problems in model checking such as safety, liveness, and co-liveness. Our lower bounds are linear in the number of vertices of the graph, even for constant-diameter graphs. For none of these problems lower bounds on the number of symbolic operations were known before. The lower bounds show an interesting separation of these problems from the reachability problem, which can be solved with O(D) symbolic operations, where D is the diameter of the graph. Additionally we present an approximation algorithm for the graph diameter which requires Õ(n √(D)) symbolic steps to achieve a (1+ϵ)-approximation for any constant ϵ > 0. This compares to O(n · D) symbolic steps for the (naive) exact algorithm and O(D) symbolic steps for a 2-approximation. Finally we also give a refined analysis of the strongly connected components algorithms of Gentilini et al., showing that it uses an optimal number of symbolic steps that is proportional to the sum of the diameters of the strongly connected components.
+
+• 61 publications
+• 14 publications
+• 51 publications
+• 2 publications
+11/08/2020
+
+### Tight Conditional Lower Bounds for Approximating Diameter in Directed Graphs
+
+Among the most fundamental graph parameters is the Diameter, the largest...
+08/12/2020
+
+### Improved SETH-hardness of unweighted Diameter
+
+We prove that, assuming the Strong Exponential Time Hypothesis, for any ...
+07/06/2021
+
+### Noisy Boolean Hidden Matching with Applications
+
+The Boolean Hidden Matching (BHM) problem, introduced in a seminal paper...
+08/30/2021
+
+### BDD-Based Algorithm for SCC Decomposition of Edge-Coloured Graphs
+
+Edge-coloured directed graphs provide an essential structure for modelli...
+11/06/2017
+
+### Nearly Work-Efficient Parallel Algorithm for Digraph Reachability
+
+One of the simplest problems on directed graphs is that of identifying t...
+09/11/2019
+
+### Quasipolynomial Set-Based Symbolic Algorithms for Parity Games
+
+Solving parity games, which are equivalent to modal μ-calculus model che...
+05/20/2019
+
+### Subcubic Equivalences Between Graph Centrality Measures and Complementary Problems
+
+Despite persistent efforts, there is no known technique for obtaining un...
+
+## 1 Introduction
+
+Graph algorithms are central in the formal analysis of reactive systems. A reactive system consists of a set of variables and a state of the system corresponds to a set of valuations, one for each of these variables. This naturally induces a directed graph: Each vertex represents a state of the system and each directed edge represents a state transition that is possible in the system. As the number of vertices is exponential in the number of variables of the system, these graphs are huge and, thus, they are usually not explicitly represented during their analysis. Instead they are implicitly represented using e.g., binary-decision diagrams (BDDs) [Bryant86, Bryant92]. To avoid considering specifics of the implicit representation and their manipulation, an elegant theoretical model for algorithms that work on this implicit representation has been developed, called symbolic algorithms (see e.g. [BurchCMDH90, ClarkeMCH96, Somenzi99, ClarkeGP99, ClarkeGJLV03, GentiliniPP08, ChatterjeeHJS13]). In this paper we will give novel upper and (unconditional) lower bounds on the number of operations required by a symbolic algorithm for solving classic graph-algorithmic questions, such as computing the strongly connected components and the (approximate) diameter, as well as for graph-algorithmic questions that are important in the analysis of reactive systems, such as safety, liveness, and co-liveness objectives. Our lower bounds are based on new reductions of problems from communication complexity to symbolic algorithms.
+
+Symbolic algorithms. A symbolic algorithm is allowed to use the same mathematical, logical, and memory access operations as a regular RAM algorithm, except for the access to the input graph: It is not given access to the input graph through an adjacency list or adjacency matrix representation but instead only through two types of symbolic operations:
+
+1. One-step operations Pre and Post: Each predecessor (Pre) (resp., successor (Post)) operation is given a set of vertices and returns the set of vertices  with an edge to (resp., edge from) some vertex of .
+
+2. Basic set operations: Each basic set operation is given one or two sets of vertices and performs a union, intersection, or complement on these sets.
+
+An initial set of vertices is given as part of the input, often consisting of a single vertex.
+
+Symbolic operations are more expensive than the non-symbolic operations and thus one is mainly interested in the number of symbolic operations of such an algorithm (and the exact number of non-symbolic operations is often neglected). Moreover, as the symbolic model is motivated by the compact representation of huge graphs, we aim for symbolic algorithms that only store or many sets of vertices as otherwise algorithms become impractical due to the huge space requirements. Additionally, every computable graph-algorithmic question can be solved with symbolic one-step operations when storing many sets (and allowing an unbounded number of non-symbolic operations): For every vertex perform a Pre and a Post operation, store the results, which represent the full graph, and then compute the solution on this graph, using only non-symbolic operations. Note, however, that our lower bounds do not depend on this requirement, i.e., they also apply to symbolic algorithms that store an arbitrary number of sets. Furthermore the basic set operations (that only require vertices, i.e., the current state variables) are computationally much less expensive than the one-step operations (that involve both variables of the current and of the next state). Thus, to simplify the analysis of symbolic algorithms, we only analyze the number of one-step operations in the lower bounds that we present. For all upper bounds in prior work and in our work the number of basic-set operations is at most linear in the number of one-step operations.
+
+There is an interesting relationship between the two types of symbolic operations and Boolean matrix-vector operations: Interpreting the edge relationship as a Boolean matrix and a vertex set as a Boolean vector, the one-step operations correspond to (left- and right-sided) matrix-vector multiplication, where the matrix is the adjacency matrix, and basic set operations correspond to basic vector manipulations. Thus, an equivalent way of interpreting symbolic algorithms is by saying that the access to the graph is only allowed by performing a Boolean matrix-vector multiplication, where the vector represents a set of vertices and the matrix is the adjacency matrix.
+
+Note also that there is a similarity to the CONGEST and the LOCAL model in synchronous distributed computation, as in these models each vertex in a synchronous network knows all its neighbors and can communicate with all of them in one round (exchanging bits in the CONGEST model), and the algorithmic complexity is measured in rounds of communication. While in these models all neighbors of every individual vertex, i.e., all edges of the graph, can be determined in one round of communication, in the symbolic model this might require Pre and Post operations, each on an singleton set. Thus, determining (and storing) all edges of a symbolically represented graph is expensive and we would ideally like to have algorithms that use sub-linear (in the number of vertices) many symbolic one-step operations.
+
+Objectives. First we formally introduce the most relevant graph-algorithmic questions from the analysis of reactive systems [MannaP92]. Given a graph and a starting vertex , let be the set of infinite paths in starting from . Each objective corresponds to a set of requirements on an infinite path and the question that needs to be decided by the algorithm is whether there is a path in that satisfies these requirements, in which case we say the path satisfies the objective. An objective is the dual of an objective if a path satisfies iff it does not satisfy .
+
+Let be a set of target vertices given as input. The most basic objective is reachability where an infinite path satisfies the objective if the path visits a vertex of  at least once. The dual safety objective is satisfied by infinite paths that only visit vertices of . The next interesting objective is the liveness (aka Büchi) objective that requires an infinite path to visit some vertex of  infinitely often. The dual co-liveness (aka co-Büchi) objective requires an infinite path to eventually only visit vertices in . Verifying these objectives are the most fundamental graph-algorithmic questions in the analysis of reactive systems.
+
+Computing the strongly connected components (SCCs) is at the heart of the fastest algorithms for liveness and co-liveness: For example, there is a reduction from liveness to the computation of SCCs that takes symbolic steps in the order of the diameter of the graph. Thus, determining the symbolic complexity of SCCs also settles the symbolic complexity of liveness.
+
+Furthermore, the diameter computation plays a crucial role in applications such as bounded model-checking [BiereCCSZ03], where the goal is to analyze the system for a bounded number of steps, and it suffices to choose the diameter of the graph as bound. Second, in many scenarios, such as in hardware verification, the graphs have small diameter, and hence algorithms that can detect if this is the case and then exploit the small diameter are relevant [BiereCCSZ03]. Motivated by these applications, we define the diameter of a graph as the largest finite distance in the graph, which coincides with the usual graph-theoretic definition on strongly connected graphs and is more general otherwise.
+
+Note that linear lower bounds for the number of symbolic operations are non-trivial, since a one-step operation can involve all edges. For example, to determine all the neighbors of a given vertex takes one symbolic operation, while it takes many operations in the classic setting. In the following we use to denote the number of vertices of a graph  and to denote its diameter.
+
+Previous results. To the best of our knowledge, no previous work has established lower bounds for symbolic computation.
+
+There is some prior work on establishing upper bounds on the number of symbolic operations: In [GentiliniPP08] a symbolic algorithm that computes the SCCs with symbolic operations is presented. This algorithm leads to an algorithm for liveness and co-liveness with symbolic operations and improves on earlier work by [BloemGS06], which requires symbolic operations.
+
+Note that for the reachability objective the straightforward algorithm requires symbolic operations: Starting from the set containing only the start vertex , repeatedly perform a Post-operation until is reached. For safety the straightforward algorithm takes symbolic operations: Iteratively remove from vertices that do not have an outgoing edge to another vertex of , i.e., vertices of , until a fixed point is reached.
+
+Finally, there is a trivial algorithm for computing the diameter of the graph: Simply determine the depth of a breadth-first search from every vertex and output the maximum over all depths. Computing the depth of a breadth-first search can be done with many symbolic steps, thus this requires many symbolic steps in total. In a strongly connected graph a 2-approximation of the diameter of the graph can be obtained by computing one breadth-first search from and one to some arbitrary vertex and output the sum of the depths. This takes symbolic steps.
+
+Our contributions. Our main contributions are novel lower bounds for the number of symbolic operations for many of the above graph-algorithmic questions, leading to an interesting separation between seemingly similar problems.
+
+1. For reachability objectives, the basic symbolic algorithm requires symbolic operations. Quite surprisingly, we show that such diameter-based upper bounds are not possible for its dual problem, namely safety, and are also not possible for liveness and co-liveness objectives. Specifically, we present tight lower bounds to show that, even for constant-diameter graphs, one-step symbolic operations are required for safety, liveness, and co-liveness objectives. In addition we establish tight bounds for symbolic operations required for the computation of SCCs, showing a lower bound of for constant-diameter graphs. See Table 1 for a summary of these results.
+
+2. We show that even for strongly-connected constant-diameter graphs approximating the diameter requires symbolic steps. More precisely, any -approximation algorithm requires symbolic one-step operations, even for undirected and connected graphs with constant diameter. We also give a novel upper bound: We present a -approximation algorithm for any constant that takes symbolic steps. This can be compared to the trivial 2-approximation algorithm and the exact algorithm. Notice that for explicitly represented graphs the approximation of the diameter is already hard for constant-diameter graphs while in the symbolic model there exists a trivial upper bound in this case, thus showing a lower bound of is non-trivial. See Table 2 for a summary of these results.
+
+3. Finally we give a refined analysis of the number of symbolic steps required for computing strongly connected components based on a different problem parameter. Let be the set of all SCCs of and the diameter of the strongly connected component . We give matching upper and lower bounds showing that the SCCs can be computed with symbolic steps. Note that can be a factor larger than .
+
+Key technical contribution. Our key technical contribution is based on the novel insight that lower bounds for communication complexity can be used to establish lower bounds for symbolic computation. We feel that this connection is of interest by itself and might lead to further lower bounds for symbolic algorithms.
+
+Our lower bounds are by two kinds of reductions, both from the communication complexity problem of Set Disjointness with elements. First, we give reductions that construct graphs such that one-step operations can be computed with bits of communication between Alice and Bob and thus allow for linear lower bounds on the number symbolic operations. Second, we give a reduction that constructs a graph with only many vertices, i.e., , but allows one-step operations to require bits of communication. This again results in linear lower bounds on the number of symbolic operations.
+
+## 2 Preliminaries
+
+Symbolic Computation. We consider symbolic computation on graphs. Given an input graph and a set of vertices , the graph  can be accessed only by the following two types of operations:
+
+1. Basic set operations like , , , , and ;
+
+2. One-step operations to obtain the predecessors or successors of the vertices of  in . In particular we define the operations
+
+ Pre(S)={v∈V∣∃s∈S:(v,s)∈E}  % and  Post(S)={v∈V∣∃s∈S:(s,v)∈E}.
+
+In the applications the basic set operations are much cheaper as compared to the one-step operations. Thus we aim for lower bounds on the number of one-step operations, while not accounting for set operations. In all our upper bounds the number of set operations is at most of the same order as the number of one-step operations. Note that there is a one-to-one correspondence between a one-step operation and a Boolean matrix-vector multiplication with the adjacency matrix and that for undirected graphs and are equivalent.
+
+Communication Complexity Lower Bound for Set Disjointness. Our lower bounds are based on the known lower bounds for the communication complexity of the Set Disjointness problem. The classical symmetric two-party communication complexity model is as follows [KushilevitzN97]. There are three finite sets , the former two are possible inputs for a function , where the actual input is only known by Alice, and the actual input is only known by Bob. Alice and Bob want to evaluate a function while sending as few bits as possible to each other. The communication happens according to a fixed protocol, known to both players beforehand, that determines which player sends which bits when, and when to stop.
+
+Set Disjointness. In the Set Disjointness problem we have a universe of elements and both sets , contain all bit vectors of length , i.e., they represent all possible subsets of and are of size . Alice has a vector and Bob has a vector , and the function is defined as if for all either or , and otherwise. We will sometimes use and to denote the sets corresponding to the vectors and , i.e., and and iff . We next state a fundamental lower bound for the communication complexity of the Set Disjointness problem which will serve as basis for our lower bounds on the number of symbolic operations.
+
+###### Theorem 2.1 ([KalyanasundaramS92, Razborov92, Bar-YossefJKS04, HastadW07, KushilevitzN97]).
+
+Any (probabilistic bounded error or deterministic) protocol for the Set Disjointness problem sends bits in the worst case over all inputs.
+
+## 3 Lower Bounds
+
+In this section we present our lower bounds, which are the main results of the paper.
+
+### 3.1 Lower Bounds for Computing Strongly Connected Components
+
+We first consider the problem of computing the strongly connected components (SCCs) of a symbolically represented graph. The best known symbolic algorithm is by Gentilini et al. [GentiliniPP08] and computes the SCCs of a Graph G with symbolic one-step operations and thus matches the linear running time of the famous Tarjan algorithm [Tarjan72] in the non-symbolic world.
+
+We provide lower bounds showing that the algorithm is essentially optimal, in particular we show that algorithms are impossible. These lower bounds are by reductions from the communication complexity problem of Set Disjointness to computing SCCs in a specific graph. In particular, we show that any algorithm that computes SCCs with symbolic one-step operations would imply a communication protocol for the Set Disjointness problem with communication.
+
+###### Reduction 3.1.
+
+Let be an instance of Set Disjointness and let w.l.o.g.  for some integers . We construct a directed graph with vertices and edges as follows. (1) The vertices are given by with . (2) There is an edge from to if either or and . (3) For , there is an edge from to iff or .
+
+In our communication protocol both Alice and Bob compute the number of SCCs on the graph from Reduction 3.1, according to a given algorithm. While both know all the vertices of the graph, they do not know all the edges (some depend on both and ) and thus whenever such an edge is relevant for the algorithm, Alice and Bob have to communicate with each other. We show that the graph is constructed such that for each subset the operations and can be computed with only four bits of communication between Alice and Bob.
+
+###### Theorem 3.2.
+
+Any (probabilistic bounded error or deterministic) symbolic algorithm that computes the SCCs of graphs with vertices needs symbolic one-step operations. Moreover, for a graph with the set of SCCs and diameter any algorithm needs symbolic one-step operations.
+
+We first show that Reduction 3.1 is a valid reduction from the Set Disjointness problem to an SCC problem. The missing proofs are given in Section 6.1.
+
+###### Lemma 3.3.
+
+iff the graph constru

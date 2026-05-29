@@ -1,0 +1,107 @@
+Question: <p>Python has several ways to parse XML...</p>
+
+<p>I understand the very basics of parsing with <strong>SAX</strong>.  It functions as a stream parser, with an event-driven API.</p>
+
+<p>I understand the <strong>DOM</strong> parser also.  It reads the XML into memory and coverts it to objects that can be accessed with Python.</p>
+
+<p>Generally speaking, it was easy to choose between the 2 depending on what you needed to do, memory constraints, performance, etc.</p>
+
+<p>(hopefully I'm correct so far).</p>
+
+<p>Since Python 2.5, we also have <strong>ElementTree</strong>. How does this compare to DOM and SAX? Which is it more similar to? Why is it better than the previous parsers?</p>
+
+Answer: <h1>Minimal DOM implementation:</h1>
+
+<p>Link: <a href="http://docs.python.org/2/library/xml.dom.minidom.html#module-xml.dom.minidom">http://docs.python.org/2/library/xml.dom.minidom.html#module-xml.dom.minidom</a></p>
+
+<p>Python supplies a full, W3C-standard implementation of XML DOM (<em>xml.dom</em>) and a minimal one, <em>xml.dom.minidom</em>. This latter one is simpler and smaller than the full implementation. However, from a "parsing perspective", it has all the pros and cons of the standard DOM - i.e. it loads everything in memory.</p>
+
+<p>Considering a basic XML file:</p>
+
+<pre><code>&lt;?xml version="1.0"?&gt;
+&lt;catalog&gt;
+    &lt;book isdn="xxx-1"&gt;
+      &lt;author&gt;A1&lt;/author&gt;
+      &lt;title&gt;T1&lt;/title&gt;
+    &lt;/book&gt;
+    &lt;book isdn="xxx-2"&gt;
+      &lt;author&gt;A2&lt;/author&gt;
+      &lt;title&gt;T2&lt;/title&gt;
+    &lt;/book&gt;
+&lt;/catalog&gt;
+</code></pre>
+
+<p>A possible Python parser using <em>minidom</em> is:</p>
+
+<pre><code>import os
+from xml.dom import minidom
+from xml.parsers.expat import ExpatError
+
+#-------- Select the XML file: --------#
+#Current file name and directory:
+curpath = os.path.dirname( os.path.realpath(__file__) )
+filename = os.path.join(curpath, "sample.xml")
+#print "Filename: %s" % (filename)
+
+#-------- Parse the XML file: --------#
+try:
+    #Parse the given XML file:
+    xmldoc = minidom.parse(filepath)
+except ExpatError as e:
+    print "[XML] Error (line %d): %d" % (e.lineno, e.code)
+    print "[XML] Offset: %d" % (e.offset)
+    raise e
+except IOError as e:
+    print "[IO] I/O Error %d: %s" % (e.errno, e.strerror)
+    raise e
+else:
+    catalog = xmldoc.documentElement
+    books = catalog.getElementsByTagName("book")
+
+    for book in books:
+        print book.getAttribute('isdn')
+        print book.getElementsByTagName('author')[0].firstChild.data
+        print book.getElementsByTagName('title')[0].firstChild.data
+</code></pre>
+
+<p>Note that <em>xml.parsers.expat</em> is a Python interface to the Expat non-validating XML parser (docs.python.org/2/library/pyexpat.html).</p>
+
+<p>The <em>xml.dom</em> package supplies also the exception class <em>DOMException</em>, but it is not supperted in <em>minidom</em>!</p>
+
+<h1>The ElementTree XML API:</h1>
+
+<p>Link: <a href="http://docs.python.org/2/library/xml.etree.elementtree.html">http://docs.python.org/2/library/xml.etree.elementtree.html</a></p>
+
+<p><em>ElementTree</em> is much easier to use and it requires less memory than XML DOM. Furthermore, a C implementation is available (<em>xml.etree.cElementTree</em>).</p>
+
+<p>A possible Python parser using <em>ElementTree</em> is:</p>
+
+<pre><code>import os
+from xml.etree import cElementTree  # C implementation of xml.etree.ElementTree
+from xml.parsers.expat import ExpatError  # XML formatting errors
+
+#-------- Select the XML file: --------#
+#Current file name and directory:
+curpath = os.path.dirname( os.path.realpath(__file__) )
+filename = os.path.join(curpath, "sample.xml")
+#print "Filename: %s" % (filename)
+
+#-------- Parse the XML file: --------#
+try:
+    #Parse the given XML file:
+    tree = cElementTree.parse(filename)
+except ExpatError as e:
+    print "[XML] Error (line %d): %d" % (e.lineno, e.code)
+    print "[XML] Offset: %d" % (e.offset)
+    raise e
+except IOError as e:
+    print "[XML] I/O Error %d: %s" % (e.errno, e.strerror)
+    raise e
+else:
+    catalogue = tree.getroot()
+
+    for book in catalogue:
+        print book.attrib.get("isdn")
+        print book.find('author').text
+        print book.find('title').text
+</code></pre>

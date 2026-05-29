@@ -1,0 +1,41 @@
+Question: <p>Is there a way to make psycopg and postgres deal with errors without having to reestablish the connection, like MySQLdb?  The commented version of the below works with MySQLdb, the comments make it work with Psycopg2:</p>
+
+<pre><code>results = {'felicitas': 3, 'volumes': 8, 'acillevs': 1, 'mosaics': 13, 'perat\xe9': 1, 'representative': 6....}
+for item in sorted(results):
+    try:
+        cur.execute("""insert into resultstab values ('%s', %d)""" % (item, results[item]))
+        print item, results[item]
+#       conn.commit()
+    except:
+#       conn=psycopg2.connect(user='bvm', database='wdb', password='redacted')
+#       cur=conn.cursor()
+        print 'choked on', item
+        continue
+</code></pre>
+
+<p>This must slow things down, could anyone give a suggestion for passing over formatting errors?  Obviously the above chokes on apostrophes, but is there a way to make it pass over that without getting something like the following, or committing, reconnecting, etc?:</p>
+
+<pre><code>agreement 19
+agreements 1
+agrees 1
+agrippa 9
+choked on agrippa's
+choked on agrippina
+</code></pre>
+
+Answer: <p>First of all you should let psycopg do the escaping for you by passing to the execute() method the parameters instead of doing the formatting yourself with '%'. That is:</p>
+
+<pre><code>cur.execute("insert into resultstab values (%s, %s)", (item, results[item]))
+</code></pre>
+
+<p>Note how we use "%s" as a marker even for non-string values and avoid quotes in the query. psycopg will do all the quoting for us.</p>
+
+<p>Then, if you want to ignore some errors, just rollback and continue.</p>
+
+<pre><code>try:
+    cur.execute("SELECT this is an error")
+except:
+    conn.rollback()
+</code></pre>
+
+<p>That's all. psycopg will rollback and start a new transaction on your next statement.</p>

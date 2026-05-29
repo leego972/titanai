@@ -1,0 +1,47 @@
+Question: <p>I am running my <code>HTTPServer</code> in a separate thread (using the threading module which has no way to stop threads...) and want to stop serving requests when the main thread also shuts down.</p>
+
+<p>The Python documentation states that <code>BaseHTTPServer.HTTPServer</code> is a subclass of <code>SocketServer.TCPServer</code>, which supports a <code>shutdown</code> method, but it is missing in <code>HTTPServer</code>.</p>
+
+<p>The whole <code>BaseHTTPServer</code> module has very little documentation :(</p>
+
+Answer: <p>The event-loops ends on SIGTERM, <kbd>Ctrl</kbd>+<kbd>C</kbd> or when <code>shutdown()</code> is called.</p>
+
+<p><code>server_close()</code> must be called after <code>server_forever()</code> to close the listening socket.</p>
+
+<pre class="lang-py prettyprint-override"><code>import http.server
+
+class StoppableHTTPServer(http.server.HTTPServer):
+    def run(self):
+        try:
+            self.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            # Clean-up server (close socket, etc.)
+            self.server_close()
+</code></pre>
+
+<p>Simple server stoppable with user action (SIGTERM, <kbd>Ctrl</kbd>+<kbd>C</kbd>, ...):</p>
+
+<pre class="lang-py prettyprint-override"><code>server = StoppableHTTPServer(("127.0.0.1", 8080),
+                             http.server.BaseHTTPRequestHandler)
+server.run()
+</code></pre>
+
+<p>Server running in a thread:</p>
+
+<pre class="lang-py prettyprint-override"><code>import threading
+
+server = StoppableHTTPServer(("127.0.0.1", 8080),
+                             http.server.BaseHTTPRequestHandler)
+
+# Start processing requests
+thread = threading.Thread(None, server.run)
+thread.start()
+
+# ... do things ...
+
+# Shutdown server
+server.shutdown()
+thread.join()
+</code></pre>

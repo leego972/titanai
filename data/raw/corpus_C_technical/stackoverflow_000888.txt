@@ -1,0 +1,64 @@
+Question: <p>I'm a firm believer of the heretic thought of tight coupling between the backend and frontend: I want existing, implied knowledge about a backend to be automatically made use of when generating user interfaces. E.g., if a VARCHAR column has a maximum with of 20 characters, there GUIs should automatically constrain the user from typing more than 20 characters in a related form field.</p>
+
+<p>And I have strong antipathy to ORMs which want to define my database tables, or are based on some hack where every table needs to have extra numeric ID columns because of the ORM.</p>
+
+<p>I've looked a bit into Python database frameworks and I think I can conclude the SQLAlchemy fits best to my mentality.</p>
+
+<p>Now, I need to find a web application framework which fits naturally with SQLAlchemy (or an equivalent) and perhaps even with my appetite for coupling. With "web application framework", I mean products/project such as Pyhons, Django, TurboGears, web2py, etc.</p>
+
+<p>E.g., it should ideally be able to:</p>
+
+<ul>
+<li><strong>automatically select a suitable form widget</strong> for data entering a given column if told to do so; e.g., if the column has a foreign key to a column with 10 different values, widget should display the 10 possible values as a dropdown</li>
+<li><strong>auto-generate javascript form validation code</strong> which gives the end-user quick error feedback if a string is entered into a field which is about to end up in an INTEGER column, etc</li>
+<li>auto-generate a <strong>calendar widget</strong> for data which will end up in a DATE column</li>
+<li><strong>hint NOT NULL constraints</strong> as javascript which complains about empty or whitespace-only data in a related input field</li>
+<li>generate javascript validation code which matches relevant (simple) <strong>CHECK-constraints</strong></li>
+<li>make it easy to <strong>avoid SQL injection</strong>, by using prepared statements and/or validation of externally derived data</li>
+<li>make it easy to <strong>avoid cross site scripting</strong> by automatically escape outgoing strings when appropriate</li>
+<li><strong>make use of constraint names</strong> to generate somewhat user friendly error messages in case a constrataint is violated</li>
+</ul>
+
+<p>All this should happen dynamically, so table adjustments are automatically reflected on the frontend - probably with a caching mechanism, so that all the model introspection wouldn't kill performance. In other words, I don't want to repeat my model definition in an XML file (or alike) when it has already been carefully been defined in my database.</p>
+
+<p>Does such a framework exist for Python (or for any language, for that matter)? If not: Which of the several Python web application frameworks will be least in the way if I were to add parts of the above features myself?</p>
+
+Answer: <p>I know that you specificity ask for a framework but I thought I would let you know about what I get up to here. I have just undergone converting my company's web application from a custom in-house ORM layer into sqlAlchemy so I am far from an expert but something that occurred to me was that sqlAlchemy has types for all of the attributes it maps from the database so why not use that to help output the right html onto the page. So we use sqlAlchemy for the back end and Cheetah templates for the front end but everything in between is basically our own still.</p>
+
+<p>We have never managed to find a framework that does exactly what we want without compromise and prefer to get all the bits that work right for us and write the glue our selves. </p>
+
+<p>Step 1. For each data type sqlAlchemy.types.INTEGER etc. Add an extra function toHtml (or many maybe toHTMLReadOnly, toHTMLAdminEdit whatever) and just have that return the template for the html, now you don't even have to care what data type your displaying if you just want to spit out a whole table you can just do (as a cheetah template or what ever your templating engine is).</p>
+
+<p>Step 2</p>
+
+<p><code>&lt;table&gt;</code></p>
+
+<p><code> &lt;tr&gt;</code></p>
+
+<p><code>  #for $field in $dbObject.c:</code></p>
+
+<p><code>    &lt;th&gt;$field.name&lt;/th&gt;</code></p>
+
+<p><code>  #end for  </code></p>
+
+<p><code> &lt;/tr&gt; </code></p>
+
+<p><code> &lt;tr&gt;</code></p>
+
+<p><code>  #for $field in dbObject.c:</code></p>
+
+<p><code>    &lt;td&gt;$field.type.toHtml($field.name, $field.value)&lt;/td&gt;</code></p>
+
+<p><code>  #end for  </code></p>
+
+<p><code> &lt;/tr&gt;</code></p>
+
+<p><code>&lt;/table&gt;</code></p>
+
+<p>Using this basic method and stretching pythons introspection to its potential, in an afternoon I managed to make create read update and delete code for our whole admin section of out database, not yet with the polish of django but more then good enough for my needs.</p>
+
+<p>Step 3 Discovered the need for a third step just on Friday, wanted to upload files which as you know needs more then just the varchar data types default text box. No sweat, I just overrode the rows class in my table definition from VARCHAR to FilePath(VARCHAR) where the only difference was FilePath had a different toHtml method. Worked flawlessly.</p>
+
+<p>All that said, if there is a shrink wrapped one out there that does just what you want, use that.</p>
+
+<p>Disclaimer: This code was written from memory after midnight and probably wont produce a functioning web page.</p>

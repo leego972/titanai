@@ -1,0 +1,186 @@
+# Grammatical Framework (programming language)
+
+Grammatical Framework (GF) is a programming language for writing grammars of natural languages. GF is capable of parsing and generating texts in several languages simultaneously while working from a language-independent representation of meaning. Grammars written in GF can be compiled into a platform independent format and then used from different programming languages including C and Java, C#, Python and Haskell. A companion to GF is the GF Resource Grammar Library, a reusable library for dealing with the morphology and syntax of a growing number of natural languages.
+
+Both GF itself and the GF Resource Grammar Library are open-source. Typologically, GF is a functional programming language. Mathematically, it is a type-theoretic formal system (a logical framework to be precise) based on Martin-Löf's intuitionistic type theory, with additional judgments tailored specifically to the domain of linguistics.
+
+Language features
+ a static type system, to detect potential programming errors
+ functional programming for powerful abstractions
+ support for writing libraries, to be used on other grammars
+ tools for Information extraction, to convert linguistic resources into GF
+
+Tutorial
+Goal: write a multilingual grammar for expressing statements about John and Mary loving each other.
+
+Abstract and concrete modules
+In GF, grammars are divided to two module types:
+
+ an abstract module, containing judgement forms  and .
+  or category declarations list categories i.e. all the possible types of trees there can be.
+  or function declarations state functions and their types, these must be implemented by concrete modules (see below).
+ one or more concrete modules, containing judgement forms  and .
+  or linearization type definitions, says what type of objects linearization produces for each category listed in .
+  or linearization rules implement functions declared in . They say how trees are linearized.
+
+Consider the following:
+
+Abstract syntax
+ abstract Zero = {
+   cat
+     S ; NP ; VP ; V2 ;
+   fun
+     Pred : NP -> VP -> S ;
+     Compl : V2 -> NP -> VP ;
+     John, Mary : NP ;
+     Love : V2 ;
+ }
+Concrete syntax: English
+ concrete ZeroEng of Zero = {
+   lincat
+     S, NP, VP, V2 = Str ;
+   lin
+     Pred np vp = np ++ vp ;
+     Compl v2 np = v2 ++ np ;
+     John = "John" ;
+     Mary = "Mary" ;
+     Love = "loves" ;
+ }
+Notice:  (token list or "string") as the only linearization type.
+
+Making a grammar multilingual
+A single abstract syntax may be applied to many concrete syntaxes, in our case one for each new natural language we wish to add. The same system of trees can be given:
+
+ different words
+ different word orders
+ different linearization types
+
+Concrete syntax: French
+ concrete ZeroFre of Zero = {
+   lincat
+     S, NP, VP, V2 = Str ;
+   lin
+     Pred np vp = np ++ vp ;
+     Compl v2 np = v2 ++ np ;
+     John = "Jean" ;
+     Mary = "Marie" ;
+     Love = "aime" ;
+ }
+
+Translation and multilingual generation
+We can now use our grammar to translate phrases between French and English. The following commands can be executed in the GF interactive shell.
+
+Import many grammars with the same abstract syntax
+> import ZeroEng.gf ZeroFre.gf
+Languages: ZeroEng ZeroFre
+Translation: pipe linearization to parsing
+> parse -lang=Eng "John loves Mary" | linearize -lang=Fre
+Jean aime Marie
+Multilingual generation: linearize into all languages
+> generate_random | linearize -treebank
+Zero: Pred Mary (Compl Love Mary)
+ZeroEng: Mary loves Mary
+ZeroFre: Marie aime Marie
+
+Parameters, tables
+Latin has cases: nominative for subject, accusative for object.
+
+ Ioannes Mariam amat "John-Nom loves Mary-Acc"
+ Maria Ioannem amat "Mary-Nom loves John-Acc"
+
+We use a parameter type for case (just 2 of Latin's 6 cases). The linearization type of NP is a table type: from  to . The linearization of  is an inflection table. When using an NP, we select () the appropriate case from the table.
+
+Concrete syntax: Latin
+ concrete ZeroLat of Zero = {
+   lincat
+     S, VP, V2 = Str ;
+     NP = Case => Str ;
+   lin
+     Pred np vp = np ! Nom ++ vp ;
+     Compl v2 np = np ! Acc ++ v2 ;
+     John = table {Nom => "Ioannes" ; Acc => "Ioannem"} ;
+     Mary = table {Nom => "Maria" ; Acc => "Mariam"} ;
+     Love = "amat" ;
+   param
+     Case = Nom | Acc ;
+ }
+
+Discontinuous constituents, records
+In Dutch, the verb heeft lief is a discontinuous constituent. The linearization type of  is a record type with two fields. The linearization of  is a record. The values of fields are picked by projection ()
+
+Concrete syntax: Dutch
+ concrete ZeroDut of Zero = {
+   lincat
+     S, NP, VP = Str ;
+     V2 = {v : Str ; p : Str} ;
+   lin
+     Pred np vp = np ++ vp ;
+     Compl v2 np = v2.v ++ np ++ v2.p ;
+     John = "Jan" ;
+     Mary = "Marie" ;
+     Love = {v = "heeft" ; p = "lief"} ;
+ }
+
+Variable and inherent features, agreement, Unicode support
+For Hebrew, NP has gender as its inherent feature a field in the record. VP has gender as its variable feature an argument of a table. In predication, the VP receives the gender of the NP.
+
+Concrete syntax: Hebrew
+ concrete ZeroHeb of Zero = {
+     flags coding=utf8 ;
+   lincat
+     S = Str ;
+     NP = {s : Str ; g : Gender} ;
+     VP, V2 = Gender => Str ;
+   lin
+     Pred np vp = np.s ++ vp ! np.g ;
+     Compl v2 np = table {g => v2 ! g ++ "את" ++ np.s} ;
+     John = {s = "ג׳ון" ; g = Masc} ;
+     Mary = {s = "מרי" ; g = Fem} ;
+     Love = table {Masc => "אוהב" ; Fem => "אוהבת"} ;
+   param
+     Gender = Masc | Fem ;
+ }
+
+Visualizing parse trees
+GF has inbuilt functions which can be used for visualizing parse trees and word alignments.
+
+The following commands will generate parse trees for the given phrases and open the produced PNG image using the system's  command.
+> parse -lang=Eng "John loves Mary" | visualize_parse -view="eog"
+> parse -lang=Dut "Jan heeft Marie lief" | visualize_parse -view="eog"
+
+Generating word alignment
+ In languages L1 and L2: link every word with its smallest spanning subtree.
+ Delete the intervening tree, combining links directly from L1 to L2.
+
+In general, this gives phrase alignment. Links can be crossing, phrases can be discontinuous. The  command follows a similar syntax:
+> parse -lang=Fre "Marie aime Jean" | align_words -lang=Fre,Dut,Lat -view="eog"
+
+Resource Grammar Library
+In natural language applications, libraries are a way to cope with thousands of details involved in syntax, lexicon, and inflection. The GF Resource Grammar Library is the standard library for Grammatical Framework. It covers the morphology and basic syntax for an increasing number of languages, currently including Afrikaans, Amharic (partial), Arabic (partial), Basque (partial), Bulgarian, Catalan, Chinese, Czech (partial), Danish, Dutch, English, Estonian, Finnish, French, German, Greek ancient (partial), Greek modern, Hebrew (fragments), Hindi, Hungarian (partial), Interlingua, Italian, Japanese, Korean (partial), Latin (partial), Latvian, Maltese, Mongolian, Nepali, Norwegian bokmål, Norwegian nynorsk, Persian, Polish, Punjabi, Romanian, Russian, Sindhi, Slovak (partial), Slovene (partial), Somali (partial), Spanish, Swahili (fragments), Swedish, Thai, Turkish (fragments), and Urdu.
+In addition, 14 languages have WordNet lexicon and large-scale parsing extensions.
+
+A full API documentation of the library can be found at the RGL Synopsis page. The RGL status document gives the languages currently available in the GF Resource Grammar Library, including their maturity.
+
+Uses of GF
+GF was first created in 1998 at Xerox Research Centre Europe, Grenoble, in the project Multilingual Document Authoring. At Xerox, it was used for prototypes including a restaurant phrase book, a database query system, a formalization of an alarm system instructions with translations to 5 languages, and an authoring system for medical drug descriptions.
+
+Later projects using GF and involving third parties include:
+ REMU: Reliable Multilingual Digital Communication, a project funded by the Swedish Research Council between 2013–2017.
+ MOLTO: multilingual online translation, an EU project that ran between 2010–2013.
+ SALDO: Swedish morphological dictionary based on rules developed for GF and Functional Morphology
+ WebAlt: multilingual generation of mathematical exercises (commercial project)
+ TALK: multilingual and multimodal spoken dialogue systems
+
+Academically, GF has been used in many PhD theses and resulted in a lot of scientific publications (see the GF publication list for some of them).
+
+Commercially, GF has been used by a number of companies, in domains such as e-commerce, health care and translating formal specifications to natural language.
+
+Community
+
+Developer mailing list
+There is an active group for developers and users of GF alike, located at https://groups.google.com/group/gf-dev
+
+Summer schools
+
+2020 – GF as a resource for Computational Law (Singapore)
+The seventh GF summer school, postponed due to COVID-19, is to be held in Singapore. Co-organised with the Singapore Management

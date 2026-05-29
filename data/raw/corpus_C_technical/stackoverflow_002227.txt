@@ -1,0 +1,38 @@
+Question: <p>I have developed some custom DAO-like classes to meet some very specialized requirements for my project that is a server-side process that does not run inside any kind of framework.  </p>
+
+<p>The solution works great except that every time a new request is made, I open a new connection via MySQLdb.connect.  </p>
+
+<p>What is the best "drop in" solution to switch this over to using connection pooling in python?  I am imagining something like the commons DBCP solution for Java.  </p>
+
+<p>The process is long running and has many threads that need to make requests, but not all at the same time... specifically they do quite a lot of work before brief bursts of writing out a chunk of their results.</p>
+
+<p>Edited to add:
+After some more searching I found <a href="http://furius.ca/antiorm/">anitpool.py</a> which looks decent, but as I'm relatively new to python I guess I just want to make sure I'm not missing a more obvious/more idiomatic/better solution.  </p>
+
+Answer: <p>Old thread, but for general-purpose pooling (connections or any expensive object), I use something like:</p>
+
+<pre><code>def pool(ctor, limit=None):
+    local_pool = multiprocessing.Queue()
+    n = multiprocesing.Value('i', 0)
+    @contextlib.contextmanager
+    def pooled(ctor=ctor, lpool=local_pool, n=n):
+        # block iff at limit
+        try: i = lpool.get(limit and n.value &gt;= limit)
+        except multiprocessing.queues.Empty:
+            n.value += 1
+            i = ctor()
+        yield i
+        lpool.put(i)
+    return pooled
+</code></pre>
+
+<p>Which constructs lazily, has an optional limit, and should generalize to any use case I can think of. Of course, this assumes that you really need the pooling of whatever resource, which you may not for many modern SQL-likes. Usage:</p>
+
+<pre><code># in main:
+my_pool = pool(lambda: do_something())
+# in thread:
+with my_pool() as my_obj:
+    my_obj.do_something()
+</code></pre>
+
+<p>This does assume that whatever object ctor creates has an appropriate destructor if needed (some servers don't kill connection objects unless they are closed explicitly).</p>

@@ -1,0 +1,112 @@
+Question: <p>I've been building an error logging app recently and was after a way of accurately timestamping the incoming data. When I say accurately I mean each timestamp should be accurate relative to each other (no need to sync to an atomic clock or anything like that).</p>
+
+<p>I've been using datetime.now() as a first stab, but this isn't perfect:</p>
+
+<pre><code>&gt;&gt;&gt; for i in range(0,1000):
+...     datetime.datetime.now()
+...
+datetime.datetime(2008, 10, 1, 13, 17, 27, 562000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 562000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 562000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 562000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 578000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 578000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 578000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 578000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 578000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 609000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 609000)
+datetime.datetime(2008, 10, 1, 13, 17, 27, 609000)
+etc.
+</code></pre>
+
+<p>The changes between clocks for the first second of samples looks like this:</p>
+
+<pre><code>uSecs    difference
+562000  
+578000  16000
+609000  31000
+625000  16000
+640000  15000
+656000  16000
+687000  31000
+703000  16000
+718000  15000
+750000  32000
+765000  15000
+781000  16000
+796000  15000
+828000  32000
+843000  15000
+859000  16000
+890000  31000
+906000  16000
+921000  15000
+937000  16000
+968000  31000
+984000  16000
+</code></pre>
+
+<p>So it looks like the timer data is only updated every ~15-32ms on my machine. The problem comes when we come to analyse the data because sorting by something other than the timestamp and then sorting by timestamp again can leave the data in the wrong order (chronologically). It would be nice to have the time stamps accurate to the point that any call to the time stamp generator gives a unique timestamp.</p>
+
+<p>I had been considering some methods involving using a time.clock() call added to a starting datetime, but would appreciate a solution that would work accurately across threads on the same machine. Any suggestions would be very gratefully received.</p>
+
+Answer: <p>Thank you all for your contributions - they've all be very useful. Brian's answer seems closest to what I eventually went with (i.e. deal with it but use a sort of unique identifier - see below) so I've accepted his answer. I managed to consolidate all the various data receivers into a single thread which is where the timestamping is now done using my new <strong>AccurrateTimeStamp</strong> class. What I've done works as long as the time stamp is the first thing to use the clock.</p>
+
+<p>As S.Lott stipulates, without a realtime OS, they're never going to be absolutely perfect. I really only wanted something that would let me see relative to each incoming chunk of data, when things were being received so what I've got below will work well.</p>
+
+<p>Thanks again everyone!</p>
+
+<pre><code>import time
+
+class AccurateTimeStamp():
+    """
+    A simple class to provide a very accurate means of time stamping some data
+    """
+
+    # Do the class-wide initial time stamp to synchronise calls to 
+    # time.clock() to a single time stamp
+    initialTimeStamp = time.time()+ time.clock()
+
+    def __init__(self):
+        """
+        Constructor for the AccurateTimeStamp class.
+        This makes a stamp based on the current time which should be more 
+        accurate than anything you can get out of time.time().
+        NOTE: This time stamp will only work if nothing has called clock() in
+        this instance of the Python interpreter.
+        """
+        # Get the time since the first of call to time.clock()
+        offset = time.clock()
+
+        # Get the current (accurate) time
+        currentTime = AccurateTimeStamp.initialTimeStamp+offset
+
+        # Split the time into whole seconds and the portion after the fraction 
+        self.accurateSeconds = int(currentTime)
+        self.accuratePastSecond = currentTime - self.accurateSeconds
+
+
+def GetAccurateTimeStampString(timestamp):
+    """
+    Function to produce a timestamp of the form "13:48:01.87123" representing 
+    the time stamp 'timestamp'
+    """
+    # Get a struct_time representing the number of whole seconds since the 
+    # epoch that we can use to format the time stamp
+    wholeSecondsInTimeStamp = time.localtime(timestamp.accurateSeconds)
+
+    # Convert the whole seconds and whatever fraction of a second comes after
+    # into a couple of strings 
+    wholeSecondsString = time.strftime("%H:%M:%S", wholeSecondsInTimeStamp)
+    fractionAfterSecondString = str(int(timestamp.accuratePastSecond*1000000))
+
+    # Return our shiny new accurate time stamp   
+    return wholeSecondsString+"."+fractionAfterSecondString
+
+
+if __name__ == '__main__':
+    for i in range(0,500):
+        timestamp = AccurateTimeStamp()
+        print GetAccurateTimeStampString(timestamp)
+</code></pre>

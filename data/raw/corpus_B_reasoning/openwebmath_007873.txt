@@ -1,0 +1,105 @@
+# OpenGL Doing a 2.5D game using OpenGL?
+
+This topic is 3644 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+## Recommended Posts
+
+Hi all, I am doing a 2D game using OpenGL (aside: I know there are other libraries suitable for 2D, but this is the job requirement) and instead of using orthographic projection, I would like to keep it 2.5D so as to make it easier to manipulate depth and layering. However, I am not sure how to render the texture (or sprite) at the size it is intended to be. Say for example, if my default camera position is (0,0,-6) and it is looking dead forward at point (0,0,0), how do I make a 64x64 bitmap appears at the same size when I have map it to a quad? What size should I set the texture to be, and how big should the quad be? Thanks in advance!
+
+##### Share on other sites
+Hidden
+The easiest solution I see here is to simply stick to perspective projection, and use billboarding for your sprites. This way, everything will scale correctly when you move the camera around. It's just so much less math and calculations. The size (distance) of your sprites will scale correctly and everything. This is atleast how I would have done it.
+
+Quote:
+ Original post by Kada2k6The easiest solution I see here is to simply stick to perspective projection, and use billboarding for your sprites. This way, everything will scale correctly when you move the camera around. It's just so much less math and calculations. The size (distance) of your sprites will scale correctly and everything. This is atleast how I would have done it.
+
+True, it's billboarding that I am looking at. The issue is - the image in Photoshop (for example)is 64 pixel by 64 pixel. How do I get a quad that is on the screen that is also 64 pixel by 64 pixel in perspective projection?
+
+##### Share on other sites
+Ensuring an exact size on screen with perspective projection isn't easy. It depends on the position of the camera, the fov used and the size of the viewport.
+
+Note that OpenGL screen coordinates are in the range [-1, 1] as opposed to viewport coordinates which are pixels. So you have to get the pixel-to-screen relation and with as well as the projection matrix settings and the distance calculate the size of the quad in world space.
+
+BUT, why do you need to have an exact size in the first place? If it is really necessary you could switch to orthogonal projection just for rendering that quad, but be careful with respect to depth values!
+
+##### Share on other sites
+Quote:
+ Original post by Lord_EvilEnsuring an exact size on screen with perspective projection isn't easy. It depends on the position of the camera, the fov used and the size of the viewport.Note that OpenGL screen coordinates are in the range [-1, 1] as opposed to viewport coordinates which are pixels. So you have to get the pixel-to-screen relation and with as well as the projection matrix settings and the distance calculate the size of the quad in world space.BUT, why do you need to have an exact size in the first place? If it is really necessary you could switch to orthogonal projection just for rendering that quad, but be careful with respect to depth values!
+
+I could switch to orthogonal projection; However, the boss suggests that I use perspective so I could do effects like zooming in, zooming out and rotational of the entire 2D scene (if it is a top-down game) easily.
+
+Is it possible to do zooming/rotational of the view if using an orthogonal projection?
+
+##### Share on other sites
+Check out the Nehe tutorial about mouse selection with openGL.
+It's done using Modelview marix, projection matrix, vievport and glUnproject function.
+Basically the first step is finding the projection of the point that was clicked (in screen coords) in the 3D scene: it's a 3D vector. If the vector crosses a triangle, then you know that the triangle was clicked.
+
+use the same concept to find the vectors corresponding to (0,0) and (1,1) on your screen. The vectors you find are the screen bounds in the 3d scene.
+Then just move/scale your world so that the vectors you found cross the extrema of the 3D plan you want to display.
+
+Hope that was clear...
+Hope it works!
+
+Good work
+LLL
+
+##### Share on other sites
+I'm developing a 2.5D game in OpenGL using orthogonal projection. I think it is the best decision I've made since I started my project. I don't see why you shouldn't be able to rotate and zoom the view in this mode? Just use glOrtho to zoom and glRotate to rotate the view, I do it all the time. If you want you can take a look at my project in my journal here at GameDev.
+
+##### Share on other sites
+Quote:
+Original post by Extrakun
+Quote:
+ Original post by Lord_EvilEnsuring an exact size on screen with perspective projection isn't easy. It depends on the position of the camera, the fov used and the size of the viewport.Note that OpenGL screen coordinates are in the range [-1, 1] as opposed to viewport coordinates which are pixels. So you have to get the pixel-to-screen relation and with as well as the projection matrix settings and the distance calculate the size of the quad in world space.BUT, why do you need to have an exact size in the first place? If it is really necessary you could switch to orthogonal projection just for rendering that quad, but be careful with respect to depth values!
+
+I could switch to orthogonal projection; However, the boss suggests that I use perspective so I could do effects like zooming in, zooming out and rotational of the entire 2D scene (if it is a top-down game) easily.
+
+Is it possible to do zooming/rotational of the view if using an orthogonal projection?
+
+Then perhaps your 'boss' doesn't quite know WTF he's talking about, because if he's suggesting that you scale by moving the camera closer to the objects or mucking about with the frustum, rather than by using a scaling matrix, he hasn't got a clue.
+
+Just use orthogonal projection, because not only is it possible to do what he suggests in ortho (or perspective) projection, but its more correct to do it using scaling and transform matrices than what he's suggesting.
+
+##### Share on other sites
+Quote:
+ Original post by Ravynebut its more correct to do it using scaling and transform matrices than what he's suggesting.
+
+On which plane of existence? Applying scaling just complicates things by f**ing up a neatly orthonormal matrix that's easy to use (and not so easy to use anymore when the applied scale affects all translations done afterwards).
+
+Also, when did stuff suddenly grow, because you were using your camera zoom? It doesn't, you just pick a smaller window and make it larger. Which is EXACTLY what happens when you reduce the PoV or reduce the width/height of ortho projection. You also don't need to worry about your 100x times bigger stuff suddenly wildly growing beyond your clip planes or "swallowing" the camera. In fact, did you ever use scaling to zoom in a real 3D scene? Are you really trying to tell me you didn't notice the "far end" of your world disappearing more and more?
+
+So how is it more "correct" to NOT use the method that's closest to the real world equivalent AND is having no unpleasant side effects? Using scaling to simulate zoom instead of the actual growing of single objects is about the last things I'd want to do without a gun pointed at my head. In fact, I'd even advice to never ever use scaling unless you absolutely have to.
+
+The reason I agree that this boss has no clue? It sounds like he wants to "zoom" by moving the camera closer. Especially with perspective projection that's a dumb idea, because you would either stop pretty soon or constantly adjust the near plane (not to mention intersection with objects to worry about). Even in 2D with ortho projection you might move beyond your stuff when you actually just want to "zoom" in more.
+
+Zooming is a trivial matter of:
+glMatrixMode(GL_PROJECTION);glLoadIdentity();int width = vportWidth/(2.0f*zoomFactor);int height = vportHeight/(2.0f*zoomFactor);glOrtho(-width, width, -height, height, -1, 1);
+
+If you want to zoom at a specific point (for example the location of the mouse pointer), you need to adjust the translation (in which case you don't have to center the view around the origin.. that's just for convenience).
+
+Examples of this and a semi-3D version (a basically 2D "game board") including source can be found here (DSA Route and SW D6 tool.. search code for "zoom", SW D6 uses perspective and moving.. just zoom in close to see why that concept sucks)
+
+##### Share on other sites
+Thanks all for your suggestions and comments. I'll look at the source and implement an orthographic PoC for my boss to look at and discuss the issues with him.
+
+1. 1
+2. 2
+3. 3
+4. 4
+Rutin
+18
+5. 5
+
+• 14
+• 12
+• 9
+• 12
+• 37
+• ### Forum Statistics
+
+• Total Topics
+631423
+• Total Posts
+3000003
+×

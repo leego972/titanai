@@ -1,0 +1,247 @@
+40m QIL Cryo_Lab CTN SUS_Lab TCS_Lab OMC_Lab CRIME_Lab FEA ENG_Labs OptContFac Mariner WBEEShop
+ 40m Log, Page 89 of 339 Not logged in
+ID Date Author Type Category Subject
+1463   Thu Apr 9 12:23:49 2009 peteUpdateLockingtuning ETM common mode
+
+Pete, Yoichi
+
+Last night, we put the IFO in FP Michelson configuration.  We took transfer functions of CARM and DARM, first using CM excitations directly on the ETMs, and then using modulations of the laser frequency via MC excitation.  We found that there was basically no coupling into DARM using the MC excitation, but that there was coherence in DARM using the ETM excitation.  Therefore, I tuned the ETM common mode in the output matrix.  I did this by taking transfer functions of PD1_Q with PD2_I (see attached plot).  I changed the  drdown_bang script to set C1:LSC-BTMTRX_14 0.98 and C1:LSC-BTMTRX_24 1.02.
+
+Attachment 1: FPMI-DARM-CARM-ETM-fineScan.pdf
+1467   Fri Apr 10 01:24:08 2009 ranaUpdateComputersallegra update (sort of)
+
+I tried to play an .avi file on allegra. In a normal universe this would be easy, but because its linux I was foiled.
+
+The default video player (Totem) doesn't play .avi or .wmv format. The patches for this work in Suse but not Fedora. Kubuntu but not CentOS, etc.I also tried installing Kplayer, Kaffeine, mplayer, xine, Aktion, Realplay, Helix, etc. They all had compatibility issues with various things but usuallylibdvdread or some gstreamer plugin.So I pressed the BIG update button. This has now started and allegra may never recover. The auto update wouldn't work in default mode becauseof the libdvdread and gstreamer-ugly plugins, so I unchecked those boxes. I think we're going to have this problem as long as we used any kind ofadvanced gstreamer stuff for the GigE cameras (which is unavoidable).
+
+1469   Fri Apr 10 04:54:24 2009 YoichiUpdateLockingREFL_DC for CARM
+Suggested by Rob and Rana's simulation works, I tried to use REFL_DC for the CARM error signal.
+
+My current guess for the cause of the 3.8kHz peak is the following.
+The AF sidebands created by the laser frequency drive are reflected by the IFO to the symmetric port if the arms are perfectly symmetric.
+However, if there is asymmetry in the arm cavities (such as loss imbalance, ITM transmission difference etc) the sidebands are scattered from the common mode to the differential mode. If our CARM error signal has a large response also to the differential mode (i.e. DARM), the loop is closed. At the DARM RSE frequency, the AF sideband in the differential mode is enhanced and creates a peak in the CARM response.
+What Rob's plots show is that PO_DC has a larger response to DARM than REFL_DC has. You can see this from the curves of CARM offset = 0 (black ones).
+When the CARM offset is zero, the CARM signal should go to zero. Therefore, the black curves show the residual DARM response. In the case of PO_DC, the black curve is very large suggesting a large DARM coupling.
+
+Now I changed the cabling at the LSC rack to put REFL_DC into the REFL2 input of the CM board.
+The REFL_DC signal is put through a 160kHz RC LPF and split to the ADC and the CM board (AC coupled by a large capacitor).
+I modified the cm_step script to use PD4_DC as CARM error signal. (The old script is saved as cm_step.podc).
+Since the polarity of the REFL_DC signal is opposite to the PO_DC, I flipped the polarity switch of the CM board.
+This will flip the sign of the RF CARM signal because this switch flips the polarity of the both inputs.
+We have to flip the sign of the RF CARM signal with the SR560 sitting on the LSC rack, which I haven't done yet.
+
+With some tweaks of the gains and addition of two lag-lead filters to PD4_DC, I was able to completely hand off the CARM error signal to REFL_DC.
+The attached plot shows the AO path loop gain at arm power = 7. The 3.8kHz is gone, although there is some phase ripple around 3.8kHz.
+
+Since the gain behavior of the REFL_DC is different from the PO_DC, I'm now working on the power up part of the script, adjusting the gains as the power goes up.
+Attachment 1: AO-loop-gain-CARM-REFL_DC.png
+1470   Fri Apr 10 18:11:18 2009 JenneUpdatePSLISS has a bad cable?
+
+[Rob, Jenne]
+
+I noticed that the ISS Mean Value and CS Saturation were both RED and unhappy. (The alarms were going off, and they were both red on the MEDM screen).  None of the MEDM settings seemed off kilter, so we went out to take a look at the PSL table.
+
+Rob checked that light is indeed going to both of the ISS photodiodes (Morag and Siobhan).  Next we checked that all the cables were good, and that the power to the ISS box was plugged in. In this process, Rob wiggled all the cables to check that they were plugged in.  Just after doing this, the Mean Value and CS Sat were happy again.  Rob thinks the current shunt connection might be bad, but we don't really know which one it was since all of the cables were jiggled between our checking the screens.
+
+Right now, everything is happy again, but as with all bad-cabling-problems, we'll probably see this one again.
+
+I don't know why in particular the connection decided to spaz out this afternoon...I don't think anyone opened the PSL table before Rob and I went to investigate.  I was working on the PMC servo (checking the LO levels...to be posted in a couple minutes), but didn't have anything to do with the ISS. After I was done, I put everything back, and locked the PMC and the MC, and everything was good, until some time later when the ISS started flipping out.
+
+1471   Fri Apr 10 19:09:48 2009 JenneUpdatePSLPMC LO Calibration
+I measured the RF LO output level from the PMC's LO board which goes directly into the LO input on the PMC Servo board. This goes hand-in-hand with Rana's thoughts
+that we might be giving the PMC mixer a too-low LO value, and we might need to switch out the mixer. Steve ordered some new mixers today to try out.
+
+The RF Output Adjust slider (on the C1:PSL_PMC_PS screen) goes from 0-10V; The nominal value (or at least the value I found it at today) is 2.014V.
+
+To measure the RF level: I unlocked the Mode Cleaner and turned off the ISS servo per Yoichi's suggestion. I then unplugged the input to the PMC servo board's LO input,
+and put that cable into a 300MHz 'scope, with 12dB attenuation. The 'scope was AC coupled, with the input set to 50Ohms.
+
+I then changed the RF Output Adjust slider in increments of 0.5, and measured the peak-to-peak values on the scope. In the table and on the plots, I've taken into account
+the 12dB attenuation. i.e I actually measured 964mV, so 964mV*10^.6 = 3838mV.
+
+ RF Output Adjust Output measured on scope Oscillator Output Monitor [V] [Vpp] [no units given on MEDM screen] All \pm 0.0159 all of this column is NEGATIVE 0.0000 3.838 0.007 0.5000 3.854 0.007 1.0000 3.838 0.006 1.5000 3.838 0.007 2.0000 3.838 0.006 2.5000 3.838 0.007 3.0000 3.838 0.007 3.5000 3.838 0.007 4.0000 3.838 0.007 4.5000 3.822 0.007 5.0000 3.822 0.012 5.5000 3.790 0.076 6.0000 3.758 0.257 6.5000 3.694 0.555 7.0000 3.615 0.931 7.5000 3.535 1.277 8.0000 3.456 1.532 8.5000 3.392 1.709 9.0000 3.344 1.829 9.5000 3.312 1.908 10.0000 3.296 1.966
+
+I think it's kind of funky that it's so flat for ~half the slider. Also, the third column includes the Oscillator Output Monitor value from the MEDM screen at various RF Adjust slider values. All of these should be negative (i.e. -0.007), but the TABLE function doesn't like "-" signs. I don't know if this information is degenerate with the 'scope measurements, or if it's an indicator of what (might be) wrong.
+
+After finishing, I plugged the cable back into the PMC servo board as it was, turned back on the ISS and relocked the PMC and the MC.
+Attachment 1: RFSliderAdjustCalib.png
+Attachment 2: RFSliderAdjustCalibWithOsc.png
+1472   Fri Apr 10 19:10:53 2009 JenneUpdateGeneralXarm locked?
+
+I don't know who left the X arm locked, but I just ran the Align Full IFO script, so everything is good in case Yoichi/someone comes in to lock the IFO this weekend.
+
+1473   Sat Apr 11 00:45:41 2009 YoichiUpdatePSLPMC LO Calibration
+
+ Quote: I then changed the RF Output Adjust slider in increments of 0.5, and measured the peak-to-peak values on the scope. In the table and on the plots, I've taken into account the 12dB attenuation. i.e I actually measured 964mV, so 964mV*10^.6 = 3838mV.
+
+3.8Vpp is about 16dBm.
+The mixer for the PMC demodulator is level 23. So 16dBm is insufficient.
+What is the level of the new mixer Steve ordered ? 13 ?
+1475   Sun Apr 12 19:27:20 2009 ranaUpdatePSLPMC LO Calibration
+
+ Quote: 3.8Vpp is about 16dBm. The mixer for the PMC demodulator is level 23. So 16dBm is insufficient. What is the level of the new mixer Steve ordered ? 13 ?
+
+Since Steve and Jenne were on it, I'm sure they ordered the optimum values...
+
+From the table, it looks like the drive level adjuster is busted. Its not supposed to just give a
+1-2 dB change over the full range. We'll have to think about what exactly to do, but we should
+probably install the level 13 mixer and put in the right attenuation to make the LO be ~13.5 dBm
+including the filter. Also need to calibrate the LO readback on the board like what Peter did for
+the FSS.
+1477   Mon Apr 13 08:59:57 2009 steveUpdatePSLmixers on order
+
+Quote:
+
+ Quote: I then changed the RF Output Adjust slider in increments of 0.5, and measured the peak-to-peak values on the scope. In the table and on the plots, I've taken into account the 12dB attenuation. i.e I actually measured 964mV, so 964mV*10^.6 = 3838mV.
+
+3.8Vpp is about 16dBm.
+The mixer for the PMC demodulator is level 23. So 16dBm is insufficient.
+What is the level of the new mixer Steve ordered ? 13 ?
+
+I ordered mixers level 13, 17 on Friday and level 23 now.
+They should be here Tuesday
+
+NOTE: level 23 power is illegal to use in the 40m lab
+They get hot
+1478   Mon Apr 13 17:55:37 2009 JenneUpdatePSLPMC LO Mon Calibration
+
+I have calibrated the PMC LO Mon (C1:PSL-PMC_LODET) on the PMC's EPICS screen, by inputting different RF LO levels into the LO input of the PMC servo board.
+
+Since the RF output adjust slider on the PMC's Phase Shifter screen doesn't do a whole lot (see elog 1471), I used a combination of attenuators and the slider to achieve different LO levels. I measured the level of the attenuated RF out of the LO board using the 4395A in spectrum analyzer mode, with the units in dBm, with 50dB attenuation to make it stop complaining about being overloaded.  For each row in the table I measured the RF level using the 4395, then plugged the cable back into the PMC servo board to get the EPICS screen's reading.
+
+The last 2 columns of the table below are the 'settings' I used to get the given RF LO level.
+
+ RF LO Input to PMC Servo Board [dBm] LO Mon on EPICS Screen [no units] RF Output Adjust Slider [V] Attenuators used [dB] 16.004 +- 0.008 0.1200 +- 0.0003 0 0 15.001 +- 0.004 0.0708 +- 0.0008 0 1 14.079 +- 0.008 0.0318 +- 0.0001 8 1 13.002 +- 0.006 0.0126 +- 0.0004 0 3 11.992 +- 0.010 0.0024 +- 0.0008 0 4 10.994 +- 0.010 -0.0024 +- 0.0003 0 4+1=5 9.993 +- 0.008 -0.0047 +- 0.0007 0 3+3=6
+
+When the new mixers that Steve ordered come in (tomorrow hopefully), I'll put in a Level 13 mixer in place of the current Level 23 mixer that we have.  Also, Rana suggested increasing the gain on the op-amp which is read out as the LO Mon so that 13dBm looks like 1V.  To do this, it looks like I'll need to increase the gain by ~80.
+
+Attachment 1: LOmonCalibration.png
+1480   Tue Apr 14 02:59:02 2009 YoichiUpdateLockingPower up until 26
+Yoichi, Peter,
+
+With careful adjustments of the common mode gains, we were able to go up to arm power = 26, sort of robustly (more 50% chance).
+At this arm power level, the common mode loop shape still looks good. But the interferometer loses lock easily.
+I have to check other DOFs, but the interferometer does not stay locked long enough.
+Today, lock losses of the IFO were associated with the lock loss of the PMC whereas the FSS stayed locked.
+Probably the AO path got large kicks, which could not be handled by the PMC PZT.
+
+The cause for the IFO lock loss is under investigation.
+1482   Tue Apr 14 17:20:36 2009 YoichiUpdateComputer Scripts / ProgramsParallel Optickle
+I wrote a parallel version of tickle() function for Optickle.
+The attached ptickle.m, which provides ptickle() command, can be used as a drop-in replacement of tickle() command.
+Just download it and place it in the @Optickle directory.
+This command will run multiple instances of Matlab to calculate the frequency responses in parallel.
+The speed gain is roughly proportional to the number of CPU cores you use.
+
+To use multiple cores, you have to run matlabpool() command first. See the comment at the beginning of ptickle.m for more detail.
+The progress bar is disabled at this moment because it is not clear for me how to make a single progress bar from multiple instances of Matlab.
+
+I sent the code to Matt, so this may be included in the next release of Optickle.
+Attachment 1: ptickle.m
+% Compute DC fields, and DC signals, and AC transfer functions
+%
+% This is a parallelized version of tickle. You have to run matlabpool(n)
+% command before using this command. matlabpool(n) will invoke n instances
+% of matlab workers in your computer. Once you have started those workers,
+% you can reuse them many times (i.e. you don't have to run matlabpoo(n)
+% every time you use ptickle). Usually n should be equal to the number of
+% CPU cores in your computer, but the Matlab parallel computing toolbox has
+% the limit of maximum 4 workers for a local computer. If you use a cluster
+% of computers across a network, this limit does not apply. But I haven't
+
+... 393 more lines ...
+1484   Wed Apr 15 02:20:46 2009 rana, yoichiUpdateDMFDMF now working copy
+
+We found that DMF/ was not an SVN working copy, so I wiped out the SVN version, imported the on-disk copy, moved it to DMFold/ and then checked out the SVN version.
+
+We can delete DMFold/ whenever we are happy with the SVN copy.
+
+1485   Wed Apr 15 03:52:27 2009 ranaUpdateDMFNDS client32 updated for DMF
+Since our seisBLRMS.m complains about 'can't find hostname' after a few hours, even though matlab is able to ping fb40m,
+I have recompiled the NDS mex client for 32-bit linux on mafalda and stuck it into the nds_mexs/ directory. This time I
+
+compiled using the 'gcc' compiler instead of the 'ANSI C' compiler that is recommended in the README (which, I notice,
+
+is now missing from Ben Johnsons web page!). Let's see how long this runs.
+
+1487   Wed Apr 15 17:11:37 2009 JenneUpdatePSLEdited c1psl.db to calibrate PMC's LO mon
+
+
+Following the method in Peter's Elog,
+
+I edited c1psl.db to include the following:
+
+grecord(calc, "C1:PSL-PMC_LOCALC")
+{
+field(INPB,"C1:PSL-PMC_LODET")
+field(SCAN,".1 second")
+field(PREC,"4")
+field(CALC,".955*LOGE(B)-17.11")
+}
+
+I restarted c1psl (had to go hit the physical reset button since it didn't come back after telnet-ing and "reboot"ing) to make this take effect.
+
+Next step is to tell the PMC screen to look at this _LOCALC rather than _LODET, and the screen will be calibrated into dBm.
+
+Right now, the screen is as it always has been, because after relooking at the calibration, I no longer believe it.  This calibration claimes -19dBm for an LOmon value of 0.1200, when I actually measured +16dBm for this LOmon value.  So I've screwed something up in doing my MatLAB calibration.  I'll fix it tomorrow, and put in the correct calibration before I change the PMC screen.
+
+RefCav, PMC, MC are all back and locked after my shenanigans.
+
+1488   Thu Apr 16 11:17:56 2009 JenneUpdatePSLEdited c1psl.db to calibrate PMC's LO mon
+
+ Quote:  I edited c1psl.db to include the following: grecord(calc, "C1:PSL-PMC_LOCALC") { field(INPB,"C1:PSL-PMC_LODET") field(SCAN,".1 second") field(PREC,"4") field(CALC,".955*LOGE(B)-17.11") }
+
+As it turns out, I apparently can't tell X from Y when fitting a function in a rush.  The real calibration stuff which is now in c1psl.db is:
+
+grecord(calc, "C1:PSL-PMC_LOCALC")
+{
+field(INPB,"C1:PSL-PMC_LODET")
+field(SCAN,".1 second")
+field(PREC,"4")
+field(CALC,"1.004*LOGE(B)+17.76")
+}
+
+I restarted c1psl (again, had to go hit the physical reset button since it didn't come back after a telnet-reboot) to have it take in the changes.  The psl.db file that was in place before yesterday (before I touched it) is saved as psl.db.15Apr2009 just in case.
+
+
+I edited the PMC EPICS screen to have the LO mon look at C1:PSL-PMC_LOCALC, which is the calibrated channel in dBm.  I also stuck a little label on the screen saying what units it's in, because everyone likes to know what units they're looking at.
+
+1489   Thu Apr 16 16:26:57 2009 peteUpdateLockingWed. night locking
+yoichi, pete
+
+We installed the watchLockLoss script in scripts/AutoDTT/.  This script monitors arm power and uses command line
+DTT to save 5 s snapshot of the interferometer when it senses loss of lock.  We ran it on linux and it seemed to
+save an xml file about half the time; we'll try it on solaris.
+
+I managed to get up to arm power of about 20 a couple of times.  IFO lost lock a couple of times after turning
+off moving zero.  MC2 would often get tripped by lock loss and need resetting.  Maybe we will try to stiffen the
+op levs.
+1490   Thu Apr 16 16:37:42 2009 AlbertoUpdateAuxiliary lockingthe zipper
+
+It takes 18 months to double the computational power of microprocessors but it took man thousands of years to invent the zipper. I never really understood that till these days.
+
+Here is a sample of my latest results from Optickle simulations of the locking signal for the Power Recycling Cavity.
+
+Thanks also to Rob's revolutionary bidimensional rotating matrix idea (I can see entire books of linear algebra going to be rewritten now because of that) I could find the way to determine the optimal demodulation phases for the demod signals.
+
+There were also an other couple of missing details. But that came easily along.
+
+The parfor function for the parallel computation in Matlab sped up some loops by a factor of 100.
+
+In these particular plots there's still no CARM offset scan. That's what I'm going to post next on the elog, together with the signals for the other degrees of freedom.
+
+Attachment 1: 19_3f_Current_40m_plots_SUCCESS.pdf
+1491   Thu Apr 16 17:19:44 2009 AlbertoUpdateAuxiliary lockingthe zipper
+
+ Quote: It takes 18 months to double the computational power of microprocessors but it took man thousands of years to invent the zipper. I never really understood that till these days. Here is a sample of my latest results from Optickle simulations of the locking signal for the Power Recycling Cavity. Thanks also to Rob's revolutionary bidimensional rotating matrix idea (I can see entire books of linear algebra going to be rewritten now because of that) I could find the way to determine the optimal demodulation phases for the demod signals. There were also an other couple of missing details. But that came easily along. The parfor function for the parallel computation in Matlab sped up some loops by a factor of 100.   In these particular plots there's still no CARM offset scan. That's what I'm going to post next on the elog, together with the signals for the other degrees of freedom.
+
+Just to show that I'm confident I'm getting reasonable results, I'll post two PRC scans for different CARM. One set of plots is for the current 40m with -19.78 deg of SRM detuning phase, the other is for the Old Upgrade (9 Mhz vs the 11 currently planned) with no detuning phase.
+
+I'm going to put together the results and get some conclusion about the 3f locking scheme for the current 40m and the upgrade.
+
+Attachment 1: 04_3f_Current_40m_plots.pdf
+Attachment 2: 11_3f_40mUpgrade_plots.pdf
+1493   Fri Apr 17 11:05:22 2009 YoichiUpdateLockingThursday night locking status
+The last night, it was sort of robust to go up until arm power = 26.
+The REFL_DC gain seems to change a lot around this region. So I did fine adjustments of the gain with small incremental steps of the arm power.
+This work will continue.

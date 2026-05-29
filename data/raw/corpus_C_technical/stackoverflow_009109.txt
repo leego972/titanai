@@ -1,0 +1,64 @@
+Question: <p>I'm trying to find the actual class of a django-model object, when using model-inheritance.</p>
+
+<p>Some code to describe the problem:</p>
+
+<pre><code>class Base(models.model):
+    def basemethod(self):
+        ...
+
+class Child_1(Base):
+    pass
+
+class Child_2(Base):
+    pass
+</code></pre>
+
+<p>If I create various objects of the two Child classes and the create a queryset containing them all:</p>
+
+<pre><code>Child_1().save()
+Child_2().save()
+(o1, o2) = Base.objects.all()
+</code></pre>
+
+<p>I want to determine if the object is of type Child_1 or Child_2 in basemethod, I can get to the child object via o1.child_1 and o2.child_2 but that reconquers knowledge about the childclasses in the baseclass.</p>
+
+<p>I have come up with the following code:</p>
+
+<pre><code>def concrete_instance(self):
+    instance = None
+    for subclass in self._meta.get_all_related_objects():
+        acc_name = subclass.get_accessor_name()
+        try:
+            instance = self.__getattribute__(acc_name)
+            return instance
+        except Exception, e:
+            pass
+</code></pre>
+
+<p>But it feels brittle and I'm not sure of what happens when if I inherit in more levels.</p>
+
+Answer: <p>It feels brittle because it is.  (This is a reprint of an answer in a different context.  <a href="http://stackoverflow.com/questions/243082/c-casting-programmatically-can-it-be-done">See C++ casting programmatically : can it be done ?</a>)</p>
+
+<p>Read up on polymorphism. Almost every "dynamic cast" situation is an example of polymorphism struggling to be implemented.</p>
+
+<p>Whatever decision you're making in the dynamic cast has already been made. Just delegate the real work to the subclasses.</p>
+
+<p>You left out the most important part of your example. The useful, polymorphic work.</p>
+
+<p>When you said "I want to determine if the object is of type Child_1 or Child_2..." you left out the "so I can make the object do <code>aMethod()</code> in a way that's unique to each subclass".  That method is the useful work, and it should simply be a method of both subclasses.</p>
+
+<pre><code>class Base(models.model):
+    def aMethod(self):
+        # base class implementation.
+
+class Child_1(Base):
+    def aMethod(self):
+        # Child_1 override of base class behavior.
+
+class Child_2(Base):
+    def aMethod(self):
+        supert( Child_2, self ).aMethod() # Invoke the base class version
+        # Child_2 extension to base class behavior.
+</code></pre>
+
+<p>Same method, multiple implementations.  Never a need to "run-time type identification" or determining the concrete class.</p>

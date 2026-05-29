@@ -1,0 +1,129 @@
+Question: <p>What are metaclasses? What do you use them for?</p>
+
+Answer: <blockquote>
+  <h1>What are metaclasses? What do you use them for?</h1>
+</blockquote>
+
+<p>A class is to an instance as a metaclass is to a class. </p>
+
+<p>Put another way, a class is an instance of a metaclass.</p>
+
+<p>Put a third way, a metaclass is a class's class.</p>
+
+<p>Still hopelessly confused? So was I, until I learned the following and demonstrated how one can actually use metaclasses:</p>
+
+<h1>You use a metaclass every time you create a class:</h1>
+
+<p>When you create a class definition, for example, like this,</p>
+
+<pre><code>class Foo(object): 'demo'
+</code></pre>
+
+<p>it's the same as functionally calling <code>type</code> with the appropriate arguments and assigning the result to a variable of that name:</p>
+
+<pre><code>name = 'Foo'
+bases = (object,)
+namespace = {'__doc__': 'demo'}
+Foo = type(name, bases, namespace)
+</code></pre>
+
+<p>Note, some things automatically get added to the <code>__dict__</code>, i.e., the namespace:</p>
+
+<pre><code>&gt;&gt;&gt; Foo.__dict__
+dict_proxy({'__dict__': &lt;attribute '__dict__' of 'Foo' objects&gt;, '__module__': '__main__', '__weakref__': &lt;attribute '__weakref__' of 'Foo' objects&gt;, '__doc__': 'demo'})
+</code></pre>
+
+<p>The <em>metaclass</em> of the object we created, in both cases, is <code>type</code>. </p>
+
+<h1>We can extend <code>type</code> just like any other class definition:</h1>
+
+<p>Here's the default <code>__repr__</code> of classes:</p>
+
+<pre><code>&gt;&gt;&gt; Foo
+&lt;class '__main__.Foo'&gt;
+</code></pre>
+
+<p>One of the most valuable things we can do by default in writing a Python object is to provide it with a good <code>__repr__</code>. When we call <code>help(repr)</code> we learn that there's a good test for a <code>__repr__</code> that also requires a test for equality - <code>obj == eval(repr(obj))</code>. The following simple implementation of <code>__repr__</code> and <code>__eq__</code> for class instances of our type class provides us with a demonstration that may improve on the default <code>__repr__</code> of classes:</p>
+
+<pre><code>class Type(type):
+    def __repr__(cls):
+        """
+        &gt;&gt;&gt; Baz
+        Type('Baz', (Foo, Bar,), {'__module__': '__main__', '__doc__': None})
+        &gt;&gt;&gt; eval(repr(Baz))
+        Type('Baz', (Foo, Bar,), {'__module__': '__main__', '__doc__': None})
+        """
+        metaname = type(cls).__name__
+        name = cls.__name__
+        parents = ', '.join(b.__name__ for b in cls.__bases__)
+        if parents:
+            parents += ','
+        namespace = ', '.join(': '.join(
+          (repr(k), repr(v) if not isinstance(v, type) else v.__name__))
+               for k, v in cls.__dict__.items())
+        return '{0}(\'{1}\', ({2}), {{{3}}})'.format(metaname, name, parents, namespace)
+    def __eq__(cls, other):
+        """
+        &gt;&gt;&gt; Baz == eval(repr(Baz))
+        True            
+        """
+        return (cls.__name__, cls.__bases__, cls.__dict__) == (
+                other.__name__, other.__bases__, other.__dict__)
+</code></pre>
+
+<p>So now when we create an object with this metaclass, the <code>__repr__</code> echoed on the command line provides a much less ugly sight than the default:</p>
+
+<pre><code>&gt;&gt;&gt; class Bar(object): pass
+&gt;&gt;&gt; Baz = Type('Baz', (Foo, Bar,), {'__module__': '__main__', '__doc__': None})
+&gt;&gt;&gt; Baz
+Type('Baz', (Foo, Bar,), {'__module__': '__main__', '__doc__': None})
+</code></pre>
+
+<p>With a <code>__repr__</code> defined for the class instance, we have a stronger ability to debug our code.</p>
+
+<h1>An expected usage: <code>__prepare__</code> a namespace</h1>
+
+<p>If, for example, we want to know in what order a class's methods are created in, we could provide an ordered dict as the namespace of the class. We would do this with <code>__prepare__</code> which <a href="https://docs.python.org/3/reference/datamodel.html#preparing-the-class-namespace">returns the namespace dict for the class if it is implemented in Python 3</a>: </p>
+
+<pre><code>from collections import OrderedDict
+
+class OrderedType(Type):
+    @classmethod
+    def __prepare__(metacls, name, bases, **kwargs):
+        return OrderedDict()
+    def __new__(cls, name, bases, namespace, **kwargs):
+        result = Type.__new__(cls, name, bases, dict(namespace))
+        result.members = tuple(namespace)
+        return result
+</code></pre>
+
+<p>And usage:</p>
+
+<pre><code>class OrderedMethodsObject(object, metaclass=OrderedType):
+    def method1(self): pass
+    def method2(self): pass
+    def method3(self): pass
+    def method4(self): pass
+</code></pre>
+
+<p>And now we have a record of the order in which these methods (and other class attributes) were created:</p>
+
+<pre><code>&gt;&gt;&gt; OrderedMethodsObject.members
+('__module__', '__qualname__', 'method1', 'method2', 'method3', 'method4')
+</code></pre>
+
+<p>Note, this example was adapted from the <a href="https://docs.python.org/3/reference/datamodel.html#metaclass-example">docs</a>. </p>
+
+<p>So what we did was instantiate a metaclass by creating a class. We can also treat the metaclass as we would any other class. It has a method resolution order:</p>
+
+<pre><code>&gt;&gt;&gt; inspect.getmro(OrderedType)
+(&lt;class '__main__.OrderedType'&gt;, &lt;class '__main__.Type'&gt;, &lt;class 'type'&gt;, &lt;class 'object'&gt;)
+</code></pre>
+
+<p>And it has approximately the correct <code>repr</code> (which we can no longer eval unless we can find a way to represent our functions.):</p>
+
+<pre><code>&gt;&gt;&gt; OrderedMethodsObject
+OrderedType('OrderedMethodsObject', (object,), {'method1': &lt;function OrderedMethodsObject.method1 at 0x0000000002DB01E0&gt;, 'members': ('__module__', '__qualname__', 'method1', 'method2', 'method3', 'method4'), 'method3': &lt;function OrderedMet
+hodsObject.method3 at 0x0000000002DB02F0&gt;, 'method2': &lt;function OrderedMethodsObject.method2 at 0x0000000002DB0268&gt;, '__module__': '__main__', '__weakref__': &lt;attribute '__weakref__' of 'OrderedMethodsObject' objects&gt;, '__doc__': None, '__d
+ict__': &lt;attribute '__dict__' of 'OrderedMethodsObject' objects&gt;, 'method4': &lt;function OrderedMethodsObject.method4 at 0x0000000002DB0378&gt;})
+</code></pre>

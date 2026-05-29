@@ -1,0 +1,106 @@
+[Domain: Applied Sciences | Subfield: Complex Circuit Systems | Topic: Verilog-A | Type: Encyclopedia | Level: Graduate]
+# Verilog-A — Overview
+
+Verilog-A is an industry standard modeling language for analog circuits. It is the continuous-time subset of Verilog-AMS. A few commercial applications may export MEMS designs in Verilog-A format. History
+Verilog-A was created out of a need to standardize the Spectre behavioral language in face of competition from VHDL (an IEEE standard), which was absorbing analog capability from other languages (e.g. MAST). Open Verilog International (OVI, the body that originally standardized Verilog) agreed to support the standardization, provided that it was part of a plan to create Verilog-AMS — a single language covering both analog and digital design. Verilog-A was an all-analog subset of Verilog-AMS that was the first phase of the project. There was considerable delay (possibly procrastination) between the first Verilog-A language reference manual and the full Verilog-AMS, and in that time Verilog moved to the IEEE, leaving Verilog-AMS behind at Accellera. The email log from AD 2000 can be found here. Standard Availability
+Verilog-A standard does not exist stand-alone - it is part of the complete Verilog-AMS standard. Its LRM is available at the Accellera website. However, the initial and subsequent releases can be found here, with what will probably be the final release here since future work will leverage the new net-type capabilities in SystemVerilog. Built-in types like "wreal" in Verilog-AMS will become user-defined types in SystemVerilog more in line with the VHDL methodology. Compatibility with the C programming language
+A subset of Verilog-A can be translated automatically to the C programming language using the Automatic Device Model Synthesizer (ADMS). This feature is used for example to translate the BSIM Verilog-A transistor models, which are no more released in C, for use in simulators like ngspice. Code example 
+This first example gives a first demonstration of modeling in Verilog-A:
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+module example(a,b,c,d,e,f);
+	
+	parameter real R = 1m;
+	parameter real C = 1u;
+	parameter real L = 1u;
+	parameter integer gain = 2;
+	
+	input a;
+	output b;
+	inout c,d,e,f;
+	
+	electrical a,b,c,d,e,f;
+	
+	analog begin
+		
+		// Modelling lumped elements
+		//Resistor
+		V(c,d) <+ R*I(c,d);
+
+		//Inductor
+		// Multiple current or voltage assignments are accumulated
+		V(c,d) <+ L * ddt(I(c,d));
+		
+		//Capacitor
+		I(e,f) <+ C * ddt(V(e,f));
+		
+		// Simple amplifier
+		// Voltages are referenced to ground if no second node is given
+		V(b) <+ gain * V(a);	
+	end	
+endmodule
+This Verilog-AMS example implements an ideal diode, by defining the current through the branch (a,c) depending on voltage at branch terminals (a), (c), and the ambient temperature of the simulated circuit:
+// Ideal Diode
+module diode (a, c); 
+    inout a, c; 
+    electrical a, c; 
+    parameter real IS = 1.0e-14;  // User-configurable saturation current
+    real idio;
+    /*
+     *  Calculate nonlinear current through diode depending on
+     *   - thermal voltage $vt (at ambient temperature of simulated circuit) and
+     *   - voltage between terminals
+     */
+    analog begin
+        idio = IS * (limexp(V(a,c)/$vt) - 1); 
+        I(a,c) <+ idio; 
+    end 
+endmodule 
+
+For a simple DC voltage source, the branch voltage is set to the constant (DC) value:
+// DC Source
+module vsrc (p,n);
+  parameter real dc = 1.0;
+  inout p, n;
+  electrical p, n;
+
+  analog begin
+    // Assign constant DC voltage at each time step:
+    V(p,n) <+ dc;
+  end
+endmodule
+
+A sine voltage generator can use the built-in sin() function:
+// A Sinusoidal Voltage Source
+`include "constants.vams" 
+
+module vsin (p,n);
+  parameter real amplitude = 1.0;
+  parameter real freq = 50.0; 
+  parameter real phase = 0.0;
+  inout p, n;
+  electrical p, n;
+
+  analog begin
+    V(p,n) <+ amplitude * sin(`M_TWO_PI * freq * $abstime + phase);
+    $bound_step(0.1/freq);  // demand at least 10 points per cycle to avoid aliasing issues
+  end
+endmodule
+
+See also
+ Verilog-AMS
+ Verilog
+
+References
+
+External links
+ Language design objectives (circa 1994)
+ Accellera Verilog Analog Mixed-Signal Group
+ Language References Manuals
+ The Designer's Guide to Verilog-AMS
+ verilogams.com — User's manual for Verilog-AMS and Verilog-A
+ Designer's Guide Community — Examples of models written in Verilog-A
+
+Hardware description languages

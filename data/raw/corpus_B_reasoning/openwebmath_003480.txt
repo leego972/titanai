@@ -1,0 +1,60 @@
+# Spacial access methods and z-order
+
+I'm relatively familiar with spacial access methods and related data-structure such as Kd-trees and R-trees, but there is a related issue which I don't remember having seen mentioned when reading on that subject.
+
+I'm concerned with the 2 dimension case. Programs manipulating shapes often sort overlapping shapes in z-order, giving a predictable behavior. Querying a data structure for a range access usually provides the shapes in the region in an order not guaranteed to respect the z-order. It is obviously possible to sort the result, but are there some data-structure allowing to avoid that step? Especially when z-order is considered important only for overlapping shapes.
+
+• This question is not entirely clear to me. First of all, what are you querying for, precisely? All shapes completely inside the query region? All shapes intersecting the query region? All groups of intersecting shapes for which at least one shape intersects the region? Secondly, what are the shapes? Rectangles? Polygons? Something else? Finally, what is your query range? A rectangle? A circle? Something else? Jan 29 '17 at 10:21
+• @Discretelizard, I don't have any application in mind (more precisely my application does not depend on z-order and is suitably handled with what we have); I was wondering how if z-order could be handled in a non-trivial way (i.e. without post-processing the result or doing a simple selection on the z-ordered list of shapes). If you need one, you can consider displaying from back to front. Jan 29 '17 at 12:25
+• Well, then I'm afraid I don't understand what sort of answer you're looking for. I could elaborate a bit more on how storing the lists of shapes at the 'bottom' of the tree sorted by their z-order can be used to get a bit better performance than simply sorting, but most of the answers I can think of likely depend on the answer to the questions I asked above. Jan 29 '17 at 13:34
+• @Discretelizard, how that problem is called in academia and the reference to a survey paper would be enough, an outline of the main techniques would be outstanding; a statement that it is not a studied problem would also work although disappointing but that's not the news-bearer fault. I'm asking in a technological watch state of mind --just collecting facts related to what I do in case they come up useful-- so ideas about how to adapt a data-structure not designed for z-order handling without experience feed-back is not what I'm looking for. Jan 29 '17 at 14:26
+
+First of all, Kd-trees are data-structures for a number of points, while your problem is considered with shapes. Although you can (and we will) represent the shapes as points in a higher dimensional space in some way, querying shapes is an important special case over arbitrary points. I don't see why Z-orders would be interesting for points, so we really want a data-structure for shapes. R-trees store rectangles, but if you are interested in finding intersections of query regions with non-rectangular shapes, R-trees probably aren't very helpful.
+
+Since a general shape is not so clearly enough, I will consider searching for a range in a set of $$n$$ simple polygons, this should be sufficient for most cases. Querying this structure with a 2D range (that is, an orthogonal rectangle) for shapes can mean two different things:
+
+• Find all polygons fully contained in an orthogonal query rectangle.
+• Find all polygons intersecting an orthogonal query rectangle.
+
+## Polygons fully contained in an orthogonal query rectangle
+
+For the first query, note that a polygon is fully contained in a rectangle if and only if its rectangular bounding box is fully contained inside the query rectangle. So, we can search for the bounding boxes of the shapes. To do this, we represent the bounding box of every shape $$s$$ as a tuple of the bottom left and upper right corner $$(p_s, q_s)$$. I denote the $$x$$- and $$y$$-coordinates of a point using brackets, e.g. $$p[x]$$. We want to find all $$s$$ such that $$p_r \leq p_s$$ and $$q_r \leq q_s$$ for a query rectangle $$r$$. We can use a 4D version of your favorite point range query data structure (Kd,R,Range,etc.-tree) to find all those rectangles in $$O(\log^3 n + k)$$ time, were $$k$$ is the amount of rectangles reported, and use $$O(n\log^3 n)$$ storage for the data-structure. You can actually reduce the storage to $$O(n\log^2 n)$$, using a 2D-Range tree on the points $$p_s$$ and 'linking' this tree to a priority search tree for the $$q_s$$ coordinate (since we only have to search in positive direction on the second coordinate). However, Range trees tend to have large coefficients in practice, so you should probably stick to the trees you're familiar with.
+
+## Polygons intersecting an orthogonal query rectangle
+
+For the second type of query on points, finding all polygons intersecting an orthogonal query rectangle, searching for intersecting bounding boxes may lead to a lot bounding boxes where the polygon does not actually intersect the query rectangle, so we need another representation. If we represent all polygons by the $$m$$ segments of their boundaries, we use a Windowing query to find the segments in $$O(log^2 m + i)$$, where $$i$$ is the amount of segments found, using a $$O(m\log m)$$ size data-structure.
+
+However, we missed the polygons that contain our query rectangle, as we only looked for boundary intersections. We can check this by storing the bounding boxes of all polygons in 2 'chained' segment trees (similar to creating from 2D-range trees from BST's) and query for the bounding boxes that contain endpoints of the query rectangle. This has a query time of $$O(\log n + k)$$ and uses $$O(n\log n )$$ storage, but this is dominated by the other part, as $$n\leq m$$ and $$k \leq i$$.
+
+## Now, for z-orders...
+
+First, to summarize, we now have algorithms to solve the following problems with the following bounds:
+
+• Finding all polygons fully contained in an orthogonal query rectangle takes $$O(\log^3 n + k)$$ time and $$O(n\log^3 n)$$ space, where $$n$$ is the total number of polygons and $$k$$ is the number of polygons reported.
+• Finding all polygons intersecting an orthogonal query rectangle takes $$O(\log^2 m + i)$$ time and $$O(m\log m)$$ space, where $$m$$ is the total number of polygon segments and $$i$$ is the number of segments of the polygons reported.
+
+Now, I feel that I can finally consider the z-order. I will assume we want to query for shapes fully contained in our rectangle, since the reasoning and conclusion is similar for the other case.
+
+I do not know why you need the objects sorted on z-order, but I assume you want to iterate over all reported shapes in their z-order (If this is not what you want, there might be a far better method than sorting)
+
+If we query as discussed and sort the found rectangles, we get a running time of $$O(\log^3 n + k\log k)$$. Generally, $$k$$ is small compared to $$n$$, so the additional log factor does not do that much so you might as well sort. In fact, $$n\log n$$ is usually the best you can get for an geometric algorithm that is not a variant of point location/range search.
+
+If $$k$$ is not small compared to $$n$$, you're probably better of not running all this complicated range searching and just run the trivial $$O(n)$$-algorithm that traverses all shapes in their z-order, while checking in constant time if it is in your query range. (I ignore sorting all shapes, as you only need to do that once)
+
+## Tldr;+Conclusion
+
+If range searching is your problem, sorting probably isn't and if sorting is your problem, range searching probably isn't.
+
+Although there are probably cases where they both are problem (e.g. zooming in maps), getting a good solution for this case could be rather tricky. I hope that if you learned anything from this answer, it is that range searching can already be quite a tricky business, so I'll leave it at this for now. It might be interesting to look if this specific topic has some useful literature.
+
+• Actually, one idea is to consider z-orders as the third dimension (I know, who would have thought?!) and store them. (not much different than storing the points in sorted binary search tree). However, we still have to merge these sorted result, which we may do a logarithmic amount of time (maybe worse), to get a $k\log \log k$ cost for the sorting (at best), so this probably has little value. Jan 28 '17 at 22:46
+• Thanks for your answer. Sadly, it felt short of addressing my concerns, probably because I was not clear and you ended retracing the journey I made before asking my question -- which is a nice confirmation that I've not missed something obvious. I just want overlapping shapes be reported in z-order, if they are not overlapping I don't care about it -- and that's why sorting seem overkill and is painful for so much for the time but for the latency introduced. (On a side note, r-trees for sure were introduced for sized objects). Jan 29 '17 at 7:58
+• @AProgrammer Ah, I see, R-trees store rectangles, not points. This does mean that it isn't very suitable for the intersection range query on polygons, though. Jan 29 '17 at 16:43
+
+I know two data structures that return results in z-order without further sorting.
+
+The CritBit-Tree is a binary prefix sharing tree. If you interleave the coordinates to get a single key, the result is a z-ordered query result. Bit interleaving is straight forward for integer values, but also possible with floating point values (with some caveats). A multidimensional implementation is available here (also includes floating-point interleaving).
+
+The PH-Tree is a z-ordered tree, essentially a CritBit tree that splits in every node in all dimensions, like a quadtree.
+
+For lower dimensions I would recommend the CritBit, but for higher dimensions (>5 dimensions?) I would recommend the PH-Tree. The PH-Tree also supports rectangle data, while the critbit only supports point data. Essentially PH-Tree is performance wise comparable to an R*Tree, sometimes worse, sometimes better.

@@ -1,0 +1,78 @@
+Question: <p>I'm investigating SUDS as a SOAP client for python.  I want to inspect the methods available from a specified service, and the types required by a specified method.</p>
+
+<p>The aim is to generate a user interface, allowing users to select a method, then fill in values in a dynamically generated form.</p>
+
+<p>I can get some information on a particular method, but am unsure how to parse it:</p>
+
+<pre><code>client = Client(url)
+method = client.sd.service.methods['MyMethod']
+</code></pre>
+
+<p>I am unable to <strong>programmaticaly</strong>  figure out what object type I need to create to be able to call the service</p>
+
+<pre><code>obj = client.factory.create('?')
+
+res = client.service.MyMethod(obj, soapheaders=authen)
+</code></pre>
+
+<p>Does anyone have some sample code?</p>
+
+Answer: <p>Okay, so SUDS does quite a bit of magic.</p>
+
+<p>A <code>suds.client.Client</code>, is built from a WSDL file:</p>
+
+<pre><code>client = suds.client.Client("http://mssoapinterop.org/asmx/simple.asmx?WSDL")
+</code></pre>
+
+<p>It downloads the WSDL and creates a definition in <code>client.wsdl</code>. When you call a method using SUDS via <code>client.service.&lt;method&gt;</code> it's actually doing a whole lot of recursive resolve magic behind the scenes against that interpreted WSDL. To discover the parameters and types for methods you'll need to introspect this object.</p>
+
+<p>For example:</p>
+
+<pre><code>for method in client.wsdl.services[0].ports[0].methods.values():
+    print '%s(%s)' % (method.name, ', '.join('%s: %s' % (part.type, part.name) for part in method.soap.input.body.parts))
+</code></pre>
+
+<p>This should print something like:</p>
+
+<pre class="lang-py prettyprint-override"><code>echoInteger((u'int', http://www.w3.org/2001/XMLSchema): inputInteger)
+echoFloatArray((u'ArrayOfFloat', http://soapinterop.org/): inputFloatArray)
+echoVoid()
+echoDecimal((u'decimal', http://www.w3.org/2001/XMLSchema): inputDecimal)
+echoStructArray((u'ArrayOfSOAPStruct', http://soapinterop.org/xsd): inputStructArray)
+echoIntegerArray((u'ArrayOfInt', http://soapinterop.org/): inputIntegerArray)
+echoBase64((u'base64Binary', http://www.w3.org/2001/XMLSchema): inputBase64)
+echoHexBinary((u'hexBinary', http://www.w3.org/2001/XMLSchema): inputHexBinary)
+echoBoolean((u'boolean', http://www.w3.org/2001/XMLSchema): inputBoolean)
+echoStringArray((u'ArrayOfString', http://soapinterop.org/): inputStringArray)
+echoStruct((u'SOAPStruct', http://soapinterop.org/xsd): inputStruct)
+echoDate((u'dateTime', http://www.w3.org/2001/XMLSchema): inputDate)
+echoFloat((u'float', http://www.w3.org/2001/XMLSchema): inputFloat)
+echoString((u'string', http://www.w3.org/2001/XMLSchema): inputString)
+</code></pre>
+
+<p>So the first element of the part's type tuple is probably what you're after:</p>
+
+<pre><code>&gt;&gt;&gt; client.factory.create(u'ArrayOfInt')
+(ArrayOfInt){
+   _arrayType = ""
+   _offset = ""
+   _id = ""
+   _href = ""
+   _arrayType = ""
+ }
+</code></pre>
+
+<p>Update:</p>
+
+<p>For the Weather service it appears that the "parameters" are a part with an <code>element</code> not a <code>type</code>:</p>
+
+<pre><code>&gt;&gt;&gt; client = suds.client.Client('http://www.webservicex.net/WeatherForecast.asmx?WSDL')
+&gt;&gt;&gt; client.wsdl.services[0].ports[0].methods.values()[0].soap.input.body.parts[0].element
+(u'GetWeatherByZipCode', http://www.webservicex.net)
+&gt;&gt;&gt; client.factory.create(u'GetWeatherByZipCode')
+(GetWeatherByZipCode){
+   ZipCode = None
+ }
+</code></pre>
+
+<p>But this is magic'd into the parameters of the method call (a la <code>client.service.GetWeatherByZipCode("12345")</code>. IIRC this is SOAP RPC binding style? I think there's enough information here to get you started. Hint: the Python command line interface is your friend!</p>

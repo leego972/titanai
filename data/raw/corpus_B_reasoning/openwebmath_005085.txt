@@ -1,0 +1,173 @@
+# Mathematical Expressions as Trees 3: Proper Expression Modelling
+
+If you haven’t done so yet, read parts one and two first or watch the video that inspired these posts.
+
+You can find a notebook with the state after this blog post here.
+
+Last time there was a problem in the expression simplification left, which is apparent when looking at these two expressions:
+
+str(Mul(Con(2), Mul(Con(3), Var('x'))).simplify()) # returns '2*3*x'
+str(Mul(Mul(Con(2), Con(3)), Var('x')).simplify()) # returns '6*x'
+
+
+They model the same expression, so both should return the second (simpler) string. The actual solution to this will come later in the post, but first I noticed another problem:
+
+## Proper Operation Modelling
+
+The way we model subtraction and division at the moment is not really correct. They are currently binary operations on the same binding level as addition and multiplication respectively. In reality a - b is more of shorthand for a + (-b) (similarly for division and the inverse) and that’s the way I want to model it now.
+
+Let’s start with the simpler of the two cases and replace Sub():
+
+### Representation for Debugging purposes
+
+For some debugging that I had to do, I first implemented the __repr__ function in all base classes. This allows me to call repr(expr) on any expression and get a string that would work as a constructor for the expression. The implementation is relatively straight forward:
+
+class SinExpr(Expr):
+# ...
+def __repr__(self):
+return str("{t}({a})".format(
+t=self.__class__.__name__,
+a=str(self))
+)
+
+class BinExpr(Expr):
+# ...
+def __repr__(self):
+return str("{t}({a}, {b})".format(
+t=self.__class__.__name__,
+a=repr(self.a),b=repr(self.b))
+)
+
+
+And of cause adding a small test:
+
+assert repr(expr) == 'Add(Mul(Con(3), Pow(Var(x), Con(2))), Sub(Var(y), Div(Con(6), Con(3))))'
+
+
+### Replacement of Sub()
+
+Ok, now to the replacement of Sub(). First we add a new base class for operations with just one argument, the unary operations:
+
+class UnaExpr(Expr):
+def __init__(self, a):
+self.a = a
+
+def __repr__(self):
+return str("{t}({a})".format(
+t=self.__class__.__name__,
+a=repr(self.a))
+)
+
+@property
+def _bindingLevel(self):
+return 4
+
+
+These get the binding level 4, consequently I shifted the binding level of the singular expressions to 5. Hard coding these values is not really a good idea though, and in C++ I would use an enum instead. I’ll have to think about how to do this in a better way later. But first I implemented the negation class Neg():
+
+class Neg(UnaExpr):
+def __str__(self):
+return '-{sub}'.format(sub=self.a)
+
+def eval(self, env):
+return -self.a.eval(env)
+
+def partial(self, var):
+return Neg(self.a.partial(var))
+
+@property
+def constValue(self):
+self.cv_a = self.a.constValue
+if self.cv_a:
+return -self.cv_a
+return None
+
+def simplify(self):
+self.a = self.a.simplify()
+if self.a.constValue == 0:
+return Con(0)
+return self
+
+
+This probably does not need to be discussed in detail.
+
+The class Sub gets deleted now and is replaced by a function of the same name, that mimics the behaviour of the previous constructor of Sub:
+
+def Sub(expr_a, expr_b):
+
+
+You might notice, that some of the previous simplification logic got lost on the way. This actually already caught by a more general rule in Add:
+
+class Add(BinExpr):
+# ...
+def _selfSimplify(self):
+# if one child is zero, return the other one
+if self.cv_a == 0:
+return self.b
+if self.cv_b == 0:
+return self.a
+return self
+
+
+There’s one other change to Add that we need:
+
+class Add(BinExpr):
+# ...
+@property
+def _strOperator(self):
+if isinstance(self.b, Neg):
+return ""  # Neg will produce the minus sign
+return "+"
+
+
+Ok, great. If we now run all our test again, we see should only need to change the __repr__ test to:
+
+assert repr(expr) == 'Add(Mul(Con(3), Pow(Var(x), Con(2))), Add(Var(y), Neg(Div(Con(6), Con(3)))))'
+
+
+Everything else should be passing fine.
+
+### Replacement of Div()
+
+We now do the same thing for division, deleting the class Div and introducing:
+
+class Inv(UnaExpr):
+def __str__(self):
+return '1/{sub}'.format(sub=self.a)
+
+def eval(self, env):
+return 1/self.a.eval(env)
+
+def partial(self, var):
+return Neg(Mul(
+self.a.partial(var),
+Inv(Pow(self.a, Con(2)))
+))
+
+@property
+def constValue(self):
+self.cv_a = self.a.constValue
+if self.cv_a:
+return 1/self.cv_a
+return None
+
+def simplify(self):
+self.a = self.a.simplify()
+if isinstance(self.a, Inv):
+return self.a.a
+if self.a.constValue == 0:
+raise ValueError("Division by zero")
+return self
+
+def Div(expr_a, expr_b):
+return Mul(expr_a, Inv(expr_b))
+
+
+The arguments are very analogous to the Sub case, so I’m not repeating them again.
+
+Running the tests, I needed to change the simple str() and repr() tests to:
+
+assert str(expr) == '3*x^2+y-6*1/3'
+
+And I deleted the other “simple” str() tests, since I really just care about the simplified string representation. All the tests there stayed valid.
+str(Mul(Con(2), Mul(Con(3), Var('x'))).simplify()) # returns '2*3*x'

@@ -1,0 +1,37 @@
+Question: <p>I am using xmlrpclib.ServerProxy to make RPC calls to a remote server. If there is not a network connection to the server it takes the default 10 seconds to return a socket.gaierror to my program. </p>
+
+<p>This is annoying when doing development without a network connection, or if the remote server is down. Is there a way to update the timeout on my ServerProxy object?</p>
+
+<p>I can't see a clear way to get access to the socket to update it.</p>
+
+Answer: <p>I wanted a small, clean, but also explicit version, so based on all other answers here, this is what I came up with:</p>
+
+<pre><code>import xmlrpclib
+
+
+class TimeoutTransport(xmlrpclib.Transport):
+
+    def __init__(self, timeout, use_datetime=0):
+        self.timeout = timeout
+        # xmlrpclib uses old-style classes so we cannot use super()
+        xmlrpclib.Transport.__init__(self, use_datetime)
+
+    def make_connection(self, host):
+        connection = xmlrpclib.Transport.make_connection(self, host)
+        connection.timeout = self.timeout
+        return connection
+
+
+class TimeoutServerProxy(xmlrpclib.ServerProxy):
+
+    def __init__(self, uri, timeout=10, transport=None, encoding=None, verbose=0, allow_none=0, use_datetime=0):
+        t = TimeoutTransport(timeout)
+        xmlrpclib.ServerProxy.__init__(self, uri, t, encoding, verbose, allow_none, use_datetime)
+
+
+proxy = TimeoutServerProxy(some_url)
+</code></pre>
+
+<p>I didn't realize at first <code>xmlrpclib</code> has old-style classes so I found it useful with a comment on that, otherwise everything should be pretty self-explanatory.</p>
+
+<p>I don't see why <code>httplib.HTTP</code> would have to be subclassed as well, if someone can enlighten me on this, please do. The above solution is tried and works.</p>

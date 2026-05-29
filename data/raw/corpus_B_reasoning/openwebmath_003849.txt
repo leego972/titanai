@@ -1,0 +1,60 @@
+# Doing logical operations on Port PINS in Assembly
+
+I'm trying to do those following the operations on PINS, but not sure how to do the not operation on a port, do xor ..etc? would someone show me an excrept psesuod code ?
+
+• Imagine that you have functions called or and xor and and and etc. that takes two 8 bits registers and saves the result in one of the 8 bit registers according to the boolean function used. - Do you think you'd be able to solve your assembly-code problem with this information? Or can you at least try solving it on your own? – Harry Svensson Oct 14 '18 at 16:26
+• Yes, but what would be the two registers, PORTA, PORTB ? What are the instructions for NOT in assembly ? – andre ahmed Oct 14 '18 at 16:33
+• That would be one's complement, a.k.a. com. Start looking into some datasheets, particularly page 281 that I just linked. – Harry Svensson Oct 14 '18 at 16:38
+
+## 1 Answer
+
+After looking through this I've understood enough to show how $$\\text{LED}_0\$$ and $$\\text{LED}_1\$$ can be made, which should show enough for you to implement the other two.
+
+As you can see, $$\\text{LED}_0\$$ depends on three bits, the easiest solution would be to use temporary registers while you are manipulating the data from $$\\text{PA}\$$ and then set $$\\text{LED}_0\$$ once you're done.
+
+Here's one solution for the first two bits, it's not efficient/optimized, but it will make you understand what I'm doing. I will write PA = Port A since that's what you've written in the comments to your question.
+
+MOV TRA,PA // Copy contents from Port A into a Temporary Register A
+MOV TRB,PA // Copy contents from Port A into a Temporary Register B
+MOV TRC,PA // Copy contents from Port A into a Temporary Register C
+
+LSR TRA //Move all bits once to the right in TRA, so bit1 in TRA is now in bit0
+
+LSR TRB
+LSR TRB //Move all bits twice to the right in TRB, so bit2 in TRB is now in bit0
+
+LSR TRC
+LSR TRC //Move all bits three times to the right in TRC,
+LSR TRC //so bit3 in TRC is now in bit0
+
+AND TRA,TRB //AND TRA and TRB together, bit by bit and save the result in TRA
+OR TRA, TRC //OR the new TRA with TRC and store the information in TRA
+
+ANDI TRA,1 //AND TRA with 0b00000001, in other words, remove the mess in other bits
+MOV LED,TRA //copy TRA into your LED register
+
+//Now, you're ready for the second bit for your LED register
+//As you can see, It's PA1, PA2 and PA3 again, PA2 is still in TRB and
+//PA3 is still in TRC, PA1 is demolished, so we need to update TRA again
+
+MOV TRA,PA // Copy contents from Port A into a Temporary Register A
+
+LSR TRA //Move all bits once to the right in TRA, so bit1 in TRA is now in bit0
+
+COM TRB //Make TRB into NOT TRB
+OR TRA,TRB //OR TRA with the inverted TRB
+AND TRA,TRC //AND the new TRA with TRC
+
+ANDI TRA,1 //AND TRA with 0b00000001, in other words, remove the mess in other bits
+LSL TRA //Move all bits in TRA one bit to the left
+OR LED,TRA //Move whatever information is in bit1 in TRA into LED at bit1
+
+//Now you're ready for the other two bits
+
+
+This should definitely get you started.
+
+Remember that you probably want PA to be PIN_A, PIN_A usually corresponds in assembler language to the input of PORT_A.
+
+If you want to optimize the code, then never move things into TRB and TRC and make TRA move around, it should lead to more efficient code, and use multiplication by $$\2^n\$$ to copy data into the multiplication register and rotate by $$\n\$$ to the left.
+So just rotate cleverly with the multiplication and look at the high byte of the multiplication register and you will have your rotated information there.

@@ -1,0 +1,330 @@
+# Model Fitting using Non-linear Least-squares#
+
+## Introduction#
+
+In this Chapter, you will learn to fit non-linear mathematical models to data using Non-Linear Least Squares (NLLS).
+
+Specifically, you will learn to
+
+• Visualize the data and the mathematical model you want to fit to them
+
+• Fit a non-linear model
+
+• Assess the quality of the fit, and whether the model is appropriate for your data
+
+• Compare and select between competing models
+
+We will work through various examples. These assume that you have at least a conceptual understanding of what Linear vs Non-linear models are, how they are fitted to data, and how the fits can be assessed statistically. You may want to see the Linear Models lecture (you can also watch the video), and the NLLS Lecture lecture first (you can also watch the video).
+
+You may also (optionally) want to see the lecture on model fitting in Ecology and Evolution in general.
+
+We will use R. For starters, clear all variables and graphic devices and load necessary packages:
+
+rm(list = ls())
+graphics.off()
+
+
+## Traits data as an example#
+
+Our first set of examples will focus on traits.
+
+A trait is any measurable feature of an individual organism. This includes physical traits (e.g., morphology, body mass, wing length), performance traits (e.g., biochemical kinetics, respiration rate, body velocity, fecundity), and behavioral traits (e.g., feeding preference, foraging strategy, mate choice). All natural populations show variation in traits across individuals. A trait is functional when it directly (e.g., mortality rate) or indirectly (e.g., somatic development or growth rate) determines individual fitness. Therefore, variation in (functional) traits can generate variation in the rate of increase and persistence of populations. When measured in the context of life cycles, without considering interactions with other organisms (e.g., predators or prey of the focal population), functional traits are typically called life history traits (such as mortality rate and fecundity). Other traits determine interactions both within the focal population (e.g., intra-specific interference or mating frequency) and between the focal population/species and others, including the species which may act as resources (prey, for example). Thus both life history and interaction traits determine population fitness and therefore abundance, which ultimately influences dynamics and functioning of the wider ecosystem, such as carbon fixation rate or disease transmission rate.
+
+## Biochemical Kinetics#
+
+The properties of an organism’s metabolic pathways, and the underlying (enzyme-mediated) biochemical reactions (kinetics) are arguably its most fundamental “traits”, because these drive all “performance” traits, from photosynthesis and respiration, to movement and growth rate.
+
+The Michaelis-Menten model is widely used to quantify reaction kinetics data and estimate key biochemical parameters. This model relates biochemical reaction rate ($$V$$) (rate of formation of the product of the reaction), to concentration of the substrate ($$S$$):
+
+(7)#$V = \frac{V_{\max} S}{K_M + S}$
+
+Here,
+
+• $$V_{\max}$$ is the maximum rate that can be achieved in the reaction system, which happens at saturating substrate concentration (as $$S$$ gets really large), and
+
+• $$K_M$$ is the Michaelis or half-saturation constant, defined as the substrate concentration at which the reaction rate is half of $$V_{\max }$$. This parameter controls the overall shape of the curve, i.e., whether $$V$$ approaches $$V_{\max}$$ slowly or rapidly. In enzyme catalyzed reactions, it measures how loosely the substrate binds the enzyme: large $$K_M$$ indicates loose binding of enzyme to substrate, small $$K_M$$ indicates tight binding (it has units of the substrate concentration, $$S$$).
+
+Biochemical reactions involving a single substrate are often well fitted by the Michaelis-Menten kinetics.
+
+The Michaelis-Menten model.
+
+Let’s fit the Michaelis-Menten model to some data.
+
+### Generating data#
+
+Instead of using real experimental data, we will actually generate some “data” because that way we know exactly what the errors in the data are. You can also import and use your own dataset for the fitting steps further below.
+
+We can generate some data as follows.
+
+First, generate a sequence of substrate concentrations from 1 to 50 in jumps of 5, using seq() (look up the documentation for seq()).
+
+S_data <- seq(1,50,5)
+S_data
+
+1. 1
+2. 6
+3. 11
+4. 16
+5. 21
+6. 26
+7. 31
+8. 36
+9. 41
+10. 46
+
+Note that because we generated values only at intervals of, there will be 50/5 = 10 “substrate” values.
+
+Now generate a Michaelis-Menten reaction velocity response with V_max = 12.5 and K_M = 7.1:
+
+V_data <- ((12.5 * S_data)/(7.1 + S_data))
+plot(S_data, V_data)
+
+
+Note that our choice of $$V_{\max} = 12.5$$ and $$K_M = 7.1$$ is completely arbitrary. As long as we make sure that $$V_{\max} > 0$$, $$K_H > 0$$, and $$K_M$$ lies well within the lower half of the the range of substrate concentrations (0-50), these “data” will be physically biologically sensible.
+
+Now let’s add some random (normally-distributed) fluctuations to the data to emulate experimental / measurement error:
+
+set.seed(1456) # To get the same random fluctuations in the "data" every time
+V_data <- V_data + rnorm(10,0,1) # Add 10 random fluctuations  with standard deviation of 1 to emulate error
+plot(S_data, V_data)
+
+
+That looks real!
+
+## Fitting the model using NLLS#
+
+Now, fit the model to the data:
+
+MM_model <- nls(V_data ~ V_max * S_data / (K_M + S_data))
+
+Warning message in nls(V_data ~ V_max * S_data/(K_M + S_data)):
+“No starting values specified for some parameters.
+Initializing ‘V_max’, ‘K_M’ to '1.'.
+Consider specifying 'start' or using a selfStart model”
+
+
+This warning arises because nls requires “starting values” for the parameters (two in this case: V_max and K_M) to start searching for optimal combinations of parameter values (ones that minimize the RSS). Indeed, all NLLS fitting functions / algorithms require this. If you do not provide starting values, nls gives you a warning (as above) and uses a starting value of 1 for every parameter by default. For simple models, despite the warning, this works well enough.
+
+Tip
+
+Before proceeding further, have a look at what nls()’s arguments are using ?nls, or looking at the documentation online.
+
+We will address the issue of starting values soon enough, but first let’s look at how good the fit that we obtained looks.
+
+### Visualizing the fit#
+
+The first thing to do is to see how well the model fitted the data, for which plotting is the best first option:
+
+plot(S_data,V_data, xlab = "Substrate Concentration", ylab = "Reaction Rate")  # first plot the data
+lines(S_data,predict(MM_model),lty=1,col="blue",lwd=2) # now overlay the fitted model
+
+
+This looks OK.
+
+Note
+
+We used the predict() function here just as we did in any of the linear models chapters (e.g., here). In general, you can use most of the same commands/functions (e.g., predict() and summary()) on the output of a nls() model fitting object as you would on a lm() model fitting object. Please have a look at the documentation of the predict function for nls before proceeding.
+
+However, the above approach for plotting is not the best way to do it, because predict(), without further arguments (see its documentation), by default only generates predicted values for the actual x-values (substrate) data used to fit the model. So if there are very few values in the original data, you will not get a smooth predicted curve (as you can see above). A better approach is to generate a sufficient number of x-axis values and then calculate the predicted line. Let’s do it:
+
+coef(MM_model) # check the coefficients
+
+V_max
+12.9636891133139
+K_M
+10.6072253230542
+Substrate2Plot <- seq(min(S_data), max(S_data),len=200) # generate some new x-axis values just for plotting
+
+Predict2Plot <- coef(MM_model)["V_max"] * Substrate2Plot / (coef(MM_model)["K_M"] + Substrate2Plot) # calculate the predicted values by plugging the fitted coefficients into the model equation
+
+plot(S_data,V_data, xlab = "Substrate Concentration", ylab = "Reaction Rate")  # first plot the data
+lines(Substrate2Plot, Predict2Plot, lty=1,col="blue",lwd=2) # now overlay the fitted model
+
+
+That looks much better (smoother) than the plot above !
+
+### Summary stats of the fit#
+
+Now lets get some stats of this NLLS fit. Having obtained the fit object (MM_model), we can use summary() just like we would for a lm() fit object:
+
+summary(MM_model)
+
+Formula: V_data ~ V_max * S_data/(K_M + S_data)
+
+Parameters:
+Estimate Std. Error t value Pr(>|t|)
+V_max   12.964      1.221  10.616 5.42e-06 ***
+K_M     10.607      3.266   3.248   0.0117 *
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.8818 on 8 degrees of freedom
+
+Number of iterations to convergence: 5
+Achieved convergence tolerance: 9.503e-06
+
+
+This looks a lot like the output of a linear model, and to be specific, of a Linear Regression. For starters, compare the above output with the output of summary(genomeSizeModelDragon) in this section of the Linear Regression chapter.
+
+So here are the main things to note about the output of summary() of an nls() model object:
+
+• Estimates are, as in the output of the lm() function for fitting linear models, the estimated values of the coefficients of the model that you fitted ($$V_{\max}$$ and $$K_M$$). Note that although we generated our data using $$V_{\max} = 12.5$$ and $$K_M = 7.1$$, the actual coefficients are quite different from what we are getting with the NLLS fitting ($$\hat{V}_{\max} = 12.96$$ and $$\hat{K}_M = 10.61$$). This is because we added random (normally-distributed) errors when we generated the “data”. This tells you something about how experimental and/or measurement errors can distort your image of the underlying mechanism or process.
+
+• Std. Error, t value, and Pr(>|t|) and Residual standard error have the same interpretation as in the output of lm() (please look back at the Linear Regression Chapter)
+
+• Number of iterations to convergence tells you how many times the NLLS algorithm had to adjust the parameter values till it managed to find a solution that minimizes the Residual Sum of Squares (RSS)
+
+• Achieved convergence tolerance tells you on what basis the algorithm decided that it was close enough to the a solution; basically if the RSS does not improve more than a certain threshold despite parameter adjustments, the algorithm stops searching. This may or may not be close to an optimal solution (but in this case it is).
+
+The last two items are specific to the output of an nls() fitting summary(), because unlike Ordinary Least Squares (OLS), which is what we used for Linear regression, NLLS is not an exact procedure, and the fitting requires computer simulations; revisit the Lecture for an explanation of this. This is all you need to know for now. As such, you do not need to report these last two items when presenting the results of an NLLS fit, but they are useful for problem solving in case the fitting does not work (more on this below).
+
+As noted above, you can use the same sort of commands on a nls() fitting result as you can on a lm() object.
+
+Thus, much of the output of NLLS fitting using nls() is similar to the output of an lm(), and can be further analyzed or processed using analogous functions such as coef(), residuals(), and confint().
+
+For example, you can get just the values of the estimated coefficients using coef() as you did above for the plotting.
+
+## Statistical inference using NLLS fits#
+
+So what do we do with the results of an NLLS fit? What statistical inferences can be made? We will address this issue here at a basic level, and then revisit it using model selection further below (in the Allometric growth example).
+
+### Goodness of fit#
+
+Assessing whether an NLLS-fitted model is “significant” based on an F-value, by performing an Analysis of Variance (ANOVA) on the regression results as one can do for a Linear Model using the anova() function on a linear model fit is not advisable. Try anova(MM_model), and see what happens:
+
+anova(MM_model)
+
+Error in anova.nls(MM_model): anova is only defined for sequences of "nls" objects
+Traceback:
+
+1. anova(MM_model)
+2. anova.nls(MM_model)
+3. stop("anova is only defined for sequences of \"nls\" objects")
+
+
+So a ANOVA calculation is not implemented for a NLLS fit. The third item in the error message / traceback above says that you can however use anova() to compare two nested models. That is, you can do something like anova(model1,model2), where model 1 is nested within model 1, as we did previously to ask if a simpler model explains significantly more variation in the data than a more complicated one (with one or more addtional terms in the equation).
+
+To understand why you cannot use an ANOVA to assess the significance of a NLLS model fit, recall that the objective of an anova() function applied to a linear model fit is o compare the fitted model to a null model, asking whether you can reject that null model (hypothesis). The problem with doing so for a nonlinear model is that unfortunately it is not clear what the null hypothesis should be when the model is not a linear combination of terms (the definition of a linear model). For an F-statistic to be meaningful, the null hypothesis model must be nested within the alternative model (in which case you can indeed use the anova() function using anova(Model1,Model2)).
+
+To make this clear, let’s recall the equation for a simple linear regression:
+
+$y = \beta_0 + \beta_1 x$
+
+The null model for this is
+
+$y = \beta_0$
+
+This then allows the TSS, RSS and ESS to be calculated in a meaninglful way, as we did before, leading to an ANOVA based assessment of significance of the regrssion moel fit to the data.
+
+Now consider a nonlinear model like the Michaelis-Menten eqn (7). What would be an appropriate null model for this equation?
+
+Thus, the best ways to assess a NLLS model’s fit are:
+
+• Compare it’s likelihood to those of other alternative models’ fits (which may include your best guess for a null model).
+
+• Examine whether the fitted coefficients are reliable, i.e., are significant, based on their (low) standard errors, (high) t-values, and (low) p-values (see the example model’s summary above).
+
+#### R-squared values#
+
+To put it simply, unlike an R$$^2$$ value obtained by fitting a linear model, that obtained from NLLS fitting is not reliable, and should not be used. The reason for this is somewhat technical (e.g., see this paper) and we won’t go into it here. But basically, NLLS R$$^2$$ values do not always accurately reflect the quality of fit, and definitely cannot be used to select between competing models (Model selection, as you learned previously). Indeed R$$^2$$ values obtained from NLLS fitting even be negative when the model fits very poorly! We will learn more about model selection with non-linear models later below.
+
+### Confidence Intervals#
+
+One particularly useful thing you can do after NLLS fitting is to calculate/construct the confidence intervals (CI’s) around the estimated parameters in our fitted model. This is analogous to how we would in the OLS fitting used for Linear Models:
+
+confint(MM_model)
+
+Waiting for profiling to be done...
+
+A matrix: 2 × 2 of type dbl
+2.5%97.5%
+V_max10.64047817.00502
+K_M 4.92454722.39247
+
+The Waiting for profiling to be done... message reflects the fact that calculating the standard errors from which the CI’s are calculated requires a particular computational procedure (which we will not go into here) when it comes to NLLS fits.
+
+Calculating confidence intervals can be useful because,
+
+1. As you learned here, here, and here (among other places) you can use a coefficient/parameter estimate’s confidence intervals to test whether it is significantly different from some reference value. In our CI example above, the intervals for K_M do in fact include the original value of $$K_M = 7.1$$ that we used to generate the data.
+
+2. Confidence intervals can also be used to do a quick (but not robust - see warning below) test of whether coefficient estimates of the same model coefficient obtained from different populations (samples) are significantly different from each other (If their CI’s don’t overlap, they are significantly different).
+
+Warning
+
+You can compare estimates of the same coefficient (parameter) from samples of different populations: if their CI’s don’t overlap, this indicates a statistically significant difference between the two populations as far as that coefficient is concerned (e.g., for 95% CI’s this means at the 0.05 level of significance or p-value). However, the opposite is not necessarily true: when CI’s overlap, there may still be a statistically significant difference between the coefficients (and therefore, populations).
+
+## The starting values problem#
+
+Now let’s revisit the issue of starting values in NLLS fitting. Previously, we fitted the Michaelis-Menten Model without any starting values, and R gave us a warning but managed to fit the model to our synthetic “data” using default starting values.
+
+### Fitting the model with starting values#
+
+Lets try the NLLS fitting again, but with some particular starting values:
+
+MM_model2 <- nls(V_data ~ V_max * S_data / (K_M + S_data), start = list(V_max = 12, K_M = 7))
+
+
+Note that unlike before, we got no warning message about starting values.
+
+As will become apparent below, using sensible starting values is important in NLLS fitting.
+
+Note
+
+How do you find “sensible” starting values for NLLS fitting? This very much depends on your understanding of the mathematical model that is being fitted to the data, the mechanistic interpretation of its parameters, and the specific dataset. For example, in the Michaelis-Menten Model example, we can know that $$V_{\max}$$ is maximum reaction velocity and $$K_M$$ is the value of the substrate concentration at which half of $$V_{\max}$$ is reached. So we can choose starting values by “eye-balling” a particular dataset and determining approximately what the V_maxand K_M are be for that particular dataset. In this particular case, we chose V_max = 12 and K_M = 7 because looking at the data plot above, these values seem to be reasonable guesses for the two parameters.
+
+Let’s compare the coefficient estimates from our two different model fits to the same dataset:
+
+coef(MM_model)
+coef(MM_model2)
+
+V_max
+12.9636891133139
+K_M
+10.6072253230542
+V_max
+12.9636297453629
+K_M
+10.6070555266004
+
+Not too different, but not exactly the same!
+
+In contrast, when you fit linear models you will get exactly the same coefficient estimates every single time, because OLS is an exact procedure.
+
+Now, let’s try even more different start values:
+
+MM_model3 <- nls(V_data ~ V_max * S_data / (K_M + S_data), start = list(V_max = .01, K_M = 20))
+
+
+Compare the coefficients of this model fit to the two previous ones:
+
+coef(MM_model)
+coef(MM_model2)
+coef(MM_model3)
+
+V_max
+12.9636891133139
+K_M
+10.6072253230542
+V_max
+12.9636297453629
+K_M
+10.6070555266004
+V_max
+0.816129930954726
+K_M
+-19.4993655809431
+
+The estimates in our latest model fit are completely different (in fact, K_M is negative)! Let’s plot this model’s and the first model’s fit together:
+
+plot(S_data,V_data)  # first plot the data
+lines(S_data,predict(MM_model),lty=1,col="blue",lwd=2) # overlay the original model fit
+lines(S_data,predict(MM_model3),lty=1,col="red",lwd=2) # overlay the latest model fit
+
+
+As you would have guessed from the really funky coefficient estimates that were obtained in MM_model3, this is a pretty poor model fit to the data, with the negative value of K_M causing the fitted version of the Michaelis-Menten model to behave strangely.
+
+Also, you could have used the nicer plotting approach that was introduced before.
+
+Let’s try with even more different starting values.
+
+nls(V_data ~ V_max * S_data / (K_M + S_data), start = list(V_max = 0, K_M = 0

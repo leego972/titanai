@@ -1,0 +1,130 @@
+# Solved: Why does integrate(psi(y)*f(y),y) return an error but integrate(psi(t,y)*f(t,y),y) works?
+
+Hi there,
+
+I am trying get an symbolic expression for the convolution $$(\psi \star f)(x) := \int\limits_{\mathbb{R}} \psi(x-y) f(y) {d y}$$
+
+of two functions $f, \psi: \mathbb{R} \to \mathbb{R}$ as follows:
+
+ var('y') psi = function('psi')(y) f = function('f')(y) integrate(psi(x-y)*f(y),y) 
+
+upon which I get the error message
+
+RuntimeError: ECL says: Error executing code in Maxima:
+
+If I add an extra argument to the two functions and define them as $$f, \psi : \mathbb{R} \times \mathbb{R} \to \mathbb{R}$$ as follows:
+
+ var('t') psi = function('psi')(t,y) f = function('f')(t,y) integrate(psi(t,x-y)*f(t,y),y) 
+
+there is a surprise, it suddenly works! I get the desired symbolic expression on which I can run diff(..,x) and all the other built-in functions.
+
+TL;DR Why does integrate(psi(y)*f(y),y) return an error?
+
+Solution Use sympy backend for symbolic integration as in integrate(psi(x-y)*f(y),y, algorithm="sympy")
+
+edit retag close merge delete
+
+Sort by » oldest newest most voted
+
+I think that's a bug in the Sage-to-maxima interface. Compare :
+
+sage: var('y')
+....: psi = function('psi')(y)
+....: f = function('f')(y)
+....:
+y
+sage: (psi(x-y)*f(y)).maxima_methods().integrate(y)
+integrate(f(y)*psi(x - y), y)
+sage: (psi(x-y)*f(y)).maxima_methods().integrate(y).diff(x)
+integrate(f(y)*D[0](psi)(x - y), y)
+
+
+with :
+
+sage: (psi(x-y)*f(y)).integrate(y)
+---------------------------------------------------------------------------
+
+
+[ Long backtrace ]
+
+RuntimeError: ECL says: Error executing code in Maxima:
+
+
+BTW :
+
+sage: integrate(psi(x-y)*f(y),y, algorithm="sympy")
+integrate(f(y)*psi(x - y), y)
+sage: integrate(psi(x-y)*f(y),y, algorithm="sympy").diff(x)
+integrate(f(y)*D[0](psi)(x - y), y)
+sage: integrate(psi(x-y)*f(y),y, algorithm="giac")
+integrate(f(y)*psi(x - y), y)
+sage: integrate(psi(x-y)*f(y),y, algorithm="giac").diff(x)
+integrate(f(y)*D[0](psi)(x - y), y)
+
+
+Another exemple of this quirk (against an old saw by Leibnitz, IIRC) :
+
+sage: foo=arctan(x).diff(x).subs(x^2==-p).maxima_methods().powerseries(p,0).subs
+....: (p==-x^2).simplify(); foo
+sum((-1)^i5*x^(2*i5), i5, 0, +Infinity)
+sage: foo.maxima_methods().integrate(x)
+sum((-1)^i5*x^(2*i5 + 1)/(2*i5 + 1), i5, 0, +Infinity)
+sage: foo.integrate(x)
+---------------------------------------------------------------------------
+
+
+[ Long backtrace again... ]
+
+RuntimeError: Encountered operator mismatch in maxima-to-sr translation
+
+
+and integrate(foo, x) gives the same final error message.
+
+I encounter the same problem (and the same "solution") in Trac#13071. Other integration Trac tickets may have a similar origin, (but I lack the time needed to check them...).
+
+more
+
+Thank you very much, that is a very thorough answer!
+
+Just started playing around with SAGE, didn't expect the underlying cracks to show up that quickly....
+
+Do you think I should file another ticket or can I somehow 'push' yours?
+
+( 2018-08-16 10:25:01 -0600 )edit
+
+The cracks do exist, but are not that frequent... The point of Sage is to group various tools under a uniform framework, thus easing the use of mutually incompatible tools. The existence of chacks must not be an obstacle (and those cracks can be repaired, hopefully..).
+
+I am not yet ready to file a new ticket about this specif point (inconsistency between two Maxima interfaces) : I do not have enough information on the specifics of the problem (and not enough time to dig them up). The ticket I quoted is but an example... But feel free to go ahead.
+
+( 2018-08-16 10:50:31 -0600 )edit
+
+That's good to know, I'll take it as an exception then -- and nothing better to understand the software then a bug being explained!
+
+( 2018-08-16 12:02:38 -0600 )edit
+
+This is definitely a bug, which seems to originate from the name psi for one of the two functions: it is confused with Maxima's special function psi, see http://maxima.sourceforge.net/docs/ma...
+
+If you replace psi by another name, everything works:
+
+sage: f = function('f')
+sage: g = function('g')
+sage: y = var('y')
+sage: integrate(g(x-y)*f(y), y)
+integrate(f(y)*g(x - y), y)
+
+
+UPDATE (13 March 2019): the bug is now tracked via the ticket #27475.
+
+more
+
+Thank you for the quick answer! I struggled to format my post -- what are the html tags for the nice verbatim code block?
+
+( 2018-08-16 10:37:46 -0600 )edit
+
+seems to be a whitespace indent Found it!
+
+( 2018-08-16 11:56:40 -0600 )edit
+
+Alternatively, you can select the code block with the mouse and click on the button "101010" in the header bar.
+
+( 2018-08-17 07:18:13 -0600 )edit

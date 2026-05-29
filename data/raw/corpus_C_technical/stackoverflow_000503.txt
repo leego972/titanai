@@ -1,0 +1,55 @@
+Question: <p>I have some kind of test data and want to create an unit test for each item. My first idea was to do it like this:</p>
+
+<pre><code>import unittest
+
+l = [["foo", "a", "a",], ["bar", "a", "b"], ["lee", "b", "b"]]
+
+class TestSequence(unittest.TestCase):
+    def testsample(self):
+        for name, a,b in l:
+            print "test", name
+            self.assertEqual(a,b)
+
+if __name__ == '__main__':
+    unittest.main()
+</code></pre>
+
+<p>The downside of this is that it handles all data in one test. I would like to generate one test for each item on the fly. Any suggestions?</p>
+
+Answer: <p>I'd been having trouble with a very particular style of parameterized tests.  All our Selenium tests can run locally, but they also should be able to be run remotely against several platforms on SauceLabs.  Basically, I wanted to take a large amount of already-written test cases and parameterize them with the fewest changes to code possible.  Furthermore, I needed to be able to pass the parameters into the setUp method, something which I haven't seen any solutions for elsewhere.</p>
+
+<p>Here's what I've come up with:</p>
+
+<pre><code>import inspect
+import types
+
+test_platforms = [
+    {'browserName': "internet explorer", 'platform': "Windows 7", 'version': "10.0"},
+    {'browserName': "internet explorer", 'platform': "Windows 7", 'version': "11.0"},
+    {'browserName': "firefox", 'platform': "Linux", 'version': "43.0"},
+]
+
+
+def sauce_labs():
+    def wrapper(cls):
+        return test_on_platforms(cls)
+    return wrapper
+
+
+def test_on_platforms(base_class):
+    for name, function in inspect.getmembers(base_class, inspect.isfunction):
+        if name.startswith('test_'):
+            for platform in test_platforms:
+                new_name = '_'.join(list([name, ''.join(platform['browserName'].title().split()), platform['version']]))
+                new_function = types.FunctionType(function.__code__, function.__globals__, new_name,
+                                                  function.__defaults__, function.__closure__)
+                setattr(new_function, 'platform', platform)
+                setattr(base_class, new_name, new_function)
+            delattr(base_class, name)
+
+    return base_class
+</code></pre>
+
+<p>With this, all I had to do was add a simple decorator @sauce_labs() to each regular old TestCase, and now when running them, they're wrapped up and rewritten, so that all the test methods are parameterized and renamed.  LoginTests.test_login(self) runs as LoginTests.test_login_internet_explorer_10.0(self), LoginTests.test_login_internet_explorer_11.0(self), and LoginTests.test_login_firefox_43.0(self), and each one has the parameter self.platform to decide what browser/platform to run against, even in LoginTests.setUp, which is crucial for my task since that's where the connection to SauceLabs is initialized.</p>
+
+<p>Anyway, I hope this might be of help to someone looking to do a similar "global" parameterization of their tests!</p>

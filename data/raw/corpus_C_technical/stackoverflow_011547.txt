@@ -1,0 +1,87 @@
+Question: <p>I want to take a screenshot via a python script and unobtrusively save it.</p>
+
+<p>I'm only interested in the Linux solution, and should support any X based environment.</p>
+
+Answer: <p>Just for completeness:
+Xlib - But it's somewhat slow when capturing the whole screen:</p>
+
+<pre><code>from Xlib import display, X
+import Image #PIL
+
+W,H = 200,200
+dsp = display.Display()
+root = dsp.screen().root
+raw = root.get_image(0, 0, W,H, X.ZPixmap, 0xffffffff)
+image = Image.fromstring("RGB", (W, H), raw.data, "raw", "BGRX")
+image.show()
+</code></pre>
+
+<p>One could try to trow some types in the bottleneck-files in PyXlib, and then compile it using Cython. That could increase the speed a bit.</p>
+
+<hr>
+
+<p><strong>Edit:</strong>
+We can write the core of the function in C, and then use it in python from ctypes, here is something I hacked together:</p>
+
+<pre><code>#include &lt;stdio.h&gt;
+#include &lt;X11/X.h&gt;
+#include &lt;X11/Xlib.h&gt;
+//Compile hint: gcc -shared -O3 -lX11 -fPIC -Wl,-soname,prtscn -o prtscn.so prtscn.c
+
+void getScreen(const int, const int, const int, const int, unsigned char *);
+void getScreen(const int xx,const int yy,const int W, const int H, /*out*/ unsigned char * data) 
+{
+   Display *display = XOpenDisplay(NULL);
+   Window root = DefaultRootWindow(display);
+
+   XImage *image = XGetImage(display,root, xx,yy, W,H, AllPlanes, ZPixmap);
+
+   unsigned long red_mask   = image-&gt;red_mask;
+   unsigned long green_mask = image-&gt;green_mask;
+   unsigned long blue_mask  = image-&gt;blue_mask;
+   int x, y;
+   int ii = 0;
+   for (y = 0; y &lt; H; y++) {
+       for (x = 0; x &lt; W; x++) {
+         unsigned long pixel = XGetPixel(image,x,y);
+         unsigned char blue  = (pixel &amp; blue_mask);
+         unsigned char green = (pixel &amp; green_mask) &gt;&gt; 8;
+         unsigned char red   = (pixel &amp; red_mask) &gt;&gt; 16;
+
+         data[ii + 2] = blue;
+         data[ii + 1] = green;
+         data[ii + 0] = red;
+         ii += 3;
+      }
+   }
+   XDestroyImage(image);
+   XDestroyWindow(display, root);
+   XCloseDisplay(display);
+}
+</code></pre>
+
+<p>And then the python-file:</p>
+
+<pre><code>import ctypes
+import os
+from PIL import Image
+
+LibName = 'prtscn.so'
+AbsLibPath = os.path.dirname(os.path.abspath(__file__)) + os.path.sep + LibName
+grab = ctypes.CDLL(AbsLibPath)
+
+def grab_screen(x1,y1,x2,y2):
+    w, h = x1+x2, y1+y2
+    size = w * h
+    objlength = size * 3
+
+    grab.getScreen.argtypes = []
+    result = (ctypes.c_ubyte*objlength)()
+
+    grab.getScreen(x1,y1, w, h, result)
+    return Image.frombuffer('RGB', (w, h), result, 'raw', 'RGB', 0, 1)
+
+if __name__ == '__main__':
+  im = grab_screen(0,0,1440,900)
+  im.show()
+</code></pre>

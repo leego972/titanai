@@ -1,0 +1,56 @@
+Question: <p>I have a two way foreign relation similar to the following</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True)
+
+class Child(models.Model):
+  name = models.CharField(max_length=255)
+  myparent = models.ForeignKey(Parent)
+</code></pre>
+
+<p>How do I restrict the choices for Parent.favoritechild to only children whose parent is itself?  I tried</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True, limit_choices_to = {"myparent": "self"})
+</code></pre>
+
+<p>but that causes the admin interface to not list any children.</p>
+
+Answer: <p>I just came across <a href="http://docs.djangoproject.com/en/dev/ref/models/fields/#django.db.models.ForeignKey.limit_choices_to">ForeignKey.limit_choices_to</a> in the Django docs.
+Not sure yet how this works, but it might just be the right think here.</p>
+
+<p><strong>Update:</strong> ForeignKey.limit_choices_to allows to specify either a constant, a callable or a Q object to restrict the allowable choices for the key. A constant obviously is no use here, since it knows nothing about the objects involved.</p>
+
+<p>Using a callable (function or class method or any callable object) seem more promising. The problem remains how to access the necessary information form the HttpRequest object. Using <a href="http://stackoverflow.com/questions/160009/django-model-limitchoicestouser-user">thread local storage</a> may be a solution.</p>
+
+<p><strong>2. Update:</strong> Here is what hast worked for me:</p>
+
+<p>I created a middle ware as described in the link above. It extracts one or more arguments from the request's GET part, such as "product=1" and stores this information in the thread locals.</p>
+
+<p>Next there is a class method in the model that reads the thread local variable and returns a list of ids to limit the choice of a foreign key field.</p>
+
+<pre><code>@classmethod
+def _product_list(cls):
+    """
+    return a list containing the one product_id contained in the request URL,
+    or a query containing all valid product_ids if not id present in URL
+
+    used to limit the choice of foreign key object to those related to the current product
+    """
+    id = threadlocals.get_current_product()
+    if id is not None:
+        return [id]
+    else:
+        return Product.objects.all().values('pk').query
+</code></pre>
+
+<p>It is important to return a query containing all possible ids if none was selected so the normal admin pages work ok.</p>
+
+<p>The foreign key field is then declared as:</p>
+
+<pre><code>product = models.ForeignKey(Product, limit_choices_to=dict(id__in=BaseModel._product_list))
+</code></pre>
+
+<p>The catch is that you have to provide the information to restrict the choices via the request. I don't see a way to access "self" here.</p>

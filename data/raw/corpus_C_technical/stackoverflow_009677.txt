@@ -1,0 +1,50 @@
+Question: <p>I've been programming for many years, and recently started learning Python. The following code works as expected in both python 2.5 and 3.0 (on OS X if that matters):</p>
+
+<pre><code>a, b, c = (1, 2, 3)
+
+print(a, b, c)
+
+def test():
+    print(a)
+    print(b)
+    print(c)    # (A)
+    #c+=1       # (B)
+test()
+</code></pre>
+
+<p>However, when I uncomment line <strong>(B)</strong>, I get an <em>UnboundLocalError: 'c' not assigned</em> at line <strong>(A)</strong>. The values of <em>a</em> and <em>b</em> are printed correctly. This has me completely baffled for two reasons:</p>
+
+<ol>
+<li><p>Why is there a runtime error thrown at line <strong>(A)</strong> because of a later statement on line <strong>(B)</strong>?</p></li>
+<li><p>Why are variables <em>a</em> and <em>b</em> printed as expected, while <em>c</em> raises an error?</p></li>
+</ol>
+
+<p>The only explanation I can come up with is that a <strong>local</strong> variable <em>c</em> is created by the assignment <code>c+=1</code>, which takes precedent over the "global" variable <em>c</em> even before the local variable is created. Of course, it doesn't make sense for a variable to "steal" scope before it exists.</p>
+
+<p>Could someone please explain this behavior?</p>
+
+Answer: <p>Taking a look at the disassembly may clarify what is happening:</p>
+
+<pre><code>&gt;&gt;&gt; def f():
+...    print a
+...    print b
+...    a = 1
+
+&gt;&gt;&gt; import dis
+&gt;&gt;&gt; dis.dis(f)
+
+  2           0 LOAD_FAST                0 (a)
+              3 PRINT_ITEM
+              4 PRINT_NEWLINE
+
+  3           5 LOAD_GLOBAL              0 (b)
+              8 PRINT_ITEM
+              9 PRINT_NEWLINE
+
+  4          10 LOAD_CONST               1 (1)
+             13 STORE_FAST               0 (a)
+             16 LOAD_CONST               0 (None)
+             19 RETURN_VALUE
+</code></pre>
+
+<p>As you can see, the bytecode for accessing a is <code>LOAD_FAST</code>, and for b, <code>LOAD_GLOBAL</code>.  This is because the compiler has identified that a is assigned to within the function, and classified it as a local variable.  The access mechanism for locals is fundamentally different for globals - they are statically assigned an offset in the frame's variables table, meaning lookup is a quick index, rather than the more expensive dict lookup as for globals.  Because of this, Python is reading the <code>print a</code> line as "get the value of local variable 'a' held in slot 0, and print it", and when it detects that this variable is still uninitialised, raises an exception.</p>

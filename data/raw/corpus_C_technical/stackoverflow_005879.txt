@@ -1,0 +1,32 @@
+Question: <p>I have a two way foreign relation similar to the following</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True)
+
+class Child(models.Model):
+  name = models.CharField(max_length=255)
+  myparent = models.ForeignKey(Parent)
+</code></pre>
+
+<p>How do I restrict the choices for Parent.favoritechild to only children whose parent is itself?  I tried</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True, limit_choices_to = {"myparent": "self"})
+</code></pre>
+
+<p>but that causes the admin interface to not list any children.</p>
+
+Answer: <p>If you only need the limitations in the Django admin interface, this might work. I based it on <a href="http://w3facility.org/question/django-limit-manytomany-queryset-based-on-selected-fk/#answer-13147522" rel="nofollow">this answer</a> from another forum - although it's for ManyToMany relationships, you should be able to replace <code>formfield_for_foreignkey</code> for it to work. In <code>admin.py</code>:</p>
+
+<pre><code>class ParentAdmin(admin.ModelAdmin):
+    def get_form(self, request, obj=None, **kwargs):
+        self.instance = obj
+        return super(ParentAdmin, self).get_form(request, obj=obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
+        if db_field.name == 'favoritechild' and self.instance:       
+            kwargs['queryset'] = Child.objects.filter(myparent=self.instance.pk)
+        return super(ChildAdmin, self).formfield_for_foreignkey(db_field, request=request, **kwargs)
+</code></pre>

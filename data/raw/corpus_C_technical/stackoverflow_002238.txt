@@ -1,0 +1,150 @@
+Question: <p>What are metaclasses? What do you use them for?</p>
+
+Answer: <h1>Role of a metaclass's <code>__call__()</code> method when creating a class instance</h1>
+
+<p>If you've done Python programming for more than a few months you'll eventually stumble upon code that looks like this:</p>
+
+<pre><code># define a class
+class SomeClass(object):
+    # ...
+    # some definition here ...
+    # ...
+
+# create an instance of it
+instance = SomeClass()
+
+# then call the object as if it's a function
+result = instance('foo', 'bar')
+</code></pre>
+
+<p>The latter is possible when you implement the <code>__call__()</code> magic method on the class.</p>
+
+<pre><code>class SomeClass(object):
+    # ...
+    # some definition here ...
+    # ...
+
+    def __call__(self, foo, bar):
+        return bar + foo
+</code></pre>
+
+<p>The <code>__call__()</code> method is invoked when an instance of a class is used as a callable. But as we've seen from previous answers a class itself is an instance of a metaclass, so when we use the class as a callable (i.e. when we create an instance of it) we're actually calling its metaclass's <code>__call__()</code> method. At this point most Python programmers are a bit confused because they've been told that when creating an instance like this <code>instance = SomeClass()</code> you're calling it's <code>__init__()</code> method. Some who've dug a bit deeper know that before <code>__init__()</code> there's <code>__new__()</code>. Well, today another layer of truth is being revealed, before <code>__new__()</code> there's the metaclass's <code>__call__()</code>.</p>
+
+<p>Let's study the method call chain from specifically the perspective of creating an instance of a class.</p>
+
+<p>This is a metaclass that logs exactly the moment before an instance is created and the moment it's about to return it.</p>
+
+<pre><code>class Meta_1(type):
+    def __call__(cls):
+        print "Meta_1.__call__() before creating an instance of ", cls
+        instance = super(Meta_1, cls).__call__()
+        print "Meta_1.__call__() about to return instance."
+        return instance
+</code></pre>
+
+<p>This is a class that uses that metaclass </p>
+
+<pre><code>class Class_1(object):
+
+    __metaclass__ = Meta_1
+
+    def __new__(cls):
+        print "Class_1.__new__() before creating an instance."
+        instance = super(Class_1, cls).__new__(cls)
+        print "Class_1.__new__() about to return instance."
+        return instance
+
+    def __init__(self):
+        print "entering Class_1.__init__() for instance initialization."
+        super(Class_1,self).__init__()
+        print "exiting Class_1.__init__()."
+</code></pre>
+
+<p>And now let's create an instance of <code>Class_1</code></p>
+
+<pre><code>instance = Class_1()
+# Meta_1.__call__() before creating an instance of &lt;class '__main__.Class_1'&gt;.
+# Class_1.__new__() before creating an instance.
+# Class_1.__new__() about to return instance.
+# entering Class_1.__init__() for instance initialization.
+# exiting Class_1.__init__().
+# Meta_1.__call__() about to return instance.
+</code></pre>
+
+<p>The code above doesn't actually do anything other than logging the task and then delegating the actual work to the parent (i.e. keeping the default behavior). So with <code>type</code> being <code>Meta_1</code>'s parent class, we can imagine that this would be the pseudo implementation of <code>type.__call__()</code>:</p>
+
+<pre><code>class type:
+    def __call__(cls, *args, **kwarg):
+
+        # ... maybe a few things done to cls here
+
+        # then we call __new__() on the class to create an instance
+        instance = cls.__new__(cls, *args, **kwargs)
+
+        # ... maybe a few things done to the instance here
+
+        # then we initialize the instance with its __init__() method
+        instance.__init__(*args, **kwargs)
+
+        # ... maybe a few more things done to instance here
+
+        # then we return it
+        return instance
+</code></pre>
+
+<p>We can see that the metaclass's <code>__call__()</code> method is the one that's called first. It then delegates creation of the instance to the class's <code>__new__()</code> method and initialization to the instance's <code>__init__()</code>. It's also the one that ultimately returns the instance.</p>
+
+<p>From the above it stems that the metaclass's <code>__call__()</code> is also given the opportunity to decide whether or not a call to <code>Class_1.__new__()</code> or <code>Class_1.__init__()</code> will eventually be made. Over the course of its execution it could actually return an object that hasn't been touched by either of these methods. Take for example this approach to the singleton pattern:</p>
+
+<pre><code>class Meta_2(type):
+
+    def __call__(cls, module):
+        if hasattr(module, '__Class_2_singleton__'):
+            # we return the only instance and skip a call to __new__() 
+            # and __init__()
+            print ("{} singleton returning from Meta_2.__call__(), "
+                   "skipping creation of new instance.".format(cls))
+            return module.__Class_2_singleton__ 
+
+        # else if the singleton isn't present we proceed as usual
+        print "Meta_2.__call__() before creating an instance."
+        instance = super(Meta_2, cls).__call__(module)
+        module.__Class_2_singleton__ = instance
+        print "Meta_2.__call__() returning new instance."
+        return instance
+
+class Class_2(object):
+
+    __metaclass__ = Meta_2
+
+    def __new__(cls, module, **kwargs):
+        print "Class_2.__new__() before creating instance."
+        instance = super(Class_2, cls).__new__(cls)
+        print "Class_2.__new__() returning instance."
+        return instance
+
+    def __init__(self, module, **kwargs):
+        print "entering Class_2.__init__() for initialization."
+        super(Class_2,self).__init__()
+        print "exiting Class_2.__init__()."
+</code></pre>
+
+<p>Let's observe what happens when repeatedly trying to create an object of type <code>Class_2</code></p>
+
+<pre><code>import sys
+a = Class_2(sys.modules['__main__'])
+# Meta_2.__call__() before creating an instance.
+# Class_2.__new__() before creating instance.
+# Class_2.__new__() returning instance.
+# entering Class_2.__init__() for initialization.
+# exiting Class_2.__init__().
+# Meta_2.__call__() returning new instance.
+
+b = Class_2(sys.modules['__main__'])
+# &lt;class '__main__.Class_2'&gt; singleton returning from Meta_2.__call__(), skipping creation of new instance.
+
+c = Class_2(sys.modules['__main__'])
+# &lt;class '__main__.Class_2'&gt; singleton returning from Meta_2.__call__(), skipping creation of new instance.
+
+a is b is c # True
+</code></pre>

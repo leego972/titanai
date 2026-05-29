@@ -1,0 +1,33 @@
+Question: <p>I have to write a reliable, totally-ordered multicast system from scratch in Python. I can't use any external libraries.  I'm allowed to use a central sequencer.</p>
+
+<p>There seems to be two immediate approaches:</p>
+
+<ol>
+<li>write an efficient system, attaching a unique id to each multicasted message,
+having the sequencer multicast sequence numbers for the message id's it receives,
+and sending back and forth ACK's and NACK's.</li>
+<li>write an inefficient flooding system, where each multicaster simply re-sends each
+message it receives once (unless it was sent by that particular multicaster.)</li>
+</ol>
+
+<p>I'm allowed to use the second option, and am inclined to do so.</p>
+
+<p>I'm currently multicasting UDP messages (which seems to be the only option,) but that means that some messages might get lost. That means I have to be able to uniquely identify each sent UDP message, so that it can be re-sent according to #2.  Should I really generate unique numbers (e.g. using the sender address and a counter) and pack them into each and every UDP message sent? How would I go about doing that?  And how do I receive a single UDP message in Python, and not a stream of data (i.e. <code>socket.recv</code>)?</p>
+
+Answer: <p>The flooding approach can cause a bad situation to get worse. If messages are dropped due to high network load, having every node resend every message will only make the situation worse.</p>
+
+<p>The best approach to take depends on the nature of the data you are sending. For example:</p>
+
+<ol>
+<li>Multimedia data: no retries, a dropped packet is a dropped frame, which won't matter when the next frame gets there anyway.</li>
+<li>Fixed period data: Recipient node keeps a timer that is reset each time an update is received. If the time expires, it requests the missing update from the master node. Retries can be unicast to the requesting node.</li>
+</ol>
+
+<p>If neither of these situations applies (every packet has to be received by every node, and the packet timing is unpredictable, so recipients can't detect missed packets on their own), then your options include:</p>
+
+<ol>
+<li>Explicit ACK from every node for each packet. Sender retries (unicast) any packet that is not ACKed.</li>
+<li>TCP-based grid approach, where each node is manually repeats received packets to neighbor nodes, relying on TCP mechanisms to ensure delivery.</li>
+</ol>
+
+<p>You could possibly rely on recipients noticing a missed packet upon reception of one with a later sequence number, but this requires the sender to keep the packet around until at least one additional packet has been sent. Requiring positive ACKs is more reliable (and provable).</p>

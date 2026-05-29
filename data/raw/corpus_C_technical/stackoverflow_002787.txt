@@ -1,0 +1,83 @@
+Question: <p>First of all, I'm fairly sure snapping to grid is fairly easy, however I've run into some odd trouble in this situation and my maths are too weak to work out specifically what is wrong.</p>
+
+<p>Here's the situation</p>
+
+<p>I have an abstract concept of a grid, with Y steps exactly Y_STEP apart (the x steps are working fine so ignore them for now)</p>
+
+<p>The grid is in an abstract coordinate space, and to get things to line up I've got a magic offset in there, let's call it Y_OFFSET</p>
+
+<p>to snap to the grid I've got the following code (python)</p>
+
+<pre><code>def snapToGrid(originalPos, offset, step):
+    index = int((originalPos - offset) / step) #truncates the remainder away
+    return index * gap + offset
+</code></pre>
+
+<p>so I pass the cursor position, Y_OFFSET and Y_STEP into that function and it returns me the nearest floored y position on the grid</p>
+
+<p>That appears to work fine in the original scenario, however when I take into account the fact that the view is scrollable things get a little weird.</p>
+
+<p>Scrolling is made as basic as I can get it, I've got a viewPort that keeps count of the distance scrolled along the Y Axis and just offsets everything that goes through it.</p>
+
+<p>Here's a snippet of the cursor's mouseMotion code:</p>
+
+<pre><code>def mouseMotion(self, event):
+    pixelPos = event.pos[Y]
+    odePos = Scroll.pixelPosToOdePos(pixelPos)
+    self.tool.positionChanged(odePos)
+</code></pre>
+
+<p>So there's two things to look at there, first the Scroll module's translation from pixel position to the abstract coordinate space, then the tool's positionChanged function which takes the abstract coordinate space value and snaps to the nearest Y step.</p>
+
+<p>Here's the relevant Scroll code</p>
+
+<pre><code>def pixelPosToOdePos(pixelPos):
+    offsetPixelPos = pixelPos - self.viewPortOffset
+    return pixelsToOde(offsetPixelPos)
+
+def pixelsToOde(pixels):
+    return float(pixels) / float(pixels_in_an_ode_unit)
+</code></pre>
+
+<p>And the tools update code</p>
+
+<pre><code>def positionChanged(self, newPos):
+    self.snappedPos = snapToGrid(originalPos, Y_OFFSET, Y_STEP)
+</code></pre>
+
+<p>The last relevant chunk is when the tool goes to render itself.  It goes through the Scroll object, which transforms the tool's snapped coordinate space position into an onscreen pixel position, here's the code:</p>
+
+<pre><code>#in Tool
+def render(self, screen):
+    Scroll.render(screen, self.image, self.snappedPos)
+
+#in Scroll
+def render(self, screen, image, odePos):
+    pixelPos = self.odePosToPixelPos(odePos)
+    screen.blit(image, pixelPos) # screen is a surface from pygame for the curious
+
+def odePosToPixelPos(self.odePos):
+    offsetPos = odePos + self.viewPortOffset
+    return odeToPixels(offsetPos)
+
+def odeToPixels(odeUnits):
+    return int(odeUnits * pixels_in_an_ode_unit)
+</code></pre>
+
+<p>Whew, that was a long explanation.  Hope you're still with me... </p>
+
+<p>The problem I'm now getting is that when I scroll up the drawn image loses alignment with the cursor.<br />
+It starts snapping to the Y step exactly 1 step below the cursor.
+Additionally it appears to phase in and out of allignment.<br />
+At some scrolls it is out by 1 and other scrolls it is spot on.<br />
+It's never out by more than 1 and it's always snapping to a valid grid location.</p>
+
+<p>Best guess I can come up with is that somewhere I'm truncating some data in the wrong spot, but no idea where or how it ends up with this behavior.</p>
+
+<p>Anyone familiar with coordinate spaces, scrolling and snapping?</p>
+
+Answer: <p>Thanks for the answer, there may be a typo, but I can't see it...</p>
+
+<p>Unfortunately the change to snapToGrid didn't make a difference, so I don't think that's the issue.</p>
+
+<p>It's not off by one pixel, but rather it's off by Y_STEP.  Playing around with it some more I've found that I can't get it to be exact at any point that the screen is scrolled up and also that it happens towards the top of the screen, which I suspect is ODE position zero, so I'm guessing my problem is around small or negative values.</p>

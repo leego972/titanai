@@ -1,0 +1,73 @@
+Question: <p>I have a string which is like this:</p>
+
+<p>this is [bracket test] "and quotes test "</p>
+
+<p>I'm trying to write something in Python to split it up by space while ignoring spaces within square braces and quotes. The result I'm looking for is:</p>
+
+<p>['this','is','bracket test','and quotes test '] </p>
+
+Answer: <p>Here's a simplistic parser (tested against your example input) that introduces the State design pattern.</p>
+
+<p>In real world, you probably want to build a real parser using something like <a href="http://www.dabeaz.com/ply/" rel="nofollow">PLY</a>.</p>
+
+<pre><code>class SimpleParser(object):
+
+    def __init__(self):
+        self.mode = None
+        self.result = None
+
+    def parse(self, text):
+        self.initial_mode()
+        self.result = []
+        for word in text.split(' '):
+            self.mode.handle_word(word)
+        return self.result
+
+    def initial_mode(self):
+        self.mode = InitialMode(self)
+
+    def bracket_mode(self):
+        self.mode = BracketMode(self)
+
+    def quote_mode(self):
+        self.mode = QuoteMode(self)
+
+
+class InitialMode(object):
+
+    def __init__(self, parser):
+        self.parser = parser
+
+    def handle_word(self, word):
+        if word.startswith('['):
+            self.parser.bracket_mode()
+            self.parser.mode.handle_word(word[1:])
+        elif word.startswith('"'):
+            self.parser.quote_mode()
+            self.parser.mode.handle_word(word[1:])
+        else:
+            self.parser.result.append(word)
+
+
+class BlockMode(object):
+
+    end_marker = None
+
+    def __init__(self, parser):
+        self.parser = parser
+        self.result = []
+
+    def handle_word(self, word):
+        if word.endswith(self.end_marker):
+            self.result.append(word[:-1])
+            self.parser.result.append(' '.join(self.result))
+            self.parser.initial_mode()
+        else:
+            self.result.append(word)
+
+class BracketMode(BlockMode):
+    end_marker = ']'
+
+class QuoteMode(BlockMode):
+    end_marker = '"'
+</code></pre>

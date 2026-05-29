@@ -1,0 +1,265 @@
+# Crosses, no Noughts
+
+Everyone realizes that Tic Tac Toe is a solved game. However, the Misère version of only-Xs provides an interesting alternative.
+
+In this version of the game, both players play Xs onto the board and try to avoid making three in a row. If you'd like to see more about this, Numberphile has a nice video about this concept.
+
+## Given a board of Misère Crosses, play an optimal move.
+
+A board is three lines of three characters each, which are X or . Thus:
+
+X X
+X
+XX
+
+
+is a valid board. You may take this in any convenient format, so long as your input and output use the same format. Formats include (but are not limited to): A multi-line string (with optional trailing newline); A 2D array of characters which are X or ; a 1D flattened array of boolean values representing if each position has been played.
+
+An optimal move is one that guarantees you will win by continuing to play optimally or prolongs your loss for as long as possible and is defined by the following rules:
+
+• Avoid making three in a row.
+• If you go first, play in the middle.
+• If the only occupied space is the middle, play in any of the remaining spaces.
+• If the middle square is not occupied and an outer square is, play opposite your opponent's last play.
+• If the middle square is occupied and an outer square is, play a "knights move" (opposite, one over) away from a previous move that does not cause you to lose.
+• If no remaining squares are left where you won't lose, play in any of the remaining squares.
+
+[NOTE: this has been proved to be non-optimal in one case but you should use this algorithm anyway.]
+
+You may assume that all of your previous moves were optimal. Thus, the first example board is not a valid input. Your opponent's moves may or may not be optimal.
+
+If the game has ended (i.e. a three in a row has been made), behavior is undefined.
+
+As this is , the shortest answer in bytes wins!
+
+One possible path, using only optimal moves, is this:
+
+[   ]  [   ]  [X  ]  [X  ]  [X  ]  [X  ]  [XX ]
+[   ]->[ X ]->[ X ]->[ XX]->[ XX]->[ XX]->[ XX]
+[   ]  [   ]  [   ]  [   ]  [ X ]  [XX ]  [XX ]
+
+
+Here are possible inputs originating from the opponent using non-optimal moves:
+(Note that only the left-side boards on this list are valid inputs.)
+
+[X  ]  [X  ]
+[   ]->[   ]
+[   ]  [  X]
+
+[XX ]  [XX ]
+[   ]->[   ]
+[  X]  [ XX]
+
+[XX ]  [XX ]
+[X  ]->[X X]
+[ XX]  [ XX]
+
+• Related – Sp3000 Mar 28 '16 at 4:17
+• What are the input and output formats? I'm assuming a board taken as an array or string? However this does not provide info on the last move, hence my next question. – Level River St Mar 28 '16 at 12:30
+• The strategy "play opposite your opponent's last play" assumes either knowledge of your opponent's move history, or that you have previously followed this strategy, i.e have not inherited a board such as .XX\nX..\nX.. for example. Do we have to consider inheriting boards such as this? – Level River St Mar 28 '16 at 12:30
+• @LevelRiverSt As written, "You may assume that all of your previous moves were optimal," so that board would be invalid input. You can take input in whatever format you like, but a multi line string such as your example there would be the "default": I just don't want to restrict anyone to having to parse the String when the move logic is the point of the challenge. – CAD97 Mar 28 '16 at 12:56
+
+# Ruby, Rev B 121 bytes
+
+Submission is the anonymous function, minus the f=. Shown in test program to illustrate use.
+
+f=->n{["~mK)\7","}uYwQO"][l=n%2].bytes{|t|9.times{|i|(m=n|1<<i)==n||8.times{|j|m/2*257>>j&255==126-t&&t+j%2!=119&&l=m}}}
+l}
+
+puts g=f[gets.to_i]
+puts
+[7,6,5,
+8,0,4,
+1,2,3].each{|i|print g>>i&1; puts if i/3==1}
+
+
+2 bytes saved by making the centre square the least significant bit instead of most significant bit (remove by /2 instead of %256.) Remaining savings by a reorganization of the table of acceptable moves. Organizing as centre square free/occupied instead of by total number of X's allows for a simpler test. Also, now there are only 2 strings in the array so the %w{string1 string2} syntax is abandoned in favour of the ["string1","string2"] syntax. This enables a nonprintable character \7 to be included, which in turn enables a simpler encoding to be used: 126-t instead of (36-t)%120.
+
+# Ruby, Rev A 143 bytes
+
+->n{l=r=("%b"%n).sum%8
+%w{\$ %5 - I+Wy Q S#}[r].bytes{|t|9.times{|i|(m=n|1<<i)==n||8.times{|j|m%256*257>>j&255==(t-36)%120&&t+j%2!=43&&l=m}}}
+l}
+
+
+This is an anonymous function. The input / output format was left open, so I've gone for a 9-bit binary number. the 512's bit represents the centre, with the remaining bits spiralling round it (the 1's bit is considered to be a corner.)
+
+There are far more possible inputs than acceptable outputs, so the algorithm is to try all moves, and find one that fits an acceptable output pattern. The acceptable output patterns for each number of X's are hardcoded.
+
+The information about the centre square is stripped off and the remaining 8 bits are multiplied by 257 to duplicate them. This pattern is then rotated past the acceptable patterns by rightshifting.
+
+The loop is not exited when a pattern is found, so the returned pattern will be the LAST acceptable pattern found. For this reason, preferable patterns (where there is a preference) come later in the list.
+
+Given the 'Knights move' strategy it is of little importance whether a pattern is rotated by 45 degrees or not. The ungolfed version follows the knights move strategy and therefore does not need to differentiate between corner squares and edge squares: three in a row is to be avoided anyway.
+
+However, I found that this is not always the best strategy, as there is the following trick. If your opponent goes first and takes the centre he should win. But on his second move he makes the error of allowing you to make a 2x2 square you should take it, as this allows you to force him to make three in a row. This is implemented in the golfed version. A little extra code is needed in this one instance to distinguish between three X's in a corner (force opponent to lose) and 3 X's along one edge (immediate suicide.)
+
+Ungolfed in test program
+
+The ungolfed version follows the logic expressed in the question.
+
+In the golfed version the table is slightly modified to [[0],[1,17],[9],[37,7,51,85],[45],[47,119]] to implement the slightly different behaviour for the case r=3. It is then compressed to printable ASCII (requiring decoding (t-36)%120). An additional bit of logic is required to differentiate between three X's in a corner and three X's along an edge in the case of the table entry 7: &&t+j%2!=43
+
+f=->n{l=r=("%b"%n).sum%8                                      #convert input to text, take character checksum to count 1's(ASCII 49.)
+#0 is ASCII 48, so %8 removes unwanted checksum bloat of 48 per char.
+#l must be initialised here for scoping reasons.
+[[0],[1,17],[9],[11,13,37,51,85],[45],[47,119]][r].each{|t| #according to r, find the list of acceptable perimeter bitmaps, and search for a solution.
+9.times{|i|(m=n|1<<i)==n||                                #OR 1<<i with input. if result == n, existing X overwritten, no good.
+#ELSE new X is in vacant square, good. So..
+8.times{|j|m%256*257>>j&255==t&&l=m}}                   #%256 to strip off middle square. *257 to duplicate bitmap.
+#rightshift, see if pattern matches t. If so, write to l
+}
+l}                                                            #return l (the last acceptable solution found) as the answer.
+
+#call function and pretty print output (not part of submission)
+puts g=f[gets.to_i]
+puts
+[6,7,0,
+5,8,1,
+4,3,2].each{|i|print g>>i&1; puts if i<3}
+
+
+Output of test program
+
+This what happens when the computer plays itself.
+
+C:\Users\steve>ruby tictac.rb
+0
+256
+
+000
+010
+000
+
+C:\Users\steve>ruby tictac.rb
+256
+384
+
+010
+010
+000
+
+C:\Users\steve>ruby tictac.rb
+384
+400
+
+010
+010
+100
+
+C:\Users\steve>ruby tictac.rb
+400
+404
+
+010
+010
+101
+
+C:\Users\steve>ruby tictac.rb
+404
+436
+
+010
+110
+101
+
+C:\Users\steve>ruby tictac.rb
+436
+444
+
+010
+110
+111
+
+
+GAME ANALYSIS PLAYING FIRST
+
+This is actually very simple and linear.
+
+When playing first, the middle square will always be the first square occupied.
+
+### r=0
+
+...  binary representation 0
+.X.
+...
+
+
+### r=2
+
+X..  binary representation 1001=9
+.XX
+...
+
+
+### r=4
+
+X.. binary representation 101101=45
+.XX
+XX.
+
+
+There is only one way (up to symmetry) to have five X's including the middle square on the board without the game being over. There is an X in the middle square, one on each diagonal (at 90 degrees to each other) and one on each horizontal/vertical centreline (at 90 degrees to each other.) As an entire edge cannot be occupied the above is the only arrangement possible. Other player must lose on next move.
+
+GAME ANALYSIS PLAYING SECOND
+
+Play is quite different depending if the other player chooses the middle square.
+
+### r=1
+
+middle square occupied
+
+.X. X..  binary representation 1
+.X. .X.
+... ...
+
+
+middle square free
+
+X.. .X. binary representation 10001=17
+... ...
+..X .X.
+
+
+### r=3
+
+Middle square occupied, if other player plays adjacent to your last X Playing a knight's move away as below is supported in the ungolfed version
+
+XX. .XX binary representation 1011=11
+.X. XX. or mirror image 1101=13
+X.. ...
+
+
+However the above is NOT the best move and is not supported in the golfed version. The best move is as follows, forcing a win on the next turn:
+
+XX. binary representation 111=7.           XXX
+XX. Only to be used where j is odd.        .X.
+... Even j would look like image to right. ...
+
+
+Middle square occupied, if other player plays at 90 or 135 degrees to your last X (play knight's move away.)
+
+X.X .X. binary representation 100101=37
+.X. .XX
+.X. X..
+
+
+Middle square free
+
+X.X .X. XX. binary representations:
+... X.X ...    1010101=85 (first two)
+X.X .X. .XX and 110011=51 (last one)
+
+
+### r=5
+
+middle square occupied. For the reasons stated above in r=4, there are four possible moves, all of which lose. only one is supported: 101111=47.
+
+middle square free. There is only one possible board up to symmetry, as follows. Other player must lose on next move, so there is no need to support r>5.
+
+XX. binary representation 1110111=119
+X.X
+.XX
+
+• This is a marvelous answer! I thought I had checked all cases for the optimal moe, but I guess I missed one. The spec'll stay the same for simplicity, though. (Really this is amazing thank you for doing this and this is so well explained! I left the I/O lose so people could do something amazing like this.) – CAD97 Mar 30 '16 at 22:34
+• Thanks, it was an interesting challenge. I've managed to golf quite a bit more out of it now. – Level River St Mar 31 '16 at 12:16

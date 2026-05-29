@@ -1,0 +1,49 @@
+## WARP+PICSAR performance
+
+The particle-in-cell code WARP and the library PICSAR have been coupled in order to run WARP efficiently on KNL and also improve performance on older architectures.
+
+### WARP+PICSAR versus WARP alone
+
+To compare WARP+PXR and WARP alone, the considered test case is an homogeneous thermalized hydrogen plasma of temperature $v_{th} = 0.1c$ where $c$ is the speed of light in vacuum. The plasma is in the entire domain of dimension 64 x 64 x 64 μm. The discretization if of 400x400x400 cells. There are 40 macro-particles per cell per species to represent the plasma (composed of two species, electrons and protons). This corresponds to a total of 5,120,000,000 particles. Simulations are run on 128 KNL nodes configures in quadrant cache with 4 MPI ranks per node. There are therefore 512 MPI subdomains that divide the main domain into cubes of 50x50x50 cells. Then, the tiling divides again each MPI subdomain into cubes of approximately 8x8x8 cells. Each MPI rank have 16 OpenMP threads to handle tiles. Current deposition is performed with order 3 B-splines shape factor. On each node, MCDRAM can contain all allocations.
+
+The original version of WARP appears extremely slow on KNL. Using WARP alone is similar to using PICSAR with the most non-optimized subroutines with MPI only. In this case there is no tiling and using OpenMP is not as efficient as with PICSAR. Therefore, we obtain a simulation time per particle per iteration per node of around 150 ns. Using WARP+PICASR, the time per particle per iteration per node drops to 19 ns. This corresponds to a speedup of almost 8.
+
+The same test case has been run on the Haswell partition of CORI and on Edison. We keep the same number of nodes meaning that the number of cores and the computational power is not equivalent. On CORI, WARP performs the simulation in around 150 ns per particle per iteration per node. WARP+PICSAR is very similar to KNL with a time per particle per iteration per node of 19 ns (speedup of 8). On Edison, WARP performs the test case in 96 ns per particle per iteration per node. With PICSAR, this drops to 33 ns (speedup of 3) showing that Haswell and KNL performs better than the previous generation Ivy Bridge.
+
+We have also tested to run on KNL using  the compiled code for Haswell (`-xCORE-AVX2` instead of `-xMIC-AVX512`). KNL architectures can excute AVX2 instructions but these instructions are not as efficient as AVX512 vector instructions to fully use the vector registers. We obtain a time of 27 ns per particle per iteration and per node.
+
+Some performance tests have also been performed with large physical cases. The first one is a 2D physical case of harmonic generation in the interaction of a high-intensity laser with a solid target. The domain is of 4300×6600 cells with 400 millions of particles. We use the Yee’s scheme with 16000 iterations. This simulation includes diagnostics every 1000 time steps. run on 96 nodes both on Edison and CORI KNL, this simulation reveals twice faster on Edison with a simulation time of 6377 seconds against 13504 seconds on KNL.
+
+### Best KNL configuration
+
+#### Hyper-threading
+
+Hyper-threading is first tested with 4 parallel configurations on a KNL configured in quadrant cache mode. The 4 parallel configurations are given in abscissa of Fig. 1. Oordinate is the time per iteration per particle (and per node). For each case, 1, 2 and 4 threads per core are tested (respectively corresponding to the blue, orange and green markers). Fig. 1 shows that WARP+PICSAR does not benefit from hyper-threading. The best performances are obtained with 1 thread per core. Using 2 threads per core, which the best with PICSAR stand-alone, slightly slows down the code. Using 4 threads/core is useless for WARP+PICSAR.
+
+Fig. 1 also reveals that the most efficient hybrid parallel distribution between MPI and OpenMP is the last case with 32 MPIs and 2 cores. This will be further studied in the next section.
+
+#### NUMA and memory KNL configurations
+
+The best NUMA and memory KNL configuration is now studied. We focus on 3 configurations: quadrant flat, quadrant cache and SNC4 flat. SNC2 is not studied here. The results of this study are shown in Fig. 2. Abscissa represents different hybrid parallel configurations as in Fig. 1 but with more data. Ordinate is the time per iteration per particle and per node in nanoseconds. Fig. 2 reveals that quadrant cache is surprisingly faster than quadrant flat although here the code fits in MCDRAM. Among all hybrid parallel distribution, the average speedup factor is of 1.15. SNC4 is almost as efficient as quadrant cache. More points are required. The difference between all configurations is nonetheless very small. Since the quadrant cache mode is the default one on CORI (they have their own partition, no need to reboot KNL nodes), we therefore recommend to use this mode for large production cases.
+
+This is also a study of the best hybrid parallel distribution between MPI and OpenMP. As for Fig. 1, Fig.2 confirms that using a large number of MPI ranks is the most efficient for WARP+PICSAR. It seems that 32 MPI ranks with 2 OpenMP per MPI is the best choice. Performance is pretty close with 8 or 64 MPI ranks. Using only OpenMP (1 MPI) is clearly slower than the best configuration in quadrant cache of a factor of 1.8. Carefully setting up a run with the best hybrid parallel distribution can really have an impact on performance. In our case, using a full MPI code is still an efficient possibility for WARP+PICSAR. In any case, even with 1 OpenMP per MPI rank, tiling is activated.
+
+#### DRAM versus MCDRAM
+
+We now study impact of MCDRAM when the problem fit in the 16 available GB. Fig. 3 shows the results of the study performed on KNL configured in flat mode with the MCDRAM only and then the DDR only. Having the code in MCDRAM speeds up the runs for every parallel configurations but with a small average factor of 1.13 in our case.
+
+#### Huge pages
+
+Huge pages are virtual memory pages which are bigger than the default base page size of 4KB. On NERSC, using larger pages can speedup applications. To use larger pages, the corresponding modules has to be loaded. For instance, to use 16MB pages, the module `craype-hugepages16M` needs to be loaded. The code has to be recompiled and run with this module.
+
+We have studied the effect of huge pages on WARP+PICSAR for 16 and 128 KNL nodes in quadrant cache. The results are shown in Fig. 4. For WARP+PICSAR, the times with huge-pages and the defaults are very similar. Using huge pages therefore does not seem to speedup the code at least for the considered test case.
+
+### Weak scaling
+
+This section presents weak scaling studies performed with WARP+PICSAR on KNL and on Haswell on CORI.
+
+### Conclusion
+
+WARP when coupled with PICSAR is faster than alone with an average speedup of 8 on CORI (both on Intel Haswell and KNL). According to the results of this study, we recommend to keep the quadrant cache mode on KNL. The latter one provides good performance and is the default KNL mode on CORI. Until 512 KNL nodes, using  many MPI ranks (32 MPI ranks per node) is more efficient than using a lot of OpenMP threads. For our case, 32 MPI ranks and 2 threads per core without hyper-threading is the best hybrid configuration.
+
+Mathieu Lobet, last update: February 9, 2017

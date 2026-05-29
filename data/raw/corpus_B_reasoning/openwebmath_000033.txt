@@ -1,0 +1,92 @@
+# Concatenate several CSV files in a single dataframe
+
+I have currently 600 CSV files (and this number will grow) of 50K lines each i would like to put in one single dataframe. I did this, it works well and it takes 3 minutes :
+
+colNames = ['COLUMN_A', 'COLUMN_B',...,'COLUMN_Z']
+folder = 'PATH_TO_FOLDER'
+
+# Dictionnary of type for each column of the csv which is not string
+dictTypes = {'COLUMN_B' : bool,'COLUMN_D' :int, ... ,'COLUMN_Y':float}
+
+try:
+# Get all the column names, if it's not in the dict of type, it's a string and we add it to the dict
+dictTypes.update({col: str for col in colNames if col not in dictTypes})
+except:
+print('Problem with the column names.')
+
+# Function allowing to parse the dates from string to date, we put in the read_csv method
+cache = {}
+def cached_date_parser(s):
+if s in cache:
+return cache[s]
+dt = pd.to_datetime(s, format='%Y-%m-%d', errors="coerce")
+cache[s] = dt
+return dt
+
+# Concatenate each df in finalData
+allFiles = glob.glob(os.path.join(folder, "*.csv"))
+finalData = pd.DataFrame()
+finalData = pd.concat([pd.read_csv(file, index_col=False, dtype=dictTypes, parse_dates=[6,14],
+date_parser=cached_date_parser) for file in allFiles ], ignore_index=True)
+
+
+It takes one minute less without the parsing date thing. So i was wondering if i could improve the speed or it was a standard amount of time regarding the number of files. Thanks !
+
+• I don't expect much of a speed boost from this comment, but it's useful to understand nonetheless. Like any reasonable function of this kind, the pd.concat() function will take not only sequences (eg, list or tuple) but any iterable, so you don't need to create a never-used list. Instead, just give pd.concat() a generator expression -- a lightweight piece of code that pd.concat() will execute on your behalf to populate the data frame. Like this: pd.concat((pd.read_csv(...) for file in allFiles), ...)
+– FMc
+Aug 24, 2020 at 18:38
+• It's a little bit slower with this but at least i've learned something ! Aug 25, 2020 at 7:52
+• Where do you get colNames and folder from? Aug 25, 2020 at 8:26
+• Sorry forgot those, one is a list of names, the other one is the path of the folder in a string Aug 25, 2020 at 8:48
+• Have u tried replacing date_parser=cached_date_parser with infer_datetime_format=True in the read_csv call? The API document says reading could be faster if the format is correctly inferred.
+– GZ0
+Aug 26, 2020 at 16:15
+
+Here is my untested feedback on your code. Some remarks:
+
+• Encapsulate the functionality as a named function. I assumed folder_path as the main "variant" your calling code might want to vary, but your use case might "call" for a different first argument.
+• Use PEP8 recommandations for variable names.
+• Comb/separate the different concerns within the function:
+1. gather input files
+2. handle column types
+3. read CSVs and parse dates
+• Depending on how much each of those concerns grows in size over time, multiple separate functions could organically grow out of these separate paragraphs, ultimately leading to a whole utility package or class (depending on how much "instance" configuration you would need to preserve, moving the column_names and dtypes parameters to object attributes of a class XyzCsvReader's __init__ method.)
+• Concerning the date parsing: probably the bottleneck is not caused by caching or not, but how often you invoke the heavy machinery behind pd.to_datetime. My guess is that only calling it once in the end, but with infer_datetime_format enabled will be much faster than calling it once per row (even with your manual cache).
+import glob
+import os
+import pandas as pd
+
+folder_path,
+column_names=None,
+dtypes=None):
+all_files = glob.glob(os.path.join(folder_path, "*.csv"))
+
+if column_names is None:
+column_names = [
+'COLUMN_A',
+'COLUMN_B',  # ...
+'COLUMN_Z']
+if dtypes is None:
+dtypes = {
+'COLUMN_B': bool,
+'COLUMN_D': int,
+'COLUMN_Y': float}
+dtypes.update({col: str for col in column_names
+if col not in dtypes})
+
+result =  pd.concat((
+for file in all_files),
+ignore_index=True)
+
+# untested pseudo-code, but idea: call to_datetime only once
+result['date'] = pd.to_datetime(
+result[[6, 14]],
+infer_datetime_format=True,
+errors='coerce')
+
+return result
+
+# use as
+
+Edit: as suggested by user FMc in their comment, switch from a list comprehension to a generator expression within pd.concat to not create an unneeded list.
+• thanks, same idea than GZ0 in the comment with the infer_datetime_format=True but it's better by a few seconds with your untested idea Aug 27, 2020 at 8:40

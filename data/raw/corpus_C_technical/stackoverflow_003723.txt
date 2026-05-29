@@ -1,0 +1,125 @@
+Question: <p>Suppose I have written a decorator that does something very generic. For example, it might convert all arguments to a specific type, perform logging, implement memoization, etc.</p>
+
+<p>Here is an example:</p>
+
+<pre><code>def args_as_ints(f):
+    def g(*args, **kwargs):
+        args = [int(x) for x in args]
+        kwargs = dict((k, int(v)) for k, v in kwargs.items())
+        return f(*args, **kwargs)
+    return g
+
+@args_as_ints
+def funny_function(x, y, z=3):
+    """Computes x*y + 2*z"""
+    return x*y + 2*z
+
+&gt;&gt;&gt; funny_function("3", 4.0, z="5")
+22
+</code></pre>
+
+<p>Everything well so far. There is one problem, however. The decorated function does not retain the documentation of the original function:</p>
+
+<pre><code>&gt;&gt;&gt; help(funny_function)
+Help on function g in module __main__:
+
+g(*args, **kwargs)
+</code></pre>
+
+<p>Fortunately, there is a workaround:</p>
+
+<pre><code>def args_as_ints(f):
+    def g(*args, **kwargs):
+        args = [int(x) for x in args]
+        kwargs = dict((k, int(v)) for k, v in kwargs.items())
+        return f(*args, **kwargs)
+    g.__name__ = f.__name__
+    g.__doc__ = f.__doc__
+    return g
+
+@args_as_ints
+def funny_function(x, y, z=3):
+    """Computes x*y + 2*z"""
+    return x*y + 2*z
+</code></pre>
+
+<p>This time, the function name and documentation are correct:</p>
+
+<pre><code>&gt;&gt;&gt; help(funny_function)
+Help on function funny_function in module __main__:
+
+funny_function(*args, **kwargs)
+    Computes x*y + 2*z
+</code></pre>
+
+<p>But there is still a problem: the function signature is wrong. The information "*args, **kwargs" is next to useless.</p>
+
+<p>What to do? I can think of two simple but flawed workarounds:</p>
+
+<p>1 -- Include the correct signature in the docstring:</p>
+
+<pre><code>def funny_function(x, y, z=3):
+    """funny_function(x, y, z=3) -- computes x*y + 2*z"""
+    return x*y + 2*z
+</code></pre>
+
+<p>This is bad because of the duplication. The signature will still not be shown properly in automatically generated documentation. It's easy to update the function and forget about changing the docstring, or to make a typo. [<i>And yes, I'm aware of the fact that the docstring already duplicates the function body. Please ignore this; funny_function is just a random example.</i>]</p>
+
+<p>2 -- Not use a decorator, or use a special-purpose decorator for every specific signature:</p>
+
+<pre><code>def funny_functions_decorator(f):
+    def g(x, y, z=3):
+        return f(int(x), int(y), z=int(z))
+    g.__name__ = f.__name__
+    g.__doc__ = f.__doc__
+    return g
+</code></pre>
+
+<p>This works fine for a set of functions that have identical signature, but it's useless in general. As I said in the beginning, I want to be able to use decorators entirely generically.</p>
+
+<p>I'm looking for a solution that is fully general, and automatic.</p>
+
+<p>So the question is: is there a way to edit the decorated function signature after it has been created?</p>
+
+<p>Otherwise, can I write a decorator that extracts the function signature and uses that information instead of "*kwargs, **kwargs" when constructing the decorated function? How do I extract that information? How should I construct the decorated function -- with exec?</p>
+
+<p>Any other approaches?</p>
+
+Answer: <p>This is solved with Python's standard library <code>functools</code> and specifically <a href="https://docs.python.org/3.5/library/functools.html#functools.wraps" rel="nofollow"><code>functools.wraps</code></a> function, which is designed to "<em>update a wrapper function to look like the wrapped function</em>". It's behaviour depends on Python version, however, as shown below. Applied to the example from the question, the code would look like:</p>
+
+<pre><code>from functools import wraps
+
+def args_as_ints(f):
+    @wraps(f) 
+    def g(*args, **kwargs):
+        args = [int(x) for x in args]
+        kwargs = dict((k, int(v)) for k, v in kwargs.items())
+        return f(*args, **kwargs)
+    return g
+
+
+@args_as_ints
+def funny_function(x, y, z=3):
+    """Computes x*y + 2*z"""
+    return x*y + 2*z
+</code></pre>
+
+<p>When executed in Python 3, this would produce the following:</p>
+
+<pre><code>&gt;&gt;&gt; funny_function("3", 4.0, z="5")
+22
+&gt;&gt;&gt; help(funny_function)
+Help on function funny_function in module __main__:
+
+funny_function(x, y, z=3)
+    Computes x*y + 2*z
+</code></pre>
+
+<p>Its only drawback is that in Python 2 however, it doesn't update function's argument list. When executed in Python 2, it will produce:</p>
+
+<pre><code>&gt;&gt;&gt; help(funny_function)
+Help on function funny_function in module __main__:
+
+funny_function(*args, **kwargs)
+    Computes x*y + 2*z
+</code></pre>

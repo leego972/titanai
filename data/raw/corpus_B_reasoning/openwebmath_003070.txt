@@ -1,0 +1,68 @@
+# Including literals into compiled C code
+
+I have a function that I want to Compile into C for speed. Inside this function is a certain long expression called x, which has been computed earlier in a Mathematica session. However, if you call x naively inside the code, then you are referring to an "external variable" and so ordinary Wolfram Language code is used instead.
+
+See below. The second version is 100 times faster because it got properly compiled into C. How can I include x in the code without literally copying-and-pasting a huge expression, which muddies up my notebook?
+
+x = Sin[i^2]*Cos[i] (* A fairly long complicated expression *);
+compiledsum1 = Compile[{{NumPoints, _Integer}},
+Block[
+{i, sum = 0.0},
+For[i = 0, i < NumPoints, i++, sum += x;];
+sum
+], CompilationTarget -> "C"];
+compiledsum2 = Compile[{{NumPoints, _Integer}},
+Block[
+{i, sum = 0.0},
+For[i = 0, i < NumPoints, i++, sum += Sin[i^2]*Cos[i];];
+sum
+], CompilationTarget -> "C"];
+
+
+Timings:
+
+compiledsum1[100000] // Timing
+{0.841049, 223.296}
+compiledsum2[100000] // Timing
+0.006448, 223.296
+
+• Sep 12, 2021 at 13:35
+• Externals are inlined by "InlineExternalDefinitions" -> True, see CompilationOptions in Compile
+– I.M.
+Sep 12, 2021 at 22:55
+
+x = Sin[i^2]*Cos[i] (*A fairly long complicated expression*);
+compiledsumtest1 =
+Hold@Compile[{{NumPoints, _Integer}},
+Block[{i, sum = 0.0}, For[i = 0, i < NumPoints, i++, sum += x;];
+sum], CompilationTarget -> "C"] /. OwnValues@x // ReleaseHold;
+
+
+Of course the solution above isn't the simplest for your specific problem. Henrik and I.M. have already shown two simpler solutions, I'd like to add one more based on pure function:
+
+x = Sin[i^2]*Cos[i] (*A fairly long complicated expression*);
+compiledsumtest2 =
+Compile[{{NumPoints, _Integer}},
+Block[{i, sum = 0.0}, For[i = 0, i < NumPoints, i++, sum += #;];
+sum], CompilationTarget -> "C"] &@x;
+
+
+But do remember the pattern-matching-based method is more general, here's an example.
+
+• Thank you! Can you point me to the best reference to understand all of this wizardry? The documentation is quite tricky for me to properly grasp. Sep 12, 2021 at 13:04
+• @BruceBartlett You may have a look at Leonid Shifrin's book, that's where I first learned about @, OwnValues, etc. These days Stephen Wolfram's book is a good choice, too. Sep 12, 2021 at 13:17
+• Thank you very much!! Sep 12, 2021 at 13:35
+
+Even easier with With.
+
+ compiledsum3 = With[{x = x},
+Compile[{{NumPoints, _Integer}},
+Block[{i, sum = 0.0},
+For[i = 0, i < NumPoints, i++, sum += x;];
+sum
+],
+CompilationTarget -> "C"]
+]
+
+
+(This is certainly a duplicate, but I have no time to look it up...)

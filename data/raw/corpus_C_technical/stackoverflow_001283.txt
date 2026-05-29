@@ -1,0 +1,84 @@
+Question: <p>I have been playing with the Ruby library "shoes". Basically you can write a GUI application in the following way:</p>
+
+<pre><code>Shoes.app do
+  t = para "Not clicked!"
+  button "The Label" do
+    alert "You clicked the button!" # when clicked, make an alert
+    t.replace "Clicked!" # ..and replace the label's text
+  end
+end
+</code></pre>
+
+<p>This made me think - how would I design a similarly nice-to-use GUI framework in Python? One that doesn't have the usual tyings of basically being wrappers to a C* library (In the case of GTK, Tk, wx, QT etc etc)</p>
+
+<p>Shoes takes things from web devlopment (like <code>#f0c2f0</code> style colour notation, CSS layout techniques, like <code>:margin =&gt; 10</code>), and from ruby (extensively using blocks in sensible ways)</p>
+
+<p>Python's lack of "rubyish blocks" makes a (metaphorically)-direct port impossible:</p>
+
+<pre><code>def Shoeless(Shoes.app):
+    self.t = para("Not clicked!")
+
+    def on_click_func(self):
+        alert("You clicked the button!")
+        self.t.replace("clicked!")
+
+    b = button("The label", click=self.on_click_func)
+</code></pre>
+
+<p>No where near as clean, and wouldn't be <em>nearly</em> as flexible, and I'm not even sure if it would be implementable.</p>
+
+<p>Using decorators seems like an interesting way to map blocks of code to a specific action:</p>
+
+<pre><code>class BaseControl:
+    def __init__(self):
+        self.func = None
+
+    def clicked(self, func):
+        self.func = func
+
+    def __call__(self):
+        if self.func is not None:
+            self.func()
+
+class Button(BaseControl):
+    pass
+
+class Label(BaseControl):
+    pass
+
+# The actual applications code (that the end-user would write)
+class MyApp:
+    ok = Button()
+    la = Label()
+
+    @ok.clicked
+    def clickeryHappened():
+        print "OK Clicked!"
+
+if __name__ == '__main__':
+    a = MyApp()
+    a.ok() # trigger the clicked action
+</code></pre>
+
+<p>Basically the decorator function stores the function, then when the action occurred (say, a click) the appropriate function would be executed.</p>
+
+<p>The scope of various stuff (say, the <code>la</code> label in the above example) could be rather complicated, but it seems doable in a fairly neat manner..</p>
+
+Answer: <p>Maybe not as slick as the Ruby version, but how about something like this:</p>
+
+<pre><code>from Boots import App, Para, Button, alert
+
+def Shoeless(App):
+    t = Para(text = 'Not Clicked')
+    b = Button(label = 'The label')
+
+    def on_b_clicked(self):
+        alert('You clicked the button!')
+        self.t.text = 'Clicked!'
+</code></pre>
+
+<p><a href="http://stackoverflow.com/questions/58711/how-would-you-design-a-very-pythonic-ui-framework#58917" rel="nofollow">Like Justin said</a>, to implement this you would need to use a custom metaclass on class <code>App</code>, and a bunch of properties on <code>Para</code> and <code>Button</code>. This actually wouldn't be too hard.</p>
+
+<p>The problem you run into next is: how do you keep track of the <em>order</em> that things appear in the class definition? In Python 2.x, there is no way to know if <code>t</code> should be above <code>b</code> or the other way around, since you receive the contents of the class definition as a python <code>dict</code>.</p>
+
+<p>However, in Python 3.0 <a href="http://www.python.org/dev/peps/pep-3115/" rel="nofollow">metaclasses are being changed</a> in a couple of (minor) ways. One of them is the <code>__prepare__</code> method, which allows you to supply your own custom dictionary-like object to be used instead -- this means you'll be able to track the order in which items are defined, and position them accordingly in the window.</p>

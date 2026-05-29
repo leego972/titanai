@@ -1,0 +1,291 @@
+# Δ ℚuantitative √ourney
+
+## Q-learning with Neural Networks
+
+### Learning Gridworld with Q-learning¶
+
+#### Introduction¶
+
+We've finally made it. We've made it to what we've all been waiting for, Q-learning with neural networks. Since I'm sure a lot of people didn't follow parts 1 and 2 because they were kind of boring, I will attempt to make this post relatively (but not completely) self-contained. In this post, we will dive into using Q-learning to train an agent (player) how to play Gridworld. Gridworld is a simple text based game in which there is a 4x4 grid of tiles and 4 objects placed therein: a player, pit, goal, and a wall. The player can move up/down/left/right ($a \in A \{up,down,left,right\}$) and the point of the game is to get to the goal where the player will receive a numerical reward. Unfortunately, we have to avoid a pit, because if we land on the pit we are penalized with a negative 'reward'. As if our task wasn't difficult enough, there's also a wall that can block the player's path (but it offers no reward or penalty).
+
+#### Quick Review of Terms and Concepts (skip if you followed parts 1 & 2)¶
+
+A state is all the information necessary (e.g. pixel data in a game) to make a decision that you expect will take you to a new (higher value) state. The high level function of reinforcement learning is to learn the values of states or state-action pairs (the value of taking action $a$ given we're in state $s$). The value is some notion of how "good" that state or action is. Generally this is a function of rewards received now or in the future as a result of taking some action or being in some state.
+
+A policy, denoted $\pi$, is the specific strategy we take in order to get into high value states or take high value actions to maximize our rewards over time. For example, a policy in blackjack might be to always hit until we have 19. We denote a function, $\pi(s)$ that accepts a state $s$ and returns the action to be taken. Generally $\pi(s)$ as a function just evaluates the value of all possible actions given the state $s$ and returns the highest value action. This will result in a specific policy $\pi$ that may change over time as we improve our value estimates.
+
+We call the function that accepts a state $s$ and returns the value of that state $v_{\pi}(s)$. This is the value function. Similarly, there is an action-value function $Q(s, a)$ that accepts a state $s$ and an action $a$ and returns the value of taking that action given that state. Some RL algorithms or implementations will use one or the other. Importantly, if we base our algorithm on learning state-values (as opposed to action-values), we must keep in mind that the value of a state depends completely on our policy $\pi$. Using blackjack as an example, if we're in the state of having a card total of 20, and have two possible actions, hit or stay, the value of this state is only high if our policy says to stay when we have 20. If our policy said to hit when we have 20, we would probably bust and lose the game, thus the value of that state would be low. More formally, the value of a state is equivalent to the value of the highest action taken in that state.
+
+#### What is Q-learning?¶
+
+Q-learning, like virtually all RL methods, is one type of algorithm used to calculate state-action values. It falls under the class of temporal difference (TD) algorithms, which suggests that time differences between actions taken and rewards received are involved.
+
+In part 2 where we used a Monte Carlo method to learn to play blackjack, we had to wait until the end of a game (episode) to update our state-action values. With TD algorithms, we make updates after every action taken. In most cases, that makes more sense. We make a prediction (based on previous experience), take an action based on that prediction, receive a reward and then update our prediction.
+
+(Btw: Don't confuse the "Q" in Q-learning with the $Q$ function we've discussed in the previous parts. The $Q$ function is always the name of the function that accepts states and actions and spits out the value of that state-action pair. RL methods involve a $Q$ function but aren't necessarily Q-learning algorithms.)
+
+Here's the tabular Q-learning update rule: $$Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha[R_{t+1} + \gamma maxQ(S_{t+1}, a_{t+1}) - Q(S_t, A_t)]$$
+
+So, like Monte Carlo, we could have a table that stores the Q-value for every possible state-action pair and iteratively update this table as we play games. Our policy $\pi$ would be based on choosing the action with the highest Q value for that given state.
+
+But we're done with tables. This is 2015, we have GPUs and stuff. Well, as I alluded to in part 2, our $Q(s,a)$ function doesn't have to just be a lookup table. In fact, in most interesting problems, our state-action space is much too large to store in a table. Imagine a very simplified game of Pacman. If we implement it as a graphics-based game, the state would be the raw pixel data. In a tabular method, if the pixel data changes by just a single pixel, we have to store that as a completely separate entry in the table. Obviously that's silly and wasteful. What we need is some way to generalize and pattern match between states. We need our algorithm to say "the value of these kind of states is X" rather than "the value of this exact, super specific state is X."
+
+That's where neural networks come in. Or any other type of function approximator, even a simple linear model. We can use a neural network, instead of a lookup table, as our $Q(s,a)$ function. Just like before, it will accept a state and an action and spit out the value of that state-action.
+
+Importantly, however, unlike a lookup table, a neural network also has a bunch of parameters associated with it. These are the weights. So our $Q$ function actually looks like this: $Q(s, a, \theta)$ where $\theta$ is a vector of parameters. And instead of iteratively updating values in a table, we will iteratively update the $\theta$ parameters of our neural network so that it learns to provide us with better estimates of state-action values.
+
+Of course we can use gradient descent (backpropagation) to train our $Q$ neural network just like any other neural network.
+
+But what's our target y vector (expected output vector)? Since the net is not a table, we don't use the formula shown above, our target is simply: $r_{t+1} + \gamma * maxQ(s', a')$ for the state-action that just happened. $\gamma$ is a parameter $0\rightarrow1$ that is called the discount factor. Basically it determines how much each future reward is taken into consideration for updating our Q-value. If $\gamma$ is close to 0, we heavily discount future rewards and thus mostly care about immediate rewards. $s'$ refers to the new state after having taken action $a$ and $a'$ refers to the next actions possible in this new state. So $maxQ(s', a')$ means we calculate all the Q-values for each state-action pair in the new state, and take the maximium value to use in our new value update. (Note I may use $s' \text{ and } a'$ interchangeably with $s_{t+1} \text{ and } a_{t+1}$.)
+
+One important note: our reward update for every state-action pair is $r_{t+1} + \gamma*maxQ(s_{t+1}, a)$ except when the state $s'$ is a terminal state. When we've reached a terminal state, the reward update is simply $r_{t+1}$. A terminal state is the last state in an episode. In our case, there are 2 terminal states: the state where the player fell into the pit (and receives -10) and the state where the player has reached the goal (and receives +10). Any other state is non-terminal and the game is still in progress.
+
+There are two keywords I need to mention as well: on-policy and off-policy methods. In on-policy methods we iteratively learn about state values at the same time that we improve our policy. In other words, the updates to our state values depend on the policy. In contrast, off-policy methods do not depend on the policy to update the value function. Q-learning is an off-policy method. It's advantageous because with off-policy methods, we can follow one policy while learning about another. For example, with Q-learning, we could always take completely random actions and yet we would still learn about another policy function of taking the best actions in every state. If there's ever a $\pi$ referenced in the value update part of the algorithm then it's an on-policy method.
+
+### Gridworld Details¶
+
+Before we get too deep into the neural network Q-learning stuff, let's discuss the Gridworld game implementation that we're using as our toy problem.
+
+We're going to implement 3 variants of the game in order of increasing difficulty. The first version will initialize a grid in exactly the same way each time. That is, every new game starts with the player (P), goal (+), pit (-), and wall (W) in exactly the same positions. Thus the algorithm just needs to learn how to take the player from a known starting position to a known end position without hitting the pit, which gives out negative rewards.
+
+The second implementation is slightly more difficult. The goal, pit and wall will always be initialized in the same positions, but the player will be placed randomly on the grid on each new game. The third implementation is the most difficult to learn, and that's where all elements are randomly placed on the grid each game.
+
+Let's get to coding.
+
+In [1]:
+import numpy as np
+
+def randPair(s,e):
+return np.random.randint(s,e), np.random.randint(s,e)
+
+#finds an array in the "depth" dimension of the grid
+def findLoc(state, obj):
+for i in range(0,4):
+for j in range(0,4):
+if (state[i,j] == obj).all():
+return i,j
+
+#Initialize stationary grid, all items are placed deterministically
+def initGrid():
+state = np.zeros((4,4,4))
+#place player
+state[0,1] = np.array([0,0,0,1])
+#place wall
+state[2,2] = np.array([0,0,1,0])
+#place pit
+state[1,1] = np.array([0,1,0,0])
+#place goal
+state[3,3] = np.array([1,0,0,0])
+
+return state
+
+#Initialize player in random location, but keep wall, goal and pit stationary
+def initGridPlayer():
+state = np.zeros((4,4,4))
+#place player
+state[randPair(0,4)] = np.array([0,0,0,1])
+#place wall
+state[2,2] = np.array([0,0,1,0])
+#place pit
+state[1,1] = np.array([0,1,0,0])
+#place goal
+state[1,2] = np.array([1,0,0,0])
+
+a = findLoc(state, np.array([0,0,0,1])) #find grid position of player (agent)
+w = findLoc(state, np.array([0,0,1,0])) #find wall
+g = findLoc(state, np.array([1,0,0,0])) #find goal
+p = findLoc(state, np.array([0,1,0,0])) #find pit
+if (not a or not w or not g or not p):
+#print('Invalid grid. Rebuilding..')
+return initGridPlayer()
+
+return state
+
+#Initialize grid so that goal, pit, wall, player are all randomly placed
+def initGridRand():
+state = np.zeros((4,4,4))
+#place player
+state[randPair(0,4)] = np.array([0,0,0,1])
+#place wall
+state[randPair(0,4)] = np.array([0,0,1,0])
+#place pit
+state[randPair(0,4)] = np.array([0,1,0,0])
+#place goal
+state[randPair(0,4)] = np.array([1,0,0,0])
+
+a = findLoc(state, np.array([0,0,0,1]))
+w = findLoc(state, np.array([0,0,1,0]))
+g = findLoc(state, np.array([1,0,0,0]))
+p = findLoc(state, np.array([0,1,0,0]))
+#If any of the "objects" are superimposed, just call the function again to re-place
+if (not a or not w or not g or not p):
+#print('Invalid grid. Rebuilding..')
+return initGridRand()
+
+return state
+
+
+The state is a 3-dimensional numpy array (4x4x4). You can think of the first two dimensions as the positions on the board; e.g. row 1, column 2 is the position (1,2) [zero indexed] on the board. The 3rd dimension encodes the object/element at that position. Since there are 4 different possible objects, the 3rd dimension of the state contains vectors of length 4. We're using a one-hot encoding for the elements except that the empty position is just a vector of all zeros. So with a 4 length vector we're encoding 5 possible options at each grid position: empty, player, goal, pit, or wall.
+
+You can also think of the 3rd dimension as being divided into 4 separate grid planes, where each plane represents the position of each element. So below is an example where the player is at grid position (3,0), the wall is at (0,0), the pit is at (0,1) and the goal is at (1,0). [All other elements are 0s]
+
+In our simple implementation it's possible for the board to be initialized such that some of the objects contain a 1 at the same "x,y" position (but different "z" positions), which indicates they're at the same position on the grid. Obviously we don't want to initialize the board in this way, so for the last 2 variants of the game that involve some element of random initialization, we check if we can find "clean" arrays (only one "1" in the 'Z' dimension of a particular grid position) of the various element types on the grid and if not, we just recursively call the initialize grid function until we get a state where elements are not superimposed.
+
+When the player successfully plays the game and lands on the goal, the player and goal positions will be superimposed and that is how we know the player has won (likewise if the player hits the pit and loses). The wall is supposed to block the movement of the player so we prevent the player from taking an action that would place them at the same position as the wall. Additionally, the grid is "enclosed" so that player cannot walk through the edges of the grid.
+
+Now we will implement the movement function.
+
+In [1]:
+def makeMove(state, action):
+#need to locate player in grid
+#need to determine what object (if any) is in the new grid spot the player is moving to
+player_loc = findLoc(state, np.array([0,0,0,1]))
+wall = findLoc(state, np.array([0,0,1,0]))
+goal = findLoc(state, np.array([1,0,0,0]))
+pit = findLoc(state, np.array([0,1,0,0]))
+state = np.zeros((4,4,4))
+
+actions = [[-1,0],[1,0],[0,-1],[0,1]]
+#e.g. up => (player row - 1, player column + 0)
+new_loc = (player_loc[0] + actions[action][0], player_loc[1] + actions[action][1])
+if (new_loc != wall):
+if ((np.array(new_loc) <= (3,3)).all() and (np.array(new_loc) >= (0,0)).all()):
+state[new_loc][3] = 1
+
+new_player_loc = findLoc(state, np.array([0,0,0,1]))
+if (not new_player_loc):
+state[player_loc] = np.array([0,0,0,1])
+#re-place pit
+state[pit][1] = 1
+#re-place wall
+state[wall][2] = 1
+#re-place goal
+state[goal][0] = 1
+
+return state
+
+
+The first thing we do is try to find the positions of each element on the grid (state). Then it's just a few simple if-conditions. We need to make sure the player isn't trying to step on the wall and make sure that the player isn't stepping outside the bounds of the grid.
+
+Now we implement getLoc which is similar to findLoc but can identify superimposed elements, whereas findLoc would miss it (intentionally) if there was superimposition. Additionally, we'll implement our reward function, which will award +10 if the player steps onto the goal, -10 if the player steps into the pit, and -1 for any other move. These rewards are pretty arbitrary, as long as the goal has a significantly higher reward than the pit, the algorithm should do fine.
+
+Lastly, I've implemented a function that will display our grid as a text array so we can see what's going on.
+
+In [3]:
+def getLoc(state, level):
+for i in range(0,4):
+for j in range(0,4):
+if (state[i,j][level] == 1):
+return i,j
+
+def getReward(state):
+player_loc = getLoc(state, 3)
+pit = getLoc(state, 1)
+goal = getLoc(state, 0)
+if (player_loc == pit):
+return -10
+elif (player_loc == goal):
+return 10
+else:
+return -1
+
+def dispGrid(state):
+grid = np.zeros((4,4), dtype=')
+player_loc = findLoc(state, np.array([0,0,0,1]))
+wall = findLoc(state, np.array([0,0,1,0]))
+goal = findLoc(state, np.array([1,0,0,0]))
+pit = findLoc(state, np.array([0,1,0,0]))
+for i in range(0,4):
+for j in range(0,4):
+grid[i,j] = ' '
+
+if player_loc:
+grid[player_loc] = 'P' #player
+if wall:
+grid[wall] = 'W' #wall
+if goal:
+grid[goal] = '+' #goal
+if pit:
+grid[pit] = '-' #pit
+
+return grid
+
+
+And that's it. That's the entire gridworld game implementation. Not too bad right? As with my part 2 blackjack implementation, this game is not using OOP-style and implemented in a functional style where we just pass around states.
+
+Let's demonstrate some gameplay. I'll be using the initGridRand() variant so that all items are placed randomly.
+
+In [422]:
+state = initGridRand()
+dispGrid(state)
+
+Out[422]:
+array([['P', '-', ' ', ' '],
+[' ', ' ', ' ', ' '],
+[' ', ' ', 'W', ' '],
+[' ', '+', ' ', ' ']],
+dtype='
+
+
+As you can see, I clearly need to move 3 spaces down, and 1 space to the right to land on the goal. Remember, our action encoding is: 0 = up, 1 = down, 2 = left, 3 = right.
+
+In [423]:
+state = makeMove(state, 1)
+state = makeMove(state, 1)
+state = makeMove(state, 1)
+state = makeMove(state, 3)
+print('Reward: %s' % (getReward(state),))
+dispGrid(state)
+
+Reward: 10
+
+Out[423]:
+array([[' ', '-', ' ', ' '],
+[' ', ' ', ' ', ' '],
+[' ', ' ', 'W', ' '],
+[' ', ' ', ' ', ' ']],
+dtype='
+
+
+We haven't implemented a display for when the player is on the goal or pit so the player and goal just disappear when that happens.
+
+### Neural Network as our Q function¶
+
+Now for the fun part. Let's build our neural network that will serve as our $Q$ function. Since this is a post about Q-learning, I'm not going to code a neural network from scratch. I'm going to use the fairly popular Theano-based library Keras. You can of course use whatever library you want, or roll your own.
+
+Important Note: Up until now, I've been talking about how the neural network can serve the role of $Q(s, a)$, and that's absolutely true. However, I will be implementing our neural network in the same way that Google DeepMind did for its Atari playing algorithm. Instead of a neural network architecture that accepts a state and an action as inputs and outputs the value of that single state-action pair, DeepMind built a network that just accepts a state and outputs separate Q-values for each possible action in its output layer. This is pretty clever because in Q-learning we need to get the $maxQ(s', a')$ [max of the Q values for every possible action in the new state s']. Rather than having to run our network forward for every action, we just need to run it forward once. The result is the same, however, it's just more efficient.
+
+In [4]:
+from keras.models import Sequential
+from keras.layers.core import Dense, Dropout, Activation
+from keras.optimizers import RMSprop
+
+In [20]:
+model = Sequential()
+#model.add(Dropout(0.2)) I'm not using dropout, but maybe you wanna give it a try?
+
+model.add(Activation('linear')) #linear output so we can have range of real-valued outputs
+
+rms = RMSprop()
+model.compile(loss='mse', optimizer=rms)
+
+In [384]:
+model.predict(state.reshape(1,64), batch_size=1)
+#just to show an example output; read outputs left to right: up/down/left/right
+
+Out[384]:
+array([[-0.02812552, -0.04649779, -0.08819015, -0.00723661]])
+
+So that's the network I've designed. An input layer of 64 units (because our state has a total of 64 elements, remember its a 4x4x4 numpy array), 2 hidden layers of 164 and 150 units, and an output layer of 4, one for each of our possible actions (up, down, left, right) [in that order].
+
+Why did I make the network like this? Honestly, I have no good answer for that. I just messed around with different hidden layer architectures and this one seemed to work fairly well. Feel free to change it up. There's probably a better configuration. (If you discover or know of a much better network architecture for this, let me know).
+
+### Online Training¶
+
+Below is the implementation for the main loop of the algorithm. In broad strokes:
+
+1. Setup a for-loop to number of epochs
+2. In the loop, setup while loop (while game is in progress)
+3. Run Q network forward.
+4. We're using an epsilon greedy implementation, so at time t with probability $\epsilon$ we will choose a random action. With probability $1-\epsilon$ we will choose the action associated with the highest Q value from our neural network.
+5. Take action $a$ as determined in (4), observe new s

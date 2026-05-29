@@ -1,0 +1,129 @@
+# Using Memoization with a Mutable Object
+
+In looking for a solution to this question, I ran across some old binary tree code by Daniel Lichtblau, reproduced below:
+
+Clear[leftsubtree, rightsubtree, nodevalue, emptyTree, treeInsert]
+leftsubtree[{left_, _, _}] := left
+rightsubtree[{_, _, right_}] := right
+nodevalue[{_, val_, _}] := val
+emptyTree = {};
+
+treeInsert[emptyTree, elem_] := {emptyTree, elem, emptyTree}
+treeInsert[tree_, elem_] /; SameQ[nodevalue[tree], elem] := tree
+treeInsert[tree_, elem_] /; OrderedQ[{nodevalue[tree], elem}] :=
+{leftsubtree[tree],
+nodevalue[tree], treeInsert[rightsubtree[tree], elem]}
+treeInsert[tree_, elem_] := {treeInsert[leftsubtree[tree], elem],
+nodevalue[tree], rightsubtree[tree]}
+
+
+When mapped onto a list, treeInsert gives you a sorted duplicate free list. For example,
+
+tr = {};
+Scan[(tr = treeInsert[tr, #]) &, RandomInteger[100, 5]];
+Flatten@tr
+(* {13, 28, 53, 59, 88} *)
+
+
+On my machine, this takes ~2 s to process RandomInteger[10, 10^5], but this increases to nearly 20 s with RandomInteger[10, 10^6]. There are likely other techniques to speed this up, but I am curious as to how memoization could be adapted to this problem. At issue, though, is that the tree changes with each insertion, and so it cannot be used directly for memoization because the definition depends directly on that form. How would one do this?
+
+Edit: as I discovered in my own testing, Fold works much better than Scan for creating a tree, as follows
+
+tr = Fold[treeInsert, {}, RandomInteger[100, 5]];
+Flatten@tr
+(* {13, 28, 53, 59, 88} *)
+
+
+Update: while my question, per se, was not answered directly, the answers themselves indicated that there were better ways to accomplish what I wanted. In the end, I chose the one I did for two reasons: speed and simplicity.
+
+-
+I think the Scan[(tr= part of the post did not make it onto the page. – ruebenko Apr 23 '12 at 14:41
+@ruebenko no it didn't. Posted it before I finished the thought, apparently. It's fixed, now. – rcollyer Apr 23 '12 at 14:42
+This does not use memoization, but have you seen this answer? It is quite fast (being compiled), and along the same lines as what you discuss. – Leonid Shifrin Apr 23 '12 at 18:16
+@LeonidShifrin I did see that answer, and I like it a lot. Unfortunately, $\pm\infty$ is not a real number, so it would have to be dealt with separately. However, I was thinking along those lines when it occurred to me that I did not know of a way to adapt memoization to this particular solution. – rcollyer Apr 23 '12 at 18:22
+@rcollyer I see. But if the problem is only about infinities, then, since the resulting list will be sorted, they can only be the first and last elements of the resulting list, if present. What I usually do is to replace them temporarily with Min[list]-1 and Max[list]+1, then use Compile, then replace back. This way, you can keep it almost as fast as without infinities. – Leonid Shifrin Apr 23 '12 at 18:24
+
+For such small trees I would memoize those that already have the element...
+
+ClearAll[leftsubtree, rightsubtree, nodevalue, emptyTree, treeInsert]
+leftsubtree[{left_, _, _}] := left
+rightsubtree[{_, _, right_}] := right
+nodevalue[{_, val_, _}] := val
+emptyTree = {};
+
+treeInsert[emptyTree, elem_] := {emptyTree, elem, emptyTree}
+
+(*This is the changed line*)
+t : treeInsert[tree_, elem_] /; ! FreeQ[tree, elem] := t = tree
+
+treeInsert[tree_, elem_] /;
+OrderedQ[{nodevalue[tree], elem}] := {leftsubtree[tree],
+nodevalue[tree], treeInsert[rightsubtree[tree], elem]}
+treeInsert[tree_, elem_] := {treeInsert[leftsubtree[tree], elem],
+nodevalue[tree], rightsubtree[tree]}
+
+-
+ This gives a 60% increase in speed over Pillsy' s similar solution on my machine. Likely because it is the common pattern, and hence higher on the list. +1 – rcollyer Apr 23 '12 at 16:14 As a side note, for testing they're small trees, but that is not guaranteed to always be the case. Although with Andy's test data, you don't expect the number of unique elements to exceed 1000, so I guess small still applies. – rcollyer Apr 23 '12 at 16:17 With further investigation, this solution seems to win big over mine when you miss the cache a lot. – Pillsy Apr 23 '12 at 16:51 As I noted in the update, I am selecting yours for speed and simplicity. – rcollyer Apr 26 '12 at 2:57 Thanks @rcollyer – Rojo Apr 26 '12 at 5:42
+
+Well, the simplest approach I came up with is to just memoize the result after you generate it.
+
+ClearAll[leftSubTree, rightSubTree, nodeValue, emptyTree, treeInsert];
+
+leftSubTree[{left_, _, _}] := left;
+rightSubTree[{_, _, right_}] := right;
+nodeValue[{_, val_, _}] := val;
+emptyTree = {};
+
+treeInsert[emptyTree, elem_] := {emptyTree, elem, emptyTree};
+treeInsert[tree_, elem_] /; SameQ[nodeValue@tree, elem] := tree;
+treeInsert[tree_, elem_] /; OrderedQ[{nodeValue[tree], elem}] :=
+With[{inserted =
+{leftSubTree[tree], nodeValue[tree],
+treeInsert[rightSubTree[tree], elem]}},
+treeInsert[inserted, elem] = inserted];
+treeInsert[tree_, elem_] :=
+With[{inserted =
+{treeInsert[leftSubTree[tree], elem], nodeValue[tree],
+rightSubTree[tree]}},
+treeInsert[inserted, elem] = inserted];
+
+
+The way this works means that if you ever try to insert an element into a tree that already contains it, it will return the memoized result immediately, and it will also return the memoized result if you've ever inserted that element into another tree identical to the one you're using now. This lead to a factor of 10 speedup on my machine with that million element list.
+
+It has the advantage of not only working well more with than one tree: it actually will be faster if those trees share structure!
+
+-
+ +1, that's an interesting idea I hadn't considered. – rcollyer Apr 23 '12 at 15:19 As an interesting side note, repeated applications on the same data set do not give any additional speed-up. Likely, that is the cost of traversing the tree itself. Also, for Andy's question, though, OrderedQ puts $\pm\infty$ at the end, so to use it with those values, Less is better, but not any faster. :P – rcollyer Apr 23 '12 at 16:07
+
+Here is an approach that inserts only if an element is not yet in the tree:
+
+ClearAll[leftsubtree, rightsubtree, nodevalue, emptyTree, treeInsert, \
+inTreeQ]
+leftsubtree[{left_, _, _}] := left
+rightsubtree[{_, _, right_}] := right
+nodevalue[{_, val_, _}] := val
+inTreeQ[_] = False;
+emptyTree = {};
+
+treeInsert[tree_, elem_] /; inTreeQ[elem] := tree
+treeInsert[emptyTree,
+elem_] := (inTreeQ[elem] = True; {emptyTree, elem, emptyTree})
+treeInsert[tree_, elem_] /; SameQ[nodevalue[tree], elem] := tree
+treeInsert[tree_, elem_] /; ! inTreeQ[elem] &&
+OrderedQ[{nodevalue[tree], elem}] := {leftsubtree[tree],
+nodevalue[tree], treeInsert[rightsubtree[tree], elem]}
+treeInsert[tree_, elem_] /; ! inTreeQ[elem] := {treeInsert[
+leftsubtree[tree], elem], nodevalue[tree], rightsubtree[tree]}
+
+tr = {};
+AbsoluteTiming[
+Scan[(tr = treeInsert[tr, #]) &, RandomInteger[10, 10^6]];]
+Flatten@tr
+
+
+This works well when there are a few different elements like in RandomInteger[10,...] Have a look and see if this works for you.
+
+Edit: I made another improvement by moving the most common case treeInsert[tree_, elem_] /; inTreeQ[elem] := tree (that the element is in the tree) up the chain
+
+-
+ It definitely speeds things up (by a very large margin), but what if I need two, or more, trees? – rcollyer Apr 23 '12 at 15:07 hm, how about using an index for each tree, like in inTreeQ[1,_]=False you'd then have to give an index to each tree ) or you could use an Unique["tr"] symbol. – ruebenko Apr 23 '12 at 15:10 The index idea is a good one. How about you make a custom "object": Tree[index, treedata]. Then, have a form of that only accepts an element, treeInsert[elem_], which will "create" the Tree and give it the unique index when used. Then unique trees can be had by all ... :) – rcollyer Apr 23 '12 at 15:17

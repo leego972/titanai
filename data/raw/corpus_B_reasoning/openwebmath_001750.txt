@@ -1,0 +1,47 @@
+# Are RSA signatures deterministic?
+
+If I sign the word HELLO with the mechanism "NONEwithRSA" with the same private key, do I always will have the same signature?
+
+A Java example always return different byte array :
+
+PKCS11Provider provider = new PKCS11Provider(this);
+List<PKCS11Slot> slots = PKCS11Slot.enumerateSlots(provider);
+PKCS11Session session = null;
+
+if (slots.size() > 0) {
+session = PKCS11Session.open(slots.get(0),
+}
+
+PKCS11KeyStoreSpi keyStore = new PKCS11KeyStoreSpi(provider, "PKCS11");
+PKCS11PrivateKey privateKey = PKCS11PrivateKey.getPrivateKeys(session).get(0);
+Signature signature = Signature.getInstance("NONEwithRSA", provider);
+signature.initSign(privateKey);
+signature.update("HELLO".getBytes(), 0, "HELLO".getBytes().length);
+byte[] realSig = signature.sign();
+
+-
+
+Some signature algorithms are deterministic (you always get the same signature for the same private key and input), others are not. In the case of RSA, as specified by PKCS#1, the "old-style" (aka "v1.5") signatures are deterministic, while the "new-style" ("PSS") signatures are not (padding includes some random bytes).
+
+In Java, the "NONEwithRSA" mechanism ought to select the old-style signatures, and the input data should be already hashed (a normal signature begins by hashing the input data); in your code, you use unhashed data as input, which is a bad idea for security. The "NONEwithRSA" mechanism was added to support contexts where data is hashed externally, and also SSL/TLS which insists (in its pre-1.2 versions) on using the concatenation of MD5 and SHA-1 as its "hash function". This does not explain why you get different outputs, but you are still doing it wrong.
+
+To investigate further, convert the signature to a BigInteger and apply the public key on it, to see what the padded data looks like:
+
+BigInteger n = ... (the public key modulus)
+BigInteger e = ... (the public key exponent)
+BigInteger x = new BigInteger(1, realSig);
+System.out.printf("%X\n", x.modPow(e, n));
+
+
+With PKCS#1 v1.5, this should look like:
+
+1FFFFFFFFF....FFFFF0048454C4C4F
+
+
+(The 48454C4C4F is the encoding of "HELLO" -- because your code puts the raw data here instead of the hash value suitably encoded in an ASN.1 structure which designates the hash function.)
+
+Since you are using a PKCS#11, you will sign data depending on what the underlying device can do. It is possible that your device does not allow such "NONEwithRSA" mechanism, or allows it only if it already looks like a properly encoded hash value. This may be your issue after all. The debug code above should show what happens.
+
+(Also, don't use String.getBytes() without any argument. This converts the input string with the default encoding of the current machine, which depends on how the machine was configured; for some people it will be UTF-8, others will have UTF-16 or latin-1 or something else. It is much better to specify an explicit encoding, as: s.getBytes("UTF-8"))
+
+-

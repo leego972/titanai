@@ -1,0 +1,96 @@
+Question: <p>Please excuse the vague title.  If anyone has a suggestion, please let me know!  Also please retag with more appropriate tags!</p>
+
+<p><strong>The Problem</strong></p>
+
+<p>I want to have an instance of an imported class be able to view things in the scope (globals, locals) of the importer.  Since I'm not sure of the exact mechanism at work here, I can describe it much better with snippets than words.</p>
+
+<pre><code>## File 1
+def f1():  print "go f1!"
+
+class C1(object):
+    def do_eval(self,x):  # maybe this should be do_evil, given what happens
+        print "evaling"
+        eval(x)
+        eval(x,globals(),locals())
+</code></pre>
+
+<p>Then run this code from an iteractive session, there there will be lots of <code>NameErrors</code></p>
+
+<pre><code>## interactive
+class C2(object):
+    def do_eval(self,x):  # maybe this should be do_evil, given what happens
+        print "evaling"
+        eval(x)
+        eval(x,globals(),locals())
+
+def f2():
+    print "go f2!"
+
+from file1 import C1
+import file1
+
+C1().do_eval('file1.f1()')
+C1().do_eval('f1()')
+C1().do_eval('f2()')
+
+file1.C1().do_eval('file1.f1()')
+file1.C1().do_eval('f1()')
+file1.C1().do_eval('f2()')
+
+C2().do_eval('f2()')
+C2().do_eval('file1.f1()')
+C2().do_eval('f1()')
+</code></pre>
+
+<p>Is there a common idiom / pattern for this sort of task?  Am I barking up the wrong tree entirely?  </p>
+
+Answer: <p>In this example, you can simply hand over functions as objects to the methods in <code>C1</code>:</p>
+
+<pre><code>&gt;&gt;&gt; class C1(object):
+&gt;&gt;&gt;    def eval(self, x):
+&gt;&gt;&gt;        x()
+&gt;&gt;&gt;
+&gt;&gt;&gt; def f2(): print "go f2"
+&gt;&gt;&gt; c = C1()
+&gt;&gt;&gt; c.eval(f2)
+go f2
+</code></pre>
+
+<p>In Python, you can pass functions and classes to other methods and invoke/create them there.</p>
+
+<p>If you want to actually evaluate a code string, you have to specify the environment, as already mentioned by Thomas.</p>
+
+<p>Your module from above, slightly changed:</p>
+
+<pre><code>## File 1
+def f1():  print "go f1!"
+
+class C1(object):
+    def do_eval(self, x, e_globals = globals(), e_locals = locals()):
+        eval(x, e_globals, e_locals)
+</code></pre>
+
+<p>Now, in the interactive interpreter:</p>
+
+<pre><code>&gt;&gt;&gt; def f2():
+&gt;&gt;&gt;    print "go f2!"
+&gt;&gt;&gt; from file1 import *    # 1
+&gt;&gt;&gt; C1().do_eval("f2()")   # 2
+NameError: name 'f2' is not defined
+
+&gt;&gt;&gt; C1().do_eval("f2()", globals(), locals()) #3
+go f2!
+&gt;&gt;&gt; C1().do_eval("f1()", globals(), locals()) #4
+go f1!
+</code></pre>
+
+<h2>Some annotations</h2>
+
+<ol>
+<li>Here, we insert all objects from <code>file1</code> into this module's namespace</li>
+<li><code>f2</code> is not in the namespace of <code>file1</code>, therefore we get a <code>NameError</code></li>
+<li>Now we pass the environment explictly, and the code can be evaluated</li>
+<li><code>f1</code> is in the namespace of this module, because we imported it</li>
+</ol>
+
+<p><strong>Edit</strong>: Added code sample on how to explicitly pass environment for <code>eval</code>.</p>

@@ -1,0 +1,67 @@
+Question: <p>I'm trying to figure out if there's a reasonably efficient way to perform a lookup in a dictionary (or a hash, or a map, or whatever your favorite language calls it) where the keys are regular expressions and strings are looked up against the set of keys.  For example (in Python syntax):</p>
+
+<pre><code>&gt;&gt;&gt; regex_dict = { re.compile(r'foo.') : 12, re.compile(r'^FileN.*$') : 35 }
+&gt;&gt;&gt; regex_dict['food']
+12
+&gt;&gt;&gt; regex_dict['foot in my mouth']
+12
+&gt;&gt;&gt; regex_dict['FileNotFoundException: file.x does not exist']
+35
+</code></pre>
+
+<p>(Obviously the above example won't work as written in Python, but that's the sort of thing I'd like to be able to do.)</p>
+
+<p>I can think of a naive way to implement this, in which I iterate over all of the keys in the dictionary and try to match the passed in string against them, but then I lose the O(1) lookup time of a hash map and instead have O(n), where n is the number of keys in my dictionary.  This is potentially a big deal, as I expect this dictionary to grow very large, and I will need to search it over and over again (actually I'll need to iterate over it for every line I read in a text file, and the files can be hundreds of megabytes in size).</p>
+
+<p>Is there a way to accomplish this, without resorting to O(n) efficiency?</p>
+
+<p>Alternatively, if you know of a way to accomplish this sort of a lookup in a database, that would be great, too.</p>
+
+<p>(Any programming language is fine -- I'm using Python, but I'm more interested in the data structures and algorithms here.)</p>
+
+<p>Someone pointed out that more than one match is possible, and that's absolutely correct.  Ideally in this situation I'd like to return a list or tuple containing all of the matches.  I'd settle for the first match, though.</p>
+
+<p>I can't see O(1) being possible in that scenario; I'd settle for anything less than O(n), though.  Also, the underlying data structure could be anything, but the basic behavior I'd like is what I've written above: lookup a string, and return the value(s) that match the regular expression keys.</p>
+
+Answer: <p>Here's an efficient way to do it by combining the keys into a single compiled regexp, and so not requiring any looping over key patterns.  It abuses the <code>lastindex</code> to find out which key matched.  (It's a shame regexp libraries don't let you tag the terminal state of the DFA that a regexp is compiled to, or this would be less of a hack.)</p>
+
+<p>The expression is compiled once, and will produce a fast matcher that doesn't have to search sequentially.  Common prefixes are compiled together in the DFA, so each character in the key is matched once, not many times, unlike some of the other suggested solutions.  You're effectively compiling a mini lexer for your keyspace.</p>
+
+<p>This map isn't extensible (can't define new keys) without recompiling the regexp, but it can be handy for some situations.</p>
+
+<pre><code># Regular expression map
+# Abuses match.lastindex to figure out which key was matched
+# (i.e. to emulate extracting the terminal state of the DFA of the regexp engine)
+# Mostly for amusement.
+# Richard Brooksby, Ravenbrook Limited, 2013-06-01
+
+import re
+
+class ReMap(object):
+
+    def __init__(self, items):
+        if not items:
+            items = [(r'epsilon^', None)] # Match nothing
+        key_patterns = []
+        self.lookup = {}
+        index = 1
+        for key, value in items:
+            # Ensure there are no capturing parens in the key, because
+            # that would mess up match.lastindex
+            key_patterns.append('(' + re.sub(r'\((?!\?:)', '(?:', key) + ')')
+            self.lookup[index] = value
+            index += 1
+        self.keys_re = re.compile('|'.join(key_patterns))
+
+    def __getitem__(self, key):
+        m = self.keys_re.match(key)
+        if m:
+            return self.lookup[m.lastindex]
+        raise KeyError(key)
+
+if __name__ == '__main__':
+    remap = ReMap([(r'foo.', 12), (r'FileN.*', 35)])
+    print remap['food']
+    print remap['foot in my mouth']
+    print remap['FileNotFoundException: file.x does not exist']
+</code></pre>

@@ -1,0 +1,74 @@
+Question: <p>I'm doing a Python script where I need to spawn several ssh-copy-id processes, and they need for me to type in a password, so i'm using PExpect.</p>
+
+<p>I have basically this:</p>
+
+<pre><code>child = pexpect.spawn('command')
+child.expect('password:')
+child.sendline('the password')
+</code></pre>
+
+<p>and then I want to spawn another process, I don't care about this one anymore, whether it ended or not.</p>
+
+<pre><code>child = pexpect.spawn('command2')
+child.expect('password:')
+child.sendline('the password')
+</code></pre>
+
+<p>And the code is hanging at the second "spawn"</p>
+
+<p>However, if I comment out the first call, the second one works, so i'm guessing that the fact that the first one is still running or something is keeping it from working.</p>
+
+<p>Now, the other thing I haven't been able to do is wait until the first one stops.
+I've tried:<br />
+child.close() - it hangs (both with True and False as parameters)
+child.read(-1) - it hangs<br />
+child.expect(pexpect.EOF) - it hangs.<br />
+child.terminate() - it hangs  (both with True and False as parameters)</p>
+
+<p>Any ideas on what could be happening?<br />
+NOTE: I'm not a Python expert, and i have never used pexpect before, so ANY idea is more than welcome.</p>
+
+<p>Thanks!</p>
+
+<p><hr /></p>
+
+<p>UPDATE: This is definitely related to ssh-copy-id, because with other processes, spawn works well even if they don't return.
+Also, apparently ssh-copy-id never returns an EOF.</p>
+
+Answer: <p>Reading <a href="http://pexpect.sourceforge.net/pexpect.html#spawn" rel="nofollow">pexpect documentation for spawn</a>, I think it is waiting for the command to terminate.</p>
+
+<p>I would suggest a couple of different possibilities, depending on your needs:</p>
+
+<p>1) Kill the spawned process. However, this may lead to corruption in your operation, so I do not know if it is what you want.</p>
+
+<pre><code>child = pexpect.spawn('command')
+child.expect('password:')
+child.sendline('the password')
+child.close(True)
+</code></pre>
+
+<p>2) Wait for completion of the initial task before moving to the next one</p>
+
+<pre><code>child = pexpect.spawn('command')
+child.expect('password:')
+child.sendline('the password')
+child.wait()
+child = pexpect.spawn('command2')
+...
+</code></pre>
+
+<p>3) Use a different instance for all children, then wait on all of them at the end - and this would be most probably the best solution</p>
+
+<pre><code>def exec_command(cmd):
+  child = pexpect.spawn(cmd)
+  child.expect('password:')
+  child.sendline('the password')
+  return child
+
+commands = ['command1', 'command2']
+childrens = [exec_command(cmd) for cmd in commands]
+for child in childrens:
+  child.wait()
+</code></pre>
+
+<p>Note: all of the code here is untested, and written under the assumption that your script is hanging because deleting a spawn object will hang until the command will terminate.</p>

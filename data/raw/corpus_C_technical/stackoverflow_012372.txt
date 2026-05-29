@@ -1,0 +1,63 @@
+Question: <p>I would like to wipe out all data for a specific kind in Google App Engine. What is the
+best way to do this?
+I wrote a delete script (hack), but since there is so much data is
+timeout's out after a few hundred records. </p>
+
+Answer: <p>Thank you all guys, I got what I need. :D<br>
+This may be useful if you have lots db models to delete, you can dispatch it in your terminal. And also, you can manage the delete list in DB_MODEL_LIST yourself.<br>
+Delete DB_1:</p>
+
+<pre><code>python bulkdel.py 10 DB_1
+</code></pre>
+
+<p>Delete All DB:</p>
+
+<pre><code>python bulkdel.py 11
+</code></pre>
+
+<p>Here is the bulkdel.py file:</p>
+
+<pre><code>import sys, os
+
+URL = 'http://localhost:8080'
+DB_MODEL_LIST = ['DB_1', 'DB_2', 'DB_3']
+
+# Delete Model
+if sys.argv[1] == '10' :
+    command = 'curl %s/clear_db?model=%s' % ( URL, sys.argv[2] )
+    os.system( command )
+
+# Delete All DB Models
+if sys.argv[1] == '11' :
+    for model in DB_MODEL_LIST :
+        command = 'curl %s/clear_db?model=%s' % ( URL, model )
+        os.system( command )
+</code></pre>
+
+<p>And here is the modified version of alexandre fiori's code.</p>
+
+<pre><code>from google.appengine.ext import db
+class DBDelete( webapp.RequestHandler ):
+    def get( self ):
+        self.response.headers['Content-Type'] = 'text/plain'
+        db_model = self.request.get('model')
+        sql = 'SELECT __key__ FROM %s' % db_model
+
+        try:
+            while True:
+                q = db.GqlQuery( sql )
+                assert q.count()
+                db.delete( q.fetch(200) )
+                time.sleep(0.5)
+        except Exception, e:
+            self.response.out.write( repr(e)+'\n' )
+            pass
+</code></pre>
+
+<p>And of course, you should map the link to model in a file(like main.py in GAE), ;)<br>
+In case some guys like me need it in detail, here is part of main.py:</p>
+
+<pre><code>from google.appengine.ext import webapp
+import utility # DBDelete was defined in utility.py
+application = webapp.WSGIApplication([('/clear_db',utility.DBDelete ),('/',views.MainPage )],debug = True)
+</code></pre>

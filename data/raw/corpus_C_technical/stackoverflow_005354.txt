@@ -1,0 +1,68 @@
+Question: <p>Is there a library function that performs binary search on a list/tuple and return the position of the item if found and 'False' (-1, None, etc.) if not?</p>
+
+<p>I found the functions bisect_left/right in the <a href="http://docs.python.org/library/bisect.html">bisect module</a>, but they still return a position even if the item is not in the list. That's perfectly fine for their intended usage, but I just want to know if an item is in the list or not (don't want to insert anything).</p>
+
+<p>I thought of using <code>bisect_left</code> and then checking if the item at that position is equal to what I'm searching, but that seems cumbersome (and I also need to do bounds checking if the number can be larger than the largest number in my list). If there is a nicer method I'd like to know about it.</p>
+
+<p><strong>Edit</strong> To clarify what I need this for: I'm aware that a dictionary would be very well suited for this, but I'm trying to keep the memory consumption as low as possible. My intended usage would be a sort of double-way look-up table. I have in the table a list of values and I need to be able to access the values based on their index. And also I want to be able to find the index of a particular value or None if the value is not in the list.</p>
+
+<p>Using a dictionary for this would be the fastest way, but would (approximately) double the memory requirements.</p>
+
+<p>I was asking this question thinking that I may have overlooked something in the Python libraries. It seems I'll have to write my own code, as Moe suggested.</p>
+
+Answer: <p>While there's no explicit binary search algorithm in Python, there is a module - <code>bisect</code> - designed to find the insertion point for an element in a sorted list using a binary search. This can be "tricked" into performing a binary search. The biggest advantage of this is the same advantage most library code has - it's high-performing, well-tested and just works (binary searches in particular can be <a href="http://en.wikipedia.org/wiki/Binary_search_algorithm#Implementation_issues" rel="nofollow">quite difficult to implement successfully</a> - particularly if edge cases aren't carefully considered).</p>
+
+<h1>Basic Types</h1>
+
+<p>For basic types like Strings or ints it's pretty easy - all you need is the <code>bisect</code> module and a sorted list:</p>
+
+<pre><code>&gt;&gt;&gt; import bisect
+&gt;&gt;&gt; names = ['bender', 'fry', 'leela', 'nibbler', 'zoidberg']
+&gt;&gt;&gt; bisect.bisect_left(names, 'fry')
+1
+&gt;&gt;&gt; keyword = 'fry'
+&gt;&gt;&gt; x = bisect.bisect_left(names, keyword)
+&gt;&gt;&gt; names[x] == keyword
+True
+&gt;&gt;&gt; keyword = 'arnie'
+&gt;&gt;&gt; x = bisect.bisect_left(names, keyword)
+&gt;&gt;&gt; names[x] == keyword
+False
+</code></pre>
+
+<p>You can also use this to find duplicates:</p>
+
+<pre><code>...
+&gt;&gt;&gt; names = ['bender', 'fry', 'fry', 'fry', 'leela', 'nibbler', 'zoidberg']
+&gt;&gt;&gt; keyword = 'fry'
+&gt;&gt;&gt; leftIndex = bisect.bisect_left(names, keyword)
+&gt;&gt;&gt; rightIndex = bisect.bisect_right(names, keyword)
+&gt;&gt;&gt; names[leftIndex:rightIndex]
+['fry', 'fry', 'fry']
+</code></pre>
+
+<p>Obviously you could just return the index rather than the value at that index if desired.</p>
+
+<h1>Objects</h1>
+
+<p>For custom types or objects, things are a little bit trickier: you have to make sure to implement rich comparison methods to get bisect to compare correctly.</p>
+
+<pre><code>&gt;&gt;&gt; import bisect
+&gt;&gt;&gt; class Tag(object):  # a simple wrapper around strings
+...     def __init__(self, tag):
+...         self.tag = tag
+...     def __lt__(self, other):
+...         return self.tag &lt; other.tag
+...     def __gt__(self, other):
+...         return self.tag &gt; other.tag
+...
+&gt;&gt;&gt; tags = [Tag('bender'), Tag('fry'), Tag('leela'), Tag('nibbler'), Tag('zoidbe
+rg')]
+&gt;&gt;&gt; key = Tag('fry')
+&gt;&gt;&gt; leftIndex = bisect.bisect_left(tags, key)
+&gt;&gt;&gt; rightIndex = bisect.bisect_right(tags, key)
+&gt;&gt;&gt; print([tag.tag for tag in tags[leftIndex:rightIndex]])
+['fry']
+</code></pre>
+
+<p>This should work in at least Python 2.7 -> 3.3</p>

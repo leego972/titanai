@@ -1,0 +1,100 @@
+Question: <p>Iâve got a brand new Django project. Iâve added one minimal view function to <code>views.py</code>, and one URL pattern to <code>urls.py</code>, passing the view by function reference instead of a string:</p>
+
+<pre><code># urls.py
+# -------
+
+# coding=utf-8
+
+from django.conf.urls.defaults import *
+
+from myapp import views
+
+
+urlpatterns = patterns('',
+    url(r'^myview/$', views.myview),
+)
+
+
+# views.py
+----------
+
+# coding=utf-8
+
+from django.http import HttpResponse
+
+
+def myview(request):
+    return HttpResponse('MYVIEW LOL',  content_type="text/plain")
+</code></pre>
+
+<p>Iâm trying to use <code>reverse()</code> to get the URL, by passing it a function reference. But Iâm not getting a match, despite confirming that the view function Iâm passing to reverse is the exact same view function I put in the URL pattern:</p>
+
+<pre><code>&gt;&gt;&gt; from django.core.urlresolvers import reverse
+&gt;&gt;&gt; import urls
+&gt;&gt;&gt; from myapp import views
+
+&gt;&gt;&gt; urls.urlpatterns[0].callback is views.myview
+True
+
+&gt;&gt;&gt; reverse(views.myview)
+Traceback (most recent call last):
+  File "&lt;console&gt;", line 1, in &lt;module&gt;
+  File "/Library/Python/2.5/site-packages/django/core/urlresolvers.py", line 254, in reverse
+    *args, **kwargs)))
+  File "/Library/Python/2.5/site-packages/django/core/urlresolvers.py", line 243, in reverse
+    "arguments '%s' not found." % (lookup_view, args, kwargs))
+NoReverseMatch: Reverse for '&lt;function myview at 0x6fe6b0&gt;' with arguments '()' and keyword arguments '{}' not found.
+</code></pre>
+
+<p>As far as I can tell from the documentation, function references should be fine in both the URL pattern and <code>reverse()</code>.</p>
+
+<ul>
+<li><a href="http://docs.djangoproject.com/en/dev/topics/http/urls/#passing-callable-objects-instead-of-strings">URL patterns with function references</a></li>
+<li><a href="http://docs.djangoproject.com/en/dev/topics/http/urls/?from=olddocs#reverse"><code>reverse</code> with function references</a></li>
+</ul>
+
+<p>Iâm using the Django trunk, revision 9092.</p>
+
+Answer: <p>Got it!! The problem is that some of the imports are of <code>myproject.myapp.views</code>, and some are just of <code>myapp.views</code>. This is confusing the Python module system enough that it no longer detects the functions as the same object. This is because your main <code>settings.py</code> probably has a line like:</p>
+
+<pre><code>ROOT_URLCONF = `myproject.urls`
+</code></pre>
+
+<p>To solve this, try using the full import in your shell session:</p>
+
+<pre><code>&gt;&gt;&gt; from django.core.urlresolvers import reverse
+&gt;&gt;&gt; from myproject.myapp import views
+&gt;&gt;&gt; reverse(views.myview)
+'/myview/'
+</code></pre>
+
+<p>Here's a log of the debugging session, for any interested future readers:</p>
+
+<pre><code>&gt;&gt;&gt; from django.core import urlresolvers
+&gt;&gt;&gt; from myapp import myview
+&gt;&gt;&gt; urlresolvers.get_resolver (None).reverse_dict
+{None: ([(u'myview/', [])], 'myview/$'), &lt;function myview at 0x845d17c&gt;: ([(u'myview/', [])], 'myview/$')}
+&gt;&gt;&gt; v1 = urlresolvers.get_resolver (None).reverse_dict.items ()[1][0]
+&gt;&gt;&gt; reverse(v1)
+'/myview/'
+&gt;&gt;&gt; v1 is myview
+False
+&gt;&gt;&gt; v1.__module__
+'testproject.myapp.views'
+&gt;&gt;&gt; myview.__module__
+'myapp.views'
+</code></pre>
+
+<p>What happens if you change the URL match to be <code>r'^myview/$'</code>?</p>
+
+<p><hr /></p>
+
+<p>Have you tried it with the view name? Something like <code>reverse ('myapp.myview')</code>?</p>
+
+<p>Is <code>urls.py</code> the root URLconf, or in the <code>myapp</code> application? There needs to be a full path from the root to a view for it to be resolved. If that's <code>myproject/myapp/urls.py</code>, then in <code>myproject/urls.py</code> you'll need code like this:</p>
+
+<pre><code>from django.conf.urls.defaults import patterns
+urlpatterns = patterns ('',
+    (r'^/', 'myapp.urls'),
+)
+</code></pre>

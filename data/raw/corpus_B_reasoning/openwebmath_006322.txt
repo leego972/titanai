@@ -1,0 +1,67 @@
+Category: Simulation
+
+A case for T junctions
+
+It has been established (for example, here) that the standard two-dimensional homogeneous PPP is not an adequate model for vehicular networks, since vehicles are mostly confined to streets. The Poisson line Cox process (PLCP) has naturally emerged as the model of choice. In this process, one-dimensional PPPs are placed on a street system formed by a Poisson line process. This model is somewhat tractable and thus has gained some traction in the community. With probability 1 each line (or street) intersects with each other line, so intersections are formed, and the communication performance at the typical intersection vehicles can be studied. This is important since vehicles at intersections are more accident-prone than other vehicles.
+
+How about T junctions? Clearly, the PLCP has no T junctions a.s. But while not quite as frequent as (four-way) intersections, they are an important building block of the street systems in every city, and it is reasonable to assume that they inherit some of the dangers of intersections. However, the performance of vehicles at T junctions have barely been modeled and analyzed. The reason is perhaps not that it is not worthy of study but the lack of a natural model. Let’s say we wanted to construct a Cox model of vehicles that is supported on a street system that has no intersections but only T junctions, with the T junctions themselves forming a stationary point process (in the same way the intersections in the PLCP form a stationary point process). What is the simplest (most natural, most tractable) model?
+
+One model we came up with is inspired by the so-called lilypond model. From each point of a PPP, a line segment grows in a random orientation in both directions. All segments grow at the same speed until one of their endpoints hit another segment. Once all growth has stopped, the lilypond street model is obtained. Here is a realization:
+
+Then PPPs of vehicles can be placed on each line segment to form a Lilypond line segment Cox process. Some results for vehicular networks based on this model are available here. The model has the advantage that it has only a single parameter – the density of the underlying PPP of the center points of each line segment. On the other hand, the distribution of the length of the line segments can only be bounded, and the construction naturally creates a dependence between the lengths of nearby segments, which limits the tractability. For instance, in a region with many initial Poisson points, segments will be short on average, while in a region with sparse Poisson points, segments will be long. Also, the construction implies that simulating this process takes significantly more time than simulating a PLCP.
+
+Given the shortcoming of the model, it seems quite probable that there are other, simpler and (even) more natural models for street systems with T junctions. Let’s try and find them!
+
+Single-point simulation?
+
+When applying simalysis as illustrated in the previous post, the question arises where to put the boundary between the part of the point process that is simulated and the part that is analyzed. Specifically, we may wonder whether we can reduce the simulated part to only a single point (on average), i.e., to choose the number of simulated points to be Poisson with mean 1 in each realization.
+Let’s find out, using the same Poisson bipolar model as in the previous post (Rayleigh fading, transmitter density 1, link distance 1/4).
+
+Fig. 1 shows the simulated (or, more precisely, simalyzed) result where the 500 realizations only contain one single point on average. This means that about 500/e ≈ 184 realizations have no point at all. We observe good accuracy, especially at small path loss exponents α. Also, the simulated curves are lower bounds to the exact ones. This is due to Jensen’s inequality:
+
+$\displaystyle \mathbb{E}\exp(-sI_c) \geq \exp(-s\mathbb{E}(I_c)),\quad s>0.$
+
+The term on the left side is the exact factor in the SIR ccdf due to the interference Ic from points outside distance c. It is larger than the right side, which is the factor used in the simalysis (see the Matlab code). This property holds for all stationary point processes.
+
+But why stop there? One would think that using, say, only 1/4 point on average would be (essentially) pointless. But let’s try, just to be sure.
+
+Remarkably, even with only 1/4 point per realization on average, the curves for α<2.5 are quite accurate, and the one for α=2.1 is an excellent lower bound! It is certainly much more accurate than a classical simulation with 500,000 points per realization (see the previous post). Such a good match is quite surprising, especially considering that 1/4 point on average means that about 78% of the realizations have 0 points, which means that in about 390 out of the 500 realizations, the simulated factor in the SIR ccdf simply yields 1. Also, in the entire simalysis, only about 125 points are ever produced. It takes no more than about 1/2 s on a standard computer.
+We conclude that accurate simulation (simalysis, actually) can be almost point-less.
+
+Simalysis: Symbiosis of simulation and analysis
+
+Simulations can be quite time-consuming. Are there any techniques that can help make them more efficient and/or accurate? Let us focus on a concrete problem. Say we would like to plot the SIR distribution in a Poisson bipolar network for different path loss exponents α, including some values close to 2. Since we would like to compare the result with the exact one, we focus on the Rayleigh fading case where the analytical expression is known and simple. The goal is to get accurate curves for α=3, 2.5, 2.25, and 2.1, and we would like to wait no longer than 1 s for the results on a standard desktop or laptop computer.
+Let us first discuss why this is a non-trivial problem. It involves averaging w.r.t. the fading and the point process, and we need to make sure that the number of interferers is large enough for good accuracy. But what is “large enough”? A quick calculation using Campbell’s theorem (for sums) reveals that if we want to capture 99% of the mean interference power (outside radius 1 to avoid complications due to a potential singularity in the path loss law), we find that for α=3, the simulation region needs to be 100 times larger than for α=4. This seems manageable, but for α=2.5, 2.25, 2.1, it is 106, 1014, 1038 times larger, respectively!
+Clearly the straightforward approach of producing many realizations of the PPP in a large region does not work in the regime of small α. So how can we achieve our goal above – high accuracy and high efficiency?
+
+The solution is to use an analysis-enhanced simulation technique, which I call simalysis. While we often tend to think as analysis vs. simulation as a dichotomy, in this approach they are used symbiotically. The idea is to exploit analytical results whenever possible to make simulations faster and more accurate. Let me illustrate how simalysis works when applied to the problem above.
+
+For small α, it is impossible to “capture” most of the interference solely by simulation. In fact, most of it stems from the infinitely many distance nodes, each one contributing little, with independent fading. We can thus assume that the variance of the interference of the nodes further than a certain distance (relatively large compared with the mean nearest-neighbor distance) is relatively small. Accordingly, replacing it by its mean is a sensible simplification. Here is where the analysis comes in. For any stationary point process of density λ, the mean interference from the nodes outside distance c is
+
+$\displaystyle I(c)=2\pi\lambda\int_c^\infty r^{1-\alpha}{\rm d} r=\frac{2\pi\lambda}{\alpha-2} c^{2-\alpha}.$
+
+This interference term can then be added to the simulated interference, which stems from points within distance c. Simulating as few as 50 points is enough for very high accuracy. The result is shown in the figure below, using the MH scale so that the entire distribution is revealed (see this post for details on the MH scale). For α near 2, the curves are indistinguishable!
+
+This simulation averages over 500 realizations of the PPP and runs in less than 1 s on a laptop. The Matlab code is available here. It uses a second simalytic technique, namely the analytical averaging over the fading. Irrespective of the type of point process we want to simulate, as long as the fading is Rayleigh, we can perform the averaging over the fading analytically.
+
+For comparison, the figure below shows the simulation results if 500,000 points (interferers) are simulated, without adding the analytical mean interference term, i.e., using classical simulation. Despite taking 600 times longer, the distributions for α<2.5 are not acceptable.
+
+Double-proving by simulation?
+
+Let us consider a hypothetical scenario that illustrates an issue I frequently observe.
+
+Author: Here is an important result for a canonical Poisson bipolar network:
+Theorem: The complementary cumulative distribution of the SIR in a Poisson bipolar network with Rayleigh fading, transmitter density λ, link distance r, and path loss exponent 2/δ is
+
+$\displaystyle \bar F(\theta)=\exp(-\lambda\pi r^2 \theta^\delta\Gamma(1-\delta)\Gamma(1+\delta)).$
+
+Proof: [Gives proof based on the probability generating functional.]
+
+Reviewer: This is a nice result, but it is not validated by simulation. Please provide simulation results.
+
+We have a proven exact analytical (PEA) result. So why would we need a simulation for “validation”? Where does the lack of trust in proofs come from? I am puzzled by these requests by reviewers. Similar issues arise when authors themselves feel the need to add simulations to the visualization of PEA results.
+Perhaps some reviewers are not familiar with the analytical tools used or they think it is easier to have a quick look at a simulated curve rather than checking a proof. Perhaps some authors are not entirely sure their proofs are valid, or they think reviewers are more likely to trust the proofs if simulations are also shown.
+The key issue is that such requests by reviewers or simulations by authors take simulation results as the “ground truth”, while portraying PEA results as weaker statements that need validation. This of course is not the case. A PEA result expresses a mathematical fact and thus does not need any further “corroboration”.
+Now, if the simulation results are accurate, the analytical and simulated curves lie exactly on top of each other, and the accompanying text states the obvious: “Look, the curves match!”. But what if there isn’t an exact match between the analytical and the simulated curve? Which means that the simulation is not accurate. Certainly that does not qualify as “validation”. The worst conclusion would be to distrust the PEA result and take the simulation as the true result.
+By its nature, a simulation is always restricted to a small cross-section of the parameter space. Even the simple result above has four parameters, which would make it hard to comprehensively simulate the network. Related, I am inviting the reader to simulate the result for a path loss exponent α=2.1 or δ=0.95. Almost surely the simulated curve will look quite different from the analytical one.
+In conclusion, there is absolutely no need for “two-step verification” of PEA results. On the contrary.

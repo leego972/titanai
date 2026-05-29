@@ -1,0 +1,92 @@
+Question: <p>I've been wondering this for some time. As the title say, which is faster, the actual function or simply raising to the half power?</p>
+
+<p><b>UPDATE</b></p>
+
+<p>This is not a matter of premature optimization. This is simply a question of how the underlying code actually works. What is the theory of how Python code works?</p>
+
+<p>I sent Guido van Rossum an email cause I really wanted to know the differences in these methods.</p>
+
+<h3>My email:</h3>
+
+<blockquote>
+  <p>There are at least 3 ways to do a square root in Python: math.sqrt, the
+  '**' operator and pow(x,.5).  I'm just curious as to the differences in
+  the implementation of each of these.  When it comes to efficiency which
+  is better?</p>
+</blockquote>
+
+<h3>His response:</h3>
+
+<blockquote>
+  <p>pow and ** are equivalent; math.sqrt doesn't work for complex numbers,
+  and links to the C  sqrt() function. As to which one is
+  faster, I have no idea...</p>
+</blockquote>
+
+Answer: <p>As per comments, I've updated the code:</p>
+
+<pre><code>import time
+import math
+
+def timeit1():
+    s = time.time()
+    for i in xrange(750000):
+        z=i**.5
+    print "Took %f seconds" % (time.time() - s)
+
+def timeit2(arg=math.sqrt):
+    s = time.time()
+    for i in xrange(750000):
+        z=arg(i)
+    print "Took %f seconds" % (time.time() - s)
+
+timeit1()
+timeit2()
+</code></pre>
+
+<p>Now the <code>math.sqrt</code> function is directly in a local argument, meaning it has the fastest lookup possible. </p>
+
+<p><strong>UPDATE:</strong> The python version seems to matter here. I used to think that <code>timeit1</code> would be faster, since when python parses "i**.5" it knows, syntactically, which method to call (<code>__pow__</code> or some variant), so it doesn't have to go through the overhead of lookup that the <code>math.sqrt</code> variant does. But I might be wrong:</p>
+
+<p><strong>Python 2.5:</strong> 0.191000 vs. 0.224000</p>
+
+<p><strong>Python 2.6:</strong> 0.195000 vs. 0.139000</p>
+
+<p>Also psyco seems to deal with <code>math.sqrt</code> better:</p>
+
+<p><strong>Python 2.5 + Psyco 2.0:</strong> 0.109000 vs. 0.043000</p>
+
+<p><strong>Python 2.6 + Psyco 2.0:</strong> 0.128000 vs. 0.067000</p>
+
+<hr>
+
+<pre><code>| Interpreter    |  x**.5, |   sqrt, | sqrt faster, % |
+|                | seconds | seconds |                |
+|----------------+---------+---------+----------------|
+| Python 3.2rc1+ |    0.32 |    0.27 |             19 |
+| Python 3.1.2   |   0.136 |   0.088 |             55 |
+| Python 3.0.1   |   0.155 |   0.102 |             52 |
+| Python 2.7     |   0.132 |   0.079 |             67 |
+| Python 2.6.6   |   0.121 |   0.075 |             61 |
+| PyPy 1.4.1     |   0.083 |  0.0159 |            422 |
+| Jython 2.5.1   |   0.132 |    0.22 |            -40 |
+| Python 2.5.5   |   0.129 |   0.125 |              3 |
+| Python 2.4.6   |   0.131 |   0.123 |              7 |
+#+TBLFM: $4=100*($2-$3)/$3;%.0f
+</code></pre>
+
+<p>Table results produced on machine:</p>
+
+<pre><code>$ uname -vms
+Linux #42-Ubuntu SMP Thu Dec 2 02:41:37 UTC 2010 x86_64
+$ cat /proc/cpuinfo | grep 'model name' | head -1
+model name      : Intel(R) Core(TM) i7 CPU         920  @ 2.67GHz
+</code></pre>
+
+<p>To reproduce results:</p>
+
+<ul>
+<li>get source: <a href="https://gist.github.com/783011"><code>git clone git://gist.github.com/783011.git gist-783011</code></a></li>
+<li>install <a href="http://codespeak.net/tox/"><code>tox</code></a>: <code>pip install tox</code></li>
+<li>run <code>tox</code> from the directory with <code>tox.ini</code> file.</li>
+</ul>

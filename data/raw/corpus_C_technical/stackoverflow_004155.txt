@@ -1,0 +1,68 @@
+Question: <p>How can I find local IP addresses (i.e. 192.168.x.x or 10.0.x.x) in Python platform independently and using only the standard library?</p>
+
+Answer: <p><strong>Socket API method</strong></p>
+
+<pre><code>import socket
+
+# from http://commandline.org.uk/python/how-to-find-out-ip-address-in-python/
+def getNetworkIp():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(('INSERT SOME TARGET WEBSITE.com', 0))
+    return s.getsockname()[0]
+</code></pre>
+
+<p>Downsides:</p>
+
+<ul>
+<li><em>Not cross-platform.</em></li>
+<li>Requires more fallback code, tied to existence of particular addresses on the internet</li>
+<li>This will also not work if you're behind a NAT</li>
+<li>Probably creates a UDP connection, not independent of (usually ISP's) DNS availability (see other answers for ideas like using 8.8.8.8: Google's (coincidentally also DNS) server)</li>
+<li>Very poor form to incorporate third-party dependency (like <code>google.com</code>) in code as a means of specifying the network interface, unless you specifically want the public IP of the interface which will route you to the specific website you want. <strong>Spamming innocent third parties is bad. Bad. BAD.</strong></li>
+</ul>
+
+<hr>
+
+<p><strong>Reflector method</strong></p>
+
+<p>(Do note that this does not answer the OP's question of the local IP address, e.g. 192.168...; it gives you your public IP address, which might be more desirable depending on use case.)</p>
+
+<p>You can query some site like whatismyip.com (but with an API), such as:</p>
+
+<pre><code>from urllib.request import urlopen
+import re
+def getPublicIp():
+    data = str(urlopen('http://checkip.dyndns.com/').read())
+    # data = '&lt;html&gt;&lt;head&gt;&lt;title&gt;Current IP Check&lt;/title&gt;&lt;/head&gt;&lt;body&gt;Current IP Address: 65.96.168.198&lt;/body&gt;&lt;/html&gt;\r\n'
+
+    return re.compile(r'Address: (\d+\.\d+\.\d+\.\d+)').search(data).group(1)
+</code></pre>
+
+<p>or if using python2:</p>
+
+<pre><code>from urllib import urlopen
+import re
+def getPublicIp():
+    data = str(urlopen('http://checkip.dyndns.com/').read())
+    # data = '&lt;html&gt;&lt;head&gt;&lt;title&gt;Current IP Check&lt;/title&gt;&lt;/head&gt;&lt;body&gt;Current IP Address: 65.96.168.198&lt;/body&gt;&lt;/html&gt;\r\n'
+
+    return re.compile(r'Address: (\d+\.\d+\.\d+\.\d+)').search(data).group(1)
+</code></pre>
+
+<p>Advantages:</p>
+
+<ul>
+<li>One upside of this method is it's cross-platform</li>
+<li>It works from behind ugly NATs (e.g. your home router).</li>
+</ul>
+
+<p>Disadvantages (and workarounds):</p>
+
+<ul>
+<li>Requires this website to be up, the format to not change (almost certainly won't), and your DNS servers to be working. One can mitigate this issue by also querying other third-party IP address reflectors in case of failure.</li>
+<li>Possible attack vector if you don't query multiple reflectors (to prevent a compromised reflector from telling you that your address is something it's not), or if you don't use HTTPS (to prevent a man-in-the-middle attack pretending to be the server)</li>
+</ul>
+
+<hr>
+
+<p><em>edit</em>: Though initially I thought these methods were really bad (unless you use many fallbacks, the code may be irrelevant many years from now), it does pose the question "what is the internet?". A computer may have many interfaces pointing to many different networks. For a more thorough description of the topic, google for <code>gateways and routes</code>. A computer may be able to access an internal network via an internal gateway, or access the world-wide web via a gateway on for example a router (usually the case). The local IP address that the OP asks about is only well-defined with respect to a single link layer, so you have to specify that ("is it the network card, or the ethernet cable, which we're talking about?"). There may be multiple non-unique answers to this question as posed. However the global IP address on the world-wide web is probably well-defined (in the absence of massive network fragmentation): probably the return path via the gateway which can access the TLDs.</p>

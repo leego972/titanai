@@ -1,0 +1,48 @@
+Question: <p>I have a python script that is a http-server: <a href="http://paste2.org/p/89701" rel="nofollow">http://paste2.org/p/89701</a>, when benchmarking it against ApacheBench (ab) with a concurrency level (-c switch) that is lower then or equal to the value i specified in the socket.listen()-call in the sourcecode everything works fine, but as soon as put the concurrency level in apache bench above the value in the socket.listen()-call performance drops through the floor, some example:</p>
+
+<ul>
+<li>socket.listen(<strong>10</strong>) and ab -n 50 -c <strong>10</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>1200req/s</strong></li>
+<li>socket.listen(<strong>10</strong>) and ab -n 50 -c <strong>11</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>40req/s</strong></li>
+<li>socket.listen(<strong>100</strong>) and ab -n 5000 -c <strong>100</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>1000req/s</strong></li>
+<li>socket.listen(<strong>100</strong>) and ab -n 5000 -c <strong>101</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>32req/s</strong></li>
+</ul>
+
+<p>Nothing changes in the code between the two calls, I canât figure out what is wrong - been at this problem for one day now. Also note that: The multiplexing version of the same code (I wrote to compare to the threaded version) works FINE no matter what socket.listen() is set to or what the concurrency (-c switch) in apache is set to.</p>
+
+<p><em>I've spent a day on IRC/python docs, posted on comp.lang.python and on my blog - I can't find ANYONE that even has an idea what could be wrong. Help me!</em></p>
+
+Answer: <p>I cannot confirm your results, and your server is coded fishy. I whipped up my own server and do not have this problem either. Let's move the discussion to a simpler level:</p>
+
+<pre><code>import thread, socket, Queue
+
+connections = Queue.Queue()
+num_threads = 10
+backlog = 10
+
+def request():
+    while 1:
+        conn = connections.get()
+        data = ''
+        while '\r\n\r\n' not in data:
+            data += conn.recv(4048)
+        conn.sendall('HTTP/1.1 200 OK\r\n\r\nHello World')
+        conn.close()
+
+if __name__ == '__main__':
+    for _ in range(num_threads):
+        thread.start_new_thread(request, ())
+
+    acceptor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    acceptor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    acceptor.bind(('', 1234))
+    acceptor.listen(backlog)
+    while 1:
+        conn, addr = acceptor.accept()
+        connections.put(conn)
+</code></pre>
+
+<p>which on my machine does:</p>
+
+<pre><code>ab -n 10000 -c 10 http://127.0.0.1:1234/ --&gt; 8695.03 [#/sec]
+ab -n 10000 -c 11 http://127.0.0.1:1234/ --&gt; 8529.41 [#/sec]
+</code></pre>

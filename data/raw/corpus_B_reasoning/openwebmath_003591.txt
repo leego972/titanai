@@ -1,0 +1,119 @@
+# Tag Info
+
+338
+
+I think this approach is mistaken, but perhaps it will be more helpful if I explain why. Wanting to know the best model given some information about a large number of variables is quite understandable. Moreover, it is a situation in which people seem to find themselves regularly. In addition, many textbooks (and courses) on regression cover stepwise ...
+
+71
+
+Check out the caret package in R. It will help you cross-validate step-wise regression models (use method='lmStepAIC' or method='glmStepAIC'), and might help you understand how these sorts of models tend to have poor predictive performance. Furthermore, you can use the findCorrelation function in caret to identify and eliminate collinear variables, and the ...
+
+39
+
+I fully concur with the problems outlined by @gung. That said, realistically speaking, model selection is a real problem in need of a real solution. Here's something I would use in practice. Split your data into training, validation, and test sets. Train models on your training set. Measure model performance on the validation set using a metric such as ...
+
+33
+
+after performing a stepwise selection based on the AIC criterion, it is misleading to look at the p-values to test the null hypothesis that each true regression coefficient is zero. Indeed, p-values represent the probability of seeing a test statistic at least as extreme as the one you have, when the null hypothesis is true. If $H_0$ is true, the p-value ...
+
+30
+
+I would recommend trying a glm with lasso regularization. This adds a penalty to the model for number of variables, and as you increase the penalty, the number of variables in the model will decrease. You should use cross-validation to select the value of the penalty parameter. If you have R, I suggest using the glmnet package. Use alpha=1 for lasso ...
+
+27
+
+As I explained in my comment on your other question, step uses AIC rather than p-values. However, for a single variable at a time, AIC does correspond to using a p-value of 0.15 (or to be more precise, 0.1573): Consider comparing two models, which differ by a single variable. Call the models $\cal{M}_0$ (smaller model) and $\cal{M}_1$ (larger model), and ...
+
+23
+
+To expand on Zach's answer (+1), if you use the LASSO method in linear regression, you are trying to minimize the sum a quadratic function and an absolute value function, ie: $$\min_{\beta} \; \; (Y-X\beta)^{T}(Y-X\beta) + \sum_i |\beta_i|$$ The first part is quadratic in $\beta$ (gold below), and the second is a square shaped curve (green below). The ...
+
+20
+
+There are a few different issues here. Probably the main issue is that model selection (whether using p-values or AICs, stepwise or all-subsets or something else) is primarily problematic for inference (e.g. getting p-values with appropriate type I error, confidence intervals with appropriate coverage). For prediction, model selection can indeed pick a ...
+
+18
+
+I would recommend not performing stepwise model building, unless you are looking for biased (inflated) coefficients, biased (deflated) p-values, and inflated model fit statistics. The fundamental problem is that all of the inferences in one's final model carry a typically invisible/silent and usually uninterpretable series of "conditional upon all these ...
+
+16
+
+To answer the question, there are several options: 1) all-subset by AIC/BIC 2) stepwise by p-value 3) stepwise by AIC/BIC 4) regularisation such as LASSO (can be based on either AIC/BIC or CV 5) genetic algorithm (GA) 6) others? 7) use of non-automatic, theory ("subject matter knowledge") oriented selection Next question would be which method is better. ...
+
+16
+
+Model averaging is one way to go (an information-theoretic approach). The R package glmulti can perform linear models for every combination of predictor variables, and perform model averaging for these results. See http://sites.google.com/site/mcgillbgsa/workshops/glmulti Don't forget to investigate collinearity between predictor variables first though. ...
+
+15
+
+The LASSO and forward/backward model selection both have strengths and limitations. No far sweeping recommendation can be made. Simulation can always be explored to address this. Both can be understood in the sense of dimensionality: referring to $p$ the number of model parameters and $n$ the number of observations. If you were able to fit models using ...
+
+15
+
+The primary advantage of stepwise regression is that it's computationally efficient. However, its performance is generally worse than alternative methods. The problem is that it's too greedy. By making a hard selection on the the next regressor and 'freezing' the weight, it makes choices that are locally optimal at each step, but suboptimal in general. And, ...
+
+13
+
+Here is a counter example using randomly generated data and R: library(MASS) library(leaps) v <- matrix(0.9,11,11) diag(v) <- 1 set.seed(15) mydat <- mvrnorm(100, rep(0,11), v) mydf <- as.data.frame( mydat ) fit1 <- lm( V1 ~ 1, data=mydf ) fit2 <- lm( V1 ~ ., data=mydf ) fit <- step( fit1, formula(fit2), direction='forward' ) ...
+
+12
+
+The facts that you are getting different answers from forward and backward selection, and that you get different answers when you change the seed, should give you pause. Clearly, these can't all be right. Most likely, none of them are. The simplest answer is that you should not use these methods at all. Here are some threads you might want to read: ...
+
+11
+
+I would not recommend you use that procedure. My recommendation is: Abandon this project. Just give up and walk away. You have no hope of this working. source for image Setting aside the standard problems with stepwise selection (cf., here), in your case you are very likely to have perfect predictions due to separation in such a high-dimensional ...
+
+11
+
+Regression based on principal components analysis (PCA) of the independent variables is certainly a way to approach this problem; see this Cross Validated page for one extensive discussion of pros and cons, with links to further related topics. I don't see the point of the regression you propose after choosing the largest components. The "reconstructed" ...
+
+11
+
+I am not aware of situations, in which stepwise regression would be the preferred approach. It may be okay (particularly in its step-down version starting from the full model) with bootstrapping of the whole stepwise process on extremely large datasets with $n>>p$. Here $n$ is the number of observations in an continuous outcome (or number of records ...
+
+11
+
+Two cases in which I would not object to seeing step-wise regression are Exploratory data analysis Predictive models In both these very important use cases, you are not so concerned about traditional statistical inference, so the fact that p-values, etc., are no longer valid is of little concern. For example, if a research paper said "In our pilot study, ...
+
+11
+
+Do not use step-wise regression. Because step-wise regression almost certainly will insure biased results. All statistics produced through step-wise model building have a nested chain of invisible/unstated "conditional on excluding X" and/or "conditional on including X" statements built into them with the result that: p-values are biased variances are ...
+
+10
+
+Your question has an implicit assumption that $R^2$ is a good measure of the quality of the fit and is appropriate for comparing between models. I think that your background information provides evidence that $R^2$ is not a good tool for what you are trying to do. After all, you can increase $R^2$ by adding nonsense variables to your model. Did you take ...
+
+9
+
+I believe what you describe is already implemented in the caret package. Look at the rfe function or the vignette here: http://cran.r-project.org/web/packages/caret/vignettes/caretSelection.pdf Now, having said that, why do you need to reduce the number of features? From 70 to 20 isn't really an order of magnitude decrease. I would think you'd need more ...
+
+8
+
+Interesting discussion. To label stepwise regression as statistical sin is a bit of a religious statement - as long as one knows what they are doing and that the objectives of the exercise is clear, it is definitely a fine approach with its own set of assumptions and, is certainly biased, and does not guarantee optimality, etc. Yet, the same can be said of ...
+
+8
+
+I gather it is the stepwise selection that is slowing you down, so you would speed up your code by skipping the stepwise selection. As it happens, I would suggest you do not use stepwise selection for other reasons as well. If you want to test hypotheses, stepwise selection will invalidate the reported $p$-values. If you want to build a predictive model, it ...
+
+8
+
+Using stepwise selection to find a model is a very bad thing to do. Your hypothesis tests will be invalid, and your out of sample predictive accuracy will be very poor due to overfitting. To understand these points more fully, it may help you to read my answer here: Algorithms for automatic model selection. The stepAIC function is selecting a model ...
+
+8
+
+An analogy may help. Stepwise regression when the candidate variables are indicator (dummy) variables representing mutually exclusive categories (as in ANOVA) corresponds exactly to choosing which groups to combine by finding out which groups are minimally different by $t$-tests. If the original ANOVA was tested against $F_{p-1, n-p-1}$ but the final ...
+
+8
+
+Stepwise selection is not generally a good idea. To understand why, it may help you to read my answer here: Algorithms for automatic model selection. As far as advantages go, in the days when searching through all possible combinations of features was too computationally intensive for computers to handle, stepwise selection saved time and was tractable. ...
+
+8
+
+Yes, stepwise methods invalidate inference in this setting. Variables are retained because either (1) they are truly strong or (2) their effects are mis-estimated to be too far from zero. This creates a selection ("publication") bias. Even more clearly, variable selection results in a biased-low estimate of $\sigma^2$ which you can almost see from just ...
+
+8
+
+As @ChrisUmphlett suggests, you can do this by stepwise reduction of a logistic model fit. However, depending on what you're trying to use this for, I would strongly encourage you to read some of the criticisms of stepwise regression on CV first. There are certain very narrow contexts in which stepwise regression works adequately (e.g. simplifying an ...
+
+Only top voted, non community-wiki answers of a minimum length are eligible

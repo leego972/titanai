@@ -1,0 +1,46 @@
+# Floating point rounding
+
+Can an IEEE-754 floating point number < 1 (i.e. generated with a random number generator which generates a number >= 0.0 and < 1.0) ever be multiplied by some integer (in floating point form) to get a number equal to or larger than that integer due to rounding?
+
+i.e.
+
+double r = random() ; // generates a floating point number in [0, 1)
+double n = some_int ;
+if (n * r >= n) {
+print 'Rounding Happened' ;
+}
+
+
+This might be equivalent to saying that does there exist an N and R such that if R is the largest number less than 1 which can be represented in IEEE-754 then N * R >= N (where * and >= are appropriate IEEE-754 operators)
+
+This comes from this question based on this documentation and the postgresql random function
+
+• Can you say anything about the range of N, i.e. is it small enough to be represented exactly in IEEE-754 double-precision? – Pedro Aug 14 '12 at 20:14
+• @Pedro In this particular case, yes, it would be a small integer - i.e. 10. I assume you are saying that if N is a very large integer with a very large number of significant digits it might not be able to be represented exactly? – Cade Roux Aug 14 '12 at 20:40
+• Exactly, if $fl(N) > N$, then $fl(R\times fl(N))$ may be larger than $RN$. – Pedro Aug 14 '12 at 21:46
+
+Assuming round-to-nearest and that $N > 0$, then $N * R < N$ always. (Be careful not to convert an integer that's too large.)
+
+Let $c 2^{-q} = N$, where $c \in [1, 2)$ is the significand and $q$ is the integer exponent. Let $1 - 2^{-s} = R$ and derive the bound
+
+$$N R = c 2^{-q}(1 - 2^{-s}) \le c 2^{-q} - 2^{-q - s},$$
+
+with equality if and only if $c = 1$. The right-hand side is less than $N$ and, since $2^{-q - s}$ is exactly $0.5$ units in the last place of $N$, either $c = 1$ and $2^{-q} - 2^{-q - s}$ is exactly representable (since $N$ is normal and not the smallest normal), or $c > 1$, and the nearest rounding is down. In both cases, $N * R$ is less than $N$.
+
+Upward rounding can cause a problem, not that it should ever be selected in the presence of unsuspecting users. Here's some C99 that prints "0\n1\n" on my machine.
+
+#include <fenv.h>
+#include <math.h>
+#include <stdio.h>
+
+int main(void) {
+double n = 10;
+double r = nextafter(1, 0);
+printf("%d\n", n == (n * r));
+fesetround(FE_UPWARD);
+printf("%d\n", n == (n * r));
+}
+
+• I'm sorry, I'm a little slow these days - I'm having trouble getting the part of the inequality $$- c 2^{-q} 2^{-s} \le - 2^{-q s}$$ – Cade Roux Aug 14 '12 at 22:50
+• @Cade Apparently I can't do algebra today. I meant $2^{-q - s}$. – Tyrone Aug 14 '12 at 22:57
+• Thanks, I wasn't sure if there was another step I was missing. – Cade Roux Aug 14 '12 at 23:18

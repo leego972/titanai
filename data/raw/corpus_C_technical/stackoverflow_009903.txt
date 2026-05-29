@@ -1,0 +1,34 @@
+Question: <p>In Python, is there a portable and simple way to test if an executable program exists?</p>
+
+<p>By simple I mean something like the <code>which</code> command which would be just perfect. I don't want to search PATH manually or something involving trying to execute it with <code>Popen</code> &amp; al and see if it fails (that's what I'm doing now, but imagine it's <code>launchmissiles</code>)</p>
+
+Answer: <p>Just remember to specify the file extension on windows. Otherwise, you have to write a much complicated <code>is_exe</code> for windows using <code>PATHEXT</code> environment variable. You may just want to use <a href="http://www.raboof.com/projects/findpath/">FindPath</a>.</p>
+
+<p>OTOH, why are you even bothering to search for the executable? The operating system will do it for you as part of <code>popen</code> call &amp; will raise an exception if the executable is not found. All you need to do is catch the correct exception for given OS. Note that on Windows, <code>subprocess.Popen(exe, shell=True)</code> will fail silently if <code>exe</code> is not found.</p>
+
+<hr>
+
+<p>Incorporating <code>PATHEXT</code> into the above implementation of <code>which</code> (in Jay's answer):</p>
+
+<pre><code>def which(program):
+    def is_exe(fpath):
+        return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+
+    def ext_candidates(fpath):
+        yield fpath
+        for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
+            yield fpath + ext
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            for candidate in ext_candidates(exe_file):
+                if is_exe(candidate):
+                    return candidate
+
+    return None
+</code></pre>

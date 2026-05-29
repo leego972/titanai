@@ -1,0 +1,161 @@
+# I'm confused about LaTeX 3 returning values from functions
+
+The below code works as expected and prints on the terminal "answer is 5". How can I change the code below so I can replace lines B and C with, in pseudocode,
+
+set \l_width_int to \width:N \l_test_seq
+
+I tried many things around lines A, B, C and other places and couldn't get anything to work. I'm confused. Thanks.
+
+\documentclass{article}
+\usepackage[check-declarations]{expl3}
+\begin{document}
+\ExplSyntaxOn
+
+\int_new:N \l_width_int
+\seq_new:N \l_test_seq
+
+\seq_set_from_clist:Nn \l_test_seq {alpha,beta,gamma}
+
+% This function sets \l_width_int to the number of characters
+% in the longest element of the sequence argument.
+\cs_new:Npn \width:N #1
+{
+\int_new:N \l__width_curwidth_int
+\int_new:N \l__width_maxwidth_int
+\tl_new:N  \l__width_cur_tl
+
+\int_set:Nn    \l__width_maxwidth_int {-1}
+\seq_map_inline:Nn {#1}
+{
+\tl_set:Nn  \l__width_cur_tl {##1}
+\int_set:Nn \l__width_curwidth_int {\tl_count:N \l__width_cur_tl}
+\int_compare:nT
+{\l__width_curwidth_int > \l__width_maxwidth_int}
+{\int_set:Nn \l__width_maxwidth_int \l__width_curwidth_int}
+}
+\int_set:Nn \l_width_int \l__width_maxwidth_int    % line A
+}
+\width:N \l_test_seq                                   % line B
+
+\ExplSyntaxOff
+\end{document}
+
+To be able to set \l_width_int (or any variable) to the result of a function (really a macro) in TeX, we have to arrange for the calculation to be done by expansion. In expl3 terms, that means you can only use functions which are shown with a star in interface3. To do that, we need to rearrange the code. I'd go with something like
+
+\cs_new:Npn \MS_width:N #1
+{
+\seq_map_function:NN {#1} \__MS_width:n
+\__MS_result:n { -1 }
+}
+\cs_new:Npn \__MS_result:n #1 {#1}
+\cs_new:Npn \__MS_width:n #1 #2 \__MS_result:n #3
+{
+\__MS_width:fnn
+{ \int_eval:n { \tl_count:n {#1} } } {#2} {#3}
+}
+\cs_new:Npn \__MS_width:nnn #1#2#3
+{
+\int_compare:nNnTF {#1} > {#3}
+{ #2 \__MS_result:n {#1} }
+{ #2 \__MS_result:n {#3} }
+}
+\cs_generate_variant:Nn \__MS_width:nnn { f }
+
+The idea is to set up the mapping such that the result is kept in the input stream all of the time: I use \__MS_result:n as a marker to know where it is and to allow the mapping tokens to be 'moved around'. I also arrange for this to be a simple 'do nothing' function to finally dump the result at the end of the mapping. This would then work in
+
+(I've given your public sequence a 'proper' name here.)
+
+Notice that I've 'forced' evaluation of the length of the token list using f-type expansion, so the value is worked out exactly rather than potentially at every pass (if the first item in the list is the longest).
+
+I'm using the fact here that I know that I can 'move stuff around' with the sequence mapping. I don't want to rely on a particular internal form for the sequence so have to stick to \seq_map_function:NN. One might argue that it would be better to work directly from the comma list and to therefore know exactly what is going on in all of the code:
+
+\cs_new:Npn \MS_width_comma:N #1
+{
+\exp_after:wN \__MS_width:w #1 , \q_nil , \q_stop
+{ -1 }
+}
+\cs_new:Npn \__MS_width:w #1 , #2 \q_stop #3
+{
+\quark_if_nil:nTF {#1}
+{ #3 }
+{
+\__MS_width:fnn { \int_eval:n { \tl_count:n {#1} } }
+{#2} {#3}
+}
+}
+\cs_new:Npn \__MS_width:nnn #1#2#3
+{
+\int_compare:nNnTF {#1} > {#3}
+{ \__MS_width:w #2 \q_stop {#1} }
+{ \__MS_width:w #2 \q_stop {#3} }
+}
+\cs_generate_variant:Nn \__MS_width:nnn { f }
+
+The basic idea is of course the same: depending on the nature of your input, you might go either way. (I'm not clear if you start with a user comma list or you might have a sequence with empty items, etc.)
+
+• I see egreg has mentioned various other things in his answer, so I don't need to ;) – Joseph Wright Jan 2 '17 at 22:59
+• I've kept width as it's the term you've used, but normally that is a typesetting concept: you are really talking about length. – Joseph Wright Jan 3 '17 at 7:35
+
+You're making things more complicated than needed. ;-)
+
+\documentclass{article}
+\usepackage[check-declarations]{expl3}
+
+\ExplSyntaxOn
+
+\int_new:N \l_senn_width_int
+\seq_new:N \l_senn_test_seq
+
+\seq_set_from_clist:Nn \l_senn_test_seq {alpha,beta,gamma}
+
+% This function sets \l_senn_width_int to the number of characters
+% in the longest element of the sequence argument.
+\cs_new_protected:Npn \senn_width:N #1
+{
+\int_set:Nn \l_senn_width_int {-1}
+\seq_map_inline:Nn #1
+{
+\int_set:Nn \l_senn_width_int
+{
+\int_max:nn { \l_senn_width_int } { \tl_count:n { ##1 } }
+}
+}
+}
+\senn_width:N \l_senn_test_seq
+
+\ExplSyntaxOff
+
+Some points to note:
+
+1. Use prefixes.
+
+2. Never allocate variables in functions, unless the functions are specifically designed to allocate variables for future usage.
+
+3. You can set a variable using its current value.
+
+4. The function \tl_count:n is expandable and can be used in the context of an integer.
+
+5. The main function \senn_width:N should be protected, as it does assignments to variables.
+
+\int_set:Nn \l_senn_width_int { \senn_width:N \l_senn_test_seq }
+
+requires \senn_width:N to be fully expandable, which I don't see easily possible.
+
+What you can do is defining a two argument macro:
+
+\senn_width_set:NN \l_senn_width_int \l_senn_test_seq
+
+so problems with expandability are overcome:
+
+\cs_new_protected:Npn \senn_width_set:NN #1 #2
+{
+\int_set:Nn #1 {-1}
+\seq_map_inline:Nn #2
+{
+\int_set:Nn #1
+{
+\int_max:nn { #1 } { \tl_count:n { ##1 } }
+}
+}
+}
+\senn_width_set:NN \l_senn_width_int \l_senn_test_seq

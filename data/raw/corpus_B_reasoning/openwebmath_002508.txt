@@ -1,0 +1,170 @@
+How to Create C/C++ Addons in Node - Stack Abuse
+
+How to Create C/C++ Addons in Node
+
+Node.js is great for a lot of reasons, one of which is the speed in which you can build meaningful applications. However, as we all know, this comes at the price of performance (as compared to native code). To get around this, you can write your code to interface with faster code written in C or C++. All we need to do is let Node know where to find this code and how to interface with it.
+
+There are a few ways to solve this problem depending on what level of abstraction you want. We'll start with the lowest abstraction, which is the Node Addon.
+
+An addon works by providing the glue between Node and C/C++ libraries. For the typical Node developer this may be a bit complicated as you'll have to get in to actually writing C/C++ code to set up the interface. However, between this article and the Node documentation, you should be able to get some simple interfaces working.
+
+There are a few things we need to go over before we can jump in to creating addons. First of all, we need to know how to compile (something Node developers happily forget about) the native code. This is done using node-gyp. Then, we'll briefly talk about nan, which helps with handling different Node API versions.
+
+node-gyp
+
+There are a lot of different kinds of processors out there (x86, ARM, PowerPC, etc), and even more operating systems to deal with when compiling your code. Luckily, node-gyp handles all of this for you. As described by their Github page, node-gyp is a "cross-platform command-line tool written in Node.js for compiling native addon modules for Node.js". Essentially, node-gyp is just a wrapper around gyp, which is made by the Chromium team.
+
+The project's README has some great instructions on how to install and use the package, so you should read that for more detail. In short, to use node-gyp you need to do the following.
+
+$cd my_node_addon  Generate the appropriate build files using the configure command, which will create either a Makefile (on Unix), or vcxproj (on Windows): $ node-gyp configure
+
+
+And finally, build the project:
+
+$node-gyp build  This will generate a /build directory containing, among other things, the compiled binary. Even when using higher abstractions like the ffi package, it's still good to understand what is happening under the hood, so I'd recommend you take the time to learn the ins and outs of node-gyp. nan nan (Native Abstractions for Node) is an easily overlooked module, but it'll save you hours of frustration. Between Node versions v0.8, v0.10, and v0.12, the V8 versions used went through some big changes (in addition to changes within Node itself), so nan helps hide these changes from you and provides a nice, consistent interface. This native abstraction works by providing C/C++ objects/functions in the #include <nan.h> header file. To use it, install the nan package: $ npm install --save nan
+
+
+"include_dirs" : [
+"<!(node -e \"require('nan')\")"
+]
+
+
+And you're ready to use the methods/functions from nan.h within your hooks instead of the original #include <node.h> code. I'd highly recommend you use nan. There isn't much point in re-inventing the wheel in this case.
+
+Before starting on your addon, make sure you take some time to familiarize yourself with the following libraries:
+
+• The V8 JavaScript C++ library, which is used for actually interfacing with JavaScript (like creating functions, calling objects, etc).
+• NOTE: node.h is the default file suggested, but really nan.h should be used instead
+• libuv, a cross-platform asynchronous I/O library written in C. This library is useful for when performing any type of I/O (opening a file, writing to the network, setting a timer, etc) in your native libraries and you need to make it asynchronous.
+• Internal Node libraries. One of the more important objects to understand is node::ObjectWrap, which most objects derive from.
+
+Throughout the rest of this section, I'll walk you through an actual example. In this case, we'll be creating a hook to the C++ <cmath> library's pow function. Since you should almost always be using nan, that's what I'll be using throughout the examples.
+
+For this example, in your addon project you should have at least these files present:
+
+• pow.cpp
+• binding.gyp
+• package.json
+
+The C++ file doesn't need to be named pow.cpp, but the name typically reflects either that it is an addon, or its specific function.
+
+// pow.cpp
+#include <cmath>
+#include <nan.h>
+
+void Pow(const Nan::FunctionCallbackInfo<v8::Value>& info) {
+
+if (info.Length() < 2) {
+Nan::ThrowTypeError("Wrong number of arguments");
+return;
+}
+
+if (!info[0]->IsNumber() || !info[1]->IsNumber()) {
+Nan::ThrowTypeError("Both arguments should be numbers");
+return;
+}
+
+double arg0 = info[0]->NumberValue();
+double arg1 = info[1]->NumberValue();
+v8::Local<v8::Number> num = Nan::New(pow(arg0, arg1));
+
+info.GetReturnValue().Set(num);
+}
+
+void Init(v8::Local<v8::Object> exports) {
+exports->Set(Nan::New("pow").ToLocalChecked(),
+Nan::New<v8::FunctionTemplate>(Pow)->GetFunction());
+}
+
+NODE_MODULE(pow, Init)
+
+
+Note there is not semicolon (;) at the end of NODE_MODULE. This is done intentionally since NODE_MODULE is not actually a function - it's a macro.
+
+Getting Started with AWS in Node.js
+
+Build the foundation you'll need to provision, deploy, and run Node.js applications in the AWS cloud. Learn Lambda, EC2, S3, SQS, and more!
+
+The above code may seem a bit daunting at first for those that haven't written any C++ in a while (or ever), but it really isn't too hard to understand. The Pow function is the meat of the code where we check the number of arguments passed, the types of the arguments, call the native pow function, and return the result to the Node application. The info object contains everything about the call that we need to know, including the arguments (and their types) and a place to return the result.
+
+The Init function mostly just associates the Pow function with the
+"pow" name, and the NODE_MODULE macro actually handles registering the addon with Node.
+
+The package.json file is not much different from a normal Node module. Although it doesn't seem to be required, most Addon modules have "gypfile": true set within them, but the build process seems to still work fine without it. Here is what I used for this example:
+
+{
+"version": "0.0.0",
+"main": "index.js",
+"dependencies": {
+"nan": "^2.0.0"
+},
+"scripts": {
+"test": "node index.js"
+}
+}
+
+
+Next, this code needs to be built into a 'pow.node' file, which is the binary of the Addon. To do this, you'll need to tell node-gyp what files it needs to compile and the binary's resulting filename. While there are many other options/configurations you can use with node-gyp, for this example we don't need a whole lot. The binding.gyp file can be as simple as:
+
+{
+"targets": [
+{
+"target_name": "pow",
+"sources": [ "pow.cpp" ],
+"include_dirs": [
+"<!(node -e \"require('nan')\")"
+]
+}
+]
+}
+
+
+Now, using node-gyp, generate the appropriate project build files for the given platform:
+
+$node-gyp configure  And finally, build the project: $ node-gyp build
+
+
+This should result in a pow.node file being created, which will reside in the build/Release/ directory. To use this hook in your application code, just require in the pow.node file (sans the '.node' extension):
+
+var addon = require('./build/Release/pow');
+
+
+
+Node Foreign Function Interface
+
+Note: The ffi package is formerly known as node-ffi. Be sure to add the newer ffi name to your dependencies to avoid a lot of confusion during npm install :)
+
+While the Addon functionality provided by Node gives you all the flexibility you need, not all developers/projects will need it. In many cases an abstraction like ffi will do just fine, and typically require very little to no C/C++ programming.
+
+ffi only loads dynamic libraries, which can be limiting for some, but it also makes the hooks much easier to set up.
+
+var ffi = require('ffi');
+
+var libm = ffi.Library('libm', {
+'pow': [ 'double', [ 'double', 'double' ] ]
+});
+
+console.log(libm.pow(4, 2));	// 16
+
+
+The above code works by specifying the library to load (libm), and specifically which methods to load from that library (pow). The [ 'double', [ 'double', 'double' ] ] line tells ffi what the return type and parameters of the method is, which in this case is two double parameters and a double returned.
+
+Conclusion
+
+While it may seem intimidating at first, creating an Addon really isn't too bad after you've had the chance to work through a small example like this on your own. When possible, I'd suggest hooking in to a dynamic library to make creating the interface and loading the code much easier, although for many projects this may not be possible or the best choice.
+
+Are there any examples of libraries you'd like to see bindings for? Let us know in the comments!
+
+Last Updated: May 13th, 2016
+
+Get tutorials, guides, and dev jobs in your inbox.
+
+Prepping for an interview?
+
+• Improve your skills by solving one coding problem every day
+• Get the solutions the next morning via email
+• Practice on actual problems asked by top companies, like:
+
+Getting Started with AWS in Node.js
+
+Build the foundation you'll need to provision, deploy, and run Node.js applications in the AWS cloud. Learn Lambda, EC2, S3, SQS, and more!

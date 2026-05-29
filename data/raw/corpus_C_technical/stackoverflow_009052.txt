@@ -1,0 +1,97 @@
+Question: <p>I am writing a web-framework for Python, of which the goal is to be as "small" as possible (currently under 100 lines of code).. You can see the current code <a href="http://github.com/dbr/pyerweb/tree/master" rel="nofollow">on github</a></p>
+
+<p>Basically it's written to be as simple to use as possible. An example "Hello World" like site:</p>
+
+<pre><code>from pyerweb import GET, runner
+
+@GET("/")
+def index():
+    return "&lt;strong&gt;This&lt;/strong&gt; would be the output HTML for the URL / "
+
+@GET("/view/([0-9]+?)$")
+def view_something(id):
+    return "Viewing id %s" % (id) # URL /view/123 would output "Viewing id 123"
+
+runner(url = "/", # url would be from a web server, in actual use
+       output_helper = "html_tidy" # run returned HTML though "HTML tidy"
+</code></pre>
+
+<p>Basically you have a function that returns HTML, and the GET decorator maps this to a URL.</p>
+
+<p>When <code>runner()</code> is called, each decorated function is checked, if the URL regex matches the request URL, the function is run, and the output is sent to the browser.</p>
+
+<p>Now, the problem - outputting headers. Currently for development I've just put a line before the <code>runner()</code> call which does <code>print Content-type:text/html\n</code> - this is obviously a bit limiting..</p>
+
+<p>My first ideas was to have the functions return a dict, something like..</p>
+
+<pre><code>@GET("/")
+def index():
+    return {
+        "html": "&lt;html&gt;&lt;body&gt;...&lt;/body&gt;&lt;/html&gt;",
+        "headers": {"Location":"http://google.com"}
+    }
+</code></pre>
+
+<p>I really don't like this - having to return a dict with a specifically named key isn't nearly as nice as just returning a string..</p>
+
+<p>I could check if the returned data is a dict, if so use <code>returned_data['html']</code> as the output, if it's a string, there is no custom headers to be sent... but this means to go from no headers (which would be the case a huge majority of the time) to headers, you'd have to change the return function from <code>return my_html</code> to <code>return {'html':my_html}</code> which isn't very elegant either..</p>
+
+<p>After writing this, I discovered "Sinatra" - a similar-in-use Ruby library, and looked at how it dealt with headers:</p>
+
+<pre><code>get "/" do
+    content_type 'text/css', :charset =&gt; 'utf-8'
+end
+</code></pre>
+
+<p>This seems like it could be nice enough in Python:</p>
+
+<pre><code>@GET("/")
+def index():
+    header("location", "http://google.com")
+</code></pre>
+
+<p>To implement this, I was considering changing how the functions are executed - instead of simply using the return value, I would change <code>sys.stdout</code> to a StringIO, so you could do..</p>
+
+<pre><code>def index():
+    print "&lt;html&gt;"
+    print "&lt;head&gt;&lt;title&gt;Something&lt;/title&gt;&lt;/head&gt;"
+    print "&lt;body&gt;...&lt;/body&gt;"
+    print "&lt;/html&gt;
+</code></pre>
+
+<p>..without having to worry about concatenating a bunch of strings together. The upshot of this is I could have a separate stream for headers, so the above <code>header()</code> function would write to this.. Something like:</p>
+
+<pre><code>def header(name, value):
+    pyerweb.header_stream.write("%s: %s" % (name, value))
+</code></pre>
+
+<p>Basically, the question is, how would you output headers from this web-framework (mostly in terms of <em>use</em>, but to a lesser extent implementation)?</p>
+
+Answer: <p>you could use that idea of returning a dict or a string, but add a new decorator, so the 'evolution' for a user would be:</p>
+
+<p>simple html:</p>
+
+<pre><code>@GET("/")
+def index():
+return "&lt;html&gt;&lt;body&gt;...&lt;/body&gt;&lt;/html&gt;"
+</code></pre>
+
+<p>with constant headers (one @HEADER for each one, or a dict with all of them):</p>
+
+<pre><code>@GET("/")
+@HEADER("Location","http://google.com")
+def index():
+return "&lt;html&gt;&lt;body&gt;...&lt;/body&gt;&lt;/html&gt;"
+</code></pre>
+
+<p>with complex, maybe calculated headers:</p>
+
+<pre><code>@GET("/")
+def index():
+return {
+    "html": "&lt;html&gt;&lt;body&gt;...&lt;/body&gt;&lt;/html&gt;",
+    "headers": {"Location":"http://google.com"}
+}
+</code></pre>
+
+<p>the @HEADER() decorator would simply change the returned value, so the 'framework' code would stay simple.</p>

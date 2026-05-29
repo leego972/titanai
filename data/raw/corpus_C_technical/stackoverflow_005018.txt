@@ -1,0 +1,54 @@
+Question: <p>I'm not exactly sure how to ask this question really, and I'm no where close to finding an answer, so I hope someone can help me. </p>
+
+<p>I'm writing a Python app that connects to a remote host and receives back byte data, which I unpack using Python's built-in struct module. My problem is with the strings, as they include multiple character encodings. Here is an example of such a string:</p>
+
+<p>"^LThis is an example ^Gstring with multiple ^Jcharacter encodings"</p>
+
+<p>Where the different encoding starts and ends is marked using special escape chars:</p>
+
+<ul>
+<li>^L - Latin1</li>
+<li>^E - Central Europe</li>
+<li>^T - Turkish</li>
+<li>^B - Baltic</li>
+<li>^J - Japanese</li>
+<li>^C - Cyrillic</li>
+<li>^G - Greek</li>
+</ul>
+
+<p>And so on... I need a way to convert this sort of string into Unicode, but I'm really not sure how to do it. I've read up on Python's codecs and string.encode/decode, but I'm none the wiser really. I should mention as well, that I have no control over how the strings are outputted by the host.</p>
+
+<p>I hope someone can help me with how to get started on this.</p>
+
+Answer: <p>There's no built-in functionality for decoding a string like this, since it is really its own custom codec.  You simply need to split up the string on those control characters and decode it accordingly.</p>
+
+<p>Here's a (very slow) example of such a function that handles latin1 and shift-JIS:</p>
+
+<pre><code>latin1 = "latin-1"
+japanese = "Shift-JIS"
+
+control_l = "\x0c"
+control_j = "\n"
+
+encodingMap = {
+    control_l: latin1,
+    control_j: japanese}
+
+def funkyDecode(s, initialCodec=latin1):
+    output = u""
+    accum = ""
+    currentCodec = initialCodec
+    for ch in s:
+        if ch in encodingMap:
+            output += accum.decode(currentCodec)
+            currentCodec = encodingMap[ch]
+            accum = ""
+        else:
+            accum += ch
+    output += accum.decode(currentCodec)
+    return output
+</code></pre>
+
+<p>A faster version might use str.split, or regular expressions.</p>
+
+<p>(Also, as you can see in this example, "^J" is the control character for "newline", so your input data is going to have some interesting restrictions.)</p>

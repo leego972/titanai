@@ -1,0 +1,206 @@
+Question: <p>I have two Python dictionaries, and I want to write a single expression that returns these two dictionaries, merged.  The <code>update()</code> method would be what I need, if it returned its result instead of modifying a dict in-place.</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a':1, 'b': 2}
+&gt;&gt;&gt; y = {'b':10, 'c': 11}
+&gt;&gt;&gt; z = x.update(y)
+&gt;&gt;&gt; print z
+None
+&gt;&gt;&gt; x
+{'a': 1, 'b': 10, 'c': 11}
+</code></pre>
+
+<p>How can I get that final merged dict in z, not x?</p>
+
+<p>(To be extra-clear, the last-one-wins conflict-handling of <code>dict.update()</code> is what I'm looking for as well.)</p>
+
+Answer: <blockquote>
+  <h1>How can I merge two Python dictionaries in a single expression?</h1>
+</blockquote>
+
+<p>Say you have two dicts and you want to merge them into a new dict without altering the original dicts:</p>
+
+<pre><code>x = {'a': 1, 'b': 2}
+y = {'b': 3, 'c': 4}
+</code></pre>
+
+<p>The desired result is to get a new dictionary (<code>z</code>) with the values merged, and the second dict's values overwriting those from the first.</p>
+
+<pre><code>&gt;&gt;&gt; z
+{'a': 1, 'b': 3, 'c': 4}
+</code></pre>
+
+<p>A new syntax for this, proposed in <a href="https://www.python.org/dev/peps/pep-0448">PEP 448</a> and <a href="https://mail.python.org/pipermail/python-dev/2015-February/138564.html">available as of Python 3.5</a>, is </p>
+
+<pre><code>z = {**x, **y}
+</code></pre>
+
+<p>And it is indeed a single expression. It is now showing as implemented in the <a href="https://www.python.org/dev/peps/pep-0478/#features-for-3-5">release schedule for 3.5, PEP 478</a>, and it has now made its way into <a href="https://docs.python.org/dev/whatsnew/3.5.html#pep-448-additional-unpacking-generalizations">What's New in Python 3.5</a> document.</p>
+
+<p>However, since many organizations are still on Python 2, you may wish to do this in a backwards compatible way. The classically Pythonic way, available in Python 2 and Python 3.0-3.4, is to do this as a two-step process:</p>
+
+<pre><code>z = x.copy()
+z.update(y) # which returns None since it mutates z
+</code></pre>
+
+<p>In both approaches, <code>y</code> will come second and its values will replace <code>x</code>'s values, thus <code>'b'</code> will point to <code>3</code> in our final result.</p>
+
+<h1>Not yet on Python 3.5, but want a <em>single expression</em></h1>
+
+<p>If you are not yet on Python 3.5, or need to write backward-compatible code, and you want this in a <em>single expression</em>, the most performant while correct approach is to put it in a function:</p>
+
+<pre><code>def merge_two_dicts(x, y):
+    '''Given two dicts, merge them into a new dict as a shallow copy.'''
+    z = x.copy()
+    z.update(y)
+    return z
+</code></pre>
+
+<p>and then you have a single expression:</p>
+
+<pre><code>z = merge_two_dicts(x, y)
+</code></pre>
+
+<p>You can also make a function to merge an undefined number of dicts, from zero to a very large number:</p>
+
+<pre><code>def merge_dicts(*dict_args):
+    '''
+    Given any number of dicts, shallow copy and merge into a new dict,
+    precedence goes to key value pairs in latter dicts.
+    '''
+    result = {}
+    for dictionary in dict_args:
+        result.update(dictionary)
+    return result
+</code></pre>
+
+<p>This function will work in Python 2 and 3 for all dicts. e.g. given dicts <code>a</code> to <code>g</code>:</p>
+
+<pre><code>z = merge_dicts(a, b, c, d, e, f, g) 
+</code></pre>
+
+<p>and key value pairs in <code>g</code> will take precedence over dicts <code>a</code> to <code>f</code>, and so on.</p>
+
+<h1>Critiques of Other Answers</h1>
+
+<p>Don't use what you see in the most upvoted answer:</p>
+
+<pre><code>z = dict(x.items() + y.items())
+</code></pre>
+
+<p>In Python 2, you create two lists in memory for each dict, create a third list in memory with length equal to the length of the first two put together, and then discard all three lists to create the dict. <strong>In Python 3, this will fail</strong> because you're adding two <code>dict_items</code> objects together, not two lists - </p>
+
+<pre><code>&gt;&gt;&gt; c = dict(a.items() + b.items())
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: unsupported operand type(s) for +: 'dict_items' and 'dict_items'
+</code></pre>
+
+<p>and you would have to explicitly create them as lists, e.g. <code>z = dict(list(x.items()) + list(y.items()))</code>. This is a waste of resources and computation power. </p>
+
+<p>Similarly, taking the union of <code>items()</code> in Python 3 (<code>viewitems()</code> in Python 2.7) will also fail when values are unhashable objects (like lists, for example). Even if your values are hashable, <strong>since sets are semantically unordered, the behavior is undefined in regards to precedence. So don't do this:</strong></p>
+
+<pre><code>&gt;&gt;&gt; c = dict(a.items() | b.items())
+</code></pre>
+
+<p>This example demonstrates what happens when values are unhashable:</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a': []}
+&gt;&gt;&gt; y = {'b': []}
+&gt;&gt;&gt; dict(x.items() | y.items())
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: unhashable type: 'list'
+</code></pre>
+
+<p>Here's an example where y should have precedence, but instead the value from x is retained due to the arbitrary order of sets:</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a': 2}
+&gt;&gt;&gt; y = {'a': 1}
+&gt;&gt;&gt; dict(x.items() | y.items())
+{'a': 2}
+</code></pre>
+
+<p>Another hack you should not use:</p>
+
+<pre><code>z = dict(x, **y)
+</code></pre>
+
+<p>This uses the <code>dict</code> constructor, and is very fast and memory efficient (even slightly more-so than our two-step process) but unless you know precisely what is happening here (that is, the second dict is being passed as keyword arguments to the dict constructor), it's difficult to read, it's not the intended usage, and so it is not Pythonic. <strong>Also, this fails in Python 3 when keys are not strings.</strong></p>
+
+<pre><code>&gt;&gt;&gt; c = dict(a, **b)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: keyword arguments must be strings
+</code></pre>
+
+<p>From the <a href="https://mail.python.org/pipermail/python-dev/2010-April/099459.html">mailing list</a>, Guido van Rossum, the creator of the language, wrote:</p>
+
+<blockquote>
+  <p>I am fine with
+  declaring dict({}, **{1:3}) illegal, since after all it is abuse of
+  the ** mechanism.</p>
+</blockquote>
+
+<p>and </p>
+
+<blockquote>
+  <p>Apparently dict(x, **y) is going around as "cool hack" for "call
+  x.update(y) and return x". Personally I find it more despicable than
+  cool.</p>
+</blockquote>
+
+<h1>Less Performant But Correct Ad-hocs</h1>
+
+<p>These approaches are less performant, but they will provide correct behavior.
+They will be <em>much less</em> performant than <code>copy</code> and <code>update</code> or the new unpacking because they iterate through each key-value pair at a higher level of abstraction, but they <em>do</em> respect the order of precedence (latter dicts have precedence)</p>
+
+<p>You can also chain the dicts manually inside a dict comprehension:</p>
+
+<pre><code>{k: v for d in dicts for k, v in d.items()} # iteritems in Python 2.7
+</code></pre>
+
+<p>or in python 2.6 (and perhaps as early as 2.4 when generator expressions were introduced):</p>
+
+<pre><code>dict((k, v) for d in dicts for k, v in d.items())
+</code></pre>
+
+<p><code>itertools.chain</code> will chain the iterators over the key-value pairs in the correct order:</p>
+
+<pre><code>import itertools
+z = dict(itertools.chain(x.iteritems(), y.iteritems()))
+</code></pre>
+
+<h1>Performance Analysis</h1>
+
+<p>I'm only going to do the performance analysis of the usages known to behave correctly. </p>
+
+<pre><code>import timeit
+</code></pre>
+
+<p>The following is done on Ubuntu 14.04</p>
+
+<p>In Python 2.7 (system Python):</p>
+
+<pre><code>&gt;&gt;&gt; min(timeit.repeat(lambda: merge_two_dicts(x, y)))
+0.5726828575134277
+&gt;&gt;&gt; min(timeit.repeat(lambda: {k: v for d in (x, y) for k, v in d.items()} ))
+1.163769006729126
+&gt;&gt;&gt; min(timeit.repeat(lambda: dict(itertools.chain(x.iteritems(), y.iteritems()))))
+1.1614501476287842
+&gt;&gt;&gt; min(timeit.repeat(lambda: dict((k, v) for d in (x, y) for k, v in d.items())))
+2.2345519065856934
+</code></pre>
+
+<p>In Python 3.5 (deadsnakes PPA):</p>
+
+<pre><code>&gt;&gt;&gt; min(timeit.repeat(lambda: {**x, **y}))
+0.4094954460160807
+&gt;&gt;&gt; min(timeit.repeat(lambda: merge_two_dicts(x, y)))
+0.7881555100320838
+&gt;&gt;&gt; min(timeit.repeat(lambda: {k: v for d in (x, y) for k, v in d.items()} ))
+1.4525277839857154
+&gt;&gt;&gt; min(timeit.repeat(lambda: dict(itertools.chain(x.items(), y.items()))))
+2.3143140770262107
+&gt;&gt;&gt; min(timeit.repeat(lambda: dict((k, v) for d in (x, y) for k, v in d.items())))
+3.2069112799945287
+</code></pre>

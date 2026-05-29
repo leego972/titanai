@@ -1,0 +1,191 @@
+Module: locationPointing¶
+
+Executive Summary¶
+
+This module generates an attitude guidance message to make a specified spacecraft pointing vector target an inertial location. This location could be on a planet if this module is connected with Module: groundLocation for example.
+
+Message Connection Descriptions¶
+
+The following table lists all the module input and output messages. The module msg connection is set by the user from python. The msg type contains a link to the message structure definition, while the description provides information on what this message is used for.
+
+Module I/O Messages
+
+Msg Variable Name
+
+Msg Type
+
+Description
+
+scAttInMsg
+
+input msg with inertial spacecraft attitude states
+
+scTransInMsg
+
+input msg with inertial spacecraft translational states
+
+locationInMsg
+
+input msg containing the inertial point location of interest
+
+celBodyInMsg
+
+(alternative) input msg containing the inertial point location of a celestial body of interest
+
+AttGuidOutMsg
+
+output message with the attitude guidance
+
+AttRefOutMsg
+
+output message with the attitude reference
+
+Detailed Module Description¶
+
+The inertial location of interest is given by $${\bf r}_{L/N}$$ and can be either extracted from locationInMsg when a location on a planet is provided, or celBodyInMsg when a celestial body’s ephemeris location is provided (for pointing at the Sun or the Earth). The vector pointing from the satellite location $${\bf r}_{S/N}$$ to this location is then
+
+${\bf r}_{L/S} = {\bf r}_{L/N} - {\bf r}_{S/N}$
+
+Let $$\hat{\bf r}_{L/S}$$ be the normalized heading vector to this location.
+
+The unit vector $$\hat{\bf p}$$ is a body-fixed vector and denotes the body axis which is to point towards the desired location $$L$$. Thus this modules performs a 2-degree of freedom attitude guidance and control solution.
+
+The eigen-axis to rotate $$\hat{\bf p}$$ towards $$\hat{\bf r}_{L/S}$$ is given by
+
+$\hat{\bf e} = \frac{\hat{\bf p} \times \hat{\bf r}_{L/S}}{|\hat{\bf p} \times \hat{\bf r}_{L/S}|}$
+
+The principle rotation angle $$\phi$$ is
+
+$\phi = \arccos (\hat{\bf p} \cdot \hat{\bf r}_{L/S} )$
+
+The attitude tracking error $${\pmb\sigma}_{B/R}$$ is then given by
+
+${\pmb\sigma}_{B/R} = - \tan(\phi/4) \hat{\bf e}$
+
+The tracking error rates $${\pmb\omega}_{B/R}$$ are obtained through numerical differentiation of the MRP values. During the first module Update evaluation the numerical differencing is not possible and this value is thus set to zero.
+
+Using the attitude navigation and guidance messages, this module also computes the reference information in the form of attRefOutMsg. This additional output message is useful when working with modules that need a reference message and cannot accept a guidance message.
+
+Note
+
+The module checks for several conditions such as heading vectors being collinear, the MRP switching during the numerical differentiation, etc.
+
+User Guide¶
+
+The one required variable that must be set is pHat_B. This is body-fixed unit vector which is to be pointed at the desired inertial location.
+
+The user should only connect one location of interest input message, either locationInMsg or celBodyInMsg. Connecting both will result in a warning and the module defaults to using the locationInMsg information.
+
+This 2D attitude control module provides two output messages in the form of AttGuidMsgPayload and AttRefMsgPayload. The first guidance message, describing body relative to reference tracking errors, can be directly connected to an attitude control module. However, at times we need to have the attitude reference message as the output to feed to Module: attTrackingError. Here the B/R states are subtracted from the B/N states to obtain the equivalent R/N states.
+
+The variable smallAngle defined the minimum angular separation where two vectors are considered colinear. It is defaulted to zero, but can be set to any desired value in radians.
+
+By default this is a 2D attitude control module in attitude and a 2D rate control. In particular, the rates about the desired heading axis are not damped. By setting the module variable useBoresightRateDamping to 1, the body rates about about the desired heading angle are added to the rate tracking error yielding a 3D rate control implementation.
+
+Functions
+
+void SelfInit_locationPointing(locationPointingConfig *configData, int64_t moduleID)
+
+This method initializes the output messages for this module.
+
+Parameters
+• configData – The configuration data associated with this module
+
+• moduleID – The module identifier
+
+Returns
+
+void
+
+void Update_locationPointing(locationPointingConfig *configData, uint64_t callTime, int64_t moduleID)
+
+This method takes the estimated body states and position relative to the ground to compute the current attitude/attitude rate errors and pass them to control.
+
+Parameters
+• configData – The configuration data associated with the module
+
+• callTime – The clock time at which the function was called (nanoseconds)
+
+• moduleID – The module identifier
+
+Returns
+
+void
+
+void Reset_locationPointing(locationPointingConfig *configData, uint64_t callTime, int64_t moduleID)
+
+This method performs a complete reset of the module. Local module variables that retain time varying states between function calls are reset to their default values. Check if required input messages are connected.
+
+Parameters
+• configData – The configuration data associated with the module
+
+• callTime – [ns] time the method is called
+
+• moduleID – The module identifier
+
+Returns
+
+void
+
+struct locationPointingConfig
+#include <locationPointing.h>
+
+This module is used to generate the attitude reference message in order to have a spacecraft point at a location on the ground.
+
+Public Members
+
+double pHat_B[3]
+
+body fixed vector that is to be aimed at a location
+
+double smallAngle
+
+rad An angle value that specifies what is near 0 or 180 degrees
+
+int useBoresightRateDamping
+
+[int] flag to use rate damping about the sensor boresight
+
+double sigma_BR_old[3]
+
+Older sigma_BR value, stored for finite diff
+
+uint64_t time_old
+
+[ns] prior time value
+
+double init
+
+moudle initialization counter
+
+double eHat180_B[3]
+
+Eigen axis to use if commanded axis is 180 from pHat
+
+NavAttMsg_C scAttInMsg
+
+input msg with inertial spacecraft attitude states
+
+NavTransMsg_C scTransInMsg
+
+input msg with inertial spacecraft attitude states
+
+GroundStateMsg_C locationInMsg
+
+input msg with location relative to planet
+
+EphemerisMsg_C celBodyInMsg
+
+input celestial body message
+
+AttGuidMsg_C attGuidOutMsg
+
+attitude guidance output message
+
+AttRefMsg_C attRefOutMsg
+
+attitude reference output message
+
+BSKLogger *bskLogger
+
+BSK Logging.

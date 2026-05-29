@@ -1,0 +1,91 @@
+Question: <p>What is the difference between old style and new style classes in Python?  Is there ever a reason to use old-style classes these days?</p>
+
+Answer: <p><strong>Important behavior changes between old and new style classes</strong></p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/576169/understanding-python-super-and-init-methods">super</a> added</li>
+<li>MRO changed (explained below)</li>
+<li><a href="http://docs.python.org/2/howto/descriptor.html">descriptors</a> added</li>
+<li>new style class objects cannot be raised unless derived from <code>Exception</code> (example below)</li>
+<li><a href="http://docs.python.org/2/reference/datamodel.html#slots"><code>__slots__</code></a> added</li>
+</ul>
+
+<h2>MRO (Method Resolution Order) changed</h2>
+
+<p>It was mentioned in other answers, but here goes a concrete example of the difference between classic MRO and C3 MRO (used in new style classes).</p>
+
+<p>The question is the order in which attributes (which include methods and member variables) are searched for in multiple inheritance.</p>
+
+<p><strong>Classic classes</strong> do a depth first search from left to right. Stop on first match. They do not have the <code>__mro__</code> attribute.</p>
+
+<pre><code>class C: i = 0
+class C1(C): pass
+class C2(C): i = 2
+class C12(C1, C2): pass
+class C21(C2, C1): pass
+
+assert C12().i == 0
+assert C21().i == 2
+
+try:
+    C12.__mro__
+except AttributeError:
+    pass
+else:
+    assert False
+</code></pre>
+
+<p><strong>New-style classes</strong> MRO is more complicated to synthesize in a single English sentence. It is explained in detail <a href="http://www.python.org/download/releases/2.3/mro/">here</a>. One of its properties is that a Base class is only searched for once all its Derived classes have been. They have the <code>__mro__</code> attribute which shows the search order. </p>
+
+<pre><code>class C(object): i = 0
+class C1(C): pass
+class C2(C): i = 2
+class C12(C1, C2): pass
+class C21(C2, C1): pass
+
+assert C12().i == 2
+assert C21().i == 2
+
+assert C12.__mro__ == (C12, C1, C2, C, object)
+assert C21.__mro__ == (C21, C2, C1, C, object)
+</code></pre>
+
+<h2>New style class objects cannot be raised unless derived from <code>Exception</code></h2>
+
+<p>Around Python 2.5 many classes could be raised, around Python 2.6 this was removed. On Python 2.7.3:</p>
+
+<pre><code># OK, old:
+class Old: pass
+try:
+    raise Old()
+except Old:
+    pass
+else:
+    assert False
+
+# TypeError, new not derived from `Exception`.
+class New(object): pass
+try:
+    raise New()
+except TypeError:
+    pass
+else:
+    assert False
+
+# OK, derived from `Exception`.
+class New(Exception): pass
+try:
+    raise New()
+except New:
+    pass
+else:
+    assert False
+
+# `'str'` is a new style object, so you can't raise it:
+try:
+    raise 'str'
+except TypeError:
+    pass
+else:
+    assert False
+</code></pre>

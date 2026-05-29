@@ -1,0 +1,28 @@
+Question: <p>I have a python module that makes use of a huge dictionary global variable, currently I put the computation code in the top section, every first time import or reload of the module takes more then one minute which is totally unacceptable. How can I save the computation result somewhere so that the next import/reload doesn't have to compute it? I tried cPickle, but loading the dictionary variable from a file(1.3M) takes approximately the same time as computation.</p>
+
+<p>To give more information about my problem, </p>
+
+<pre><code>FD = FreqDist(word for word in brown.words()) # this line of code takes 1 min
+</code></pre>
+
+Answer: <p>Just to clarify: the code in the body of a module is <em>not</em> executed every time the module is imported - it is run only once, after which future imports find the already created module, rather than recreating it.  Take a look at sys.modules to see the list of cached modules.</p>
+
+<p>However, if your problem is the time it takes for the first import after the program is run, you'll probably need to use some other method than a python dict.  Probably best would be to use an on-disk form, for instance a sqlite database, one of the dbm modules.</p>
+
+<p>For a minimal change in your interface, the shelve module may be your best option - this puts a pretty transparent interface between the dbm modules that makes them act like an arbitrary python dict, allowing any picklable value to be stored. Here's an example:</p>
+
+<pre><code># Create dict with a million items:
+import shelve
+d = shelve.open('path/to/my_persistant_dict')
+d.update(('key%d' % x, x) for x in xrange(1000000))
+d.close()
+</code></pre>
+
+<p>Then in the next process, use it.  There should be no large delay, as lookups are only performed for the key requested on the on-disk form, so everything doesn't have to get loaded into memory:</p>
+
+<pre><code>&gt;&gt;&gt; d = shelve.open('path/to/my_persistant_dict')
+&gt;&gt;&gt; print d['key99999']
+99999
+</code></pre>
+
+<p>It's a bit slower than a real dict, and it <strong>will</strong> still take a long time to load if you do something that requires all the keys (eg. try to print it), but may solve your problem.</p>

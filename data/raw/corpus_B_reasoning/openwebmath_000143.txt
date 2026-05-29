@@ -1,0 +1,162 @@
+# Motivation
+
+Robust water resource planning and management decisions rely upon the evaluation of alternative policies under a wide variety of plausible future scenarios. Often, despite the availability of historic records, non-stationarity and system uncertainty require the generation of synthetic datasets to be used in these analyses.
+
+When creating synthetic timeseries data from historic records, it is important to replicate the statistical properties of the system while preserving the inherent stochasticity in the system. Along with replicating statistical autocorrelation, means, and variances it is important to replicate the correlation between variables present in the historic record.
+
+Previous studies by Zeff et al. (2016) and Gold et al. (2022) have relied upon synthetic streamflow and water demand timeseries to inform infrastructure planning and management decisions in the “Research Triangle” region of North Carolina. The methods used for generating the synthetic streamflow data emphasized the preservation of autocorrelation, seasonal correlation, and cross-site correlation of the inflows. However, a comprehensive investigation into the preservation of correlation in the generated synthetic data has not been performed.
+
+Given the critical influence of both reservoir inflow and water demand in the success of water resource decisions, it is important that potential interactions between these timeseries are not ignored.
+
+In this post, I present methods for producing synthetic demand timeseries conditional upon synthetic streamflow data. I also present an analysis of the correlation in both the historic and synthetic timeseries.
+
+A GitHub repository containing all of the necessary code and data can be accessed here.
+
+# Case Study: Reservoir Inflow and Water Demand
+
+This post studies the correlation between reservoir inflow and water demand at one site in the Research Triangle region of North Carolina, and assesses the preservation of this correlation in synthetic timeseries generated using two different methods: an empirical joint probability distribution sampling scheme, and a conditional expectation sampling scheme.
+
+# Methods
+
+Synthetic data was generated using historic reservoir inflow and water demand data from a shared 18-year period, at weekly timesteps. Demand data is reported as the unit water demand, in order to remove the influence of growing population demands. Unit water demand corresponds to the fraction of the average annual water demand observed in that week; i.e., a unit water demand of 1.2 suggests that water demand was 120% of the annual average during that week. Working with unit demand allows for the synthetic data to be scaled according to projected changes in water demand for a site.
+
+Notably, all of the synthetic generation techniques presented below are performed using weekly-standardized inflow and demand data. This is necessary to remove the seasonality in both variables. If not standardized, measurement of the correlation will be dominated by this seasonal correlation. Measurement of the correlation between the standardized data thus accounts for shared deviances from the seasonal mean in both data. In each case, historic seasonality, as described by the weekly means and variances, is re-applied to the standardized synthetic data after it is generated.
+
+## Synthetic Streamflow Generation
+
+Synthetic inflow was generated using the modified Fractional Gaussian Noise (mFGN) method described by Kirsch et al. (2013). The mFGN method is specifically intended to preserve both seasonal correlation, intra-annual autocorrelation, and inter-annual autocorrelation. The primary modification of the mFGN compared to the traditional Fractional Gaussian Noise method is a matrix manipulation technique which allows for the generation of longer timeseries, whereas the traditional technique was limited to timeseries of roughly 100-time steps (McLeod and Hipel, 1978; Kirsch et al., 2013).
+
+Professor Julie Quinn wrote a wonderful blog post describing the mFGN synthetic streamflow generator in her 2017 post, Open Source Streamflow Generator Part 1: Synthetic Generation. For the sake of limiting redundancy on this blog, I will omit the details of the streamflow generation in this post, and refer you to the linked post above. My own version of the mFGN synthetic generator is included in the repository for this post, and can be found here.
+
+## Synthetic Demand Generation
+
+Synthetic demand data is generated after the synthetic streamflow and is conditional upon the corresponding weekly synthetic streamflow. Here, two alternative synthetic demand generation methods are considered:
+
+1. An empirical joint probability distribution sampling method
+2. A conditional expectation sampling method
+
+### Joint Probability Distribution Sampling Method
+
+The first method relies upon the construction of an empirical joint inflow-demand probability density function (PDF) using historic data. The synthetic streamflow is then used to perform a conditional sampling of demand from the PDF.
+
+The joint PDF is constructed using the weekly standardized demand and weekly standardized log-inflow. Historic values are then assigned to one of sixteen bins within each inflow or demand PDF, ranging from -4.0 to 4.0 at 0.5 increments. The result is a 16 by 16 matrix joint PDF. A joint cumulative density function (CDF) is then generated from the PDF.
+
+For some synthetic inflow timeseries, the synthetic log-inflow is standardized using historic inflow mean and standard deviations. The corresponding inflow-bin from the marginal inflow PDF is identified. A random number is randomly selected from a uniform distribution ranging from zero to the number of observations in that inflow-bin. The demand-CDF bin number corresponding to the value of the random sample is identified. The variance of the demand value is then determined to be the value corresponding to that bin along the discretized PDF range, from -4.0 to 4.0. Additionally, some statistical noise is added to the sampled standard demand by taking a random sample from a normal distribution, $N(0, 0.5)$.
+
+Admittedly, this process is difficult to translate into words. With that in mind, I recommend the curious reader take a look at the procedure in the code included in the repository.
+
+Lastly, for each synthetic standard demand, $d_{s_{i,j}}$, the historic weekly demand mean, $\mu_{D_j}$, and standard deviation, $\sigma_{D_j}$, are applied to convert to a synthetic unit demand, $D_{s_{i,j}}$.
+
+$D_{s_{i,j}} = d_{s_{i,j}} \sigma_{D_j} + \mu_{D_j}$
+
+Additionally, the above process is season-specific: PDFs and CDFs are independently constructed for the irrigation and non-irrigation seasons. When sampling the synthetic demand, samples are drawn from the corresponding distribution according to the week in the synthetic timeseries.
+
+### Conditional Expectation Sampling Method
+
+The second method does not rely upon an empirical joint PDF, but rather uses the correlation between standardized inflow and demand data to calculate demand expectation and variance conditional upon the corresponding synthetic streamflow and the correlation between historic observations. The conditional expectation of demand, $E[D|Q_{s_i}]$, given a specific synthetic streamflow, $Q_{s_i}$, is:
+
+$E[D|Q_{s_i}] = E[D] + \rho \frac{\sigma_Q}{\sigma_D} (Q_i - \mu_Q)$
+
+Where $\rho$ is the Pearson correlation coefficient of the weekly standardized historic inflow and demand data. Since the data is standardized, ( $E[d] = 0$ and $\sigma_z = \sigma_d = 1$) the above form of the equation simplifies to:
+
+$E[d|Z_{s_i}] = \rho (Z_{s_i})$
+
+Where $d$ is standard synthetic demand and $Z_{s_i}$ is the standard synthetic streamflow for the $i^{th}$ week. The variance of the standard demand conditional upon the standard streamflow is then:
+
+$Var(d|Z_{s_i}) = \sigma_d^2(1 - \rho^2) = (1 - \rho^2)$
+
+The weekly standard demand, $d_{s_i}$, is then randomly sampled from a normal distribution centered around the conditional expectation with standard deviation equal to the square root of the conditional variance.
+
+$d_{s_i} \approx N(E[d|Z_{s_i}], Var(d|Z_{s_i})^{1/2})$
+
+As in the previous method, this method is performed according to whether the week is within the irrigation season or not. The correlation values used in the calculation of expected value and variance are calculated for both irrigated and non-irrigated seasons and applied respective of the week.
+
+As in the first method, the standard synthetic demand is converted to a unit demand, and seasonality is reintroduced, using the weekly means and standard deviations of the historic demand:
+
+$D_{s_{i,j}} = d_{s_{i,j}} \sigma_{D_j} + \mu_{D_j}$
+
+# Results
+
+### Historic Correlation Patterns
+
+It is worthwhile to first consider the correlation pattern between stream inflow and demand in the historic record.
+
+The correlation patterns between inflow and demand found in this analysis support the initial hypothesis that inflow and demand are correlated with one another. More specifically, there is a strong negative correlation between inflow and demand week to week (along the diagonal in the above figure). Contextually, this makes sense; low reservoir inflow correspond to generally dryer climatic conditions. When considering that agriculture accounts for a substantial contribution to demand in the region, it is understandable that demand will be high during dry periods, when are farmers require more reservoir supply to irrigate their crops. During wet periods, they depend less upon the reservoir supply.
+
+Interestingly, there appears to be some type of lag-correlation, between variables across different weeks (dark coloring on the off-diagonals in the matrix). For example, there exists strong negative correlation between the inflow during week 15 with the demands in weeks 15, 16, 17 and 18. This may be indicative of persistence in climatic conditions which influence demand for several subsequent weeks.
+
+### Synthetic Streamflow Results
+
+Consideration of the above flow duration curves reveal that the synthetic streamflow generated through the mFGN method exceedance probabilities are in close alignment with the historic record. While it should not be assumed that future hydrologic conditions will follow historic trends (Milly et al., 2008), the focus of this analysis is the replication of historic patterns. This result confirms previous studies by Mandelbrot and Wallis (1968) that the FGN method is capable of capturing flood and drought patterns from the historic record.
+
+### Synthetic Demand Results
+
+The above figure shows a comparison of the ranges in unit demand data between historic and synthetic data sets. Like the synthetic streamflow data, these figures reveal that both demand generation techniques are producing timeseries that align closely with historic patterns. The joint probability sampling method does appear to produce consistently higher unit demands than the historic record, but this discrepancy is not significant enough to disregard the method, and may be corrected with some tweaking of the PDF-sampling scheme.
+
+### Synthetic Correlation Patterns
+
+Now that we know both synthetic inflow and demand data resemble historic ranges, it is important to consider how correlation is replicated in those variables.
+
+Take a second to compare the historic correlation patterns in Figure 1 with the correlation in the synthetic data shown in Figure 4. The methods are working!
+
+As in the historic data, the synthetic data contain strong negative correlations between inflow and demand week-to-week (along the diagonal).
+
+Visualizing the joint distributions of the standardized data provides more insight into the correlation of the data. The Pearson correlation coefficients for each aggregated data set are shown in the upper right of each scatter plot, and in the table below.
+
+One concern with this result is that the correlation is actually too strong in the synthetic data. For both methods, the Pearson Correlation coefficient is greater in the synthetic data than it is in the historic data.
+
+This may be due to the fact that correlation is highly variable throughout the year in the historic record, but the methods used here only separate the year into two seasons – non-irrigation and irrigation seasons. Aggregated across these seasons, the historic correlations are negative. However, there exist weeks (e.g., during the winter months) when weekly correlations are 0 or even positive. Imposing the aggregated negative-correlation to every week during the generation process may be the cause of the overly-negative correlation in the synthetic timeseries.
+
+It may be possible to produce synthetic data with better preservation of historic correlations by performing the same demand generation methods but with more than two seasons.
+
+## Conclusions
+
+When generating synthetic timeseries, it is important to replicate the historic means and variances of the data, but also to capture the correlation that exist between variables. Interactions between exogenous variables can have critical implications for policy outcomes.
+
+For example, when evaluating water resource policies, strong negative correlation between demand and inflow can constitute a compounding risk (Simpson et al., 2021), where the risk associated with low streamflow during a drought is then compounded by high demand at the same time.
+
+Here, I’ve shared two different methods of producing correlated synthetic timeseries which do well in preserving historic correlation patterns. Additionally, I’ve tried to demonstrate different analyses and visualizations that can be used to verify this preservation. While demonstrated using inflow and demand data, the methods described in this post can be applied to a variety of different timeseries variables.
+
+Lastly, I want to thank David Gold and David Gorelick for sharing their data and insight on this project. I also want to give a shout out to Professor Scott Steinschneider whose Multivariate Environmental Statistics class at Cornell motivated this work, and who fielded questions along the way.
+
+Happy programming!
+
+# References
+
+Gold, D. F., Reed, P. M., Gorelick, D. E., & Characklis, G. W. (2022). Power and Pathways: Exploring Robustness, Cooperative Stability, and Power Relationships in Regional Infrastructure Investment and Water Supply Management Portfolio Pathways. Earth’s Future10(2), e2021EF002472.
+
+Kirsch, B. R., Characklis, G. W., & Zeff, H. B. (2013). Evaluating the impact of alternative hydro-climate scenarios on transfer agreements: Practical improvement for generating synthetic streamflows. Journal of Water Resources Planning and Management, 139(4), 396-406.
+
+Lettenmaier, D. P., Leytham, K. M., Palmer, R. N., Lund, J. R., & Burges, S. J. (1987). Strategies for coping with drought: Part 2, Planning techniques and reliability assessment (No. EPRI-P-5201). Washington Univ., Seattle (USA). Dept. of Civil Engineering; Electric Power Research Inst., Palo Alto, CA (USA).
+
+Mandelbrot, B. B., & Wallis, J. R. (1968). Noah, Joseph, and operational hydrology. Water resources research, 4(5), 909-918.
+
+McLeod, A. I., & Hipel, K. W. (1978). Preservation of the rescaled adjusted range: 1. A reassessment of the Hurst Phenomenon. Water Resources Research14(3), 491-508.
+
+Simpson, N. P., Mach, K. J., Constable, A., Hess, J., Hogarth, R., Howden, M., … & Trisos, C. H. (2021). A framework for complex climate change risk assessment. One Earth4(4), 489-501.
+
+Zeff, H. B., Herman, J. D., Reed, P. M., & Characklis, G. W. (2016). Cooperative drought adaptation: Integrating infrastructure development, conservation, and water transfers into adaptive policy pathways. Water Resources Research, 52(9), 7327-7346.
+
+# CNNs for Time Series Applications
+
+This post is meant to be an introduction to convolutional neural networks (CNNs) and how they can be applied to continuous prediction problems, such as time series predictions. CNNs have historically been utilized in image classification applications. At a high level, CNNs use small kernels (filters) that can slide over localized regions of an image and detect features from edges to faces, much in the same way as the visual cortex of a brain (Hubel and Wiesel, 1968). The basic concepts of a CNN were first introduced by Kunihiko Fukushima in 1980 and the first use of CNNs for image recognition were carried out by Yann LeCun in 1988. The major breakthrough for the algorithm didn’t happen until 2000 with the advent of GPUs and by 2015, CNNs were favored to win image recognition contests over other deep networks.
+
+It is believed that recurrent style networks such as LSTMs are the most appropriate algorithms for time series prediction, but studies have been conducted that suggest that CNNs can perform equivalently (or better) and that appropriate filters can extract features that are coupled across variables and time while being computationally efficient to train (Bai et al., 2018, Rodrigues et al., 2021). Below, I’ll demonstrate some of the key characteristics of CNNs and how CNNs can be used for time series prediction problems.
+
+## Architecture
+
+Figure 1: CNN schematic for image classification (Sharma, 2018)
+
+Figure 1 shows a schematic of a CNN’s architecture. The architecture is primarily comprised of a series of convolution and pooling layers followed by a fully connected network. In each convolution layer are kernel matrices that are convolved with the input into the convolution layer. It is up to the user to define the number of kernels and size of the kernels, but the weights in the kernel are learned using backpropagation. A bias is added to the output of the convolution layer and then passed through an activation function, such as ReLU function to yield feature maps. The feature maps are stacked in a cuboid of a depth that equals the number of filters. If the convolution layer is followed by a pooling layer, the feature maps are down-sampled to produce a lower dimensional representation of the feature maps. The output from the final pooling or convolutional layer is flattened and fed to the fully connected layers.
+
+We will now look at the components of the architecture in more detail. To demonstrate how the convolutional layer works, we will use a toy example shown in Figure 2.
+
+Figure 2: Convolution of a 3×3 kernel with the original image
+
+Let’s say that our input is an image is represented as a 5×5 array and the filter is a 3×3 kernel that will be convolved with the image. The result is the array termed Conv1 which is just another array where each cell is the dot product between the filter and the 3×3 subsections of the image. The numbers in color represent the values that the filter is centered on. Note that the convolution operation will result in an output that is smaller than the input and can result in a loss of information around the boundaries of the image. Zero padding, which constitutes adding border of zeros around the input array, can be used to preserve the input size. The kernel matrices are the mechanisms by which the CNN is able to identify underlying patterns. Figure 3 shows examples of what successive output from convolution layers, or feature maps, can look like.
+
+Figure 3: Convolutional layer output for a CNN trained to distinguish between cats and dogs (Dertat, 2017)
+
+The filters in the first convolutional layer of a CNN retain most of the information of the image, particularly edges. The brightest colors represent the most active pixels. The feature maps tend to become more abstract or focused on specific features as you move deeper into the network (Dertat, 2017). For example, Block 3 seems to be tailored to distinguish eyes.
+
+The other key type of layer is a pooling layer. A pooling layer is added after convolution to reduce dimensionality, which can both reduce computational time to train by reducing parameters but can also reduce the chances of overfitting. The most common ty

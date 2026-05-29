@@ -1,0 +1,510 @@
+================================================================================
+TITAN AI — TRAINING PACK 028: MICROSERVICES — DEEP ARCHITECTURE AND PATTERNS
+SERVICE DECOMPOSITION, DATA CONSISTENCY, OBSERVABILITY, TESTING STRATEGIES
+================================================================================
+
+================================================================================
+PART 1: SERVICE DECOMPOSITION PRINCIPLES
+================================================================================
+
+--- WHEN TO BUILD MICROSERVICES ---
+
+THE MONOLITH FIRST RULE (Martin Fowler):
+  Don't start with microservices. Start with a monolith. Extract when you have real pain.
+  
+  Reason: Microservices require you to understand service boundaries.
+  Boundaries require domain understanding.
+  You rarely understand your domain fully at the start.
+  Wrong boundaries in microservices = worse than monolith (distributed monolith).
+  
+  WHEN to extract services:
+  1. Team autonomy: Multiple teams can't ship independently.
+  2. Scale isolation: One component needs 100x scale of others.
+  3. Technology mismatch: One component needs Python ML, rest are Java.
+  4. Compliance boundary: PCI scope, HIPAA scope needs isolation.
+  5. Fault isolation: Failure in one part shouldn't take down everything.
+
+DOMAIN-DRIVEN DESIGN FOR SERVICE BOUNDARIES:
+
+Bounded Context: Natural boundary for a microservice.
+  A Bounded Context is: A subsystem with its own model, language, and team.
+  Different meanings of same word in different contexts:
+  "Customer" in Sales context: Prospect + contact info + opportunity
+  "Customer" in Shipping context: Name + address + delivery preferences
+  "Customer" in Finance context: Account + payment history + credit
+  
+  These are different models of the same real-world entity.
+  Trying to share one Customer object = coupling between teams.
+  Separate Bounded Contexts = separate services = independent evolution.
+
+Context Mapping patterns:
+  Customer-Supplier: Upstream team (supplier) provides API. Downstream consumes.
+                     Supplier must maintain backward compatibility. Downstream depends.
+  
+  Shared Kernel: Two teams share a model. Changes require agreement from both.
+                 Riskiest pattern. Only when necessary.
+  
+  Anti-Corruption Layer (ACL): Translates between your model and external/legacy model.
+  External system uses "legacy language". Your service speaks "your language".
+  ACL translates at the boundary. Your domain model stays clean.
+  
+  Published Language: Well-documented, versioned interface contract. Both sides conform.
+  Example: OpenAPI spec. Protobuf definition.
+
+STRANGLER FIG PATTERN:
+  Migrate from monolith to microservices incrementally.
+  
+  1. New requests → Feature Proxy (intercepts all traffic)
+  2. Feature by feature: Implement in new microservice
+  3. Feature Proxy routes: Implemented features → new service, rest → monolith
+  4. When all features migrated: Monolith retired
+  
+  At any point: Both old and new work simultaneously.
+  Zero "big bang" migration. Risk minimized.
+  Can stop at any point if migration not worth continuing.
+  
+  Implementation:
+  Feature Proxy = Nginx or API gateway with routing rules.
+  New service = Deployed independently of monolith.
+  Data: New service may share DB initially, then separate (a further step).
+
+================================================================================
+PART 2: DATA CONSISTENCY IN MICROSERVICES
+================================================================================
+
+--- THE DISTRIBUTED DATA PROBLEM ---
+
+In a monolith: All data in one database. Transactions are ACID. Consistency simple.
+
+In microservices:
+  OrderService: Has orders table (in its own database).
+  InventoryService: Has stock table (in its own database).
+  CustomerService: Has customer table (in its own database).
+  
+  Operation: Customer places order.
+  Steps: Check inventory, create order, reduce inventory, send confirmation.
+  These span 3 databases. No ACID transaction.
+  What if inventory reduces, then order creation fails?
+  You've reserved stock that doesn't correspond to an order.
+  
+  This is the core challenge of microservices data consistency.
+
+--- TWO-PHASE COMMIT (2PC) — WHY NOT ---
+
+2PC provides distributed ACID. So why not use it?
+
+Protocol:
+  Phase 1 (Prepare): Coordinator asks all participants "Can you commit?"
+  Each participant: Acquires locks. Responds "yes" or "no."
+  Phase 2 (Commit/Abort): If all yes → Coordinator sends Commit. Else → Abort.
+
+Problems:
+  Blocking protocol: If coordinator crashes after Phase 1, participants hold locks forever.
+  No automatic recovery without coordinator restart.
+  Latency: 2 round trips + lock hold time across all services.
+  Scales poorly: Every participant holds resources during protocol. Long tail latency.
+  Not supported: Most NoSQL databases, Kafka don't support 2PC.
+  
+  Rule of thumb: 2PC suitable for ≤3 participants, same datacenter, low volume.
+  Not suitable for: Public internet, multi-cloud, high-volume microservices.
+
+--- SAGA PATTERN — PRODUCTION IMPLEMENTATION ---
+
+Saga = sequence of local transactions with compensating transactions for rollback.
+
+CHOREOGRAPHY SAGA (event-driven):
+
+  Order Created →
+  ├─ PaymentService: Processes payment
+  │   ├─ Success: Emits PaymentProcessed
+  │   └─ Failure: Emits PaymentFailed
+  │
+  PaymentProcessed →
+  ├─ InventoryService: Reserves items
+  │   ├─ Success: Emits ItemsReserved  
+  │   └─ Failure: Emits ReservationFailed → CompensationNeeded
+  │
+  ItemsReserved →
+  └─ ShippingService: Creates shipment
+      ├─ Success: Emits ShipmentCreated → Saga Complete
+      └─ Failure: Emits ShipmentFailed → Compensation needed
+
+  Compensation chain (failure in shipping):
+  ShipmentFailed → InventoryService listens → Releases reserved items → emits ItemsReleased
+  ItemsReleased → PaymentService listens → Refunds payment → emits PaymentRefunded
+  PaymentRefunded → OrderService listens → Cancels order → Saga rolled back.
+
+  Python choreography saga:
+  class PaymentService:
+      def on_order_created(self, event):
+          try:
+              payment_id = self.charge(event['order_id'], event['amount'])
+              self.publish('PaymentProcessed', {
+                  'order_id': event['order_id'],
+                  'payment_id': payment_id,
+                  'correlation_id': event['correlation_id']
+              })
+          except PaymentError as e:
+              self.publish('PaymentFailed', {
+                  'order_id': event['order_id'],
+                  'reason': str(e),
+                  'correlation_id': event['correlation_id']
+              })
+      
+      def on_items_released(self, event):
+          """Compensating transaction: Refund on reservation failure"""
+          payment = self.find_payment(event['order_id'])
+          self.refund(payment['payment_id'])
+          self.publish('PaymentRefunded', {'order_id': event['order_id']})
+
+ORCHESTRATION SAGA:
+  Central saga orchestrator coordinates steps and compensations.
+  
+  from enum import Enum
+  
+  class OrderSagaState(Enum):
+      STARTED = "started"
+      PAYMENT_PENDING = "payment_pending"
+      PAYMENT_COMPLETED = "payment_completed"
+      INVENTORY_PENDING = "inventory_pending"
+      INVENTORY_RESERVED = "inventory_reserved"
+      SHIPPING_PENDING = "shipping_pending"
+      COMPLETED = "completed"
+      COMPENSATING = "compensating"
+      FAILED = "failed"
+  
+  class OrderSagaOrchestrator:
+      def __init__(self, payment_client, inventory_client, shipping_client):
+          self.state = OrderSagaState.STARTED
+          self.payment = payment_client
+          self.inventory = inventory_client
+          self.shipping = shipping_client
+          self.completed_steps = []
+          self.saga_id = str(uuid4())
+      
+      def execute(self, order):
+          self._save_state(order)  # Persist saga state for recovery
+          
+          try:
+              # Step 1
+              self.state = OrderSagaState.PAYMENT_PENDING
+              payment = self.payment.charge(order['id'], order['amount'])
+              self.completed_steps.append(('payment', payment['id']))
+              self.state = OrderSagaState.PAYMENT_COMPLETED
+              
+              # Step 2
+              self.state = OrderSagaState.INVENTORY_PENDING
+              reservation = self.inventory.reserve(order['id'], order['items'])
+              self.completed_steps.append(('inventory', reservation['id']))
+              self.state = OrderSagaState.INVENTORY_RESERVED
+              
+              # Step 3
+              self.state = OrderSagaState.SHIPPING_PENDING
+              shipment = self.shipping.create(order['id'], order['address'])
+              self.completed_steps.append(('shipping', shipment['id']))
+              
+              self.state = OrderSagaState.COMPLETED
+              return {'success': True, 'saga_id': self.saga_id}
+              
+          except Exception as e:
+              self.state = OrderSagaState.COMPENSATING
+              self._compensate()
+              self.state = OrderSagaState.FAILED
+              raise SagaFailedError(f"Saga {self.saga_id} failed: {e}")
+      
+      def _compensate(self):
+          for step_name, step_id in reversed(self.completed_steps):
+              try:
+                  if step_name == 'shipping':
+                      self.shipping.cancel(step_id)
+                  elif step_name == 'inventory':
+                      self.inventory.release(step_id)
+                  elif step_name == 'payment':
+                      self.payment.refund(step_id)
+              except Exception as e:
+                  # Compensation failure: Log, alert, manual intervention
+                  logger.critical(f"Compensation failed for {step_name}/{step_id}: {e}")
+                  # Must be manually resolved — no automatic recovery
+
+================================================================================
+PART 3: OBSERVABILITY IN MICROSERVICES
+================================================================================
+
+--- THE THREE PILLARS ---
+
+METRICS: What's happening (numbers)?
+LOGS: What happened (text)?
+TRACES: How did it happen (request journey)?
+
+Without all three: You cannot diagnose distributed system problems.
+A 500ms latency increase in your app:
+  Metrics: You know latency is up.
+  Logs: You see errors in one service.
+  Traces: You see that service B is slow because service C is slow because DB query is slow.
+
+--- DISTRIBUTED TRACING (OPENTELEMETRY) ---
+
+CONCEPTS:
+  Trace: Complete journey of one request through all services.
+  Span: Single operation within one service (one unit of work).
+  Context propagation: Pass trace context between services so spans link up.
+  
+  Trace ID: Unique ID for entire request journey.
+  Span ID: ID for one operation within that trace.
+  Parent Span ID: Which span triggered this one.
+
+OPENTELEMETRY INSTRUMENTATION:
+
+Python automatic instrumentation:
+  # Install:
+  pip install opentelemetry-sdk opentelemetry-exporter-otlp
+  pip install opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-requests
+  
+  # Setup (in main.py):
+  from opentelemetry import trace
+  from opentelemetry.sdk.trace import TracerProvider
+  from opentelemetry.sdk.trace.export import BatchSpanProcessor
+  from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+  from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+  from opentelemetry.instrumentation.requests import RequestsInstrumentor
+  
+  # Configure exporter (to Jaeger, Tempo, Honeycomb, etc.)
+  exporter = OTLPSpanExporter(endpoint="http://otel-collector:4317")
+  
+  provider = TracerProvider()
+  provider.add_span_processor(BatchSpanProcessor(exporter))
+  trace.set_tracer_provider(provider)
+  
+  # Auto-instrument: Every request automatically traced
+  FastAPIInstrumentor.instrument_app(app)
+  RequestsInstrumentor().instrument()  # Every outbound HTTP call traced
+  
+  # Manual span for business logic:
+  tracer = trace.get_tracer(__name__)
+  
+  async def process_order(order_id: str):
+      with tracer.start_as_current_span("process_order") as span:
+          span.set_attribute("order.id", order_id)
+          span.set_attribute("order.tier", "premium")
+          
+          try:
+              result = await db.fetch_order(order_id)
+              span.set_attribute("order.total", result['total'])
+              return result
+          except Exception as e:
+              span.record_exception(e)
+              span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+              raise
+
+TRACE SAMPLING STRATEGIES:
+  Always sample: Every request traced. High cost. Use for low-volume services.
+  Probabilistic: Sample N% of requests. Misses infrequent errors.
+  Rate limiting: Max N traces/second. Bounded cost.
+  Tail-based sampling: Buffer requests. Sample based on outcome (errors = always sample).
+    Best for: Catch errors reliably while controlling cost.
+    Implementation: OpenTelemetry Collector with tail sampling processor.
+
+JAEGER PRODUCTION DEPLOYMENT:
+  version: '3'
+  services:
+    jaeger:
+      image: jaegertracing/all-in-one:1.52
+      environment:
+        SPAN_STORAGE_TYPE: elasticsearch
+        ES_SERVER_URLS: http://elasticsearch:9200
+      ports:
+        - "16686:16686"   # Jaeger UI
+        - "4317:4317"     # OTLP gRPC
+        - "4318:4318"     # OTLP HTTP
+
+--- STRUCTURED LOGGING FOR MICROSERVICES ---
+
+RULE: Every log entry must include trace_id and span_id.
+Without it: You cannot correlate logs with traces.
+
+Python with structlog:
+  import structlog
+  from opentelemetry import trace
+  
+  def add_trace_context(logger, method, event_dict):
+      """Add OTel trace context to every log entry"""
+      current_span = trace.get_current_span()
+      if current_span.is_recording():
+          ctx = current_span.get_span_context()
+          event_dict['trace_id'] = format(ctx.trace_id, '032x')
+          event_dict['span_id'] = format(ctx.span_id, '016x')
+      return event_dict
+  
+  structlog.configure(
+      processors=[
+          add_trace_context,
+          structlog.processors.TimeStamper(fmt="iso"),
+          structlog.processors.StackInfoRenderer(),
+          structlog.processors.format_exc_info,
+          structlog.processors.JSONRenderer()
+      ]
+  )
+  
+  log = structlog.get_logger()
+  
+  # Usage:
+  log.info("order.processed", order_id=order_id, total=total, items_count=len(items))
+  # Output: {"timestamp":"2025-01-15T10:00:00Z","level":"info","event":"order.processed",
+  #          "order_id":"abc123","total":150.00,"items_count":3,
+  #          "trace_id":"abc123def456...","span_id":"ab12cd34..."}
+
+LOGGING LEVELS AND POLICY:
+  DEBUG: Development only. Never in production (too verbose, too costly).
+  INFO: Business events (order.placed, payment.processed, user.registered).
+        Should be sparse enough to read through in an incident.
+  WARNING: Unexpected but recoverable (retry #3, slow query > 1s, cache miss rate high).
+           Something worth investigating proactively.
+  ERROR: Failed operation with user impact. Needs investigation.
+         Triggers alert if error rate rises above baseline.
+  CRITICAL: System-level failure. Needs immediate response. Pages on-call.
+
+--- METRICS AND ALERTING ---
+
+PROMETHEUS + GRAFANA PRODUCTION SETUP:
+
+Key metrics to expose from each service:
+
+HTTP metrics (auto from frameworks like FastAPI/Express):
+  http_requests_total{method, endpoint, status_code}  — Counter
+  http_request_duration_seconds{method, endpoint}     — Histogram (with buckets)
+  
+Business metrics (manual instrumentation):
+  orders_placed_total                          — Counter
+  order_value_dollars                          — Histogram
+  payment_failures_total{reason}              — Counter
+  inventory_level{product_id, warehouse}      — Gauge
+  
+Service health:
+  db_query_duration_seconds{query_name}       — Histogram
+  cache_hit_ratio                             — Gauge
+  external_api_request_total{api, status}     — Counter
+
+GOLDEN SIGNALS (Google SRE):
+  Latency: How long does a request take?
+  Traffic: How many requests per second?
+  Errors: What fraction of requests fail?
+  Saturation: How full is the service? (CPU, memory, queue depth)
+  
+  Dashboard: Show all four for every service. Alerts when thresholds breached.
+
+ALERT DESIGN:
+  Alert on symptoms (user impact), not causes (internal metrics).
+  
+  WRONG alert: "CPU > 80%" (cause, maybe no user impact)
+  RIGHT alert: "Error rate > 1%" (symptom, users seeing errors)
+  RIGHT alert: "P99 latency > 2 seconds" (symptom, users experiencing slowness)
+  
+  Alerting on causes: Too many alerts, too noisy, on-call fatigue.
+  Alerting on symptoms: Fewer alerts, each meaningful, clear user impact.
+
+================================================================================
+PART 4: MICROSERVICE TESTING STRATEGIES
+================================================================================
+
+--- THE TESTING PYRAMID FOR MICROSERVICES ---
+
+Unit tests (many, fast):
+  Test individual functions in isolation.
+  Mock all external dependencies.
+  
+Integration tests (moderate):
+  Test one service with its real dependencies (real DB, real cache).
+  No mocking of own infrastructure. Mock only external services.
+  Docker Compose for local integration test environment.
+  
+Contract tests (per service boundary):
+  Pact tests: Consumer defines expectations. Provider verifies it meets them.
+  Run on every commit. Catches API breaking changes before deployment.
+
+End-to-end tests (few, slow):
+  Full system tests. Multiple services deployed, real traffic, test critical paths.
+  Run: Nightly or before major releases. Too slow for every commit.
+  Focus: Critical user journeys only. Login → Order → Payment → Confirmation.
+
+--- TESTING WITH TEST CONTAINERS ---
+
+Instead of mocking DB, Redis, etc.: Use real containers in tests.
+  from testcontainers.postgres import PostgresContainer
+  from testcontainers.redis import RedisContainer
+  import pytest
+  
+  @pytest.fixture(scope="session")
+  def postgres_container():
+      with PostgresContainer("postgres:15") as postgres:
+          yield postgres.get_connection_url()
+  
+  @pytest.fixture(scope="session")
+  def redis_container():
+      with RedisContainer("redis:7") as redis:
+          yield f"redis://{redis.get_container_host_ip()}:{redis.get_exposed_port(6379)}"
+  
+  def test_order_creation(postgres_container, redis_container):
+      """Test against real PostgreSQL and Redis (running in Docker)"""
+      repo = OrderRepository(postgres_container)
+      cache = OrderCache(redis_container)
+      service = OrderService(repo, cache)
+      
+      order = service.create_order(user_id="user123", items=[...])
+      
+      assert order.id is not None
+      assert cache.get(order.id) is not None  # Also cached
+      assert repo.find(order.id).status == "pending"
+  
+  # No mocking. Real database. Real cache. Actual behavior tested.
+  # Tests run in CI. Each run creates fresh containers.
+
+--- CHAOS ENGINEERING FOR MICROSERVICES ---
+
+Netflix Chaos Monkey learnings applied:
+
+Most useful experiments for microservices:
+  1. Kill a non-critical service: Does the dependent service degrade gracefully?
+     Expected: Circuit breaker activates, fallback response served, no cascade failure.
+  
+  2. Add latency to service B: Does service A's circuit breaker trip at correct threshold?
+     Expected: After X slow responses, circuit opens, fails fast, latency visible in traces.
+  
+  3. Return 500 errors from service B: Does retry logic work? Does circuit open?
+     Expected: Retry N times, then circuit open, customer gets degraded experience (not 500).
+  
+  4. Exhaust DB connection pool: Does service fail fast or hang?
+     Expected: Timeout configured, connection limit handled, 503 returned quickly.
+  
+  CHAOS TOOLKIT EXPERIMENT:
+  {
+    "title": "Circuit breaker activates on payment service failure",
+    "steady-state-hypothesis": {
+      "title": "Checkout succeeds",
+      "probes": [{
+        "name": "checkout-success-rate",
+        "type": "probe",
+        "tolerance": {"gte": 0.99},
+        "provider": {"type": "http", "url": "http://metrics/checkout_success_rate"}
+      }]
+    },
+    "method": [{
+      "type": "action",
+      "name": "introduce-payment-service-failure",
+      "provider": {
+        "type": "process",
+        "path": "kubectl",
+        "arguments": "scale deployment payment-service --replicas=0"
+      }
+    }]
+  }
+
+================================================================================
+END OF PACK 028: MICROSERVICES DEEP ARCHITECTURE
+Total: When to use microservices (Monolith First Rule), DDD bounded contexts, context
+mapping patterns, Strangler Fig migration, distributed data problem, why 2PC fails,
+Saga pattern (choreography and orchestration with full Python implementations and
+compensation), distributed tracing with OpenTelemetry (auto/manual instrumentation,
+sampling strategies, Jaeger setup), structured logging (trace context injection,
+structlog), Prometheus Golden Signals, alert design principles, testing pyramid
+(contract testing, TestContainers), chaos engineering experiments.
+================================================================================

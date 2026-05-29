@@ -1,0 +1,55 @@
+Question: <p>I have been trying to find information on how to retrieve attachments from a gmail account in either python or PHP, I'm hoping that someone here can be of some help, thanks.</p>
+
+<p>Related:</p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/348630/how-can-i-download-all-emails-with-attachments-from-gmail">How can I download all emails with attachments from Gmail?</a></li>
+</ul>
+
+Answer: <p>I found some code that works! this will download any attachments to a selected folder</p>
+
+<pre><code>&lt;?php 
+
+$gmail_username = 'username@gmail.com';
+$gmail_password = 'mypassword';
+
+$imap = imap_open ("{imap.gmail.com:993/imap/ssl}INBOX", $gmail_username, $gmail_password) or die("can't connect: " . imap_last_error());
+$savefilepath = 'path/to/images_folder/'; //absolute path to images directory
+$imagefilepath = 'images/'; //relative path to images directory
+
+$headers = imap_headers($imap);
+foreach ($headers as $mail) {
+    $flags = substr($mail, 0, 4);
+    //Check for unread msgs, get their UID, and queue them up
+    if (strpos($flags, "U")) {
+        preg_match('/[0-9]+/',$mail,$match);
+        $new_msg[] = implode('',$match);     
+    }
+}
+
+if ($new_msg) {
+    foreach ($new_msg as $result) {
+        $structure = imap_fetchstructure($imap,$result);
+        $parts = $structure-&gt;parts;
+        foreach ($parts as $part) {
+            if ($part-&gt;parameters[0]-&gt;attribute == "NAME") {
+                //Generate a filename with format DATE_RANDOM#_ATTACHMENTNAME.EXT
+                $savefilename = date("m-d-Y") . '_' . mt_rand(rand(), 6) . '_' . $part-&gt;parameters[0]-&gt;value;
+                save_attachment(imap_fetchbody($imap,$result,2),$savefilename,$savefilepath,$savethumbpath);
+                imap_fetchbody($imap,$result,2); //This marks message as read
+            } 
+        }
+    }
+}
+
+imap_close($imap);
+
+function save_attachment( $content , $filename , $localfilepath, $thumbfilepath ) {
+    if (imap_base64($content) != FALSE) {   
+        $file = fopen($localfilepath.$filename, 'w');
+        fwrite($file, imap_base64($content));
+        fclose($file);
+    }
+}
+?&gt;
+</code></pre>

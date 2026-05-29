@@ -1,0 +1,48 @@
+# rpihkal: Stop pasting and start gluing
+
+Use the glue R package to join strings.
+
+We’ve all been there; writing manuscripts with R Markdown and dreaming of easy in-text code bits for reproducible reporting. Say you’ve fit a regression model to your data, and would then like to report the model’s parameters in your text, without writing the values in the text. (If the data or model changes, you’d need to re-type the values again.)
+
+For example, you can print this model summary easily in the R console:
+
+fit <- lm(mpg ~ disp, data = mtcars)
+summary(fit)
+##
+## Call:
+## lm(formula = mpg ~ disp, data = mtcars)
+##
+## Residuals:
+##     Min      1Q  Median      3Q     Max
+## -4.8922 -2.2022 -0.9631  1.6272  7.2305
+##
+## Coefficients:
+##              Estimate Std. Error t value Pr(>|t|)
+## (Intercept) 29.599855   1.229720  24.070  < 2e-16 ***
+## disp        -0.041215   0.004712  -8.747 9.38e-10 ***
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+##
+## Residual standard error: 3.251 on 30 degrees of freedom
+## Multiple R-squared:  0.7183, Adjusted R-squared:  0.709
+## F-statistic: 76.51 on 1 and 30 DF,  p-value: 9.38e-10
+
+And to cite those values in the text body of your manuscript, you can write the text in R Markdown like this:
+
+The model intercept was r round(coef(fit)[1], 2), great.
+
+Which would show up in your manuscript like this:
+
+The model intercept was 29.6, great.
+
+## Paste
+
+However, when you want to present more information, such as the parameter estimate with its standard error, you will have to paste() those strings together:
+
+(x <- round(summary(fit)$coefficients, 3)) ## Estimate Std. Error t value Pr(>|t|) ## (Intercept) 29.600 1.230 24.070 0 ## disp -0.041 0.005 -8.747 0 intercept <- paste("b = ", x[1, 1], ", SE = ", x[1, 2], sep = "") You can then just cite the intercept object in your text body: The model intercept was very very significant (r intercept). Which would render in your PDF or word document as: The model intercept was very very significant (b = 29.6, SE = 1.23). paste() is a base R function, and as such very robust and reproducible–all R installations will have it. However, as such it has a fairly terrible syntax where you have to quote strings, separate strings and variables with commas, etc. This task is made much easier with glue(). ## Glue glue is a small R package that allows you to join strings together in a neat, pythonific way. It replaces the need for quoting and separating arguments in paste(), by asking you to wrap variables in curly braces. Here’s how to do the above pasting with glue: library(glue) intercept <- glue("b = {x[1, 1]}, SE = {x[1, 2]}") Which gives you the same string as the much messier paste() approach: b = 29.6, SE = 1.23 ### Glue with data frames Glue has other neat (more advanced) features, such as gluing variables row-by-row in a data frame: library(dplyr) as.data.frame(x) %>% glue_data( "{rownames(.)}'s point estimate was {Estimate}, with an SE of {Std. Error}." ) ## (Intercept)'s point estimate was 29.6, with an SE of 1.23. ## disp's point estimate was -0.041, with an SE of 0.005. ## Appendix: papaja For some models (like our simple linear model example here), the papaja R package (which deserves its own rpihkal post!) has very useful shortcuts library(papaja) intercept <- apa_print(fit)$estimate\$Intercept
+
+If you now cite intercept in the text body of your manuscript, it renders into $$\LaTeX$$ (which is interpreted nicely if you are outputting PDF or Word documents; here on this website it looks odd):
+
+The model intercept was rather significant (r intercept).
+
+The model intercept was rather significant ($$b = 29.60$$, 95% CI $$[27.09$$, $$32.11]$$).

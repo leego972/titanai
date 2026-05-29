@@ -1,0 +1,45 @@
+Question: <p>I have a python module installed on my system and I'd like to be able to see what functions/classes/methods are available in it.   </p>
+
+<p>I want to call the doc function on each one. In ruby I can do something like ClassName.methods to get a list of all the methods available on that class. Is there something similar in python?</p>
+
+<p>eg. something like:</p>
+
+<pre><code>from somemodule import foo
+print foo.methods # or whatever is the correct method to call
+</code></pre>
+
+Answer: <p>For completeness' sake, I'd like to point out that sometimes you may want to <em>parse</em> code instead of importing it. An <code>import</code> will <em>execute</em> top-level expressions, and that could be a problem.</p>
+
+<p>For example, I'm letting users select entry point functions for packages being made with <a href="https://docs.python.org/dev/library/zipapp.html">zipapp</a>. Using <code>import</code> and <code>inspect</code> risks running astray code, leading to crashes, help messages being printed out, GUI dialogs popping up and so on.</p>
+
+<p>Instead I use the <a href="https://docs.python.org/3.2/library/ast.html#module-ast">ast</a> module to list all the top-level functions:</p>
+
+<pre><code>import ast
+import sys
+
+def top_level_functions(body):
+    return (f for f in body if isinstance(f, ast.FunctionDef))
+
+def parse_ast(filename):
+    with open(filename, "rt") as file:
+        return ast.parse(file.read(), filename=filename)
+
+if __name__ == "__main__":
+    for filename in sys.argv[1:]:
+        print(filename)
+        tree = parse_ast(filename)
+        for func in top_level_functions(tree.body):
+            print("  %s" % func.name)
+</code></pre>
+
+<p>Putting this code in <code>list.py</code> and using itself as input, I get:</p>
+
+<pre><code>$ python list.py list.py
+list.py
+  top_level_functions
+  parse_ast
+</code></pre>
+
+<p>Of course, navigating an AST can be tricky sometimes, even for a relatively simple language like Python, because the AST is quite low-level. But if you have a simple and clear use case, it's both doable and safe.</p>
+
+<p>(Though, a downside is that you can't detect functions that are dynamically generated, like <code>foo = lambda x,y: x*y</code>.)</p>

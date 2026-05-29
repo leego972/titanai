@@ -1,0 +1,51 @@
+Question: <p>Ant has a nice way to select groups of files, most handily using ** to indicate a directory tree. E.g.</p>
+
+<pre><code>**/CVS/*            # All files immediately under a CVS directory.
+mydir/mysubdir/**   # All files recursively under mysubdir
+</code></pre>
+
+<p>More examples can be seen here:</p>
+
+<p><a href="http://ant.apache.org/manual/dirtasks.html" rel="nofollow">http://ant.apache.org/manual/dirtasks.html</a></p>
+
+<p>How would you implement this in python, so that you could do something like:</p>
+
+<pre><code>files = get_files("**/CVS/*")
+for file in files:
+    print file
+
+=&gt;
+CVS/Repository
+mydir/mysubdir/CVS/Entries
+mydir/mysubdir/foo/bar/CVS/Entries
+</code></pre>
+
+Answer: <p>As soon as you come across a <code>**</code>, you're going to have to recurse through the whole directory structure, so I think at that point, the easiest method is to iterate through the directory with os.walk, construct a path, and then check if it matches the pattern.  You can probably convert to a regex by something like:</p>
+
+<pre><code>def glob_to_regex(pat, dirsep=os.sep):
+    dirsep = re.escape(dirsep)
+    print re.escape(pat)
+    regex = (re.escape(pat).replace("\\*\\*"+dirsep,".*")
+                           .replace("\\*\\*",".*")
+                           .replace("\\*","[^%s]*" % dirsep)
+                           .replace("\\?","[^%s]" % dirsep))
+    return re.compile(regex+"$")
+</code></pre>
+
+<p>(Though note that this isn't that fully featured - it doesn't support <code>[a-z]</code> style glob patterns for instance, though this could probably be added).  (The first <code>\*\*/</code> match is to cover cases like <code>\*\*/CVS</code> matching <code>./CVS</code>, as well as having just <code>\*\*</code> to match at the tail.)</p>
+
+<p>However, obviously you don't want to recurse through everything below the current dir when not processing a <code>**</code> pattern, so I think you'll need a two-phase approach.  I haven't tried implementing the below, and there are probably a few corner cases, but I think it should work:</p>
+
+<ol>
+<li><p>Split the pattern on your directory seperator.  ie <code>pat.split('/') -&gt; ['**','CVS','*']</code></p></li>
+<li><p>Recurse through the directories, and look at the relevant part of the pattern for this level.  ie. <code>n levels deep -&gt; look at pat[n]</code>.</p></li>
+<li><p>If <code>pat[n] == '**'</code> switch to the above strategy:</p>
+
+<ul>
+<li>Reconstruct the pattern with <code>dirsep.join(pat[n:])</code></li>
+<li>Convert to a regex with <code>glob\_to\_regex()</code></li>
+<li>Recursively <code>os.walk</code> through the current directory, building up the path relative to the level you started at.  If the path matches the regex, yield it.</li>
+</ul></li>
+<li><p>If pat doesn't match <code>"**"</code>, and it is the last element in the pattern, then yield all files/dirs matching <code>glob.glob(os.path.join(curpath,pat[n]))</code></p></li>
+<li><p>If pat doesn't match <code>"**"</code>, and it is NOT the last element in the pattern, then for each directory, check if it matches (with glob) <code>pat[n]</code>.  If so, recurse down through it, incrementing depth (so it will look at <code>pat[n+1]</code>)</p></li>
+</ol>

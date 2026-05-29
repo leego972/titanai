@@ -1,0 +1,214 @@
+# Hybrid raytraced shadows part 2: performance improvements
+
+A few weeks ago I documented the experiments I made with hybrid raytraced shadows and reflections, describing how raytracing can be set up and used in the context of a deferred rendering architecture. It was great fun and I managed to produce some nice images.
+
+I soon came to realise though that this simplistic approach was mostly suitable for simple models (such as spheres and cubes) as the bounding volume hierarchy (BVH) I created to accelerate scene traversal stored full meshes in the leaves. This reduced the opportunity to accelerate traversal further when a leaf was reached, which is especially bad for large meshes, and complicated the shader a lot by creating many paths through it, potentially increasing thread divergence and reducing occupancy (by increased register allocation). Also the raytracing pass was heavily memory bound, making it scale less well with more complex, and higher polygon, content. The current approach would easily break down when used with more representative game environments/meshes.
+
+So I set about improving the performance of the hybrid raytracer. This coincided with Wolfgang Engel inviting me to port the code I wrote for the previous blog post to The Forge, so I switched to that framework to develop the test app.
+
+The first improvement I implemented was to store triangles in the leaves instead of full meshes. For every triangle in the scene, transformed to world space, a bounding box is calculated and the BVH was created off that bounding box list, initially using a median split (sorting the bounding box list by distance and splitting it in half), like previously. For storage of BVH tree I initially kept the Structured Buffer from the previous demo, adding an extra float3 and repurposing the members of the struct for either an intermediate node’s bounding box or a leaf’s triangle vertices.
+
+The compute shader became much simpler as there is no need for two separate parts, one to traverse the BVH and one to iterate over (potentially many) mesh triangles to determine collisions.
+
+This simple change led to more than halving the raytracing shadow pass cost even in a simple scene (10ms from 23ms on the Intel HD 4000).
+
+This was due to a combination of less memory bandwidth needed and less ALU for collision detection as the vertices come pre-transformed to world space (so no need to fetch matrices and do transformations), and reduced divergence in the shader. Also by by having individual triangles in the leaves we reduce the number of ray-triangle intersection tests and increase the number of ray-aabox test which are cheaper.
+
+Next I tried loading and creating the BVH using the Sponza model. This created a ~558K node tree which at first proved too much for the HD 4000 to handle, for quarter resolution shadows.
+
+On an NVidia GTX 970 (Maxwell) the shadow pass cost was 16ms, still quarter resolution (full res was 1920×1080).
+
+Having a single structure for both the nodes and the leaves seems wasteful, so I swapped to a raw (ByteAddressBuffer) for BVH storage to handle memory in the shader manually.
+
+```while (offsetToNextNode !=0)
+{
+dataOffset += SizeOfInt;
+
+collision = false;
+
+if (offsetToNextNode < 0)
+{
+//try collision against this node's bounding box
+dataOffset += SizeOfFloat3;
+
+dataOffset += SizeOfFloat3;
+
+//intermediate node check for intersection with bounding box
+collision = RayIntersectsBox(worldPos, rayDirInv, bboxMin.xyz, bboxMax.xyz);
+
+//if there is collision, go to the next node (left) or else skip over the whole branch
+if (!collision)
+dataOffset += abs(offsetToNextNode);
+
+}
+else if (offsetToNextNode > 0)
+{
+dataOffset += SizeOfFloat3;
+
+dataOffset += SizeOfFloat3;
+
+dataOffset += SizeOfFloat3;
+
+//leaf node check for intersection with triangle
+collision = RayTriangleIntersect(worldPos, rayDir, vertex0.xyz, vertex1MinusVertex0.xyz, vertex2MinusVertex0.xyz, t, bCoord);
+
+if (collision)
+{
+break;
+}
+}
+}
+
+```
+
+Using a ByteAddressBuffer and variable size nodes dropped the shadow cost from 16ms to 13ms on the GTX 970.
+
+Memory layout changes helped performance measurably, but 13ms for quarter resolution shadows on the GTX 970 sound a lot. The issue with “real-world” meshes (as opposed to spheres and cubes), is that the polygon distribution is not uniform and triangle sizes vary a lot leading to non-optimal traversal often with overlapping nodes (bounding boxes).
+
+To improve this I tried a Surface Area Heuristic (SAH) during BVH construction. To understand how this works imagine a bunch of triangles and a ray:
+
+In order to accelerate traversal, a median-split BVH construction approach would sort triangles (across an axis) based on their bounding box centroid, split the list in the middle and create two children nodes.
+
+With this scheme the ray will first intersect the left child’s bounding box, which is mostly empty space, and will waste time going down the left subtree only to find out that there is no triangle collision there. If we remove the “split in the middle” requirement and allow the split distance to move, we can potentially find a better split that eliminates that empty space and makes BVH traversal faster (in this example we’ve moved the split distance one to the left):
+
+This is exactly what the Surface Area Heuristic does, it considers many splits across all 3 axes:
+
+and picks the split distance that minimises
+
+$SurfaceArea(AABB_{left}) * NoOfTris_{left} + SurfaceArea(AABB_{right}) * NoOfTris_{right}$
+
+This is the traversal heatmap of the plain, median split BVH. Blue is zero steps through the BVH and red is over 500 :
+
+This is the traversal heatmap of the BVH with the Surface Area Heuristic:
+
+The number of nodes visited during traversal goes down dramatically, as does the cost of the shadows pass, down to 3.6ms (from 13ms) on the GTX 970, for quarter res shadows. A tip from Yuriy O’Donnell to rearrange the nodes so that the largest one is visited first, dropped this a further 0.3 ms.
+
+The SAH and calculating the cost of each split gives us further options, for example we could stop subdivision when splitting a node produces children where the cost is no less than the cost of the parent node. I didn’t implement this in this iteration as it requires leaf nodes potentially handling more than one triangles.
+
+At this point I started feeling encouraged and dropped the quarter resolution, trying full resolution shadows instead. This, as expected, increased the cost of the shadows pass to ~10.5ms on the GTX 970. The shadow pass was still TEX bound, the cost of reading the BVH trampling everything else in the shader.
+
+So far I was using a mix of unaligned Load and Load3s to fetch the BVH data in the compute shader from the ByteAddressBuffer. A performance study of various buffers done by Sebastian Aaltonen showed that raw (ByteAddressBuffer) buffers might not be the best option on NVidia GPUs (certainly on Maxwell GPUs like the one I am using — Sebastian has just added performance test results for Volta which show that raw might be the best choice on that architecture). I experimented with changing the storage of the BVH to a float4 typed buffer instead of raw, packing the data in order to reduce memory waste like this:
+
+```struct BVHNode
+{
+float4 MinBounds; // OffsetToNextNode in w component
+float4 MaxBounds;
+};
+
+struct BVHLeaf
+{
+float4 Vertex0; // OffsetToNextNode in w component
+float4 Edge1;
+float4 Edge2;
+};
+```
+
+```while (offsetToNextNode != 0)
+{
+float4 element0 = BVHTree[dataOffset++].xyzw;
+float4 element1 = BVHTree[dataOffset++].xyzw;
+
+offsetToNextNode = int(element0.w);
+
+collision = false;
+
+if (offsetToNextNode < 0)
+{
+//try collision against this node's bounding box
+float3 bboxMin = element0.xyz;
+float3 bboxMax = element1.xyz;
+
+//intermediate node check for intersection with bounding box
+collision = RayIntersectsBox(worldPos, rayDirInv, bboxMin.xyz, bboxMax.xyz);
+
+//if there is collision, go to the next node (left) or else skip over the whole branch
+if (!collision)
+dataOffset += abs(offsetToNextNode);
+}
+else if (offsetToNextNode > 0)
+{
+float4 element2 = BVHTree[dataOffset++].xyzw;
+
+float3 vertex0 = element0.xyz;
+float3 vertex1MinusVertex0 = element1.xyz;
+float3 vertex2MinusVertex0 = element2.xyz;
+
+//leaf node check for intersection with triangle
+collision = RayTriangleIntersect(worldPos, rayDir, vertex0.xyz, vertex1MinusVertex0.xyz, vertex2MinusVertex0.xyz, t, bCoord);
+
+if (collision)
+{
+break;
+}
+}
+}
+```
+
+Compared to raw buffer storage this scheme added a byte per node and 2 bytes per leaf. In terms of performance though, it made a massive difference, cutting the shadow cost in half on the GTX 970, down to 5.5ms from 10.5ms.
+
+Unfortunately on Intel GPUs, at least the HD 4000 that I am profiling on, the situation is reversed, i.e. raw buffers are significantly faster than typed buffers, meaning for optimal performance on all GPUs we’d need support both types of buffers.
+
+Finally, Rory Driscoll suggested a simple optimisation that I somehow had totally missed, although I have used it in the previous game for regular, shadowmap, shadows: avoid casting rays for surfaces that point away from the light. This is simple to implement in the shader as I am already loading the normal. A negative dot product between the light and normal directions means that the surface is pointing away from the light and ray tracing can be skipped for that pixel.
+
+```float depth = depthBuffer[DTid.xy].x;
+float3 normal = normalBuffer[DTid.xy].xyz;
+
+float NdotL = dot(normal, lightDir.xyz);
+
+if (depth < 1 && NdotL > 0)
+{
+// trace rays
+}
+```
+
+The improvement this change can make to the shadow cost depends on the scene and light direction, in this particular case it cut the cost in half again, down to ~2.5ms from 5.5ms on the GTX 970 and to 20ms from 40ms on the HD 4000 (full-res shadows in both cases). As a reminder we also avoid tracing rays for “sky pixels” (depth == 1).
+
+Interestingly, the shadow pass is now ALU bound instead of TEX (memory) bound on GTX970, meaning that the GPU spends more time on calculating intersections than fetching memory.
+
+Compared to the original (which was rendering quarter res as well)
+
+This could potentially be improved by reducing bounding box overlap in the BVH which would in turn avoid unnecessary intersection tests. Spatial Splits seems like a good approach which I will try in a future iteration. Also in some cases, especially for simpler systems like directional light shadows and non moving light, parts of the ray-box intersection could be precalculated and stored in the BVH nodes to reduce the amount of computation in the shader.
+
+To summarise the improvements that took place this iteration and their impact:
+
+• Stored triangles instead of full meshes in the BVH leaves. Halved the raytracing cost of simple scene on the HD 4000.
+• Switched to a ByteAddressBuffer from Structured Buffer for BVH storage, this had a measurable impact on performance on the GTX970 (from 16ms to 13ms, quarter res shadows) and even more on the HD 4000
+• Used a Surface Area Heuristic during BVH creation, this improved traversal time a lot (3.6ms from 13ms on the GTX 970, for quarter res shadows)
+• Reordered nodes so that the one with the largest probability of impact is visited first, this had a small positive impact on the performance (0.3 ms on the GTX970).
+• Switched to a float4 typed Buffer for BVH storate which improved performance significantly on the GTX970 (down to 5.5ms from 10.5ms for full res shadows), but made performance worse on the HD 4000.
+• Avoided casting shadow rays for surfaces that point away from the light. Again, this halved the raytracing cost on both GPUs (down to 2.5ms from 5.5ms on the GTX 970 and to 20ms from 40ms on the HD 4000, full res shadows).
+
+After this batch of improvements full resolution shadows now cost about ~2.5ms (for the profiling light direction/view) at 1920×1080 on the GTX 970 (or 0.82 GigaRays/sec if you prefer that metric), and about 20ms on the Intel HD 4000.
+
+Finally, since I unhelpfully changed shadow resolution mid-project, it is worth comparing the impact of the performance improvements when rendering quarter resolution shadows, for which I have recorded the original cost: It is reduced from about 16ms to 0.8ms on the GTX970.
+
+The results imply that raytraced shadows could be feasible in “real-world” scenarios, with more representative meshes, using a combination of good BVH acceleration, playing to a particular GPU’s strength and context specific optimisations (like the NdotL optimisation for shadow rays above).
+
+The hybrid raytraced shadows sample is now part of The Forge and it supports both DirectX 12 and Vulkan (more platforms are being added as well). It will be available with the next release which should be able to download this week.
+
+## 3 thoughts on “Hybrid raytraced shadows part 2: performance improvements”
+
+1. Thanks for the write-up Kostas. Is the 20ms figure you mention for the HD4000 measured using the optimal memory layout for that GPU?
+
+1. Yes it is, the HD4000 is using a ByteAddressBuffer to store the BVH.
+
+2. nothings2 says:
+
+I don’t have a ton of actual experience with (compute) shader optimization, so take this with a grain of salt, but:
+
+If you have a code sequence like “if (usually_true) do_cheap_thing; else do_expensive_thing” then this can be fine if usually true is true like 99.9% of the time. (It’s also fine if “usually_true” is true like 50% of the time.) But if “usually_true” is true like 1/64th of the time, and the underlying SIMD is 64 lanes wide, then you’re going to be running the else case almost every time through the loop, but with only 1/64th utilization. (To be clear, I’m referring to your if branch on testing BVH nodes vs testing triangles.)
+
+I have no idea what sort of actual numbers you’re getting here so I don’t know if it’s an actual issue.
+
+I don’t remember if you can easily use perf tools to see utilization, but it seems like there’s a simple way to optimize it and you can just test it and see if it helps. (Again, caveat, I’ve never actually done this so maybe I’m missing something.)
+
+To be explicit, the loop looks like:
+“while () { setup; if (usually) { cheap_thing } else { expensive_thing }”
+
+(I’m writing this as a one-liner because there’s no preview so I don’t know how indented code will show up.)
+
+What you want to do is do more of the cheap thing than the expensive thing, so you basically unroll the cheap half of the loop:
+
+“setup; while() { if (usually) { cheap_thing; setup; if (usually) { cheap_thing; setup; } } } if (!usually) { expensive_thing; setup; } }”
+
+I don’t have any practical experience so I don’t know how many times you should unroll. I’d start with four and see if it makes any difference.

@@ -1,0 +1,33 @@
+Question: <p>For some reasons, I would like to do an explicit quoting of a string value (becoming a part of constructed SQL query) instead of waiting for implicit quotation performed by <code>cursor.execute</code> method on contents of its second parameter.</p>
+
+<p>By "implicit quotation" I mean:</p>
+
+<pre><code>value = "Unsafe string"
+query = "SELECT * FROM some_table WHERE some_char_field = %s;"
+cursor.execute( query, (value,) ) # value will be correctly quoted
+</code></pre>
+
+<p>I would prefer something like that:</p>
+
+<pre><code>value = "Unsafe string"
+query = "SELECT * FROM some_table WHERE some_char_field = %s;" % \
+    READY_TO_USE_QUOTING_FUNCTION(value)
+cursor.execute( query ) # value will be correctly quoted, too
+</code></pre>
+
+<p>Is such low level <code>READY_TO_USE_QUOTING_FUNCTION</code> expected by Python DB API specification (I couldn't find such functionality in <a href="http://www.python.org/dev/peps/pep-0249/">PEP 249</a> document). If not, maybe Psycopg2 provides such function? If not, maybe Django provides such function? I would prefer not to write such function myself...</p>
+
+Answer: <p>You should try to avoid doing your own quoting.  Not only will it be DB-specific as people have pointed out, but flaws in quoting are the source of SQL injection bugs.</p>
+
+<p>If you don't want to pass around queries and values separately, then pass around a list of the parameters:</p>
+
+<pre><code>def make_my_query():
+    # ...
+    return sql, (value1, value2)
+
+def do_it():
+    query = make_my_query()
+    cursor.execute(*query)
+</code></pre>
+
+<p>(I probably have the syntax of cursor.execute wrong) The point here is that just because cursor.execute takes a number of arguments, that doesn't mean you have to handle them all separately.  You can deal with them as one list.</p>

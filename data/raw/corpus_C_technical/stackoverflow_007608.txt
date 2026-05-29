@@ -1,0 +1,56 @@
+Question: <p>How do I execute the following shell command using the Python <a href="https://docs.python.org/library/subprocess.html"><code>subprocess</code></a> module?</p>
+
+<pre><code>echo "input data" | awk -f script.awk | sort &gt; outfile.txt
+</code></pre>
+
+<p>The input data will come from a string, so I don't actually need <code>echo</code>.  I've got this far, can anyone explain how I get it to pipe through <code>sort</code> too?</p>
+
+<pre><code>p_awk = subprocess.Popen(["awk","-f","script.awk"],
+                          stdin=subprocess.PIPE,
+                          stdout=file("outfile.txt", "w"))
+p_awk.communicate( "input data" )
+</code></pre>
+
+<p><strong>UPDATE</strong>:  Note that while the accepted answer below doesn't actually answer the question as asked, I believe S.Lott is right and it's better to avoid having to solve that problem in the first place!</p>
+
+Answer: <p>To emulate a shell pipeline:</p>
+
+<pre><code>from subprocess import check_call
+
+check_call('echo "input data" | a | b &gt; outfile.txt', shell=True)
+</code></pre>
+
+<p>without invoking the shell (see <a href="http://docs.python.org/2.7/library/subprocess.html#replacing-shell-pipeline" rel="nofollow">17.1.4.2. Replacing shell pipeline</a>):</p>
+
+<pre><code>#!/usr/bin/env python
+from subprocess import Popen, PIPE
+
+a = Popen(["a"], stdin=PIPE, stdout=PIPE)
+with a.stdin:
+    with a.stdout, open("outfile.txt", "wb") as outfile:
+        b = Popen(["b"], stdin=a.stdout, stdout=outfile)
+    a.stdin.write(b"input data")
+statuses = [a.wait(), b.wait()] # both a.stdin/stdout are closed already
+</code></pre>
+
+<p><a href="http://plumbum.readthedocs.org/en/latest/" rel="nofollow"><code>plumbum</code></a> provides some syntax sugar:</p>
+
+<pre><code>#!/usr/bin/env python
+from plumbum.cmd import a, b # magic
+
+(a &lt;&lt; "input data" | b &gt; "outfile.txt")()
+</code></pre>
+
+<p>The analog of:</p>
+
+<pre><code>#!/bin/sh
+echo "input data" | awk -f script.awk | sort &gt; outfile.txt
+</code></pre>
+
+<p>is:</p>
+
+<pre><code>#!/usr/bin/env python
+from plumbum.cmd import awk, sort
+
+(awk["-f", "script.awk"] &lt;&lt; "input data" | sort &gt; "outfile.txt")()
+</code></pre>

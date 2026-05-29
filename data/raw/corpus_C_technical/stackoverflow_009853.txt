@@ -1,0 +1,27 @@
+Question: <p>I'm using the <a href="http://docs.python.org/library/subprocess.html">subprocess module</a> to start a subprocess and connect to it's output stream (stdout). I want to be able to execute non-blocking reads on its stdout. Is there a way to make .readline non-blocking or to check if there is data on the stream before I invoke <code>.readline</code>? I'd like this to be portable or at least work under Windows and Linux.</p>
+
+<p>here is how I do it for now (It's blocking on the <code>.readline</code> if no data is avaible):</p>
+
+<pre><code>p = subprocess.Popen('myprogram.exe', stdout = subprocess.PIPE)
+output_str = p.stdout.readline()
+</code></pre>
+
+Answer: <p>I have often had a similar problem; Python programs I write frequently need to have the ability to execute some primary functionality while simultaneously accepting user input from the command line (stdin). Simply putting the user input handling functionality in another thread doesn't solve the problem because <code>readline()</code> blocks and has no timeout. If the primary functionality is complete and there is no longer any need to wait for further user input I typically want my program to exit, but it can't because <code>readline()</code> is still blocking in the other thread waiting for a line. A solution I have found to this problem is to make stdin a non-blocking file using the fcntl module:</p>
+
+<pre><code>import fcntl
+import os
+import sys
+
+# make stdin a non-blocking file
+fd = sys.stdin.fileno()
+fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+# user input handling thread
+while mainThreadIsRunning:
+      try: input = sys.stdin.readline()
+      except: continue
+      handleInput(input)
+</code></pre>
+
+<p>In my opinion this is a bit cleaner than using the select or signal modules to solve this problem but then again it only works on UNIX...</p>

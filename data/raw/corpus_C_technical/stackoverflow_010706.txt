@@ -1,0 +1,80 @@
+Question: <p>I have two Python dictionaries, and I want to write a single expression that returns these two dictionaries, merged.  The <code>update()</code> method would be what I need, if it returned its result instead of modifying a dict in-place.</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a':1, 'b': 2}
+&gt;&gt;&gt; y = {'b':10, 'c': 11}
+&gt;&gt;&gt; z = x.update(y)
+&gt;&gt;&gt; print z
+None
+&gt;&gt;&gt; x
+{'a': 1, 'b': 10, 'c': 11}
+</code></pre>
+
+<p>How can I get that final merged dict in z, not x?</p>
+
+<p>(To be extra-clear, the last-one-wins conflict-handling of <code>dict.update()</code> is what I'm looking for as well.)</p>
+
+Answer: <p>In a follow-up answer, you asked about the relative performance of these two alternatives:</p>
+
+<pre><code>z1 = dict(x.items() + y.items())
+z2 = dict(x, **y)
+</code></pre>
+
+<p>On my machine, at least (a fairly ordinary x86_64 running Python 2.5.2), alternative <code>z2</code> is not only shorter and simpler but also significantly faster.  You can verify this for yourself using the <code>timeit</code> module that comes with Python.</p>
+
+<p>Example 1: identical dictionaries mapping 20 consecutive integers to themselves:</p>
+
+<pre><code>% python -m timeit -s 'x=y=dict((i,i) for i in range(20))' 'z1=dict(x.items() + y.items())'
+100000 loops, best of 3: 5.67 usec per loop
+% python -m timeit -s 'x=y=dict((i,i) for i in range(20))' 'z2=dict(x, **y)' 
+100000 loops, best of 3: 1.53 usec per loop
+</code></pre>
+
+<p><code>z2</code> wins by a factor of 3.5 or so.  Different dictionaries seem to yield quite different results, but <code>z2</code> always seems to come out ahead.  (If you get inconsistent results for the <em>same</em> test, try passing in <code>-r</code> with a number larger than the default 3.)</p>
+
+<p>Example 2: non-overlapping dictionaries mapping 252 short strings to integers and vice versa:</p>
+
+<pre><code>% python -m timeit -s 'from htmlentitydefs import codepoint2name as x, name2codepoint as y' 'z1=dict(x.items() + y.items())'
+1000 loops, best of 3: 260 usec per loop
+% python -m timeit -s 'from htmlentitydefs import codepoint2name as x, name2codepoint as y' 'z2=dict(x, **y)'               
+10000 loops, best of 3: 26.9 usec per loop
+</code></pre>
+
+<p><code>z2</code> wins by about a factor of 10.  That's a pretty big win in my book!</p>
+
+<p>After comparing those two, I wondered if <code>z1</code>'s poor performance could be attributed to the overhead of constructing the two item lists, which in turn led me to wonder if this variation might work better:</p>
+
+<pre><code>from itertools import chain
+z3 = dict(chain(x.iteritems(), y.iteritems()))
+</code></pre>
+
+<p>A few quick tests, e.g.</p>
+
+<pre><code>% python -m timeit -s 'from itertools import chain; from htmlentitydefs import codepoint2name as x, name2codepoint as y' 'z3=dict(chain(x.iteritems(), y.iteritems()))'
+10000 loops, best of 3: 66 usec per loop
+</code></pre>
+
+<p>lead me to conclude that <code>z3</code> is somewhat faster than <code>z1</code>, but not nearly as fast as <code>z2</code>.  Definitely not worth all the extra typing.</p>
+
+<p>This discussion is still missing something important, which is a performance comparison of these alternatives with the "obvious" way of merging two lists: using the <code>update</code> method.  To try to keep things on an equal footing with the expressions, none of which modify x or y, I'm going to make a copy of x instead of modifying it in-place, as follows:</p>
+
+<pre><code>z0 = dict(x)
+z0.update(y)
+</code></pre>
+
+<p>A typical result:</p>
+
+<pre><code>% python -m timeit -s 'from htmlentitydefs import codepoint2name as x, name2codepoint as y' 'z0=dict(x); z0.update(y)'
+10000 loops, best of 3: 26.9 usec per loop
+</code></pre>
+
+<p>In other words, <code>z0</code> and <code>z2</code> seem to have essentially identical performance.  Do you think this might be a coincidence?  I don't....</p>
+
+<p>In fact, I'd go so far as to claim that it's impossible for pure Python code to do any better than this.  And if you can do significantly better in a C extension module, I imagine the Python folks might well be interested in incorporating your code (or a variation on your approach) into the Python core.  Python uses <code>dict</code> in lots of places; optimizing its operations is a big deal.</p>
+
+<p>You could also write this as</p>
+
+<pre><code>z0 = x.copy()
+z0.update(y)
+</code></pre>
+
+<p>as Tony does, but (not surprisingly) the difference in notation turns out not to have any measurable effect on performance.  Use whichever looks right to you.  Of course, he's absolutely correct to point out that the two-statement version is much easier to understand.</p>

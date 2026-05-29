@@ -1,0 +1,124 @@
+For my latest project, I wanted to use RGBW LEDs instead of just RGB ones.
+As they have some interesting advantages over RGB that I wanted to explore:
+
+• A more accurate representation of white
+• A wider color spectrum
+
+This only works with somewhat desaturated colors. But at the end of the post I have some ideas that might help to work around that.
+
+This would allow for better lighting of surfaces as well as more natural-looking colors.
+
+Why that is and how we get there is what I will try to explain below:
+
+## What is color exactly?
+
+### Light and color
+
+Light or visible light to be precise is a form of electromagnetic radiation with a wavelength of 400-700 nanometers. Electromagnetic radiation means that the wave got a magnetic as well as an electric field which both oscillate at the same time. Such a wave is emitted when an electron transitions from a higher to a lower state of energy, releasing the difference in the form of a photon. The length of one of the wave segments is used to identify the waves corresponding wavelength.
+
+### What the wavelength got to do with spectral color
+
+Relevant for us are the colors red, green and blue(RGB anyone?) that can be found at ~700 nm, ~530 nm, and ~470 nm respectively. At those wavelengths, they are considered (near-) spectral colors. That means that they are composed of only one wavelength or a relatively narrow band of wavelengths. Which means that they can be used to efficiently mix different colors.
+
+## Mixing colors
+
+When different waves of light intersect and bundle up before they reach the eye, they can be perceived as a different color that appears lighter than the colors used to mix it. A light source will appear as white if enough colors are added up that way.
+
+And as an example for mixing, if you get a red and a green light to combine, the resulting light will appear yellow.
+
+### Subtractive mixing
+
+This type of color mixing determines how an object looks in a specific light. The surface of an object is composed of one or many pigments. A pigment only reflects a specific wavelength and absorbs the rest. Mixing enough pigments will result in all light being absorbed, creating a black surface.
+
+For example, a red surface illuminated by white light looks red because it absorbs all but the red light. But if you would use a blue light instead, the same surface would look black.
+
+## Wavelength spectra of RGB and white LEDs
+
+Let's take a look at the emission graph above that shows what the possible spectrum of an RGB LED might look like.
+
+Given a temperature of 25 °C, the x-axis describes the wavelength and therefore the perceived color of the light and the y-axis describes the actual intensity of that wavelength.
+And as you can see, their actual colors are intense but have a quite narrow range of emitted colors with some gaps in between.
+
+If we now look at the spectrum of a white LED, you can clearly see that there is a wider range of wavelengths.
+
+To understand how this is archived we first need to understand what a Stokes shift is.
+Quoting Wikipedia:
+
+When a system (be it a molecule or atom) absorbs a photon, it gains energy and enters an excited state. One way for the system to relax is to emit a photon, thus losing its energy (another method would be the loss of energy as heat). When the emitted photon has less energy than the absorbed photon, this energy difference is the Stokes shift.
+
+In the case of the white LED this means that some of the photons of the underlying blue LED are absorbed by the phosphor(or a similar substance) and are (re-)emitted with a longer wavelength, thereby broadening the spectrum.
+
+Now we can discern the problems of mixing RGB in the light(heh) of additive and subtractive mixing:
+
+• Additive mixing works quite well, just needs some proper balancing to account for the  capabilities of the different LEDs
+• Subtractive mixing produces wrong colors because of missing wavelengths between the three color
+
+But if we now add the white color into the mix we will be able to mitigate those problems at least for less saturated colors:
+
+• By mixing on top of white we do not need to be concerned about having a perfect white to desaturate the color
+• Using a white LED gives us a wider and natural spectrum, making our colors illuminate surfaces more natural
+
+## Mixing in the white
+
+To grasp how to use the white while mixing you will have to understand that in RGB only two colors are actually needed to mix a pure hue, while the third color is used solely to control the saturation. Take a look at the following graphic:
+
+If we have a lot of red and blue and we add a little bit of green the resulting color is only shifted towards the white point D65.
+
+That means we can easily swap the color with the lowest value with white and get almost the same result. Let's take a look at some code for that:
+
+// red = 200
+// green = 150
+// blue = 250
+std::array<int, 3> rgb = {200, 150, 250};
+
+// checking for the index of the smallest of the three values
+// green is the smallest
+// becomes index = 1
+int index = std::min_element(color.begin(), color.end()) - color.begin();
+
+// storing value for later
+int value = rgb[index];
+
+// setting green to 0
+rgb[index] = 0;
+
+// creating the RGBW output
+// becomes rgbw = {200, 0, 250, 150}
+str::array<int, 4> rgbw = {rgb[0], rgb[1], rgb[2], value};
+
+As already explained in the code the green would become zero and the white 150, hopefully resulting in a slightly desaturated purple.
+
+To compensate for the difference in luminosity between the colored LEDs and the white LED I don't just replace the color with white but allow a specific factor to be used.
+In my case, the factor is adjustable at runtime using a simple interface and some buttons.
+
+In actual code that could look something like this:
+
+// some arbitrary factor between 0 and 1
+float factor = 0.6;
+
+std::array<int, 3> rgb = {200, 150, 250};
+int index = std::min_element(color.begin(), color.end()) - color.begin();
+
+// getting 60% of green
+int value = rgb[index] * factor;
+
+// setting green to 40% of itself
+rgb[index] = rgb[index] * (1 - factor);
+
+// creating the RGBW output
+// becomes rgbw = {200, 60, 250, 90}
+str::array<int, 4> rgbw = {rgb[0], rgb[1], rgb[2], value};
+
+In this case, the white to green ratio(or pure white to barely white if you want) is 60% to 40% or 90:60 to use the actual numbers.
+
+## Conclusion
+
+Using the white LED when mixing desaturated colors is fairly easy and can be achieved by just simply replacing all or some of the amount of white created by the third color with actual white.
+
+The more desaturated the color is, the more are we able to reap the benefits of the wider color spectrum. The problem is, that on full saturations we have no white at all.
+But I can think of at least two ways to increase the quality even in that case:
+
+• Using more than three spectral colors(tetra-, pentachromatic LEDs)
+• Always adding some tiny amount of white(and maybe increase the resolution from 8-bit(256 steps) to 16-bit(65536 steps))
+
+And as I am already working on implementing the aforementioned 16-bit RGB resolution I might be able to try the last one out for myself.

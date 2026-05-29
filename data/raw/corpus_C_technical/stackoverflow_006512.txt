@@ -1,0 +1,51 @@
+Question: <p>I have a models <code>A</code> and <code>B</code>, that are like this:</p>
+
+<pre><code>class A(models.Model):
+  title = models.CharField(max_length=20)
+  (...)
+
+class B(models.Model):
+  date = models.DateTimeField(auto_now_add=True)
+  (...)
+  a = models.ForeignKey(A)
+</code></pre>
+
+<p>Now I have some <code>A</code> and <code>B</code> objects, and I'd like to get a query that selects all <code>A</code> objects that have less then 2 <code>B</code> pointing at them.</p>
+
+<p>A is something like a pool thing, and users (the B) join pool. if there's only 1 or 0 joined, the pool shouldn't be displayed at all.</p>
+
+<p>Is it possible with such model design? Or should I modify that a bit?</p>
+
+Answer: <p>I'd recommend modifying your design to include some status field on A.</p>
+
+<p>The issue is one of "why?"  Why does A have &lt; 2 B's and why does A have >= 2 B's.  Is it because user's didn't enter something?  Or is because they tried and their input had errors.  Or is it because the &lt; 2 rule doesn't apply in this case.</p>
+
+<p>Using presence or absence of a Foreign Key limits the meaning to -- well -- present or absent.  You don't have any way to represent "why?"</p>
+
+<p>Also, you have the following option</p>
+
+<pre><code>[ a for a in A.objects.all() if a.b_set.count() &lt; 2 ]
+</code></pre>
+
+<p>This can be pricey because it does fetch all the A's rather than force the database to do the work.</p>
+
+<p><hr /></p>
+
+<p>Edit: From the comment "would require me to watch for user join / user leaving the pool events".</p>
+
+<p>You don't "watch" anything -- you provide an API which does what you need.  That's the central benefit of the Django model.  Here's one way, with explict methods in the <code>A</code> class.</p>
+
+<pre><code>class A( models.Model ):
+    ....
+    def addB( self, b ):
+        self.b_set.add( b )
+        self.changeFlags()
+    def removeB( self, b ):
+        self.b_set.remove( b )
+        self.changeFlags()
+    def changeFlags( self ):
+        if self.b_set.count() &lt; 2: self.show= NotYet
+        else: self.show= ShowNow
+</code></pre>
+
+<p>You can also define a special <code>Manager</code> for this, and replace the default <code>b_set</code> Manager with your manager that counts references and updates <code>A</code>.</p>

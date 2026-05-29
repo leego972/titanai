@@ -1,0 +1,208 @@
+# Python (Numpy) Non-Elementwise Array Operations
+
+1. Jan 20, 2014
+
+### thegreenlaser
+
+Python (numpy) question:
+
+I have two 2D numpy arrays, A[i,j] and B[k,l], but the indexes are unrelated to each other (A and B won't even have the same dimensions in general). I want to be able to add/multiply these two together to get a 4D matrix: C[i,j,k,l] = A[i,j] + B[k,l] or C[i,j,k,l] = A[i,j]*B[k,l].
+
+Obviously I can do this by looping through all four indices and running the statement "C[i,j,k,l] = A[i,j] + B[k,l]" or "C[i,j,k,l] = A[i,j]*B[k,l]" at each iteration of the loop, but is there an elegant way of doing this using a numpy function rather than loops? Some sort of addition function that adds an N-dimensional array to an M-dimensional array to give an (N+M)-dimensional array of all possible pairwise additions of elements? My loops are taking a while to run, and I'm hoping that using a "proper" numpy array manipulation function rather than loops would speed things up (and clean up my code a bit).
+
+2. Jan 20, 2014
+
+### AlephZero
+
+3. Jan 21, 2014
+
+### thegreenlaser
+
+Thanks. It's kind of too bad there's no such operation...
+
+However, I've at least realized that rather than looping through all four indices i, j, k and l, I can just loop through two (e.g. i and j) and then run the statement "C[i,j,:,:] = A[i,j] + B" or "C[i,j,:,:] = A[i,j]*B" each time. That at least cuts out a decent chunk of the loop iterations. In fact, in my case I was able to cut out almost all of the loop iterations since k and l have much larger ranges than i and j.
+
+4. Jan 21, 2014
+
+### Staff: Mentor
+
+Is there some reason you need to add matrices in the way you described? The reason that there isn't a function like what you're asking for is that the usual matrix operations of addition and multiplication are very limited in how they operate. Two matrices can be added only if they are both the same size - same number of rows and columns. Two matrices A and B can be multiplied only if the number of columns of A is the same as the number of rows of B.
+
+Are you doing this just to do it, or do you have some reason to combine matrices in the way you described?
+
+5. Jan 22, 2014
+
+### thegreenlaser
+
+Here's a really simple example with 1D matrices of why I would want to do this. Say I have N different sources, and I'm trying to calculate a function corresponding to each source: fn(x) where
+
+$$f_n(x) = x - s_n$$
+
+Now, in a program, the variable "x" would actually be a 1xM matrix of values, so fn(x) would actually be an NxM matrix with values f[n,m] = x[m] - s[n].
+
+My situation is more complicated, but it's the same sort of thing. The indices i and j correspond to x and y positions and the indices k and l correspond to different sources and I'm calculating the field created by each source.
+
+6. Jan 22, 2014
+
+### Staff: Mentor
+
+The notation isn't helping any that I can see. An example of what you're trying to do might be more helpful.
+
+Suppose that s is a vector with 5 elements (N = 5), and that x is a vector with 7 elements (M = 7).
+Here's a possible s vector: s = <1, 2, 3, 4, 5>. And here's a possible x vector: x = <2, 4, 6, 8, 10, 12, 14>.
+
+How do you see f1(x) being calculated? The subtraction you show doesn't make sense to me, because x and s are of different sizes.
+
+7. Jan 22, 2014
+
+### thegreenlaser
+
+f1(x) = <1,3,5,7,9,11,13>
+
+I don't think you're really understanding what I'm asking, so let me try a more concrete example. Say I have three charged particles located on the x-axis at s1 = -3, s2 = 0, and s3 = 5.
+
+The electric field due to charge n at some position x will depend on the distance away from that source, which is given by x - sn, right? So En(x) would depend on the quantity (x - sn).
+
+Now, I'm writing a program, and I want to find each En(x) at a bunch of points between x = -10 and x = +10 so that I can plot the electric field for each charge. So, in the program, I create an array of 5 points x = [-10, -5, 0, 5, 10] that I want to calculate each En field at.
+
+In the end, I'll have a 3x5 array "E" of points, where E[n,m] is the field due to the nth source at position x[m]. To calculate that value, I need to calculate x[m] - s[n]. I'm subtracting the number s[n] (the position of the nth source) from the number x[m] (the position I'm calculating En at), and I'm doing that for each combination of n and m.
+
+Maybe it'll be more clear: so E[n,:] is an array which corresponds to En(x) calculated at a bunch of different x values (since you can't use a continuous variable in programming, you have to pick an array of values to calculate the function at).
+
+Hopefully that makes sense? If I'm solving this problem with pen and paper, there's no point where I'm adding/subtracting an N or M dimensional vectors. I think the term "array" is probably more helpful than the word "vector" in this context.
+
+8. Jan 22, 2014
+
+### thegreenlaser
+
+This thread is kind of getting off track though... without worrying about why I need to do it, can we just trust that I do need to perform such a calculation? To get back on track... I'm looking for a numpy function that accomplishes the same thing as the following piece of code:
+
+Code (Text):
+
+#A, B, and C are numpy arrays
+#A is Ni by Nj
+#B is Nk by Nl
+#C is Ni by Nj by Nk by Nl
+
+for i in range(Ni):
+for j in range(Nj):
+for k in range(Nk):
+for l in range(Nl):
+C[i,j,k,l] = A[i,j] + B[k,l]
+
+9. Jan 22, 2014
+
+### Staff: Mentor
+
+Based on this, what you're doing is picking one component of s and subtracting it from each component of x.
+
+Here is some C code that would do this operation.
+Code (Text):
+
+for (j = 0; j < M; j++)
+{
+f(1) = x(j) - s(1);
+}
+
+Here is some code that would calculate all of the values in the f array.
+Edit: Changed the code below to address a bug reported in post #12.
+Code (Text):
+
+for (i = 0; i < N; i ++)
+{
+for (j = 0; j < M; j++)
+{
+f(i, j) = x(j) - s(i);
+}
+}
+
+When the code above is done, you'll have a vector of function values <f1, f2, ..., fN>, where each component is calculated in the way that you calculated f1(x).
+Let's stay with the simpler example until I get a better understanding of what you're trying to do. Does the above do what you're trying to do?
+"Vector" and "array" are pretty much synonomous when the array is one-dimensional.
+
+Last edited: Jan 23, 2014
+10. Jan 23, 2014
+
+### thegreenlaser
+
+Yes, exactly, this is basically what I have currently. See my last post; the python code in that post does exactly what I want it to do, it's just that numpy functions tend to run a lot faster than loops, which is why I'm looking for a numpy function to accomplish the same thing as that loop.
+
+Last edited by a moderator: Jan 23, 2014
+11. Jan 23, 2014
+
+### Staff: Mentor
+
+As AlephZero said early on in this thread, there's not much demand for what you're trying to do, so there's not likely to be a special function to do it.
+
+If you want the code to run faster, write your code in a compiled language such as C or C++. My understanding is that python is interpreted, and interpreted languages inherently run much more slowly than compiled languages.
+
+12. Jan 23, 2014
+
+### AlephZero
+
+There must be some misunderstanding, or a typo, there.
+Do you really mean something like
+Code (Text):
+
+f(i) += x(j) - s(i);
+
+or
+Code (Text):
+
+f(i,j) = x(j) - s(i);
+
+Either way, the bottom line is you are calculating i*j values, so the only optimization you can make is to reduce the overhead of stepping through the loops, in an interpreted language.
+
+You could change the first option to something like
+Code (Text):
+
+f(i) = sum(x(:)) - N*s(i)
+
+(assuming there is a built in math function called sum)
+or change the second option to use array slices instead of the inner loop, something like
+Code (Text):
+
+f(i,:) = x(:) - s(i);
+
+(note, I'm not a Python programmer so my syntax is probably wrong in those examples!)
+
+13. Jan 23, 2014
+
+### Staff: Mentor
+
+Code (Text):
+f(i,j) = x(j) - s(i);
+When I made the transition from calculating f1(x) to calculating all of the f values, I failed to take that into account.
+
+Here's the corrected version:
+Code (Text):
+for (i = 0; i < N; i ++)
+{
+for (j = 0; j < M; j++)
+{
+f(i, j) = x(j) - s(i);
+}
+}
+
+14. Jan 23, 2014
+
+### thegreenlaser
+
+Yes, I'm aware of this. This is why I want to use a built-in numpy function rather than looping through the array. As I understand it, the built-in functions are pre-compiled rather than interpreted, which is why they tend to run much faster than the interpreted loops.
+
+I guess the answer is just that there is no such function. I'll try to find another way to make my code run faster... I think it's possible using a package to write part of a python script in C so that it runs fast. I'll look into that.
+
+Thanks for the help.
+
+15. Dec 7, 2016
+
+### hautahi
+
+Hi, just stumbled upon this. This can be implemented using outer product and reshaping commands in numpy:
+
+Code (Python):
+import numpy as np
+s, x = [1,2,3,4,5], [2,4,6,8,10,12,14]
+N, M = len(s), len(x)
+fp = np.repeat(x,N) -np.outer(np.ones([M,1]),s).flatten()
+f = fp.reshape([N,M],order='F')

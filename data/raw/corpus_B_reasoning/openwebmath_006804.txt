@@ -1,0 +1,66 @@
+# Passing objects atomically across threads without locks or data races for audio synchronization
+
+I am learning about one of the hardest parts of Audio development: the synchronization between the audio thread and the GUI thread. Per the discussion here https://forum.juce.com/t/timur-doumler-talks-on-c-audio-sharing-data-across-threads/26311 and here: https://stackoverflow.com/questions/15460829/lock-free-swap-of-two-unique-ptrt I'm wondering if the following class solves the problem or comes close to solving it.
+
+template<typename T>
+struct SmartAtomicPtr
+{
+SmartAtomicPtr( T* newT )
+{
+update( newT );
+}
+~SmartAtomicPtr()
+{
+update(nullptr);
+}
+void update( T* newT, std::memory_order ord = memory_order_seq_cst )
+{
+keepAlive.reset( atomicTptr.exchange( newT, ord ) );
+}
+std::shared_ptr<T> getShared(std::memory_order ord = memory_order_seq_cst)
+{
+return std::make_shared<T>( atomicTptr.load(ord) );
+}
+T* getRaw(std::memory_order ord = memory_order_seq_cst)
+{
+return atomicTptr.load(ord);
+}
+private:
+std::atomic<T*> atomicTptr{nullptr};
+std::shared_ptr<T> keepAlive;
+};
+
+
+I know that whatever value ends up in the shared_ptr won't be deleted until the SmartAtomicPtr goes out of scope, which is fine.
+
+the ultimate goal would be a lock-free, wait-free solution.
+
+an example of where this might get used is the following interleaving of the audio and message thread. The goal is to keep the returned object from dangling
+
+/*
+AudioProcessor owns a SmartAtomicPtr<T> ptr that the message
+thread has public access to.
+*/
+/* audio thread */ auto* t = ptr.getRaw();
+/* message thread */ processor.ptr.update( new T() );
+/* audio thread */ t->doSomething(); //t is a dangling pointer now
+
+
+with getShared(), I believe that t no longer dangles:
+
+/* audio thread */ auto t = ptr.getShared();
+/* message thread */ processor.ptr.update( new T() );
+/* audio thread */ t->doSomething(); //t is one of 2 shared_ptrs
+//holding the previous atomic value of ptr
+
+
+I ran into some double-deletes, but I believe I have solved them, and also prevented the shared_ptr member from being stomped on in the event you call getShared() and update() at the same time, and also kept it leak-free.
+
+any thoughts?
+
+## 1 Answer
+
+keepAlive.reset is not thread safe. So your class as a whole cannot be thread safe.
+
+• Concrete proof that a short answer can be a great answer - good one! – Toby Speight Mar 6 '19 at 15:13
+• thanks @ratchet. I ended up using a couple FIFOs and a lot of std::move() to ensure construction and destruction happened on the gui thread, even though usage was happening on the audio thread for my project. – MatkatMusic Mar 17 '19 at 5:54

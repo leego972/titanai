@@ -1,0 +1,82 @@
+Question: <p>I am instantiating a class A (which I am importing from somebody
+else, so I can't modify it) into my class X.</p>
+
+<p>Is there a way I can intercept or wrape calls to methods in A?
+I.e., in the code below can I call</p>
+
+<pre><code>x.a.p1()
+</code></pre>
+
+<p>and get the output</p>
+
+<pre><code>X.pre
+A.p1
+X.post
+</code></pre>
+
+<p>Many TIA!</p>
+
+<pre><code>class A:
+    # in my real application, this is an imported class
+    # that I cannot modify
+    def p1(self): print 'A.p1'
+
+class X:
+    def __init__(self):
+        self.a=A()
+    def pre(self): print 'X.pre'
+    def post(self): print 'X.post'
+
+x=X()
+x.a.p1()
+</code></pre>
+
+Answer: <p>Here is the solution I and my colleagues came up with:</p>
+
+<pre><code>from types import MethodType
+
+class PrePostCaller:
+    def __init__(self, other):
+        self.other = other
+
+    def pre(self): print 'pre'
+    def post(self): print 'post'
+
+    def __getattr__(self, name):
+        if hasattr(self.other, name):
+            func = getattr(self.other, name)
+            return lambda *args, **kwargs: self._wrap(func, args, kwargs)
+        raise AttributeError(name)
+
+    def _wrap(self, func, args, kwargs):
+        self.pre()
+        if type(func) == MethodType:
+            result = func( *args, **kwargs)
+        else:
+            result = func(self.other, *args, **kwargs)
+        self.post()
+        return result
+
+#Examples of use
+class Foo:
+    def stuff(self):
+        print 'stuff'
+
+a = PrePostCaller(Foo())
+a.stuff()
+
+a = PrePostCaller([1,2,3])
+print a.count()
+</code></pre>
+
+<p>Gives:</p>
+
+<pre><code>pre
+stuff
+post
+pre
+post
+0
+</code></pre>
+
+<p>So when creating an instance of your object, wrap it with the PrePostCaller object. After that you continue using the object as if it was an instance of the wrapped object. With this solution you can do the wrapping on a per instance basis.</p>

@@ -1,0 +1,150 @@
+# Prime generator SPOJ problem in Python 3
+
+I am trying to solve an SPOJ problem: print all prime numbers in a given range (as large as $10^9$). I have used the Sieve of Eratosthenes algorithm. But it is still slow when input is in range of $10^4$.
+
+import math
+no_of_cases = int(input())
+
+for i in range(no_of_cases):
+x = input().split(" ")
+a = int(x[0])
+b = int(x[1])
+lis = set([p*i for p in range(2,b+1) for i in range(2,b+1)])
+
+print (sorted(set(range(a,b+1))- lis))
+
+
+• It is slow because your set is computed using a doubly nested for loop. In the average case scenario, that yields a runtime complexity of O(b^2). Try finding ways to optimize the inner calculation. – user991710 May 10 '16 at 20:09
+• @user991710 what can i do instead of set? – Freddy May 11 '16 at 14:14
+• @Easterly: why would the OP want to make a slow algorithm even slower? The Sieve of Sundaram is strictly inferior to the Sieve of Eratosthenes (more complicated, less performance). In fact, if you do due diligence cleanup/optimisation on the Sieve of Sundaram then you arrive almost at an odds-only Sieve of Eratosthenes, except that it fails to skip non-prime factors. See Sieve of Eratosthenes has huge 'overdraw' - is Sundaram's better after all? – DarthGizka May 12 '16 at 13:02
+• @Freddy: Code Review is for working code (even if it is a bit slow and can be improved). Your code fails to meet specifications (sieve several ranges up to 10^9 within an exceedingly generous time limit of about 6 seconds). If you can't be arsed to read at least some of the existing answers regarding SPOJ PRIME1 to find out where you went wrong, why should anyone here bother repeating the already existing information? And your algorithm is not an implementation of the Sieve of Eratosthenes. – DarthGizka May 12 '16 at 13:08
+• @DarthGizka First of all my program is running in terminal. I have read at too many places after my previous question(before asking this question) that is why code is completly different. What I understood was that I need to remove all the multiples of prime. So I did that, it might not be 100% Sieve of Eratosthenes. I also tried using square root but that was throwing error. Though I can't argue if it off topic. I respect the rules of S.E. sites. – Freddy May 12 '16 at 13:50
+
+I'll convert your program to a primes_below function. (I don't take into account the lower bound.) After doing this I got:
+
+def primes_below(n):
+lis = set([p * i for p in range(2, n + 1) for i in range(2, n + 1)])
+return sorted(set(range(2, n + 1)) - lis)
+
+
+First things first, you need a maximum of $n ^ 2$ amount of memory. Why? If we look at your algorithm what is $i_{\text{max}}$ and $p_{\text{max}}$? Both are $n$. And so your current largest number is $n^2$.
+
+You said:
+
+I also tried using square root but that was throwing error.
+
+This also wouldn't work correctly. Lets go through every combination if we were to do that with 16.
+
+2 * 2 = 4
+2 * 3 = 6
+2 * 4 = 8
+3 * 2 = 6
+3 * 3 = 9
+3 * 4 = 12
+4 * 2 = 8
+4 * 3 = 12
+4 * 4 = 16
+
+
+This means that 4, 6, 8, 9, 12, 16 are not prime. We should know that the primes in this range are 2, 3, 5, 7, 11, 13. And so 10, 14, 15 are all incorrectly said as prime.
+
+But looking at the above you should be able to see that there is no point on having $3 * 2$, $4 * 2$, $4 * 3$. This is as you've already done those calculations and so you should start the range for $i$ at $p$. And this is true for your current solution.
+
+And so we know that we should at least use:
+
+def primes_below(n):
+lis = set([p * i for p in range(2, n + 1) for i in range(p, n + 1)])
+return sorted(set(range(2, n + 1)) - lis)
+
+
+Now we need to remove the creation of numbers greater than (or equal) $n$. Rather than looking at some complex maths, we'll have a look at range.
+
+range(stop)
+range(start, stop[, step])
+
+This is a versatile function to create lists containing arithmetic progressions. It is most often used in for loops. The arguments must be plain integers. If the step argument is omitted, it defaults to 1. If the start argument is omitted, it defaults to 0. The full form returns a list of plain integers [start, start + step, start + 2 * step, ...]. If step is positive, the last element is the largest start + i * step less than stop; if step is negative, the last element is the smallest start + i * step greater than stop. step must not be zero (or else ValueError is raised).
+
+From the above we know that the first number we use is $p * p$, this is as $i$ starts as $p$. The largest number we want is also $n$. But we don't want to remove all the numbers that are between $p^2$ and $n$, and so we need that step. That step will also be $p$.
+
+Or in Python:
+
+def primes_below(n):
+lis = set([i for p in range(2, n) for i in range(p * p, n, p)])
+return sorted(set(range(2, n)) - lis)
+
+
+Before we say all is good, some maths! What is the largest $p$ that will mean the second range contains a value?
+
+If $p^2 > n$ then the second range will be empty, and so the largest $p$ follows the equation $p^2 <= n$. And so $p_{\text{max}} = \sqrt{n}$.
+
+And adding this to the range significantly improves performance.
+
+def primes_below(n):
+lis = set([i for p in range(2, int(n ** 0.5) + 1) for i in range(p * p, n, p)])
+return sorted(set(range(2, n)) - lis)
+
+
+This function is roughly ~3800 times faster than the original, at n = 5000.
+
+Now you probably think it's good enough for this challenge, it's pretty fast!
+But unfortunately no. Actually I thought I'd broke my machine when I ran it the first time, and I have 32GB of RAM! I closed every app I had on my machine and the program still broke! This means that you have to care about the memory and your current method doesn't.
+
+Instead we need to limit the amount of memory to $n$.
+
+To do this you can use lis = [True] * n. And then you want to change them to False if you come across one. And you'll want to set 0 and 1 to false at the beginning. The same way you are at the moment. This should get you something like:
+
+def primes_below(n):
+lis = [True] * n
+lis[0] = lis[1] = False
+for p in range(2, int(n ** 0.5) + 1):
+for i in range(p * p, n, p):
+lis[i] = False
+return ...
+
+
+Now you want to be able to return the numbers. Python has enumerate which will give us the index and the value, this will allow us to make a comprehension. And so if the value is True add the index to the output. Which will result in:
+
+def primes_below(n):
+lis = [True] * n
+lis[0] = lis[1] = False
+for p in range(2, int(n ** 0.5) + 1):
+for i in range(p * p, n, p):
+lis[i] = False
+return (i for i, v in enumerate(lis) if v)
+
+
+Since you don't want to display some numbers you'll want to implement a lower bound, I'd do this out of the function as then if you ever need the Sieve again you'll have a 'pure' one.
+
+This can simply be another comprehension:
+
+numbers = (i for i in primes_below(b + 1) if i < a)
+
+
+And will make usage simple:
+
+no_of_cases = int(input())
+for _ in range(no_of_cases):
+a, b = map(int, input().split(" ")[:2])
+print([i for i in primes_below(b + 1) if i < a)])
+
+
+This however is still too slow for my liking. And so to make it 3 times faster, at n = 10 ** 7, you can add a check if p is prime, if it is then do what we were doing before if not go to the next number.
+
+This results in:
+
+def primes_below2(n):
+lis = [True] * n
+lis[0] = lis[1] = False
+for p in range(2, int(n ** 0.5) + 1):
+if not lis[p]:
+continue
+for i in range(p * p, n, p):
+lis[i] = False
+return (i for i, d in enumerate(lis) if d)
+
+
+This is roughly 11500 times faster than the original, at n = 5000. And takes about 244 seconds, on my machine, to generate all the primes below 10 ** 9.
+
+• @Freddy I bet you'll love my edit then, ;P – Peilonrayz May 13 '16 at 19:03
+• I can't understand in last line if d – Freddy May 13 '16 at 19:48
+• @Freddy I originally used d as data but changed it to v for value to make more sense. What it does is filter out all the non-primes, so it only returns primes. – Peilonrayz May 13 '16 at 20:23

@@ -1,0 +1,49 @@
+Question: <p>I am trying to write a decorator to do logging:</p>
+
+<pre><code>def logger(myFunc):
+    def new(*args, **keyargs):
+        print 'Entering %s.%s' % (myFunc.im_class.__name__, myFunc.__name__)
+        return myFunc(*args, **keyargs)
+
+    return new
+
+class C(object):
+    @logger
+    def f():
+        pass
+
+C().f()
+</code></pre>
+
+<p>I would like this to print:</p>
+
+<pre><code>Entering C.f
+</code></pre>
+
+<p>but instead I get this error message:</p>
+
+<pre><code>AttributeError: 'function' object has no attribute 'im_class'
+</code></pre>
+
+<p>Presumably this is something to do with the scope of 'myFunc' inside 'logger', but I've no idea what.</p>
+
+Answer: <p>I found another solution to a very similar problem using the <code>inspect</code> library.  When the decorator is called, even though the function is not yet bound to the class, you can inspect the stack and discover which class is calling the decorator.  You can at least get the string name of the class, if that is all you need (probably can't reference it yet since it is being created).  Then you do not need to call anything after the class has been created.</p>
+
+<pre><code>import inspect
+
+def logger(myFunc):
+    classname = inspect.getouterframes(inspect.currentframe())[1][3]
+    def new(*args, **keyargs):
+        print 'Entering %s.%s' % (classname, myFunc.__name__)
+        return myFunc(*args, **keyargs)
+    return new
+
+class C(object):
+    @logger
+    def f(self):
+        pass
+
+C().f()
+</code></pre>
+
+<p>While this is not necessarily <em>better</em> than the others, it is the <em>only</em> way I can figure out to discover the class name of the future method during the call to the decorator. Make note of not keeping references to frames around in the <code>inspect</code> library documentation.</p>

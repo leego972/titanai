@@ -1,0 +1,93 @@
+Question: <p>Can someone explain to me the difference between doing:</p>
+
+<pre><code>class Child(SomeBaseClass):
+    def __init__(self):
+        super(Child, self).__init__()
+</code></pre>
+
+<p>and this:</p>
+
+<pre><code>class Child(SomeBaseClass):
+    def __init__(self):
+        SomeBaseClass.__init__(self)
+</code></pre>
+
+<p>I've seen <code>super</code> being used quite a lot in classes with only single inheritance. I can see why you'd use it in multiple inheritance but am unclear as to what the advantages are of using it in this kind of situation.</p>
+
+Answer: <blockquote>
+  <p>Can someone explain to me the difference between doing:</p>
+
+<pre><code>class Child(SomeBaseClass):
+    def __init__(self):
+        super(Child, self).__init__()
+</code></pre>
+  
+  <p>and this:</p>
+
+<pre><code>class Child(SomeBaseClass):
+    def __init__(self):
+        SomeBaseClass.__init__(self)
+</code></pre>
+</blockquote>
+
+<h1>Indirection with Forward Compatibility</h1>
+
+<p>What does it give you? For single inheritance, the above is practically identical from a static analysis point of view. However, using <code>super</code> gives you a layer of indirection with forward compatibility.</p>
+
+<p>Forward compatibility is very important to seasoned developers. You want your code to keep working with minimal changes as you change it. When you look at your revision history, you want to see precisely what changed when. </p>
+
+<p>You may start off with single inheritance, but if you decide to add another base class, you only have to change the line with the bases - if the bases change in a class you inherit from (say a mixin is added) you'd change nothing in this class. Particularly in Python 2, getting the arguments to super and the correct method arguments right can be difficult. If you know you're using <code>super</code> correctly with single inheritance, that makes debugging less difficult going forward.</p>
+
+<h1>Dependency Injection</h1>
+
+<p>Other people can use your code and inject parents into the method resolution:</p>
+
+<pre><code>class SomeBaseClass(object):
+    def __init__(self):
+        print('SomeBaseClass.__init__(self) called')
+
+class UnsuperChild(SomeBaseClass):
+    def __init__(self):
+        print('Child.__init__(self) called')
+        SomeBaseClass.__init__(self)
+
+class SuperChild(SomeBaseClass):
+    def __init__(self):
+        print('SuperChild.__init__(self) called')
+        super(SuperChild, self).__init__()
+</code></pre>
+
+<p>Say you add another class to your object, and want to inject a class between Foo and Bar (for testing or some other reason):</p>
+
+<pre><code>class InjectMe(SomeBaseClass):
+    def __init__(self):
+        print('InjectMe.__init__(self) called')
+        super(InjectMe, self).__init__()
+
+class UnsuperInjector(UnsuperChild, InjectMe): pass
+
+class SuperInjector(SuperChild, InjectMe): pass
+</code></pre>
+
+<p>Using the un-super child fails to inject the dependency because the child you're using has hard-coded the method to be called after its own:</p>
+
+<pre><code>&gt;&gt;&gt; o = UnsuperInjector()
+UnsuperChild.__init__(self) called
+SomeBaseClass.__init__(self) called
+</code></pre>
+
+<p>However, the class with the child that uses <code>super</code> can correctly inject the dependency:</p>
+
+<pre><code>&gt;&gt;&gt; o2 = SuperInjector()
+SuperChild.__init__(self) called
+InjectMe.__init__(self) called
+SomeBaseClass.__init__(self) called
+</code></pre>
+
+<h2>Conclusion</h2>
+
+<p>Always use <code>super</code> to reference the parent class. </p>
+
+<p>What you intend is to reference the parent class that is next-in-line, not specifically the one you see the child inheriting from.</p>
+
+<p>Not using <code>super</code> can put unnecessary constraints on users of your code.</p>

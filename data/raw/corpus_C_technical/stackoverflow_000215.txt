@@ -1,0 +1,77 @@
+Question: <p>This is a difficult and open-ended question I know, but I thought I'd throw it to the floor and see if anyone had any interesting suggestions.</p>
+
+<p>I have developed a code-generator that takes our python interface to our C++ code (generated via SWIG) and generates code needed to expose this as WebServices.  When I developed this code I did it using TDD, but I've found my tests to be brittle as hell.  Because each test essentially wanted to verify that for a given bit of input code (which happens to be a C++ header) I'd get a given bit of outputted code I wrote a small engine that reads test definitions from XML input files and generates test cases from these expectations.</p>
+
+<p>The problem is I dread going in to modify the code at all.  That and the fact that the unit tests themselves are a: complex, and b: brittle.</p>
+
+<p>So I'm trying to think of alternative approaches to this problem, and it strikes me I'm perhaps tackling it the wrong way.  Maybe I need to focus more on the outcome, IE: does the code I generate actually run and do what I want it to, rather than, does the code look the way I want it to.</p>
+
+<p>Has anyone got any experiences of something similar to this they would care to share?</p>
+
+Answer: <p>Unit testing is just that testing a specific unit. So if you are writing a specification for class A, it is ideal if class A does not have the real concrete versions of class B and C.</p>
+
+<p>Ok I noticed afterwards the tag for this question includes C++ / Python, but the principles are the same:</p>
+
+<pre><code>    public class A : InterfaceA 
+    {   
+      InterfaceB b;
+
+      InterfaceC c;
+
+      public A(InterfaceB b, InterfaceC c)   {
+          this._b = b;
+          this._c = c;   }
+
+      public string SomeOperation(string input)   
+      {
+          return this._b.SomeOtherOperation(input) 
+               + this._c.EvenAnotherOperation(input); 
+      } 
+    }
+</code></pre>
+
+<p>Because the above System A injects interfaces to systems B and C, you can unit test just system A, without having real functionality being executed by any other system. This is unit testing.</p>
+
+<p>Here is a clever manner for approaching a System from creation to completion, with a different When specification for each piece of behaviour:</p>
+
+<pre><code>public class When_system_A_has_some_operation_called_with_valid_input : SystemASpecification
+{
+    private string _actualString;
+
+    private string _expectedString;
+
+    private string _input;
+
+    private string _returnB;
+
+    private string _returnC;
+
+    [It]
+    public void Should_return_the_expected_string()
+    {
+        _actualString.Should().Be.EqualTo(this._expectedString);
+    }
+
+    public override void GivenThat()
+    {
+        var randomGenerator = new RandomGenerator();
+        this._input = randomGenerator.Generate&lt;string&gt;();
+        this._returnB = randomGenerator.Generate&lt;string&gt;();
+        this._returnC = randomGenerator.Generate&lt;string&gt;();
+
+        Dep&lt;InterfaceB&gt;().Stub(b =&gt; b.SomeOtherOperation(_input))
+                         .Return(this._returnB);
+        Dep&lt;InterfaceC&gt;().Stub(c =&gt; c.EvenAnotherOperation(_input))
+                         .Return(this._returnC);
+
+        this._expectedString = this._returnB + this._returnC;
+    }
+
+    public override void WhenIRun()
+    {
+        this._actualString = Sut.SomeOperation(this._input);
+    }
+}
+</code></pre>
+
+<p>So in conclusion, a single unit / specification can have multiple behaviours, and the specification grows as you develop the unit / system; and if your system under test depends on other concrete systems within it, watch out.</p>

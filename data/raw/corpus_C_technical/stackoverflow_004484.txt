@@ -1,0 +1,48 @@
+Question: <p>I am in a project where we are starting refactoring some massive code base. One problem that immediately sprang up is that each file imports a lot of other files. How do I in an elegant way mock this in my unit test without having to alter the actual code so I can start to write unit-tests?</p>
+
+<p>As an example: The file with the functions I want to test, imports ten other files which is part of our software and not python core libs.</p>
+
+<p>I want to be able to run the unit tests as separately as possible and for now I am only going to test functions that does not depend on things from the files that are being imported.</p>
+
+<p>Thanks for all the answers. </p>
+
+<p>I didn't really know what I wanted to do from the start but now I think I know. </p>
+
+<p>Problem was that some imports was only possible when the whole application was running because of some third-party auto-magic. So I had to make some stubs for these modules in a directory which I pointed out with sys.path</p>
+
+<p>Now I can import the file which contains the functions I want to write tests for in my unit-test file without complaints about missing modules.</p>
+
+Answer: <p>If you want to import a module while at the same time ensuring that it doesn't import anything, you can replace the <code>__import__</code> builtin function.</p>
+
+<p>For example, use this class:</p>
+
+<pre><code>class ImportWrapper(object):
+    def __init__(self, real_import):
+        self.real_import = real_import
+
+    def wrapper(self, wantedModules):
+        def inner(moduleName, *args, **kwargs):
+            if moduleName in wantedModules:
+                print "IMPORTING MODULE", moduleName
+                self.real_import(*args, **kwargs)
+            else:
+                print "NOT IMPORTING MODULE", moduleName
+        return inner
+
+    def mock_import(self, moduleName, wantedModules):
+        __builtins__.__import__ = self.wrapper(wantedModules)
+        try:
+            __import__(moduleName, globals(), locals(), [], -1)
+        finally:
+            __builtins__.__import__ = self.real_import
+</code></pre>
+
+<p>And in your test code, instead of writing <code>import myModule</code>, write:</p>
+
+<pre><code>wrapper = ImportWrapper(__import__)
+wrapper.mock_import('myModule', [])
+</code></pre>
+
+<p>The second argument to <code>mock_import</code> is a list of module names you <em>do</em> want to import in inner module.</p>
+
+<p>This example can be modified further to e.g. import other module than desired instead of just not importing it, or even mocking the module object with some custom object of your own.</p>

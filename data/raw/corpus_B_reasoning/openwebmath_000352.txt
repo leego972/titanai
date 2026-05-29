@@ -1,0 +1,387 @@
+## Recommended Posts
+
+Hiya again guys,
+
+I have a niggling problem with my CSM. The middle an far cascades noticeably "swim" as you move around. It's not really noticeable on the close one but i'm that's probably just due to the filtering and the factor it has such a high quality map to work from.
+
+Anyway I have 3 cascades and i'm using a bounding box for each. They all overlap with they near clip and this works fairly nicely but I was looking at the csm sample that some nicely ported over to monogame. The problem is I can't get the sphere based bounding boxes working at all for me. My debug rendertargets for all the cascades are just blank. If I switch my camera to be the shadow light camera (the sun) it seems fine (and it works using my bounding box method so i think that's fine). I THINK i'm just calculating the bounding box (using a sphere) incorrectly some how.
+
+public void GenerateCSMOrthoSlice(float pfarClip)
+{
+Vector3[] frustumCornersWS = new Vector3[8];
+Vector3[] frustumCornersLS = new Vector3[8];
+BoundingFrustum viewFrustum = new BoundingFrustum(_Camera.CameraView * Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver4, _Camera._aspectRatio, 10, pfarClip));
+frustumCornersWS = viewFrustum.GetCorners();
+
+Vector3 frustumCentroid = new Vector3(0, 0, 0);
+for (int i = 0; i < 8; i++)
+frustumCentroid += frustumCornersWS[i];
+frustumCentroid /= 8;
+
+lightsView = Matrix.Identity;
+lightsViewProjectionMatrix = Matrix.Identity;
+
+ShadowLightPos = frustumCentroid + (SunlightDirection * 100);
+
+Vector3 mins = frustumCornersLS[0];
+Vector3 maxes = frustumCornersLS[0];
+for (int i = 0; i < 8; i++)
+{
+if (frustumCornersLS[i].X > maxes.X)
+maxes.X = frustumCornersLS[i].X;
+else if (frustumCornersLS[i].X < mins.X)
+mins.X = frustumCornersLS[i].X;
+if (frustumCornersLS[i].Y > maxes.Y)
+maxes.Y = frustumCornersLS[i].Y;
+else if (frustumCornersLS[i].Y < mins.Y)
+mins.Y = frustumCornersLS[i].Y;
+if (frustumCornersLS[i].Z > maxes.Z)
+maxes.Z = frustumCornersLS[i].Z;
+else if (frustumCornersLS[i].Z < mins.Z)
+mins.Z = frustumCornersLS[i].Z;
+}
+
+float diagonalLength = (frustumCornersWS[0] - frustumCornersWS[6]).Length();
+diagonalLength += 2;    //Without this, the shadow map isn't big enough in the world.
+float worldsUnitsPerTexel = diagonalLength / (float)4096;
+
+Vector3 vBorderOffset = (new Vector3(diagonalLength, diagonalLength, diagonalLength) - (maxes - mins)) * 0.5f;
+maxes += vBorderOffset;
+mins -= vBorderOffset;
+
+mins /= worldsUnitsPerTexel;
+mins.X = (float)Math.Floor(mins.X);
+mins.Y = (float)Math.Floor(mins.Y);
+mins.Z = (float)Math.Floor(mins.Z);
+mins *= worldsUnitsPerTexel;
+
+maxes /= worldsUnitsPerTexel;
+maxes.X = (float)Math.Floor(maxes.X);
+maxes.Y = (float)Math.Floor(maxes.Y);
+maxes.Z = (float)Math.Floor(maxes.Z);
+maxes *= worldsUnitsPerTexel;
+
+ShadowLightProjection = Matrix.CreateOrthographicOffCenter(mins.X, maxes.X, mins.Y, maxes.Y, -maxes.Z - 500f, -mins.Z);
+}
+
+What I tried (which doesn't work at all) is:
+
+public void GenerateCSMOrthoSlice(float pfarClip)
+{
+
+Vector3 minExtents = Vector3.Zero;
+Vector3 maxExtents = Vector3.Zero;
+Vector3[] frustumCornersWS = new Vector3[8];
+Vector3[] frustumCornersLS = new Vector3[8];
+BoundingFrustum viewFrustum = new BoundingFrustum(_Camera.CameraView * Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver4, _Camera._aspectRatio, 10, pfarClip));
+frustumCornersWS = viewFrustum.GetCorners();
+
+Vector3 frustumCentroid = new Vector3(0, 0, 0);
+for (int i = 0; i < 8; i++)
+frustumCentroid += frustumCornersWS[i];
+frustumCentroid /= 8;
+
+{
+
+// This needs to be constant for it to be stable
+var upDir = Vector3.Up;
+
+// Calculate the radius of a bounding sphere surrounding the frustum corners
+for (var i = 0; i < 8; ++i)
+{
+var dist = (_frustumCorners[i] - frustumCentroid).Length();
+}
+
+minExtents = -maxExtents;
+}
+
+lightsView = Matrix.Identity;
+lightsViewProjectionMatrix = Matrix.Identity;
+
+//Vector3 sunlightdirection = new Vector3(0.21f, 0.11f, -0.5f);
+ShadowLightPos = frustumCentroid + (SunlightDirection * 100);
+
+Vector3 mins = frustumCornersLS[0];
+Vector3 maxes = frustumCornersLS[0];
+for (int i = 0; i < 8; i++)
+{
+if (frustumCornersLS[i].X > maxes.X)
+maxes.X = frustumCornersLS[i].X;
+else if (frustumCornersLS[i].X < mins.X)
+mins.X = frustumCornersLS[i].X;
+if (frustumCornersLS[i].Y > maxes.Y)
+maxes.Y = frustumCornersLS[i].Y;
+else if (frustumCornersLS[i].Y < mins.Y)
+mins.Y = frustumCornersLS[i].Y;
+if (frustumCornersLS[i].Z > maxes.Z)
+maxes.Z = frustumCornersLS[i].Z;
+else if (frustumCornersLS[i].Z < mins.Z)
+mins.Z = frustumCornersLS[i].Z;
+}
+
+float diagonalLength = (frustumCornersWS[0] - frustumCornersWS[6]).Length();
+diagonalLength += 2;    //Without this, the shadow map isn't big enough in the world.
+float worldsUnitsPerTexel = diagonalLength / (float)4096;
+
+Vector3 vBorderOffset = (new Vector3(diagonalLength, diagonalLength, diagonalLength) - (maxes - mins)) * 0.5f;
+maxes += vBorderOffset;
+mins -= vBorderOffset;
+
+mins /= worldsUnitsPerTexel;
+mins.X = (float)Math.Floor(mins.X);
+mins.Y = (float)Math.Floor(mins.Y);
+mins.Z = (float)Math.Floor(mins.Z);
+mins *= worldsUnitsPerTexel;
+
+maxes /= worldsUnitsPerTexel;
+maxes.X = (float)Math.Floor(maxes.X);
+maxes.Y = (float)Math.Floor(maxes.Y);
+maxes.Z = (float)Math.Floor(maxes.Z);
+maxes *= worldsUnitsPerTexel;
+
+ShadowLightProjection = Matrix.CreateOrthographicOffCenter(mins.X, maxes.X, mins.Y, maxes.Y, -maxes.Z - 500f, -mins.Z);
+
+{
+ShadowLightProjection = Matrix.CreateOrthographicOffCenter(minExtents.X, minExtents.Y, maxExtents.X, maxExtents.Y, 0.0f, pfarClip);
+
+// Create the rounding matrix, by projecting the world-space origin and determining
+// the fractional offset in texel space
+var shadowOrigin = new Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+
+var roundOffset = roundedOrigin - shadowOrigin;
+roundOffset = roundOffset * (2.0f / 4096);
+roundOffset.Z = 0.0f;
+roundOffset.W = 0.0f;
+
+}
+
+//
+}
+
+##### Share on other sites
+
+I'm no MonoGame expert, but looking at your code it looks like you mixed up the parameters to Matrix.CreateOrthographicOffCenter() in the stabilized version.
+
+##### Share on other sites
+
+Thanks, yes. Well spotted. Unfortunately that had no effect.
+
+Shimmery shadows have been bugging me for ages but I can't seem to figure out how to use the sphere method of making my cascades
+
+##### Share on other sites
+
+If anyone could give  me some code/pseudo code for finding the bounding sphere of my shadow camera that would do. I was reading shaderx7 on this subject. Which was interedting but the math is over my head. I don't mind the wasted space. By the time my game is finished games will be able to support one giant texture lol
+
+Thanks
+
+##### Share on other sites
+Posted (edited)
+
+Here is my code that is used in production (So I know it works ;-) )
+
+	V4 vMin = vCorners[0];
+V4 vMax = vCorners[0];
+for(int j = 1; j<8; j++) {
+vMin = VMin(vMin, vCorners[j]);
+vMax = VMax(vMax, vCorners[j]);
+}
+V4 vSize = vMax - vMin;
+float fRadius = VLen3(vSize).x() * 0.5f;
+
+// Snap center to shadow texel
+// This is done by transforming center of CSM frustum into light post projection (texel space) and
+// perform snapping in this space.
+M44 mCameraToLight = MInverseAffine(mLightToCamera);
+V4 vCenterCamera = VLerp(vMin, vMax, VSplat(0.5f));
+V4 vCenterLight = VTransform43(mCameraToLight, vCenterCamera);
+vCenterTexel = VProject(vCenterTexel);
+vSnap = VFloor(vSnap);
+V4 vSnapOffset = VLoadZero() - vSnap;
+mSnapTrans.vTrans = VXY01(vSnapOffset);
+
+
+Hope it makes sense.
+
+BTW: Looking at your code I think the issue is the way you apply the offset directly to the matrix instead of doing a multiplication with a translation matrix (Like I do in the last line)
+
+Henning
+
+Oh, and I now use the quantization trick instead of the code above to get more precision (http://dev.theomader.com/stable-csm/)
+
+Edited by semler
+
+##### Share on other sites
+
+Thanks, your help is much appreciated. I'm not familiar with that language but i'll see if I can work it out (I'm just a c# xna/monogame guy)
+
+##### Share on other sites
+
+This ia  video of the problem. I'm not if i'm barking up the wrong tree. But shadows are very "jiggly" on some objects. I wanted to try the sphere based approach. Which from my understanding is making a bounding sphere from the shadow camera view frustrum then creating my usual orthographic projection for my cascade from that. Am I undestanding it correctly?
+
+Here's a video of the annoying problem I have. Shortly into the video i turn on the rendertarget display so you can see the 3 cascade render targets on the right. As you can see theres a lot of jiggle going on. Depth Bias doesn't seem to make any difference really.
+
+##### Share on other sites
+
+I'm a complete noob here but i see that you rotate your shadow maps with camera orientation and this way it's impossible to avoid jittering. I think you have to keep the shadow map orientation constant in worldspace and only adapt it to the position of the camera ignoring player view direction. So when you rotate but don't move, you would see the corners of cascade transitions fixed to the floor.  Does this make sense?
+
+##### Share on other sites
+Posted (edited)
+
+I think you're probably correct/ That's what I was referring to with using a sphere from the camera frustrum to build the bounding box for my orthographic projection for the shadow like.
+
+I think i'm missing something though. I've found some examples here and there but I'm just not getting it. Maybe some pseudo code would help me.
+
+Edited by skyemaidstone
+
+##### Share on other sites
+
+Semlers linked blog contains more articles and code, however...
+
+Looking at code snippets often raises more questions than answers: What conventions are used here (is this a camera to world matrix or world to camera? what multiplication order do they use? etc. etc.) - mostly you have to care for the deatils yourself and after you undrestood the concept it's only the details that's left.
+
+I recommend you simplyfy the problem instead so cou can solve it more easily in your own:
+
+1. Ignore frustum and any bounds and make each cascade just centered to the texel closest to the camera. (visualizing texel grid on a simple ground plane should help to set this up. And if this works all math is known.)
+
+2. If you get this to work robustly so the cascades move with the camera without jitter the main problem is solved and you can start to optimize it for the frustum, which shouldn't be that hard at this point.
+
+##### Share on other sites
+
+Thanks for the answers. That's exactly what I'm trying now Joe, ie simplifying the problem.
+
+If I can get rid of the jiggling for 1 CSM "slice" then I'm there really. Filtering and stuff works fine already.
+
+I'll read some more and see if I can figure out how to make my slice ignore camera rotation. I've tried moving them to texel increments (based on one of the links above CSM which i've read and reread) but the problem isn't real;y improved.
+
+Increasing my shadow map size to something ridiculous didn't improve the jiggling either so it does seem to be the rotation causing the problem. Hence I was trying to use the sphere based approach for bounding sphere but i just don't "get it".
+
+Or maybe I'm just doing the "move bounding box in texel increments" incorrectly..  I shall persevere.
+
+##### Share on other sites
+
+Ok I came back to this after working on more interesting parts of my game and although I've improved it by using a sphere based approach to making the projections it hasn't really improved the shimmering that much. In fact if i comment out my texel snapping part it makes little difference. I'm getting a bit stumped. Maybe I've been looking at it too long. It's acceptable now I guess but i'd like it to be totally rock solid ideally
+
+This creates the projection and view for each cascade. Any ideas what i've missed?
+
+        public void GenerateCSMOrthoSliceTS(float pNearClip, float pfarClip)
+{
+Vector3[] frustumCorners = new Vector3[8];
+
+Matrix mCameraViewProj = _Camera.CameraView;
+mCameraViewProj *= Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver4, _Camera._aspectRatio, pNearClip, pfarClip);
+BoundingFrustum oCameraViewProjFrustum = new BoundingFrustum(mCameraViewProj);
+
+frustumCorners = oCameraViewProjFrustum.GetCorners();
+
+Vector3 frustumCenter = new Vector3(0, 0, 0);
+for (int i = 0; i < 8; i++)
+frustumCenter += frustumCorners[i];
+frustumCenter /= 8;
+
+lightsView = Matrix.Identity;
+lightsViewProjectionMatrix = Matrix.Identity;
+
+float radius = (frustumCorners[0] - frustumCorners[6]).Length() / 2.0f;
+
+float texelsPerUnit = (float)4096 / (radius * 2.0f);
+Matrix mTexelScaling = Matrix.CreateScale(texelsPerUnit);
+
+SunlightDirection.Normalize();
+Vector3 baselookAt = new Vector3(SunlightDirection.X, SunlightDirection.Y, SunlightDirection.Z);
+Matrix mLookAt = Matrix.CreateLookAt(Vector3.Zero, baselookAt, Vector3.Up);
+mLookAt = Matrix.Multiply(mTexelScaling, mLookAt);
+Matrix mLookAtInv = Matrix.Invert(mLookAt);
+
+frustumCenter = Vector3.Transform(frustumCenter, mLookAt);
+frustumCenter.X = (float)Math.Floor(frustumCenter.X);    //clamp to texel increment
+frustumCenter.Y = (float)Math.Floor(frustumCenter.Y);    //clamp to texel increment
+frustumCenter = Vector3.Transform(frustumCenter, mLookAtInv);
+
+Vector3 eye = frustumCenter + (SunlightDirection * radius * 2.0f);
+
+}
+
+## Create an account
+
+Register a new account
+
+• ### Forum Statistics
+
+• Total Topics
+628730
+• Total Posts
+2984423
+• ### Similar Content
+
+• THE PROJECT
+
+INT is a 3D Sci-fi RPG with a strong emphasis on story, role playing, and innovative RPG features such as randomized companions. The focus is on the journey through a war-torn world with fast-paced combat against hordes of enemies. The player must accomplish quests like a traditional RPG, complete objectives, and meet lively crew members who will aid in the player's survival. Throughout the game you can side and complete missions through criminal cartels, and the two major combatants, the UCE and ACP, of the Interstellar Civil War.
+Please note that all of our current positions are remote work. You will not be required to travel.
+Talent Needed
+
+Unity Engine Programmer
+3D Animator
+We have made great strides in the year 2017! INT has received a comprehensive face-lift compared to the start of the year. We look forward to a productive, fruitful year 2018!
+Revenue-Share
+This is the perfect opportunity to get into the game development industry. Being an Indie team we do not have the creative restrictions often imposed by publishers or other third parties. We are extremely conscientious of our work and continuously uphold a high level of quality throughout our project.
+We are unable to offer wages or per-item payments at this time. However revenue-sharing from crowd-funding is offered to team members who contribute 15-20 hours per week to company projects, as well as maintain constant communication and adhere to deadlines. Currently the crowd-funding campaign is scheduled for the year 2018. Your understanding is dearly appreciated.
+
+Thank you for your time! We look forward to hearing from you!
+
+John Shen
+Starboard Games LLC
+
+• Hello people of gamedev.net
+
+Me and my team have been working on a MMORPG game with Unreal Engine 4 for quite some time now.
+We are seeking beta tester's and have beta key's available to people who sign up on our website.
+Feel free to register on our forums, We can talk about the game and help everyone get a better idea of what type of game it is.
+
+Legion is a 3D fantasy MMORPG that has features including massive scale battles, unique characters and monsters, customization of avatars, special equipment and more. Players choose between the starter stats of Warrior, Magician, Archer and character advancement occurs through a mix of questing, PvP, Guild Wars, and hunting, depending upon player preference. In Legion, completely open PvP battles take place between members of the two warring factions.
+
+We plan to make this game very competitive and exciting
+• By Matuda
+Hello!
+Trying to create a physics puzzle game in my "free" time.
+So far it's going very steady, but slow.
+Hope to get some feedback from you!
+
+Area 86 is a physics-based game, that lets you control a robot at a secret place in space.
+From simple item moving to custom imagined solutions with item picking, throwing, combining and activating!
+Explore & examine all possibilities each place has to offer and do your best to get further.
+But remember, each action has consequences and thus could break or make something unexpected.
+
+Quick overlook of main features:
+Physics-based gameplay with no bugs or whatsoever Tasks that give you more clue on how to do things wrong Controllable robot who can be blamed for all consequences Includes more than 1 level and each level contains less than 12 possible tasks to complete [ not in free version ] Secret places and hidden objects for extra challenge
+One fully completable level with 6 tasks and 2 hidden special items to discover.
+From the task list, 2 are main tasks which you should complete to get further and then there are 4 other tasks that should challenge your thinking.
+One of the secret items is visible instant, but you need to figure out how to collect it, while the other special item is hiding.
+Another extra feature is visual hints, that should force your thinking of discovering features.
+
+• well, i have started developing games last year, alone , I made a singleplayer 3d openworld rpg on unity you can look at it on googleplaystore ( kooru stone rpg ) whatever, this year, i wanted to make mmo, which gone really fine until I first try real hosting, I was working on "wamp" until then. The reason i am desperate now is that the way my game works.
+On my pc, using wamp mysql , with localhost as host for my game, i was testing my mmorpg with using andorid emulators, ofcourse no lag no issues no restrictions, beautiful dream... But then, I wanted to get real host from web, so, I rent a basic, cheaphest ever web host ( 10\$ year ), and transferred my php files along with sql database.
+So, I launched the game, still no issues, tried to handle 2-3 players by using my pc, phone, friend's phone...
+After a while, ( after really short time (3-4mins)) host started not to respond, beacause those web hosting were not fit to handle mmos, i predicted that.
+now what i am explaining is that my game works like this and asking what way should i use to handle it :
+- Creates web request ( like : webhost.com/game/getplayerdata.php?ID=2 )
+-Reads request ( request result be like = "ID2-GoodGuyXx-23-123-4-123-43 )
+-Builds player using result string
+-does similar requests REEAALY FREQUENTLY  ( total requests of 8 - 12 times per seconds )
+With my current ultimate cheap web hosting, i can handle 2 players with low lag ( lol ) but, i want to handle around 20-100 players,
+just need a clear path, i have been struggling with google cloud sql and other vps server dedicated server options, i dont wanna pay much and get ripped off.
+
+• Hi,
+
+I have a triangle,oriented in a 3D Plane i.e. I have my vertices as (x1,y1,z1) ; (x2,y2,z2) and (x3,y3,z3)
+I am trying to convert this triangular facet to voxelised model i.e.
+Along each edge,I am applying Bresenhams 3D Line algorithm and generating intermediate points.After generating intermediate points, I want to fill the inside region.
+I have been searching for some algorithm like flood filling,but did not find anything relevant till now.
+I would be really glad,if some one can provide an algorithm for achieving this.
+I basically have a List of tuple for storing all the (x,y,z) data created along the edges.(generated using Brsenhams 3D Line algorithm).
+Now,I want an algorithm,which creates cubes in the inside region.
+
+• 25
+• 11
+• 10
+• 16
+• 14

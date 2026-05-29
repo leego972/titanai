@@ -1,0 +1,153 @@
+Jump to content
+• Advertisement
+
+# OpenGL State Changes Optimization?
+
+This topic is 2878 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+If you intended to correct an error in the post then please contact us.
+
+## Recommended Posts
+
+Greetings everyone,
+
+I’m into optimizing state changes, but first… how OpenGL handles state change remains ambiguous. Regarding to this thread:
+
+http://www.gamedev.net/community/forums/topic.asp?topic_id=416620 EDIT: cant make it work :)
+
+Operations like glBind* seems to have the highest CPU/GPU process. However, let’s say we set 2 exact same state change in a row:
+
+glEnable*
+glEnable*
+
+will the second glEnable* cost less?
+
+Taking those 4 examples into account:
+
+Void set1(){	If (state needs Enabling)		Enable;	else		Disable;	Draw();}Void set2(){	If (state needs Enabling)		Enable;	Draw();	If (state was changed)		Disable;}Void set3(){	If (state needs Enabling)		if (not already Enabled)			Enable;	Draw();	If (state was changed)		if (not already Disable)			Disable;}Void set4(){	If (state needs Enabling)	{		if (not already Enabled)			Enable;	}	else if (not already Disable)		Disable;	Draw();}
+
+which one would be the fastest?
+
+[Edited by - golgoth13 on August 28, 2010 12:18:45 PM]
+
+#### Share this post
+
+##### Share on other sites
+Advertisement
+I'm also very interesting if it's better to store each state in your programm to check if a state change is needed or just try to minimize state changes by batching and stuff
+
+#### Share this post
+
+##### Share on other sites
+I'm also interested in this. I think set 4 is the winner.
+
+Looking at the sets, this is what I see:
+
+set1: Every call will either enable or disable; so that's a cost of '1'
+
+set2: If a state isn't needed no thing is called. If a state is needed, its enabled, used and then disabled. So it's either a cost of '0' or a cost of '2'. (Assuming enable and disable both take the same amount of time. I'm not sure about this, but I would guess Enable does more work then disabling.) If half your draw calls need the state, the average cost is still '1'.
+
+set3: This one is probably the most confusing. You turn it on if you need it (and its not already on). The if you turned it on, you turn it back off. So, again the cost is either 0 or 2.
+
+set4: If you need it, enabled, and its not already on, you turn it on. If you don't need it enabled, and its not already off, you turn it off. So, if you call set4 and its already in the state you need, the cost is 0. If its not in the state you need the cost is 1. If your draw calls are evenly distributed, then your average cost will be .5.
+
+This, also, assumes that the cost of calling a glEnable function is much slower than the if statement you are using to do the check. I believe this is true since the if statement is just a memory access and a compare, whereas the function call involves the stack, plus you have no idea what is happening once you're inside GL.
+
+#### Share this post
+
+##### Share on other sites
+It's quite possible that the GL-driver will also do these "not already Enabled" tests internally -- if so, then your tests aren't going to be much of an optimization (you'd have to test this though, and it could change from driver to driver... :()
+i.e. this could be happening:
+void set3(){	If (state needs Enabling)		if (not already Enabled)			glEnable(state);}void glEnable(state){	if (state not already Enabled)		internal_addStateEnableToCommandBuffer(state);}
+You can implement these 4 options, call them 100,000 times, and surround each test with some high-precision timing code to see which one takes the most CPU time. You can also use a tool like 'gdebugger' to do more in-depth analysis (but it's expensive - I don't have a copy :()
+
+But... without having any profiling data on hand, Set4 looks the best ;)
+Quote:
+ Operations like glBind* seems to have the highest CPU/GPU process. However, let’s say we set 2 exact same state change in a row ... will the second glEnable* cost less?
+The driver seems to collect all the state changes at the beginning of each draw-call, and submit them to the GPU all at once.
+So, if you write "glEnable(x);glDisable(x);glEnable(x);", it should have a similar (GPU-side) cost to just "glEnable(x);" - obviously a little bit more CPU time is going to be wasted with the first though.
+
+#### Share this post
+
+##### Share on other sites
+I agree with set4 also! Unless:
+
+Quote:
+ It's quite possible that the GL-driver will also do these "not already Enabled" tests internally
+
+Then set1 should win fair and square… and make our life much easier.
+
+I choose the glEnable/glDisable for simplicity sake, but furthermore, since only one program can be use at the time, perhaps glUseProgram state could be optimized with an ID check, like so: (in the case it’s not tested internally of course)
+
+void bind1(){	if (use)	{		if (id != currentId)		{			glUseProgram(id);			currentId = id;		}	}	else if (currentId != 0)	{		glUseProgram(0);		currentId = 0;	}	Draw();}
+
+i m also guessing:
+if (id != currentId)will be faster then:glGet(GL_CURRENT_PROGRAM) // I m not even sure if this makes sens in this case though.
+
+Hopefully, an OpenGL Jedi master could clear this up.
+
+Quote:
+ You can implement these 4 options, call them 100,000 times, and surround each test with some high-precision timing code to see which one takes the most CPU time.
+
+Would be interesting, as mentioned in the previous thread, to have a table with approximations cost for each glFunction. In fact, I’m hoping for this to be old news already, I’ll be really surprised if it is not yet available.
+
+By the way, Is there other GL profiler you guys recommend?
+
+#### Share this post
+
+##### Share on other sites
+Quote:
+ Original post by golgoth13*** Source Snippet Removed ***i m also guessing:*** Source Snippet Removed ***
+Yeah I'd prefer to use my own 'last known value' that retrieve a value from the driver.
+Quote:
+ Would be interesting, as mentioned in the previous thread, to have a table with approximations cost for each glFunction. In fact, I’m hoping for this to be old news already, I’ll be really surprised if it is not yet available.
+These numbers would change from driver to driver, card to card though. So any numbers published this year will be useless next year.
+Here's an interesting quote from Tom F:
+Quote:
+ 1. Typically, a graphics-card driver will try to take the entire state of the rendering pipeline and optimise it like crazy in a sort of "compilation" step. In the same way that changing a single line of C can produce radically different code, you might think you're "just" changing the AlphaTestEnable flag, but actually that changes a huge chunk of the pipeline. Oh but sir, it is only a wafer-thin renderstate... In practice, it's extremely hard to predict anything about the relative costs of various changes beyond extremely broad generalities - and even those change fairly substantially from generation to generation.2. Because of this, the number of state changes you make between rendering calls is not all that relevant any more. This used to be true in the DX7 and DX8 eras, but it's far less so in these days of DX9, and it will be basically irrelevant on DX10. The card treats each unique set of states as an indivisible unit, and will often upload the entire pipeline state. There are very few incremental state changes any more - the main exceptions are rendertarget and some odd non-obvious ones like Z-compare modes.
+Quote:
+ By the way, Is there other GL profiler you guys recommend?
+Check out gDebugger and GPU PerfStudio.
+
+#### Share this post
+
+##### Share on other sites
+
+• Advertisement
+• Advertisement
+
+• ### Popular Contributors
+
+1. 1
+Rutin
+19
+2. 2
+3. 3
+JoeJ
+15
+4. 4
+5. 5
+• Advertisement
+
+• 21
+• 19
+• 11
+• 13
+• 17
+• ### Forum Statistics
+
+• Total Topics
+631697
+• Total Posts
+3001764
+×
+
+## Important Information
+
+By using GameDev.net, you agree to our community Guidelines, Terms of Use, and Privacy Policy.
+
+We are the game development community.
+
+Whether you are an indie, hobbyist, AAA developer, or just trying to learn, GameDev.net is the place for you to learn, share, and connect with the games industry. Learn more About Us or sign up!
+
+Sign me up!

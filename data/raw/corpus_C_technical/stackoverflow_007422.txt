@@ -1,0 +1,86 @@
+Question: <p>I need to connect to an Exchange mailbox in a Python script, without using any profile setup on the local machine (including using Outlook).  If I use win32com to create a MAPI.Session I could logon (with the Logon() method) with an existing profile, but I want to just provide a username &amp; password.</p>
+
+<p>Is this possible?  If so, could someone provide example code?  I would prefer if it only used the standard library and the pywin32 package.  Unfortunately, enabling IMAP access for the Exchange server (and then using imaplib) is not possible.</p>
+
+<p>In case it is necessary: all the script will be doing is connecting to the mailbox, and running through the messages in the Inbox, retrieving the contents.  I can handle writing the code for that, if I can get a connection in the first place!</p>
+
+<p>To clarify regarding Outlook: Outlook will be installed on the local machine, but it does not have any accounts setup (i.e. all the appropriate libraries will be available, but I need to operate independently from anything setup inside of Outlook).</p>
+
+Answer: <p>Ive got it, to connect to outbound exchange you need to connect like this:</p>
+
+<pre><code>import smtplib
+
+url = YOUR_EXCHANGE_SERVER
+conn = smtplib.SMTP(url,587)
+conn.starttls()
+user,password = (EXCHANGE_USER,EXCHANGE_PASSWORD)
+conn.login(user,password)
+</code></pre>
+
+<p>now you can send like a normal connection</p>
+
+<pre><code>message = 'From: FROMADDR\nTo: TOADDRLIST\nSubject: Your subject\n\n{}'
+from, to = fromaddr,toaddrs
+txt = 'This is my message'
+conn.sendmail(fromaddr,toaddrs,msg.format(txt))
+</code></pre>
+
+<p>to get the mail from your inbox its a little different</p>
+
+<pre><code>import imaplib
+
+url = YOUR_EXCHANGE_URL
+conn = imaplib.IMAP4_SSL(url,993)
+user,password = (EXCHANGE_USER,EXCHANGE_PASSWORD)
+conn.login(user,password)
+conn.select('INBOX')
+results,data = conn.search(None,'ALL')
+msg_ids = data[0]
+msg_id_list = msg_ids.split()
+</code></pre>
+
+<p>this gives you a list of message id'
+s that you can use to get your emails</p>
+
+<pre><code>latest_email_id = msg_id_list[-1]
+result,data = conn.fetch(latest_email_id,"(RFC822)")
+raw_email = data[0][1]
+</code></pre>
+
+<p>now raw_email is your email messsage, but its not very pretty, if you want to parse it do somthing like this</p>
+
+<pre><code>from email.parser import Parser
+
+p = Parser()
+msg = p.parsestr(raw_email)
+</code></pre>
+
+<p>now you can do</p>
+
+<pre><code>msg.get('From')
+msg.get('Subject')
+</code></pre>
+
+<p>or for the content</p>
+
+<pre><code>msg.get_payload()
+</code></pre>
+
+<p>but if its a multipart message your going to need to do a little more processing, luckly a recursive solution is perfect for this situation</p>
+
+<pre><code>def process_multipart_message(message):
+    rtn = ''
+    if message.is_multipart():
+        for m in message.get_payload():
+            rtn += process_multipart_message(m)
+    else:
+        rtn += message.get_payload()
+    return rtn
+</code></pre>
+
+<p>now </p>
+
+<pre><code>msg_contant = process_multipart_message(msg)
+</code></pre>
+
+<p>will give you the whole message every time.</p>

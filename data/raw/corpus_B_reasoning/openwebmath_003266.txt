@@ -1,0 +1,123 @@
+# A \boxed alternative with minimal spacing?
+
+The following code comes from this post. The problem is that I would like a way to automate the size of the box so as to be very small with a few of spacing, but the following solution doesn't work with fractions for example.
+
+\documentclass[border=5pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{calc,shapes}
+
+\newcommand{\tikzmark}[1]{\tikz[overlay,remember picture] \node (#1) {};}
+\newcommand{\DrawBox}[1][red]{%
+\tikz[overlay,remember picture]{
+\draw[#1]
+($(bl)+(-0.2em,0.9em)$) rectangle
+($(br)+(0.2em,-0.3em)$);}
+}
+\newcommand{\MyBox}[2][red]{\tikzmark{bl}#2\tikzmark{br}\DrawBox[#1]}
+
+\begin{document}
+Lorem ipsum dolor sit amet. \MyBox{Lorem ipsum} dolor sit amet. Lorem ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. \MyBox{$\frac{\frac{2}{5} - 7}{4 + x^3}$} Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.  Lorem
+ipsum \MyBox[blue]{$3.29 \times 10^{29}$} dolor sit amet. Lorem ipsum dolor sit amet. Lorem
+ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem
+\MyBox[draw=red,fill=yellow!20,,opacity=0.3]{$3.29 \times 10^{29}$} ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.
+\end{document}
+
+-
+Do you need the answer to be TikZ-based or could a different approach be acceptable? –  Gonzalo Medina Nov 18 '11 at 18:39
+Any kind of flexible solution is accepted. –  projetmbc Nov 18 '11 at 20:56
+Related Question: drawing boxes around words –  Peter Grill Nov 28 '11 at 17:20
+Related Question: mdframed: size frame to content. –  Peter Grill Dec 30 '12 at 18:44
+
+With the help of the xparse package, and using a \fboxcolor, I defined a \MyBox command which has 5 optional arguments and a mandatory one; the syntax is
+
+\MyBox[<frame color>][<fill color>]{<contents>}[\fboxsep value][<box depth>][<box height>]
+
+
+The command is very flexible; you can change the colors (for both the frame and the fill), the value for \fboxsep used; and gives you additional independent control over the box height and depth (this command is inspired in Herbert's answer to the question you linkd to).
+
+The code and an example (I used some exaggerated values in some cases just to show the flexibility of the command):
+
+\documentclass{article}
+\usepackage{xparse}
+\usepackage{xcolor}
+
+\newbox\FBox
+\NewDocumentCommand\MyBox{O{black}O{white}mO{0.5pt}O{0pt}O{0pt}}{%
+\setlength\fboxsep{#4}\sbox\FBox{\fcolorbox{#1}{#2}{#3\rule[-#5]{0pt}{#6}}}\usebox\FBox}
+
+\begin{document}
+Lorem ipsum dolor sit amet. \MyBox{Lorem ipsum} dolor sit amet. Lorem ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. \MyBox[red]{$\frac{\frac{2}{5} - 7}{4 + x^3}$} Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem
+ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem
+\MyBox[red!30][yellow!10]{$3.29 \times 10^{29}$} ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.  Lorem
+\MyBox[olive][red!40]{$3.29 \times 10^{29}$}[8pt] ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.  Lorem
+\MyBox[olive][red!40]{$3.29 \times 10^{29}$}[4pt][2pt][33pt] ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.  Lorem
+\MyBox[olive][red!40]{$3.29 \times 10^{29}$}[4pt][23pt][2pt] ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.
+\end{document}
+
+
+-
+That's great even if I don't understand all of that small code. –  projetmbc Nov 19 '11 at 10:12
+\newcommand\MyBox[2][red]{\mbox{\tikzmark{bl}#2\tikzmark{br}\DrawBox[#1]}}
+
+
+but the vertical spacing is still wrong. However, tikz is not the right tool for this problem. You already got other solutions which also can have colored frames.
+
+-
+I completely agree; using TikZ here is not the best approach. –  Gonzalo Medina Nov 18 '11 at 18:52
+@GonzaloMedina/Herbert: Am curious as to what is wrong with a tikz solution? Besides the package overhead, is there some other reason you are thinking about? If you are already using tikz, then there is no additional package overhead. –  Peter Grill Nov 19 '11 at 0:24
+
+Here is a enhanced version of the earlier solution provided at this earlier question about a boxed alternative with nicer spacing. This version measures the height and depth of the text that the box encloses. This two parameters \@DrawBoxHeightSep specify the separation to be applied to the height and depth. Here is the relevant section zoomed in:
+
+## Notes:
+
+• This does require two runs: the first to compute the positions of the box, and the second to draw it in the correct spot.
+
+## Known Issues:
+
+• This won't work if the text crosses line boundaries. If this is an issue and you are willing to consider highlighting instead of a box you should refer to Cool Text Highlighting in LaTeX.
+
+## Code:
+
+\documentclass[border=1pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{calc,shapes}
+
+\makeatletter
+\newcommand*{\@DrawBoxHeightSep}{0.030em}%
+\newcommand*{\@DrawBoxDepthSep}{0.025em}%
+\newcommand{\@DrawBox}[3][red]{%#1= style, #2=height, #3=depth
+\tikz[overlay,remember picture]{
+\draw[#1]
+($(bl)+(-0.2em,#2+\@DrawBoxHeightSep)$) rectangle
+($(br)+(0.2em,-#3-+\@DrawBoxDepthSep)$);}
+}
+
+\newcommand{\tikzmark}[1]{\tikz[overlay,remember picture] \node (#1) {};}
+
+\newdimen\@myBoxHeight%
+\newdimen\@myBoxDepth%
+\newcommand{\MyBox}[2][red]{%
+\settoheight{\@myBoxHeight}{#2}% Record height of box
+\settodepth{\@myBoxDepth}{#2}% Record height of box
+\tikzmark{bl}#2\tikzmark{br}\@DrawBox[#1]{\@myBoxHeight}{\@myBoxDepth}% Draw the box
+}
+\makeatother
+
+\begin{document}
+Lorem ipsum dolor sit amet. \MyBox{Lorem ipsum} dolor sit amet. Lorem ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. \MyBox{$\frac{\frac{2}{5} - 7}{4 + x^3}$} Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.  Lorem
+ipsum \MyBox[blue]{$3.29 \times 10^{29}$} dolor sit amet. Lorem ipsum dolor sit amet. Lorem
+ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem
+\MyBox[draw=red,fill=yellow!20,,opacity=0.3]{$3.29 \times 10^{29}$} ipsum dolor sit amet.
+Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.
+\end{document}
+
+-
+Thanks for this solution using TiKz. –  projetmbc Nov 19 '11 at 10:12

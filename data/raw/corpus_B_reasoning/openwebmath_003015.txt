@@ -1,0 +1,390 @@
+# Composability¶
+
+In this tutorial, you will learn how to build workflows that span several Canton domains. Composability turns those several Canton domains into one conceptual ledger at the application level.
+
+The tutorial assumes the following prerequisites:
+
+The tutorial consists of two parts:
+
+1. The first part illustrates how to design a workflow that spans multiple domains.
+2. The second part shows how to compose existing workflows on different domains into a single workflow and the benefits this brings.
+
+The DAML models are shipped with the Canton release in the daml/CantonExamples folder in the modules Iou and Paint. The configuration and the steps are available in the examples/05-composability folder of the Canton release. To run the workflow, start Canton from the release’s root folder as follows:
+
+./bin/canton -c examples/05-composability/composability.conf
+
+
+You can copy-paste the console commands from the tutorial in the given order into the Canton console to run them interactively. All console commands are also summarized in the bootstrap scripts composability1.canton and composability2.canton.
+
+## Part 1: A multi-domain workflow¶
+
+We consider the paint agreement scenario from the Getting started tutorial. The house owner and the painter want to enter a paint agreement that obliges the painter to paint the house owner’s house. To enter such an agreement, the house owner proposes a paint offer to the painter and the painter accepts. Upon acceptance, the paint agreement shall be created atomically with changing the ownership of the money, which we represent by an IOU backed by the bank.
+
+Atomicity guarantees that no party can scam the other: The painter enters the obligation of painting the house only if house owner pays, and the house owner pays only if the painter enters the obligation. This avoid bad scenarios such as the following, which would have to be resolved out of band, e.g., using legal processes:
+
+• The house owner spends the IOU on something else and does not pay the painter, even though the painter has entered the obligation to paint the house. The painter then needs to convince the house owner to pay with another IOU or to revoke the paint agreement.
+• The house owner wires the money to the painter, but the painter refuses to enter the paint agreement. The house owner then begs the painter to return the money.
+
+### Setting up the topology¶
+
+In this example, we assume a topology with two domains, iou and paint. The house owner’s and the painter’s participants are connected to both domains, as illustrated in the following diagram.
+
+The configuration file composability.conf configures the two domains iou and paint and three participants. The domain parameter setting transfer-exclusivity-timeout will be explained in the second part of this tutorial.
+
+canton {
+domains {
+iou {
+public-api.port = 11018
+storage.type = memory
+domain-parameters.transfer-exclusivity-timeout = PT0s // disables automatic transfer-in
+}
+
+paint {
+public-api.port = 11028
+storage.type = memory
+domain-parameters.transfer-exclusivity-timeout = PT2s
+}
+}
+
+participants {
+participant1 {
+ledger-api.port = 11011
+storage.type = memory
+}
+
+participant2 {
+ledger-api.port = 11021
+storage.type = memory
+}
+
+participant3 {
+ledger-api.port = 11031
+storage.type = memory
+}
+}
+}
+
+
+As the first step, all the nodes are started and the parties for the bank (hosted on participant 1), the house owner (hosted on participant 2), and the painter (hosted on participant 3) are created. The details of the party onboarding are not relevant for show-casing cross-domain workflows.
+
+// start all instances defined in the configuration file
+all start
+
+connect(participant1, iou)
+connect(participant2, iou)
+connect(participant3, iou)
+connect(participant2, paint)
+connect(participant3, paint)
+
+// create the parties
+val Bank = enable_party(participant1, "Bank")
+val HouseOwner = enable_party(participant2, "House Owner")
+val Painter = enable_party(participant3, "Painter")
+
+// Wait until the party enabling has taken effect and a heartbeat has been sent afterwards
+val partyAssignment = Set(HouseOwner -> participant2, Painter -> participant3)
+assert(await_topology_heartbeat(participant2, partyAssignment))
+assert(await_topology_heartbeat(participant3, partyAssignment))
+
+// upload the DAML model to all participants
+val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
+
+
+### Creating the IOU and the paint offer¶
+
+To initialize the ledger, the Bank creates an IOU for the house owner and the house owner creates a paint offer for the painter. These steps are implemented below using the Scala bindings generated from the DAML model. The generated Scala classes are distributed with the Canton release in the package com.digitalasset.canton.examples. The relevant classes are imported as follows:
+
+import com.digitalasset.canton.examples.Iou.{Amount, DiscloseIou, Iou}
+import com.digitalasset.canton.examples.Paint.{OfferToPaintHouseByOwner, PaintHouse}
+import com.digitalasset.canton.ledger.api.client.DecodeUtil.decodeAllCreated
+import com.digitalasset.canton.protocol.ContractIdSyntax._
+
+
+Bank creates an IOU of USD 100 for the house owner on the iou domain, by submitting the command through the ledger API command service of participant 1. The house owner then discloses the IOU contract to the painter such that the painter can effect the ownership change when they accept the offer. Both of these commands run over the iou domain because the Bank’s participant 1 is only connected to the iou domain. The need to disclose the IOU contract is explained in DA ledger privacy model.
+
+// Bank creates IOU for the house owner
+val createIouCmd = Iou(
+payer = Bank.toPrim,
+owner = HouseOwner.toPrim,
+amount = Amount(value = 100.0, currency = "USD")
+).create.command
+val Seq(iouContract) = decodeAllCreated(Iou.id)(
+participant1.ledger_submit_flat(Bank, Seq(createIouCmd)))
+
+// Wait until the house owner sees the IOU in the active contract store
+assert(await_active_contract(participant2, HouseOwner, iouContract.contractId.toLf))
+
+// The house owner discloses the IOU to the Painter
+val discloseIouCmd = DiscloseIou(
+sender = HouseOwner.toPrim,
+iou = iouContract.contractId
+).createAnd.exerciseDisclose(HouseOwner.toPrim).command
+participant2.ledger_submit_flat(HouseOwner, Seq(discloseIouCmd))
+
+
+Similarly, the house owner creates a paint offer on the paint domain via participant 2. In the ledger_submit_flat command, we set the workflow id to the paint domain so that the participant submits the commands to this domain. If no domain was specified, the participant automatically determines a suitable domain. In this case, both domains are eligible because on each domain, every stakeholder (the house owner and the painter) is hosted on a connected participant.
+
+// The house owner creates a paint offer using participant 2 and the Paint domain
+val paintOfferCmd = OfferToPaintHouseByOwner(
+painter = Painter.toPrim,
+houseOwner = HouseOwner.toPrim,
+bank = Bank.toPrim,
+iouId = iouContract.contractId
+).create.command
+val Seq(paintOffer) = decodeAllCreated(OfferToPaintHouseByOwner.id)(
+participant2.ledger_submit_flat(HouseOwner, Seq(paintOfferCmd), workflowId = paint.name))
+
+
+### Transferring a contract¶
+
+In Canton, contracts reside on at most one domain at a time. For example, the IOU contract resides on the iou domain because it has been created by a command that was submitted to the iou domain. Similarly, the paint offer resides on the paint domain. In the current version of Canton, a command can only use contracts that reside on the domain that the command is submitted to. Therefore, before the painter can accept the offer and thereby become the owner of the IOU contract, both contracts must be brought to a common domain.
+
+In this example, the house owner and the painter are hosted on participants that are connected to both domains, whereas the Bank is only connected to the iou domain. The IOU contract cannot be moved to the paint domain because all stakeholders of a contract must be connected to the contract’s domain of residence. Conversely, the paint offer can be transferred to the iou domain, so that the painter can accept the offer on the iou domain.
+
+Stakeholders can change the residence domain of a contract using the transfer command. In the example, the painter transfers the paint offer from the paint domain to the iou domain.
+
+// Wait until the painter sees the paint offer in the active contract store
+assert(await_active_contract(participant3, Painter, paintOffer.contractId.toLf))
+
+// Painter transfers the paint offer to the IOU domain
+participant3.transfer(
+Painter,                      // Initiator of the transfer
+paintOffer.contractId.toLf,   // Contract to be transferred
+paint.alias,                  // Origin domain
+iou.alias                     // Target domain
+)
+
+
+### Atomic acceptance¶
+
+The paint offer and the IOU contract both reside on the iou domain now. Accordingly, the painter can complete the workflow by accepting the offer.
+
+// Painter accepts the paint offer on the IOU domain
+val acceptCmd = paintOffer.contractId.exerciseAcceptByPainter(Painter.toPrim).command
+val acceptTx = participant3.ledger_submit_flat(Painter, Seq(acceptCmd))
+val Seq(painterIou) = decodeAllCreated(Iou.id)(acceptTx)
+val Seq(paintHouse) = decodeAllCreated(PaintHouse.id)(acceptTx)
+
+
+This transaction executes on the iou domain because the input contracts (the paint offer and the IOU) reside there. It atomically creates two contracts on the iou domain: the painter’s new IOU and the agreement to paint the house. The unhappy scenarios needing out-of-band resolution are avoided.
+
+### Completing the workflow¶
+
+Finally, the paint agreement can be transferred back to the paint domain, where it actually belongs.
+
+// Wait until the house owner sees the PaintHouse agreement
+assert(await_active_contract(participant2, HouseOwner, paintHouse.contractId.toLf))
+
+// The house owner moves the PaintHouse agreement back to the Paint domain
+participant2.transfer(
+HouseOwner,
+paintHouse.contractId.toLf,
+iou.alias,
+paint.alias
+)
+
+
+Note that the painter’s IOU remains on the iou domain. The painter can therefore call the IOU and cash it out.
+
+// Painter converts the Iou into cash
+participant3.ledger_submit_flat(
+Painter,
+Seq(painterIou.contractId.exerciseCall(Painter.toPrim).command),
+iou.name
+)
+
+
+### Take aways¶
+
+• Contracts reside on domains. Commands can only use contracts that reside on the domain to which they are submitted.
+• Stakeholders can move contracts from one domain to another using transfer. All stakeholders must be connected to the origin and the target domain.
+
+## Part 2: Composing existing workflows¶
+
+This part shows how existing workflows can be composed even if they work on separate domains. The running example is a variation of the paint example from the first part with a more complicated topology. We therefore assume that you have gone through the first part of this tutorial. Technially, this tutorial runs through the same steps as the first part, but more details are exposed. The console commands assume that you start with a fresh Canton console.
+
+### Existing workflows¶
+
+Consider a situation where the two domains iou and paint have evolved separately:
+
+• The iou domain for managing IOUs,
+• The paint domain for managing paint agreements.
+
+Accordingly, there are separate applications for managing IOUs (issuing, changing ownership, calling) and paint agreements, and the house owner and the painter have connected their applications to different participants. The situation is illustrated in the following picture.
+
+To enter in a paint agreement in this setting, the house owner and the painter need to perform the following steps:
+
+1. The house owner creates a paint offer through participant 2 on the paint domain.
+2. The painter accepts the paint offer through participant 3 on the paint domain. As a consequence, a paint agreement is created.
+3. The painter sets a reminder that he needs to receive an IOU from the house owner on the iou domain.
+4. When the house owner observes a new paint agreement through participant 2 on the paint domain, she changes the IOU ownership to the painter through participant 5 on the iou domain.
+5. The painter observes a new IOU through participant 4 on the iou domain and therefore removes the reminder.
+
+Overall, a non-trivial amount of out-of-band coordination is required to keep the paint ledger consistent with the iou ledger. If this coordination breaks down, the unhappy scenarios from the first part can happen.
+
+### Required changes¶
+
+We now show how the house owner and the painter can avoid need for out-of-band coordination when entering in paint agreements. The goal is to reuse the existing infrastructure for managing IOUs and paint agreements as much as possible. The following changes are needed:
+
+1. The house owner and the painter connect their participants for paint agreements to the iou domain:
+
+The Canton configuration is accordingly extended with the two participants 4 and 5. (The connections themselves are set up in the next section.)
+
+canton {
+participants {
+participant4 {
+ledger-api.port = 11041
+storage.type = memory
+}
+
+participant5 {
+ledger-api.port = 11051
+storage.type = memory
+}
+}
+}
+
+2. They replace their DAML model for paint offers such that the house owner must specify an IOU in the offer and its accept choice makes the painter the new owner of the IOU.
+
+3. They create a new application for the paint offer-accept workflow.
+
+The DAML models for IOUs and paint agreements themselves remain unchanged, and so do the applications that deal with them.
+
+### Preparation using the existing workflows¶
+
+We extend the topology from the first part as described. The commands are explained in detail in Canton’s identity management manual.
+
+// start all instances defined in the configuration file
+all start
+
+connect(participant1, iou)
+connect(participant2, iou)
+connect(participant3, iou)
+connect(participant2, paint)
+connect(participant3, paint)
+connect(participant4, iou)
+connect(participant5, iou)
+
+// create the parties
+val Bank = enable_party(participant1, "Bank")
+val HouseOwner = enable_party(participant2, "House Owner")
+val Painter = enable_party(participant3, "Painter")
+
+// enable the house owner on participant 5 and the painter on participant 4
+// as explained in the identity management documentation at
+// https://www.canton.io/docs/stable/user-manual/usermanual/identity_management.html#party-on-two-nodes
+import com.digitalasset.canton.console.ParticipantReference
+def authorizePartyParticipant(partyId: PartyId, createdAt: ParticipantReference, to: ParticipantReference): Unit = {
+val createdAtP = createdAt.tryToId
+val toP = to.tryToId
+createdAt.authorize_party_to_participant(IdentityChangeOp.Add, None, partyId, toP, RequestSide.From)
+to.authorize_party_to_participant(IdentityChangeOp.Add, None, partyId, toP, RequestSide.To)
+}
+authorizePartyParticipant(HouseOwner, participant2, participant5)
+authorizePartyParticipant(Painter, participant3, participant4)
+
+// Wait until the party enabling has taken effect and a heartbeat has been sent afterwards
+val partyAssignment = Set(HouseOwner -> participant2, HouseOwner -> participant5, Painter -> participant3, Painter -> participant4)
+assert(await_topology_heartbeat(participant2, partyAssignment))
+assert(await_topology_heartbeat(participant3, partyAssignment))
+
+// upload the DAML model to all participants
+val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
+
+
+As before, the Bank creates an IOU and the house owner discloses it to the painter on the iou domain, using their existing applications for IOUs.
+
+import com.digitalasset.canton.examples.Iou.{Amount, DiscloseIou, Dummy, Iou}
+import com.digitalasset.canton.examples.Paint.{OfferToPaintHouseByOwner, PaintHouse}
+import com.digitalasset.canton.ledger.api.client.DecodeUtil.decodeAllCreated
+import com.digitalasset.canton.protocol.ContractIdSyntax._
+
+val createIouCmd = Iou(
+payer = Bank.toPrim,
+owner = HouseOwner.toPrim,
+amount = Amount(value = 100.0, currency = "USD")
+).create.command
+val Seq(iouContract) = decodeAllCreated(Iou.id)(
+participant1.ledger_submit_flat(Bank, Seq(createIouCmd)))
+
+// Wait until the house owner sees the IOU in the active contract store of participant 5
+assert(await_active_contract(participant5, HouseOwner, iouContract.contractId.toLf))
+
+// The house owner discloses the IOU to the Painter
+val discloseIouCmd = DiscloseIou(
+sender = HouseOwner.toPrim,
+iou = iouContract.contractId
+).createAnd.exerciseDisclose(HouseOwner.toPrim).command
+decodeAllCreated(DiscloseIou.id)(participant5.ledger_submit_flat(HouseOwner, Seq(discloseIouCmd)))
+
+
+### The paint offer-accept workflow¶
+
+The new paint offer-accept workflow happens in four steps:
+
+1. Create the offer on the paint domain.
+2. Transfer the contract to the iou domain.
+3. Accept the offer.
+4. Transfer the paint agreement to the paint domain.
+
+#### Making the offer¶
+
+The house owner creates a paint offer on the paint domain.
+
+// The house owner creates a paint offer using participant 2 and the Paint domain
+val paintOfferCmd = OfferToPaintHouseByOwner(
+painter = Painter.toPrim,
+houseOwner = HouseOwner.toPrim,
+bank = Bank.toPrim,
+iouId = iouContract.contractId
+).create.command
+val Seq(paintOffer) = decodeAllCreated(OfferToPaintHouseByOwner.id)(
+participant2.ledger_submit_flat(HouseOwner, Seq(paintOfferCmd), workflowId = paint.name))
+
+
+#### Transfers are not atomic¶
+
+In the first part, we have used transfer to move the offer to the iou domain. Now, we look a bit behind the scenes. A contract transfer happens in two atomic steps: transfer-out and transfer-in. transfer is merely a shorthand for the two steps. In particular, transfer is not an atomic operation like other ledger commands.
+
+During a transfer-out, the contract is deactivated on the origin domain, in this case the paint domain. Any stakeholder whose participant is connected to the origin domain and the target domain can initiate a transfer-out. The transfer_out command returns a transfer Id.
+
+// Wait until the painter sees the paint offer in the active contract store
+assert(await_active_contract(participant3, Painter, paintOffer.contractId.toLf))
+
+// Painter transfers the paint offer to the IOU domain
+val paintOfferTransferId = participant3.transfer_out(
+Painter,                      // Initiator of the transfer
+paintOffer.contractId.toLf,   // Contract to be transferred
+paint.alias,                  // Origin domain
+iou.alias                     // Target domain
+)
+
+
+The transfer_in command consumes the transfer Id and activates the contract on the target domain.
+
+participant3.transfer_in(Painter, paintOfferTransferId, iou.alias)
+
+
+Between the transfer-out and the transfer-in, the contract does not reside on any domain and cannot be used by commands. We say that the contract is in transit.
+
+#### Accepting the paint offer¶
+
+The painter accepts the offer, as before.
+
+// Wait until the Painter sees the IOU contract on participant 3.
+// Since disclosed contracts do not show up in the active contract service,
+// the Painter instead creates and archives a dummy contract;
+// Canton's ordering ensures that the participant knows the earlier disclosure afterwards.
+val dummyCmd = Dummy(party = Painter.toPrim).createAnd.exerciseArchive(Painter.toPrim).command
+participant3.ledger_submit_flat(Painter, Seq(dummyCmd), workflowId = iou.name)
+
+// Painter accepts the paint offer on the Iou domain
+val acceptCmd = paintOffer.contractId.exerciseAcceptByPainter(Painter.toPrim).command
+val acceptTx = participant3.ledger_submit_flat(Painter, Seq(acceptCmd))
+val Seq(painterIou) = decodeAllCreated(Iou.id)(acceptTx)
+val Seq(paintHouse) = decodeAllCreated(PaintHouse.id)(acceptTx)
+
+
+#### Automatic transfer-in¶
+
+Finally, the paint agreement is transferred back to the paint domain such that the existing infrastructure aroun

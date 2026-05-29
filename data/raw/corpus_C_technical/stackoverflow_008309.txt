@@ -1,0 +1,58 @@
+Question: <p>Is there a way to ensure all created subprocess are dead at exit time of a Python program? By subprocess I mean those created with subprocess.Popen().</p>
+
+<p>If not, should I iterate over all of the issuing kills and then kills -9? anything cleaner?</p>
+
+Answer: <p>You can use <a href="http://docs.python.org/library/atexit.html" rel="nofollow"><strong>atexit</strong></a> for this, and register any clean up tasks to be run when your program exits. </p>
+
+<p><strong>atexit.register(func[, *args[, **kargs]])</strong></p>
+
+<p>In your cleanup process, you can also implement your own wait, and kill it when a your desired timeout occurs.</p>
+
+<pre><code>&gt;&gt;&gt; import atexit
+&gt;&gt;&gt; import sys
+&gt;&gt;&gt; import time
+&gt;&gt;&gt; 
+&gt;&gt;&gt; 
+&gt;&gt;&gt;
+&gt;&gt;&gt; def cleanup():
+...     timeout_sec = 5
+...     for p in all_processes: # list of your processes
+...         p_sec = 0
+...         for second in range(timeout_sec):
+...             if p.poll() == None:
+...                 time.sleep(1)
+...                 p_sec += 1
+...         if p_sec &gt;= timeout_sec:
+...             p.kill() # supported from python 2.6
+...     print 'cleaned up!'
+...
+&gt;&gt;&gt;
+&gt;&gt;&gt; atexit.register(cleanup)
+&gt;&gt;&gt;
+&gt;&gt;&gt; sys.exit()
+cleaned up!
+</code></pre>
+
+<p><strong>Note</strong> -- Registered functions won't be run if this process (parent process) is killed.</p>
+
+<p><strong>The following windows method is no longer needed for python >= 2.6</strong></p>
+
+<p>Here's a way to kill a process in windows. Your Popen object has a pid attribute, so you can just call it by <strong>success = win_kill(p.pid)</strong> (Needs <a href="http://sourceforge.net/projects/pywin32/" rel="nofollow">pywin32</a> installed):</p>
+
+<pre><code>    def win_kill(pid):
+        '''kill a process by specified PID in windows'''
+        import win32api
+        import win32con
+
+        hProc = None
+        try:
+            hProc = win32api.OpenProcess(win32con.PROCESS_TERMINATE, 0, pid)
+            win32api.TerminateProcess(hProc, 0)
+        except Exception:
+            return False
+        finally:
+            if hProc != None:
+                hProc.Close()
+
+        return True
+</code></pre>

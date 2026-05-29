@@ -1,0 +1,117 @@
+# Point group symmetry representations¶
+
+In the chemist’s point of view, group theory is a long-known approach to assign symmetry representations to molecular vibrations and wave functions 1 2. For larger but still symmetric molecules (eg. nanoclusters 3), assignment of the representations by hand for each electron band becomes tedious. This tool is an automatic routine to resolve the representations.
+
+In this implementation, the wave functions are operated with rotations and mirroring with cubic interpolation onto the same grid, and the overlap of the resulting function with the original one is calculated. The representations are then given as weights that are the coefficients of the linear combination of the overlaps in the basis of the character table rows ie. the irreducible representations.
+
+Prior to symmetry analysis, you should have the restart file that includes the wave functions, and knowledge of
+
+• The point group to consider
+
+• The bands you want to analyze
+
+• The main axis and the secondary axis of the molecule, corresponding to the point group
+
+• The atom indices whose center-of-mass is shifted to the center of the unit cell ie. to the crossing of the main and secondary axes.
+
+• The atom indices around which you want to perform the analysis (optional)
+
+## Example: The water molecule¶
+
+To resolve the symmetry representations of occupied states of the water molecule in C2v point group, the h2o.py script can be used:
+
+from gpaw import GPAW
+from ase.build import molecule
+
+# Ground state calculation:
+atoms = molecule('H2O')
+atoms.center(vacuum=2.5)
+atoms.calc = GPAW(mode='lcao', txt='h2o.txt')
+e = atoms.get_potential_energy()
+
+
+In order to analyze the symmetry, you need to create a SymmetryChecker object and call its check_band() method like this:
+
+from gpaw.point_groups import SymmetryChecker
+for n in range(4):
+result = checker.check_band(atoms.calc, n)
+print(n, result['symmetry'])
+
+
+You can also write the wave functions to a file:
+
+atoms.calc.write('h2o.gpw', mode='all')
+
+
+and do the analysis later:
+
+>>> from gpaw import GPAW
+>>> from gpaw.point_groups import SymmetryChecker
+>>> calc = GPAW('h2o.gpw')
+>>> center = calc.atoms.positions[0]  # oxygen atom
+>>> checker = SymmetryChecker('C2v', center, radius=2.0)
+>>> checker.check_calculation(calc, n1=0, n2=4)
+
+
+This will produce the following output:
+
+band    energy     norm  normcut     best     A1      A2      B1      B2
+0   -25.967    1.048    1.039       A1   1.000  -0.000   0.000   0.000
+1   -13.763    0.931    0.891       B2   0.000   0.000  -0.000   1.000
+2    -8.461    0.928    0.908       A1   1.000  -0.000   0.000   0.000
+3    -7.027    0.876    0.868       B1   0.000   0.000   1.000  -0.000
+
+
+The bands have very distinct representations as expected.
+
+Note
+
+There is also a simple command-line interface:
+
+\$ python3 -m gpaw.point_groups C2v h2o.gpw -c O -b 0:4
+
+class gpaw.point_groups.SymmetryChecker(group: Union[str, gpaw.point_groups.group.PointGroup], center: Sequence[float], radius: float = 2.0, x: Optional[Union[str, Sequence[float]]] = None, y: Optional[Union[str, Sequence[float]]] = None, z: Optional[Union[str, Sequence[float]]] = None, grid_spacing: float = 0.2)[source]
+
+Check point-group symmetries.
+
+If a non-standard orientation is desired then two of x, y, z can be specified.
+
+check_atoms(atoms: ase.atoms.Atoms, tol: float = 1e-05)bool[source]
+
+Check if atoms have all the symmetries.
+
+Unit of tol is Angstrom.
+
+check_band(calc, band: int, spin: int = 0) → Dict[str, Any][source]
+
+Check wave function from GPAW calculation.
+
+check_calculation(calc, n1: int, n2: int, spin: int = 0, output: str = '-')None[source]
+
+Check several wave functions from GPAW calculation.
+
+check_function(function: gpaw.hints.ArrayND, grid_vectors: gpaw.hints.ArrayND = None) → Dict[str, Any][source]
+
+Check function on uniform grid.
+
+class gpaw.point_groups.PointGroup(name: str)[source]
+
+Point-group object.
+
+Name must be one of: C2, C2v, C3v, D2d, D3h, D5, D5h, Ico, Ih, Oh, Td or Th.
+
+get_normalized_table()gpaw.hints.ArrayND[source]
+
+Normalized character table.
+
+1
+
+K. C. Molloy. Group Theory for Chemists: Fundamental Theory and Applications. Woodhead Publishing 2011
+
+2
+
+J. F. Cornwell. Group Theory in Physics: An Introduction. Elsevier Science and Technology (1997)
+
+3
+
+Kaappa, Malola, Häkkinen; Point Group Symmetry Analysis of the Electronic Structure of Bare and Protected Metal Nanocrystals J. Phys. Chem. A; vol. 122, 43, pp. 8576-8584 (2018)

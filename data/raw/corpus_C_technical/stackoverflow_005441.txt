@@ -1,0 +1,313 @@
+Question: <p>Can you add new statements (like <code>print</code>, <code>raise</code>, <code>with</code>) to Python's syntax?</p>
+
+<p>Say, to allow..</p>
+
+<pre><code>mystatement "Something"
+</code></pre>
+
+<p>Or,</p>
+
+<pre><code>new_if True:
+    print "example"
+</code></pre>
+
+<p>Not so much if you <em>should</em>, but rather if it's possible (short of modifying the python interpreters code)</p>
+
+Answer: <p>You may find this useful - <a href="http://eli.thegreenplace.net/2010/06/30/python-internals-adding-a-new-statement-to-python/">Python internals: adding a new statement to Python</a>, quoted here:</p>
+
+<hr>
+
+<p>This article is an attempt to better understand how the front-end of Python works. Just reading documentation and source code may be a bit boring, so I'm taking a hands-on approach here: I'm going to add an <code>until</code> statement to Python.</p>
+
+<p>All the coding for this article was done against the cutting-edge Py3k branch in the <a href="http://code.python.org/hg/branches/py3k/">Python Mercurial repository mirror</a>.</p>
+
+<h3>The <code>until</code> statement</h3>
+
+<p>Some languages, like Ruby, have an <code>until</code> statement, which is the complement to <code>while</code> (<code>until num == 0</code> is equivalent to <code>while num != 0</code>). In Ruby, I can write:</p>
+
+<pre><code>num = 3
+until num == 0 do
+  puts num
+  num -= 1
+end
+</code></pre>
+
+<p>And it will print:</p>
+
+<pre><code>3
+2
+1
+</code></pre>
+
+<p>So, I want to add a similar capability to Python. That is, being able to write:</p>
+
+<pre><code>num = 3
+until num == 0:
+  print(num)
+  num -= 1
+</code></pre>
+
+<h3>A language-advocacy digression</h3>
+
+<p>This article doesn't attempt to suggest the addition of an <code>until</code> statement to Python. Although I think such a statement would make some code clearer, and this article displays how easy it is to add, I completely respect Python's philosophy of minimalism. All I'm trying to do here, really, is gain some insight into the inner workings of Python.</p>
+
+<h3>Modifying the grammar</h3>
+
+<p>Python uses a custom parser generator named <code>pgen</code>. This is a LL(1) parser that converts Python source code into a parse tree. The input to the parser generator is the file <code>Grammar/Grammar</code><strong>[1]</strong>. This is a simple text file that specifies the grammar of Python.</p>
+
+<p><strong>[1]</strong>: From here on, references to files in the Python source are given relatively to the root of the source tree, which is the directory where you run configure and make to build Python.</p>
+
+<p>Two modifications have to be made to the grammar file. The first is to add a definition for the <code>until</code> statement. I found where the <code>while</code> statement was defined (<code>while_stmt</code>), and added <code>until_stmt</code> below <strong>[2]</strong>:</p>
+
+<pre><code>compound_stmt: if_stmt | while_stmt | until_stmt | for_stmt | try_stmt | with_stmt | funcdef | classdef | decorated
+if_stmt: 'if' test ':' suite ('elif' test ':' suite)* ['else' ':' suite]
+while_stmt: 'while' test ':' suite ['else' ':' suite]
+until_stmt: 'until' test ':' suite
+</code></pre>
+
+<p><strong>[2]</strong>: This demonstrates a common technique I use when modifying source code Iâm not familiar with: <em>work by similarity</em>. This principle wonât solve all your problems, but it can definitely ease the process. Since everything that has to be done for <code>while</code> also has to be done for <code>until</code>, it serves as a pretty good guideline.</p>
+
+<p>Note that I've decided to exclude the <code>else</code> clause from my definition of <code>until</code>, just to make it a little bit different (and because frankly I dislike the <code>else</code> clause of loops and don't think it fits well with the Zen of Python).</p>
+
+<p>The second change is to modify the rule for <code>compound_stmt</code> to include <code>until_stmt</code>, as you can see in the snippet above. It's right after <code>while_stmt</code>, again.</p>
+
+<p>When you run <code>make</code> after modifying <code>Grammar/Grammar</code>, notice that the <code>pgen</code> program is run to re-generate <code>Include/graminit.h</code> and <code>Python/graminit.c</code>, and then several files get re-compiled.</p>
+
+<h3>Modifying the AST generation code</h3>
+
+<p>After the Python parser has created a parse tree, this tree is converted into an AST, since ASTs are <a href="http://eli.thegreenplace.net/2009/02/16/abstract-vs-concrete-syntax-trees/">much simpler to work with</a> in subsequent stages of the compilation process.</p>
+
+<p>So, we're going to visit <code>Parser/Python.asdl</code> which defines the structure of Python's ASTs and add an AST node for our new <code>until</code> statement, again right below the <code>while</code>:</p>
+
+<pre><code>| While(expr test, stmt* body, stmt* orelse)
+| Until(expr test, stmt* body)
+</code></pre>
+
+<p>If you now run <code>make</code>, notice that before compiling a bunch of files, <code>Parser/asdl_c.py</code> is run to generate C code from the AST definition file. This (like <code>Grammar/Grammar</code>) is another example of the Python source-code using a mini-language (in other words, a DSL) to simplify programming. Also note that since <code>Parser/asdl_c.py</code> is a Python script, this is a kind of <a href="http://en.wikipedia.org/wiki/Bootstrapping_%28compilers%29">bootstrapping</a> - to build Python from scratch, Python already has to be available.</p>
+
+<p>While <code>Parser/asdl_c.py</code> generated the code to manage our newly defined AST node (into the files <code>Include/Python-ast.h</code> and <code>Python/Python-ast.c</code>), we still have to write the code that converts a relevant parse-tree node into it by hand. This is done in the file <code>Python/ast.c</code>. There, a function named <code>ast_for_stmt</code> converts parse tree nodes for statements into AST nodes. Again, guided by our old friend <code>while</code>, we jump right into the big <code>switch</code> for handling compound statements and add a clause for <code>until_stmt</code>:</p>
+
+<pre><code>case while_stmt:
+    return ast_for_while_stmt(c, ch);
+case until_stmt:
+    return ast_for_until_stmt(c, ch);
+</code></pre>
+
+<p>Now we should implement <code>ast_for_until_stmt</code>. Here it is:</p>
+
+<pre><code>static stmt_ty
+ast_for_until_stmt(struct compiling *c, const node *n)
+{
+    /* until_stmt: 'until' test ':' suite */
+    REQ(n, until_stmt);
+
+    if (NCH(n) == 4) {
+        expr_ty expression;
+        asdl_seq *suite_seq;
+
+        expression = ast_for_expr(c, CHILD(n, 1));
+        if (!expression)
+            return NULL;
+        suite_seq = ast_for_suite(c, CHILD(n, 3));
+        if (!suite_seq)
+            return NULL;
+        return Until(expression, suite_seq, LINENO(n), n-&gt;n_col_offset, c-&gt;c_arena);
+    }
+
+    PyErr_Format(PyExc_SystemError,
+                 "wrong number of tokens for 'until' statement: %d",
+                 NCH(n));
+    return NULL;
+}
+</code></pre>
+
+<p>Again, this was coded while closely looking at the equivalent <code>ast_for_while_stmt</code>, with the difference that for <code>until</code> I've decided not to support the <code>else</code> clause. As expected, the AST is created recursively, using other AST creating functions like <code>ast_for_expr</code> for the condition expression and <code>ast_for_suite</code> for the body of the <code>until</code> statement. Finally, a new node named <code>Until</code> is returned.</p>
+
+<p>Note that we access the parse-tree node <code>n</code> using some macros like <code>NCH</code> and <code>CHILD</code>. These are worth understanding - their code is in <code>Include/node.h</code>.</p>
+
+<h3>Digression: AST composition</h3>
+
+<p>I chose to create a new type of AST for the <code>until</code> statement, but actually this isn't necessary. I could've saved some work and implemented the new functionality using composition of existing AST nodes, since:</p>
+
+<pre><code>until condition:
+   # do stuff
+</code></pre>
+
+<p>Is functionally equivalent to:</p>
+
+<pre><code>while not condition:
+  # do stuff
+</code></pre>
+
+<p>Instead of creating the <code>Until</code> node in <code>ast_for_until_stmt</code>, I could have created a <code>Not</code> node with an <code>While</code> node as a child. Since the AST compiler already knows how to handle these nodes, the next steps of the process could be skipped.</p>
+
+<h3>Compiling ASTs into bytecode</h3>
+
+<p>The next step is compiling the AST into Python bytecode. The compilation has an intermediate result which is a CFG (Control Flow Graph), but since the same code handles it I will ignore this detail for now and leave it for another article.</p>
+
+<p>The code we will look at next is <code>Python/compile.c</code>. Following the lead of <code>while</code>, we find the function <code>compiler_visit_stmt</code>, which is responsible for compiling statements into bytecode. We add a clause for <code>Until</code>:</p>
+
+<pre><code>case While_kind:
+    return compiler_while(c, s);
+case Until_kind:
+    return compiler_until(c, s);
+</code></pre>
+
+<p>If you wonder what <code>Until_kind</code> is, it's a constant (actually a value of the <code>_stmt_kind</code> enumeration) automatically generated from the AST definition file into <code>Include/Python-ast.h</code>. Anyway, we call <code>compiler_until</code> which, of course, still doesn't exist. I'll get to it an a moment.</p>
+
+<p>If you're curious like me, you'll notice that <code>compiler_visit_stmt</code> is peculiar. No amount of <code>grep</code>-ping the source tree reveals where it is called. When this is the case, only one option remains - C macro-fu. Indeed, a short investigation leads us to the <code>VISIT</code> macro defined in <code>Python/compile.c</code>:</p>
+
+<pre><code>#define VISIT(C, TYPE, V) {\
+    if (!compiler_visit_ ## TYPE((C), (V))) \
+        return 0; \
+</code></pre>
+
+<p>It's used to invoke <code>compiler_visit_stmt</code> in <code>compiler_body</code>. Back to our business, however...</p>
+
+<p>As promised, here's <code>compiler_until</code>:</p>
+
+<pre><code>static int
+compiler_until(struct compiler *c, stmt_ty s)
+{
+    basicblock *loop, *end, *anchor = NULL;
+    int constant = expr_constant(s-&gt;v.Until.test);
+
+    if (constant == 1) {
+        return 1;
+    }
+    loop = compiler_new_block(c);
+    end = compiler_new_block(c);
+    if (constant == -1) {
+        anchor = compiler_new_block(c);
+        if (anchor == NULL)
+            return 0;
+    }
+    if (loop == NULL || end == NULL)
+        return 0;
+
+    ADDOP_JREL(c, SETUP_LOOP, end);
+    compiler_use_next_block(c, loop);
+    if (!compiler_push_fblock(c, LOOP, loop))
+        return 0;
+    if (constant == -1) {
+        VISIT(c, expr, s-&gt;v.Until.test);
+        ADDOP_JABS(c, POP_JUMP_IF_TRUE, anchor);
+    }
+    VISIT_SEQ(c, stmt, s-&gt;v.Until.body);
+    ADDOP_JABS(c, JUMP_ABSOLUTE, loop);
+
+    if (constant == -1) {
+        compiler_use_next_block(c, anchor);
+        ADDOP(c, POP_BLOCK);
+    }
+    compiler_pop_fblock(c, LOOP, loop);
+    compiler_use_next_block(c, end);
+
+    return 1;
+}
+</code></pre>
+
+<p>I have a confession to make: this code wasn't written based on a deep understanding of Python bytecode. Like the rest of the article, it was done in imitation of the kin <code>compiler_while</code> function. By reading it carefully, however, keeping in mind that the Python VM is stack-based, and glancing into the documentation of the <code>dis</code> module, which has <a href="http://docs.python.org/py3k/library/dis.html">a list of Python bytecodes</a> with descriptions, it's possible to understand what's going on.</p>
+
+<h3>That's it, we're done... Aren't we?</h3>
+
+<p>After making all the changes and running <code>make</code>, we can run the newly compiled Python and try our new <code>until</code> statement:</p>
+
+<pre><code>&gt;&gt;&gt; until num == 0:
+...   print(num)
+...   num -= 1
+...
+3
+2
+1
+</code></pre>
+
+<p>Voila, it works! Let's see the bytecode created for the new statement by using the <code>dis</code> module as follows:</p>
+
+<pre><code>import dis
+
+def myfoo(num):
+    until num == 0:
+        print(num)
+        num -= 1
+
+dis.dis(myfoo)
+</code></pre>
+
+<p>Here's the result:</p>
+
+<pre><code>4           0 SETUP_LOOP              36 (to 39)
+      &gt;&gt;    3 LOAD_FAST                0 (num)
+            6 LOAD_CONST               1 (0)
+            9 COMPARE_OP               2 (==)
+           12 POP_JUMP_IF_TRUE        38
+
+5          15 LOAD_NAME                0 (print)
+           18 LOAD_FAST                0 (num)
+           21 CALL_FUNCTION            1
+           24 POP_TOP
+
+6          25 LOAD_FAST                0 (num)
+           28 LOAD_CONST               2 (1)
+           31 INPLACE_SUBTRACT
+           32 STORE_FAST               0 (num)
+           35 JUMP_ABSOLUTE            3
+      &gt;&gt;   38 POP_BLOCK
+      &gt;&gt;   39 LOAD_CONST               0 (None)
+           42 RETURN_VALUE
+</code></pre>
+
+<p>The most interesting operation is number 12: if the condition is true, we jump to after the loop. This is correct semantics for <code>until</code>. If the jump isn't executed, the loop body keeps running until it jumps back to the condition at operation 35.</p>
+
+<p>Feeling good about my change, I then tried running the function (executing <code>myfoo(3)</code>) instead of showing its bytecode. The result was less than encouraging:</p>
+
+<pre><code>Traceback (most recent call last):
+  File "zy.py", line 9, in
+    myfoo(3)
+  File "zy.py", line 5, in myfoo
+    print(num)
+SystemError: no locals when loading 'print'
+</code></pre>
+
+<p>Whoa... this can't be good. So what went wrong?</p>
+
+<h3>The case of the missing symbol table</h3>
+
+<p>One of the steps the Python compiler performs when compiling the AST is create a symbol table for the code it compiles. The call to <code>PySymtable_Build</code> in <code>PyAST_Compile</code> calls into the symbol table module (<code>Python/symtable.c</code>), which walks the AST in a manner similar to the code generation functions. Having a symbol table for each scope helps the compiler figure out some key information, such as which variables are global and which are local to a scope.</p>
+
+<p>To fix the problem, we have to modify the <code>symtable_visit_stmt</code> function in <code>Python/symtable.c</code>, adding code for handling <code>until</code> statements, after the similar code for <code>while</code> statements <strong>[3]</strong>:</p>
+
+<pre><code>case While_kind:
+    VISIT(st, expr, s-&gt;v.While.test);
+    VISIT_SEQ(st, stmt, s-&gt;v.While.body);
+    if (s-&gt;v.While.orelse)
+        VISIT_SEQ(st, stmt, s-&gt;v.While.orelse);
+    break;
+case Until_kind:
+    VISIT(st, expr, s-&gt;v.Until.test);
+    VISIT_SEQ(st, stmt, s-&gt;v.Until.body);
+    break;
+</code></pre>
+
+<p><strong>[3]</strong>: By the way, without this code thereâs a compiler warning for <code>Python/symtable.c</code>. The compiler notices that the <code>Until_kind</code> enumeration value isnât handled in the switch statement of <code>symtable_visit_stmt</code> and complains. Itâs always important to check for compiler warnings!</p>
+
+<p>And now we really are done. Compiling the source after this change makes the execution of <code>myfoo(3)</code> work as expected.</p>
+
+<h3>Conclusion</h3>
+
+<p>In this article I've demonstrated how to add a new statement to Python. Albeit requiring quite a bit of tinkering in the code of the Python compiler, the change wasn't difficult to implement, because I used a similar and existing statement as a guideline.</p>
+
+<p>The Python compiler is a sophisticated chunk of software, and I don't claim being an expert in it. However, I am really interested in the internals of Python, and particularly its front-end. Therefore, I found this exercise a very useful companion to theoretical study of the compiler's principles and source code. It will serve as a base for future articles that will get deeper into the compiler.</p>
+
+<h3>References</h3>
+
+<p>I used a few excellent references for the construction of this article. Here they are, in no particular order:</p>
+
+<ul>
+<li><a href="http://www.python.org/dev/peps/pep-0339/">PEP 339: Design of the CPython compiler</a> - probably the most important and comprehensive piece of <em>official</em> documentation for the Python compiler. Being very short, it painfully displays the scarcity of good documentation of the internals of Python.</li>
+<li>"Python Compiler Internals" - an article by Thomas Lee</li>
+<li>"Python: Design and Implementation" - a presentation by Guido van Rossum</li>
+<li>Python (2.5) Virtual Machine, A guided tour - a presentation by Peter TrÃ¶ger</li>
+</ul>
+
+<p><a href="http://eli.thegreenplace.net/2010/06/30/python-internals-adding-a-new-statement-to-python/">original source</a></p>

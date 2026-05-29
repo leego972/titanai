@@ -1,0 +1,35 @@
+Question: <p>Using python 2.4 and the built-in <code>ZipFile</code> library, I cannot read very large zip files (greater than 1 or 2 GB) because it wants to store the entire contents of the uncompressed file in memory.  Is there another way to do this (either with a third-party library or some other hack), or must I "shell out" and unzip it that way (which isn't as cross-platform, obviously).</p>
+
+Answer: <p>Here's an outline of decompression of large files.</p>
+
+<pre><code>import zipfile
+import zlib
+import os
+
+src = open( doc, "rb" )
+zf = zipfile.ZipFile( src )
+for m in  zf.infolist():
+
+    # Examine the header
+    print m.filename, m.header_offset, m.compress_size, repr(m.extra), repr(m.comment)
+    src.seek( m.header_offset )
+    src.read( 30 ) # Good to use struct to unpack this.
+    nm= src.read( len(m.filename) )
+    if len(m.extra) &gt; 0: ex= src.read( len(m.extra) )
+    if len(m.comment) &gt; 0: cm= src.read( len(m.comment) ) 
+
+    # Build a decompression object
+    decomp= zlib.decompressobj(-15)
+
+    # This can be done with a loop reading blocks
+    out= open( m.filename, "wb" )
+    result= decomp.decompress( src.read( m.compress_size ) )
+    out.write( result )
+    result = decomp.flush()
+    out.write( result )
+    # end of the loop
+    out.close()
+
+zf.close()
+src.close()
+</code></pre>

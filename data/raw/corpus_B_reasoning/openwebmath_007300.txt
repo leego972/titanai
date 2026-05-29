@@ -1,0 +1,206 @@
+# Plotting a smooth function [duplicate]
+
+I want to plot the graph of the function given by:
+
+f(x)=abs(x - x^3/6 - sin(x)) for -1<= x <=1
+
+but a noise (near x-axis) curve is obtained: The code is the following:
+
+\documentclass[11pt,border=1mm]{standalone}
+\usepackage[portuguese, shorthands=off]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{tikz,pgfplots}
+
+\begin{document}
+
+\begin{tikzpicture}
+\begin{axis}[
+xmin = -1,
+xmax = 1,
+width = 10cm]
+{abs(x-x^3/6-sin(deg(x)))};
+\end{axis}
+\end{tikzpicture}
+
+\end{document}
+
+
+and the output produced is the following:
+
+How can I fix this?
+
+• Please extend your example to a minimal working example (MWE). Sep 24 at 12:59
+• Done, as you suggested. Sep 24 at 13:02
+• Since the Taylor's series approximation is $\sin(x) = x - \frac{x^3}{3!} + \frac{x^5){5!}-...$ you are bound to get some round off error, and pgfmath in particular is prone to round off errors. Sep 24 at 13:22
+• Since you have some responses below that seem to answer your question, please consider marking one of them as ‘Accepted’ by clicking on the tickmark below their vote count (see How do you accept an answer?). This shows which answer helped you most, and it assigns reputation points to the author of the answer (and to you!). It's part of this site's idea to identify good questions and answers through upvotes and acceptance of answers. Sep 29 at 11:49
+
+There was a similar question not so far in the past. If was already guessed the root cause of the "noise" is TeXs calculation engine. So the solution is to use another calculation engine. Here I show the comparison of TeX and Lua. In my answer to the similar question you can also find the engines gnuplot and l3/xfp.
+
+% used PGFPlots v1.18.1
+\documentclass[border=5pt]{standalone}
+\usepackage{pgfplots}
+% use this compat level or higher to make use of the Lua calculation engine
+\pgfplotsset{compat=1.12}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+cycle multiindex* list={
+color\nextlist
+[1 of]mark list\nextlist
+},
+xmin=-1,
+xmax=1,
+domain=-1:1,
+samples=51,
+smooth,
+%        no markers,
+mark size=1pt,
+]
+% using TeX as calculation engine
+% using Lua as calculation engine
+\end{axis}
+\end{tikzpicture}
+\end{document}
+
+
+• do I need to use LuaLaTeX to fully gain the advantage of the LUA calculation engine or is the same result possible if I use PDFLaTeX to compile this document? Sep 25 at 7:38
+• @Lukas, (of course) you need to compile with LuaLaTeX to make use of Lua stuff ... ;) Sep 25 at 18:19
+• I was just a little puzzled because it compiled with pdflatex without an error :D thanks for the information! Sep 25 at 18:28
+• @Lukas, yes it does. If you want to know why, see the comments in my quoted answer. Sep 26 at 5:01
+
+As others have explained, you're relying on pgfmath to do calculations and that is prone to round off errors. It's great for the sort of calculations that come up for most people but you're working with a more complicated function. The answer then is to use a more appropriate tool, a computer algebra system, to do the calculation. This is possible with the sagetex package, found here on CTAN. This package lets you farm out the calculations to open source CAS Sage instead of using pgfmath. The result will be accurate calculations which can be used in your plot.
+
+\documentclass[11pt,border=1mm]{standalone}
+\usepackage{sagetex}
+\usepackage[usenames,dvipsnames]{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+\begin{document}
+\begin{sagesilent}
+LowerX = -1
+UpperX = 1
+LowerY = -.001
+UpperY = .009
+step = .001
+t = var('t')
+g(x)= abs(x-x^3/6-sin(x))
+
+x_coords = [t for t in srange(LowerX,UpperX,step)]
+y_coords = [g(t).n(digits=6) for t in srange(LowerX,UpperX,step)]
+
+output = r""
+output += r"\begin{tikzpicture}[scale=1.0]"
+output += r"\begin{axis}[xmin=%f,xmax=%f,ymin= %f,ymax=%f,width=10cm]"%(LowerX,UpperX,LowerY, UpperY)
+output += r"\addplot[thin, blue, unbounded coords=jump] coordinates {"
+for i in range(0,len(x_coords)-1):
+if (y_coords[i])<LowerY or (y_coords[i])>UpperY:
+output += r"(%f , inf) "%(x_coords[i])
+else:
+output += r"(%f , %f) "%(x_coords[i],y_coords[i])
+output += r"};"
+output += r"\end{axis}"
+output += r"\end{tikzpicture}"
+\end{sagesilent}
+\sagestr{output}
+\end{document}
+
+
+The code, running in Cocalc, is shown below:
+
+Sage is not part of your LaTeX distribution so this will not work on your machine unless you either 1. download the program to your machine and get it to work with your LaTeX distribution (which can be troublesome) or 2. open a free Cocalc account which gives you access to Sage over the internet.
+
+Sage also gives you access to Python which you can then use as well. See, for example, how the Cantor function is plotted using sagetex. Search this site for sagetex and you will see how it can be used for more complex mathematical problems, such as finding a transpose of a matrix.
+
+Update:
+
+One of difficult problems with beginner is to compile any single Asymptote code(s), thus, I have shared a way which I used beside http://asymptote.ualberta.ca/, here is it.
+
+While waiting for a TikZ/PGF answer, see a runnable code with Asymptote.
+
+One of features of Asymptote:
+
+...
+
+inspired by MetaPost, with a much cleaner, powerful C++-like programming syntax and IEEE floating-point numerics;
+
+...
+
+import graph;
+
+size(350,300,false); // The boolean "false" is important.
+
+real f(real x){ return abs(x-x^3/6-sin(x));}
+guide F=graph(f,-1,1,500);
+// domain -1,1
+// samples 500
+
+draw(F,1bp+blue);
+limits((-1,-1e-3),(1,9*1e-3)); // See page 113 in the documentation
+xaxis("$x$",BottomTop,LeftTicks(Size=4,Ticks=uniform(-1,1,10)));
+yaxis("$y$",LeftRight,RightTicks(ticklabel=new string(real x){ return
+format("%.3f",1e+3*x);},
+Size=4,Ticks=1e-3*uniform(0,8,4)));
+labelx("$.10^{-3}$",(-1,9*1e-3),N+0.7E); // See page 104 in the documentation
+
+
+• Nice! it can be an example on the Asymptote gallery on 2D graphs Sep 25 at 19:25
+
+Looks like tikz has some numerical limitations, here. E.g. increasing the samples gives even more errors, like shown below, while decreasing is better, but not what you want.
+
+However, if you switch to PSTricks, numerics seems to be better. Here is some starting code, with remarks below the next drawing.
+
+\documentclass[11pt,border=1mm]{article}
+%\documentclass[11pt,border=1mm]{standalone}
+%\usepackage[portuguese, shorthands=off]{babel}
+\usepackage[utf8]{inputenc}
+%\usepackage{tikz,pgfplots}
+\usepackage{pst-plot}
+
+\begin{document}
+\begin{pspicture}
+\end{pspicture}
+\end{document}
+
+
+REMARKS:
+
+1. For simplicity I left out grid or axes. Not too difficult to add, but too difficult for me right now ;-)
+
+2. f(x) looks a bit odd ... think of entering your equation term by term on an old HP-calculator in so called polish notation (values operation => result, repeat). For simplification I multiplied by 1000 at the end.
+
+3. During compile make sure you advise your Latex-compiler to go via dvips ... else it won't create a pdf.
+
+4. The generated .ps and .pdf are vector graphics, i.e. with less trouble from the numerical side, also during display. If the line looks blurred, increase the lines linewidth during plotting: it's an artifact from your computers display system.
+
+5. If you need more samples, a simple-stupid way is to let x run from -10 to +10 AND divide it by 10 inside \psplot. There may be better ways to do it.
+
+6. In your final document you could use \includegraphics to show any graphic, which you created as a separate .pdf with tikz OR PSTricks.
+
+This (too long for a comment) is an auxiliary for the above Asymptote answer. The question is interesting in the sense that the options [smooth], [samples] of the plot command in TikZ do not work as expected due to computation limit of pgfmath. So Asymptote is one of suitable choices.
+
+The following illustrates the sine function, the 3rd-order Taylor polynomial, and the 3rd-order Taylor remainder. Thus, visually the approximation T_3(x) of sin(x) is only good in a vicinity of the origin where the remainder is almost horizontal.
+
+// http://asymptote.ualberta.ca/
+unitsize(1cm);
+size(8cm);
+import graph;
+usepackage("amsmath");
+pen p=gray+opacity(.5);
+draw((-2pi-1,0)--(2pi+1,0),p);
+draw((0,-4)--(0,5),p);
+
+// graph of sin(.)
+path F=graph(sin,-2pi,2pi);
+draw(Label("$y=\sin x$",EndPoint,N),F,blue);
+
+// graph of the 3rd-order Taylor polynomial
+real T3(real x){ return (x-x^3/6);}
+guide G=graph(T3,-1.1pi,1.1pi);
+draw(Label(scale(.8)*"$T_3(x)=x-\dfrac{x^3}{6}$",EndPoint,E),G,darkcyan);
+
+// graph of the 3rd-order Taylor remainder
+real r(real x){ return abs(x-x^3/6-sin(x));}
+guide R=graph(r,-1.15pi,1.15pi,500);
+draw(Label(scale(.8)*"$r_3(x)=\left|x-\dfrac{x^3}{6}-\sin x\right|$",BeginPoint),R,magenta);
+
+shipout(bbox(5mm,invisible));

@@ -1,0 +1,303 @@
+# Prime numbers
+
+In mathematics, a prime number (or a prime) is a natural number which has exactly two distinct natural number divisors: 1 and itself. The smallest prime is thus 2.
+
+Any natural number is representable as a product of powers of its prime factors, and so a prime has no prime divisors other than itself. That means that starting with 2, for each newly found prime we can eliminate from the rest of the numbers all such numbers that have this prime as their divisor, giving us the next available number as next prime. This is known as sieving the natural numbers, so that in the end what we are left with are just primes.
+
+To eliminate a prime's multiples from the result we can either a. plainly test each new candidate number for divisibility by that prime with a direct test, giving rise to a kind of "trial division" algorithm; or b. we can find out multiples of a prime p by counting up from it by p numbers at a time, resulting in a variant of a "genuine sieve" as it was reportedly originally conceived by Eratosthenes in ancient Greece.
+
+Having a direct-access mutable arrays indeed enables easy marking off of these multiples on pre-allocated array as it is usually done in imperative languages; but to get an efficient list-based code we have to be smart about combining those streams of multiples of each prime - which gives us also the memory efficiency in generating the results one by one.
+
+## Prime Number Resources
+
+• At Wikipedia:
+• HackageDB packages:
+• arithmoi: Various basic number theoretic functions; efficient array-based sieves, Montgomery curve factorisation ...
+• Numbers: An assortment of number theoretic functions.
+• NumberSieves: Number Theoretic Sieves: primes, factorization, and Euler's Totient.
+• primes: Efficient, purely functional generation of prime numbers.
+• Papers:
+• O'Neill, Melissa E., "The Genuine Sieve of Eratosthenes", Journal of Functional Programming, Published online by Cambridge University Press 9 October 2008 doi:10.1017/S0956796808007004.
+
+## Sieve of Eratosthenes
+
+Sieve of Eratosthenes is genuinely represented by
+
+ -- genuine yet wasteful sieve of Eratosthenes
+primesTo m = 2 : eratos [3,5..m]  where
+eratos []     = []
+eratos (p:xs) = p : eratos (xs minus [p,p+2*p..m])
+-- eulers (p:xs) = p : eulers (xs minus map (p*)(p:xs))
+-- turner (p:xs) = p : turner [x | x<-xs, rem x p /= 0]
+
+
+This should be regarded more like a specification, not a code. It is extremely slow, running at empirical time complexities worse than quadratic in number of primes produced. But it has the core defining features of S. of E. as a. being bounded, i.e. having a top limit value, and b. finding out the multiples of a prime by counting up from it. Yes, this is exactly how Eratosthenes defined it (Nicomachus, Introduction to Arithmetic, I, pp. 13, 31).
+
+The canonical list-difference minus and duplicates-removing list-union union functions dealing with ordered increasing lists - infinite as well as finite - are simple enough to define (using compare has an effect of comparing the values only once, unlike when using (<) etc):
+
+ -- ordered lists, difference and union
+minus (x:xs) (y:ys) = case (compare x y) of
+LT -> x : minus  xs  (y:ys)
+EQ ->     minus  xs     ys
+GT ->     minus (x:xs)  ys
+minus  xs     _     = xs
+union (x:xs) (y:ys) = case (compare x y) of
+LT -> x : union  xs  (y:ys)
+EQ -> x : union  xs     ys
+GT -> y : union (x:xs)  ys
+union  xs     ys    = xs ++ ys
+
+
+(the name merge ought to be reserved for duplicates-preserving merging as used by mergesort - that's why we use union here, following Leon P.Smith's Data.List.Ordered package).
+
+### Analysis
+
+So what does it do, this sieve code? For each found prime it removes its odd multiples from further consideration. It finds them by counting up in steps of 2p. There are thus $O(m/p)$ multiples for each prime, and $O(m \log\log(m))$ multiples total, with duplicates, by virtues of prime harmonic series, where $\sum_{p_i.
+
+If each multiple is dealt with in $O(1)$ time, this will translate into $O(m \log \log(m))$ RAM machine operations (since we consider addition as an atomic operation). Indeed, mutable random-access arrays allow for that. Melissa O'Neill's article's stated goal was to show that so does efficient Priority Queue implementation in Haskell as well. But lists in Haskell are sequential, not random-access, and complexity of minus(a,b) is about $O(|a \cup b|)$, i.e. here it is $O(|a|)$ which is $O(m/\log(p))$ according to the remark about the Φ-function in Melissa O'Neill's article.
+
+It looks like $\sum_{i=1}^{k}{1/log(p_i)} = O(k/\log(k))$. Since the number of primes below m is $n = \pi(m) = O(m/\log(m))$ by the prime number theorem (where $\pi(m)$ is a prime counting function), there will be k = n multiples-removing steps in the algorithm; it means total complexity of $O(m k/\log(k)) = O(m^2/(\log(m))^2)$, or $O(n^2)$ in n primes produced - much much worse than the optimal $O(n \log(n) \log\log(n))$.
+
+### From Squares
+
+But we can start each step at the prime's square, as its smaller multiples will be already processed on previous steps. This means we can stop early, when the prime's square reaches the top value m, and thus cut the total number of steps to around $k = \pi(\sqrt{m}) = O(2\sqrt{m}/\log(m))$. This does not in fact change the complexity of random-access code, but for lists it makes it $O(m^{1.5}/(\log m)^2)$, or $O(n^{1.5}/\sqrt{\log n})$ in n primes produced, showing an enormous speedup in practice:
+
+ primesToQ m = 2 : sieve [3,5..m]  where
+sieve []     = []
+sieve (p:xs) = p : sieve (xs minus [p*p,p*p+2*p..m])
+
+
+Its empirical complexity is about $O(n^{1.45})$. This simple optimization of starting from a prime's square has dramatic effect here because our formulation is bounded, in accordance with the original algorithm. This has the desired effect of stopping early and thus preventing the creation of all the extraneous multiples streams which start beyond the upper bound anyway, turning the unacceptably slow initial specification into a code yet-far-from-optimal and slow, but acceptably so, striking a good balance between clarity, succinctness and efficiency.
+
+### Guarded
+
+This ought to be explicated (improving on clarity though not on time complexity) as in the following, for which it is indeed a minor optimization whether to start from p or p*p - but only after we've went to the necessary trouble of explicitly stopping as soon as possible:
+
+ primesToG m = 2 : sieve [3,5..m]  where
+sieve (p:xs)
+| p*p > m = p : xs
+| True    = p : sieve (xs minus [p*p,p*p+2*p..m])
+
+
+It is now clear that it can't be made unbounded just by abolishing the upper bound m, because the guard can not be simply omitted without changing the complexity back for the worst.
+
+### Accumulating Array
+
+So while minus(a,b) takes $O(|b|)$ operations for random-access imperative arrays and about $O(|a|)$ operations for lists here, using Haskell's immutable array for a one could expect the array update time to be indeed $O(|b|)$ but it looks like it's not so:
+
+ primesToA m = sieve 3 $array (3,m) [(i,odd i) | i<-[3..m]] where sieve p a | p*p>m = 2 : [i | (i,True) <- assocs a] | a!p = sieve (p+2)$ a//[(i,False) | i <- [p*p,p*p+2*p..m]]
+| True  = sieve (p+2) a
+
+
+It's much slower than the above, though it should be running at optimal complexity on implementations which are able to properly use the destructive update here, for an array being passed along as an accumulating parameter, it seems.
+
+How this implementation deficiency is to be overcome? One way is to use explicitly mutable monadic arrays (see below), but we can also think about it a little bit more on the functional side of things.
+
+### Postponed
+
+Going back to guarded Eratosthenes, first we notice that though it works with minimal number of prime multiples streams, it still starts working with each a bit prematurely. Fixing this with explicit synchronization won't change complexity but will speed it up some more:
+
+ primesPE () = 2 : primes'
+where
+primes' = sieve [3,5..] primes' 9
+sieve (p:xs) ps@ ~(_:t) q
+| p < q  = p : sieve xs ps q
+| True   =     sieve (xs minus [q,q+2*p..]) t (head t^2)
+
+
+Since the removal of a prime's multiples here starts at the right moment, and not just from the right place, the code could now finally be made unbounded. Because no multiples-removal process is started prematurely, there are no extraneous multiples streams, which were the reason for the extreme wastefulness and thus inefficiency of the original formulation.
+
+### Segmented
+
+With work done segment-wise between the successive squares of primes it becomes
+
+  primesSE () = 2 : primes'
+where
+primes' = 3 : sieve primes' 5 9 []
+sieve (p:ps) x q fs =
+foldr (flip minus) [x,x+2..q-2]
+[[y+s,y+2*s..q] | (s,y) <- fs]
+++ sieve ps (q+2) (head ps^2)
+((2*p,q):[(s,q-rem (q-y) s) | (s,y) <- fs])
+
+
+This "marks" the odd composites in a given range by generating them - just as a person performing the original sieve of Eratosthenes would do, counting one by one the multiples of the relevant primes. These composites are independently generated so some will be generated multiple times. Rearranging the chain of subtractions into a subtraction of merged streams (see below) and using tree-like folding further speeds up the code and improves its asymptotic behavior.
+
+The advantage in working with spans explicitly is that this code is easily amendable to using arrays for the composites marking and removal on each finite span; and memory usage can be kept in check by using fixed sized segments.
+
+### Linear merging
+
+But segmentation doesn't add anything substantially, and each multiples stream starts at its prime's square anyway. What does the Postponed code do, operationally? For each prime's square passed over, it builds up a nested linear left-deepening structure, (...((xs-a)-b)-...), where xs is the original odds-producing [3,5..] list, so that each odd it produces must go through minus nodes on its way up - and those odd numbers that eventually emerge on top are prime. Thinking a bit about it, wouldn't another, right-deepening structure, (xs-(a+(b+...))), be better? This idea is due to Richard Bird (in the code presented in Melissa O'Neill's article).
+
+Here, xs would stay near the top, and more frequently odds-producing streams of multiples of smaller primes would be above those of the bigger primes, that produce less frequently their candidates which have to pass through more union nodes on their way up. Plus, no explicit synchronization is necessary anymore because the produced multiples of a prime start at its square anyway - just some care has to be taken to avoid a runaway access to the infinitely-defined structure (specifically, if each (+) operation passes along unconditionally its left child's head value before polling the right child's head value, then we are safe).
+
+Here's the code, faster yet but still with about same time complexity of $O(n^{1.4})$:
+
+ {-# OPTIONS_GHC -O2 -fno-cse #-}
+primesLME () = 2 : ([3,5..] minus
+join [[p*p,p*p+2*p..] | p <- primes'])
+where
+primes' = 3 : ([5,7..] minus
+join [[p*p,p*p+2*p..] | p <- primes'])
+join ((x:xs):t) = x : union xs (join t)
+
+
+The double primes feed is introduced here to prevent unneeded memoization and thus prevent memory leak, as per Melissa O'Neill's code, and is dependent on no expression sharing being performed by a compiler.
+
+### Tree merging
+
+Moreover, it can be changed into a tree structure. This idea is due to Dave Bayer on haskell-cafe mailing list (though in more complex formulation, its radical simplification due to Will Ness):
+
+ {-# OPTIONS_GHC -O2 -fno-cse #-}
+primesTME () = 2 : ([3,5..] minus
+join [[p*p,p*p+2*p..] | p <- primes'])
+where
+primes' = 3 : ([5,7..] minus
+join [[p*p,p*p+2*p..] | p <- primes'])
+join  ((x:xs):t)    = x : union xs (join (pairs t))
+pairs ((x:xs):ys:t) = (x : union xs ys) : pairs t
+
+
+It is very fast, running at speeds and empirical complexities comparable with the code from Melissa O'Neill's article (about $O(n^{1.2})$ in number of primes n produced).
+
+For esthetic purposes the above can be rewritten as follows, using explicated infinite tree-like folding:
+
+primes = 2 : g (fix g)
+where
+g xs = 3 : gaps 5 (foldi (\(x:xs) ys -> x:union xs ys) []
+[[x*x, x*x+2*x..] | x <- xs])
+
+fix g = xs where xs = g xs
+
+gaps k s@(x:xs) | k<x  = k:gaps (k+2) s      -- equivalent to
+| True =   gaps (k+2) xs     --  [k,k+2..]minuss, k<=x
+
+
+### Tree merging with Wheel
+
+Wheel factorization optimization can be further applied, and another tree structure can be used which is better adjusted for the primes multiples production (effecting about 5%-10% at the top of a total 2.5x speedup w.r.t. the above tree merging on odds only - though complexity stays the same):
+
+{-# OPTIONS_GHC -O2 -fno-cse #-}
+primesTMWE () = 2:3:5:7: gaps 11 wheel (join $roll 11 wheel primes') where primes' = 11: gaps 13 (tail wheel) (join$ roll 11 wheel primes')
+join ((x:xs): ~(ys:zs:t))  = x : union xs (union ys zs)
+union join (pairs t)
+pairs ((x:xs):ys:t)        = (x : union xs ys) : pairs t
+gaps k ws@(w:t) cs@(c:u) | k==c  = gaps (k+w) t u
+| True  = k : gaps (k+w) t cs
+roll k ws@(w:t) ps@(p:u) | k==p  = scanl (\c d->c+p*d) (p*p) ws
+: roll (k+w) t u
+| True  = roll (k+w) t ps
+wheel = 2:4:2:4:6:2:6:4:2:4:6:6:2:6:4:2:6:4:6:8:4:2:4:2:
+4:8:6:4:6:2:4:6:2:6:6:4:2:4:6:2:6:4:2:4:2:10:2:10:wheel
+
+
+#### Above Limit
+
+Another task is to produce primes above a given number (not having to find out their ordinal numbers).
+
+{-# OPTIONS_GHC -O2 -fno-cse #-}
+primesFromTMWE a0 = (if a0 <= 2 then [2] else [])
+++ (gaps a wh' $compositesFrom a) where (a,wh') = rollFrom (snap (max 3 a0) 3 2) (h,p':t) = span (< z) primes' -- p < z => p*p<=a z = ceiling$ sqrt $fromIntegral a + 1 -- p'>=z => p'*p'>a compositesFrom a = foldi union' [] (foldi union [] [multsOf p a | p <- h++[p']] : [multsOf p (p*p) | p <- t]) primes' = gaps 11 wheel (foldi union' [] [multsOf p (p*p) | p <- primes'']) primes'' = 11: gaps 13 (tail wheel) (foldi union' [] [multsOf p (p*p) | p <- primes'']) union' (x:xs) ys = x : union xs ys multsOf p from = scanl (\c d->c+p*d) (p*x) wh -- (p*)<$>
+where                                       --   scanl (+) x wh
+(x,wh) = rollFrom (snap from p (2*p) div p)
+
+gaps k ws@(w:t) cs@(c:u) | k==c  = gaps (k+w) t u
+| True  = k : gaps (k+w) t cs
+snap v origin step = if r==0 then v else v+(step-r)
+where r = mod (v-origin) step
+wheelNums = scanl (+) 0 wheel
+wheel     = 2:4:2:4:6:2:6:4:2:4:6:6:2:6:4:2:6:4:6:8:4:2:4:2:
+4:8:6:4:6:2:4:6:2:6:6:4:2:4:6:2:6:4:2:4:2:10:2:10:wheel
+rollFrom n = go wheelNums wheel
+where m  = (n-11) mod 210
+go (x:xs) ws@(w:ws') | x < m = go xs ws'
+| True  = (n+x-m, ws)     -- (x >= m)
+
+
+This uses the infinite-tree folding foldi with plain union where heads are unordered, and back with union' above that. A certain preprocessing delay makes it worthwhile when producing more than just a few primes.
+
+## Turner's sieve - Trial division
+
+David Turner's original 1975 formulation (SASL Language Manual, 1975) replaces non-standard minus in the sieve of Eratosthenes by stock list comprehension with rem filtering, turning it into a kind of trial division algorithm:
+
+ -- unbounded sieve, premature filters
+primesT () = 2 : sieve [3,5..]  where
+sieve (p:xs) = p : sieve [x | x<-xs, rem x p /= 0]
+-- filter ((/=0).(remp)) xs
+
+
+This creates an immense number of superfluous implicit filters in extremely premature fashion. To be admitted as prime, each number will be tested for divisibility here by all its preceding primes potentially, while just those not greater than its square root would suffice. To find e.g. the 1001st prime (7927), 1000 filters are used, when in fact just the first 24 are needed (up to 89's filter only). Operational overhead is enormous here.
+
+### Guarded Filters
+
+When we force ourselves away from the Quest for a Mythical One-Liner it really ought to be written at least as bounded and guarded variety (if not abandoned right away in favor of algorithmically superior sieve of Eratosthenes), yet again achieving the miraculous complexity improvement from above quadratic to about $O(n^{1.45})$ empirically (in n primes produced):
+
+ primesToGT m = 2 : sieve [3,5..m]  where
+sieve (p:xs)
+| p*p > m = p : xs
+| True    = p : sieve [x | x<-xs, rem x p /= 0]
+-- filter ((/=0).(remp)) xs
+
+
+### Postponed Filters
+
+or better yet as unbounded, postponed variety:
+
+ primesPT () = 2 : primes'
+where
+primes' = sieve [3,5..] primes' 9
+sieve (p:xs) ps@ ~(_:t) q
+| p < q   = p : sieve xs ps q
+| True    =     sieve [x | x<-xs, rem x p /= 0] t (head t^2)
+-- filter ((/=0).(remp)) xs
+
+
+creating here as well the linear nested filters structure at run-time, (...(([3,5..] |> filterBy 3) |> filterBy 5)...) (with |> defined as x |> f = f x), each filter started at its proper moment.
+
+### Optimal trial divison
+
+The above is equivalent to the traditional formulation of trial division,
+
+isPrime primes n = foldr (\p r -> p*p > n || (rem n p /= 0 && r))
+True primes
+primes = 2 : filter (isPrime primes) [3..]
+
+
+except that this one is rechecking for each candidate which primes to use, which will be the same prefix of the primes list being built, for all the candidate numbers in the ever increasing spans between the successive primes squares.
+
+### Segmented Generate and Test
+
+This primes prefix's length can be explicitly maintained, achieving a certain further speedup (though not in complexity which stays the same) by turning a list of filters into one filter by an explicit list of primes:
+
+ primesST () = 2 : primes'
+where
+primes' = 3 : sieve 0 5 9 (tail primes')
+sieve k x q ps = let fs = take k primes' in
+[n | n <- [x,x+2..q-2], and [rem n f/=0 | f <- fs]]
+-- filter (\n-> all ((/=0).(rem n)) fs) [x,x+2..q-2]
+++ sieve (k+1) (q+2) (head ps^2) (tail ps)
+
+
+This seems to eliminate most recalculations, explicitly filtering composites out from batches of odds between the consecutive squares of primes.
+
+All these variants of course being variations of trial division – finding out primes by direct divisibility testing of every odd number by all primes below its square root potentially (instead of just by its factors, which is what direct generation of multiples is doing, essentially) – are thus of principally worse complexities than that of Sieve of Eratosthenes; but one far worse than another yet easily fixable from a wasteful monstrosity to almost acceptable performance (at least for the first few hundred thousand primes, when compiled) just by following the proper definition of the sieve as being bounded, simply with guarded formulation, instead of "heading for the hills" of using brittle implementations of complex data structures with unclear performance guarantees.
+
+#### Generate and Test Above Limit
+
+The following will start the segmented Turner sieve at the right place, using any primes list it's supplied with (e.g. TMWE etc.), demand computing it up to the square root of any prime it'll produce:
+
+ primesSTFrom primes m
+| m>2 = sieve (length h-1) (mdiv2*2-1) (head ps^2) (tail ps)
+where
+(h,ps) = span (<= (floor.sqrt $fromIntegral m+1)) primes sieve k x q ps = let fs = take k$ tail primes in
+[n | n <- [x+2,x+4..q-2], and [rem n f /= 0 | f <- fs]]
+++ sieve (k+1) q (head ps^2) (tail ps)
+
+
+This is usually faster than testing candidate numbers for divisibility one by one which has to re-fetch anew the needed prime factors to test by, for each candidate. Faster is the offset sieve of Eratosthenes on odds, and yet faster the above one, w/ wheel optimization.
+
+### Conclusions
+
+So it really pays off to analyse the code properly instead of just labeling it "naive". BTW were this divisibility testing somehow turned into an O(1) operation, e.g. by some kind of massive parallelization, the overall complexity would drop to O(n). It's the sequentiality of testing that's the culprit. Though of course the proper multiples-removing S. of E. is a better candidate for parallelization.
+
+Did Eratosthenes himself achieve the optimal complexity? It rather seems doubtful, as he probably counted

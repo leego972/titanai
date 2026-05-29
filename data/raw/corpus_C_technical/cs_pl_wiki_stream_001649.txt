@@ -1,0 +1,126 @@
+# Dispose pattern
+
+In object-oriented programming, the dispose pattern is a design pattern for resource management. In this pattern, a resource is held by an object, and released by calling a conventional method – usually called close, dispose, free, release depending on the language – which releases any resources the object is holding onto. Many programming languages offer language constructs to avoid having to call the dispose method explicitly in common situations.
+
+The dispose pattern is primarily used in languages whose runtime environment have automatic garbage collection (see motivation below).
+
+Motivation
+
+Wrapping resources in objects 
+Wrapping resources in objects is the object-oriented form of encapsulation, and underlies the dispose pattern.
+
+Resources are typically represented by handles (abstract references), concretely usually integers, which are used to communicate with an external system that provides the resource. For example, files are provided by the operating system (specifically the file system), which in many systems represents open files with a file descriptor (an integer representing the file).
+
+These handles can be used directly, by storing the value in a variable and passing it as an argument to functions that use the resource. However, it is frequently useful to abstract from the handle itself (for example, if different operating systems represent files differently), and to store additional auxiliary data with the handle, so handles can be stored as a field in a record, along with other data; if this in an opaque data type, then this provides information hiding and the user is abstracted from the actual representation.
+
+For example, in C file input/output, files are represented by objects of the FILE type (confusingly called "file handles": these are a language-level abstraction), which stores an (operating system) handle to the file (such as a file descriptor), together with auxiliary information like I/O mode (reading, writing) and position in the stream. These objects are created by calling fopen (in object-oriented terms, a constructor), which acquires the resource and returns a pointer to it; the resource is released by calling fclose on a pointer to the FILE object. In code:
+
+FILE *f = fopen(filename, mode);
+// Do something with f.
+fclose(f);
+
+Note that fclose is a function with a FILE * parameter. In object-oriented programming, this is instead an instance method on a file object, as in Python:
+
+f = open(filename)
+# Do something with f.
+f.close()
+
+This is precisely the dispose pattern, and only differs in syntax and code structure from traditional file opening and closing. Other resources can be managed in exactly the same way: being acquired in a constructor or factory, and released by an explicit close or dispose method.
+
+Prompt release 
+The fundamental problem that freeing resources aims to solve is that resources are expensive (for example, there may be a limit on the number of open files), and thus should be released promptly. Further, some finalization work is sometimes needed, particularly for I/O, such as flushing buffers to ensure that all data is actually written.
+
+If a resource is unlimited or effectively unlimited, and no explicit finalization is necessary, it is not important to release it, and in fact short-lived programs often do not explicitly release resources: due to short run time, they are unlikely to exhaust resources, and they rely on the runtime system or operating system to do any finalization.
+
+However, in general resources must be managed (particularly for long-lived programs, programs that use many resources, or for safety, to ensure that data is written out). Explicit disposal means that resource finalization and release is deterministic and prompt: the dispose method does not complete until these are done.
+
+An alternative to requiring explicit disposal is to tie resource management to object lifetime: resources are acquired during object creation, and released during object destruction. This approach is known as the Resource Acquisition Is Initialization (RAII) idiom, and is used in languages with deterministic memory management (e.g. C++). In this case, in the example above, the resource is acquired when the file object is created, and when the scope of the variable f is exited, the file object that f refers to is destroyed, and as part of this, the resource is released.
+
+RAII relies on object lifetime being deterministic; however, with automatic memory management, object lifetime is not a concern of the programmer: objects are destroyed at some point after they are no longer used, but when is abstracted. Indeed, lifetime is often not deterministic, though it may be, notably if reference counting is used. Indeed, in some cases there is no guarantee that objects will ever be finalized: when the program terminates, it may not finalize the objects, and instead just let the operating system reclaim memory; if finalization is required (e.g., to flush buffers), data loss can occur.
+
+Thus by not coupling resource management to object lifetime, the dispose pattern allows resources to be released promptly, while giving implementation flexibility for memory management. The cost of this is that resources must be managed manually, which can be tedious and error-prone.
+
+Early exit 
+A key problem with the dispose pattern is that if the dispose method is not called, the resource is leaked. A common cause of this is early exit from a function, due to an early return or exception.
+
+For example:
+def func(filename):
+    f = open(filename)
+    if a:
+        return x
+    f.close()
+    return y
+If the function returns at the first return, the file is never closed and the resource is leaked.
+
+def func(filename):
+    f = open(filename)
+    g(f)  # Do something with f that may raise an exception.
+    f.close()
+If the intervening code raises an exception, the function exits early and the file is never closed, so the resource is leaked.
+
+Both of these can be handled by a try...finally construct, which ensures that the finally clause is always executed on exit:
+def func(filename):
+    try:
+        f = open(filename)
+        # Do something.
+    finally:
+        f.close()
+
+More generically:
+Resource resource = getResource();
+try {
+    // Resource has been acquired; perform actions with the resource.
+    ...
+} finally {
+    // Release resource, even if an exception was thrown.
+    resource.dispose();
+}
+
+The try...finally construct is necessary for proper exception safety, since the finally block enables execution of cleanup logic regardless of if an exception is thrown or not in the try block.
+
+One disadvantage of this approach is that it requires the programmer to explicitly add cleanup code in a finally block. This leads to code size bloat, and failure to do so will lead to resource leakage in the program.
+
+Language constructs 
+To make the safe use of the dispose pattern less verbose, several languages have some kind of built-in support for resources held and released in the same block of code.
+
+The C# language features the using statement that automatically calls the Dispose method on an object that implements the IDisposable interface:
+
+using (Resource resource = GetResource())
+{
+    // Perform actions with the resource.
+    ...
+}
+which is equal to: 
+Resource resource = GetResource()
+try 
+{
+    // Perform actions with the resource.
+    ...
+}
+finally 
+{
+    // Resource might not been acquired, or already freed
+    if (resource != null) 
+        ((IDisposable)resource).Dispose(); 
+}
+
+Similarly, the Python language has a with statement that can be used to similar effect with a context manager object. The context manager protocol requires implementing __enter__ and __exit__ methods which get automatically called by the with statement construct, to prevent duplication of code that would otherwise occur with the try/finally pattern.
+with resource_context_manager() as resource:
+    # Perform actions with the resource.
+    ...
+# Perform other actions where the resource is guaranteed to be deallocated.
+...
+
+The Java language introduced a new syntax called try-with-resources in Java version 7. It can be used on objects that implement the AutoCloseable interface (that defines method close()):
+try (OutputStream x = new OutputStream(...)) {
+    // Do something with x
+} catch (IOException ex) {
+    // Handle exception
+
+  // The resource x is automatically closed
+} // try
+
+Problems 
+Beyond the key problem of correct resource management in the presence of returns and exceptions, and heap-based resource management (disposing objects in a different scope from where they are created), there are many further complexities associated with the dispose pattern. These problems are largely avoided by RAII. However, in common simple use these complexities do not arise: acquire a single resource, do something with it, automatically release it.
+
+A fundamental problem is that having a resource is no longer a class invariant (the resource i

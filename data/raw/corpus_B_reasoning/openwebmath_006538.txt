@@ -1,0 +1,81 @@
+# What should a proof of correctness for a typechecker actually be proving?
+
+I've been programming for several years, but am very unfamiliar with theoretical CS. I've recently been trying to study programming languages, and as part of that, type checking and inference.
+
+My question is, if I try to write a type inference and checking program for a programming language, and I wish to prove that my typechecker works, what exactly is the proof I'm looking for?
+
+In plain language, I want my type checker to be able to identify any errors in a piece of code that might occur at runtime. If I were to use something like Coq to try proving that my implementation is correct, what exactly will this "proof of correctness" be trying to show?
+
+• Maybe you can clarify if you want to know (1) whether your implementation does implement a given typing system $T$, or (2) whether your typing system $T$ does prevent the errors you think it should? They are different questions. – Martin Berger Jun 12 '17 at 17:58
+• @MartinBerger: Ah, I seem to have skipped over that difference. My actual question probably meant to ask both. The context is that I'm trying to build a language, and for it I was writing a typechecker. And people asked me to use a tried and tested algorithm. I was interested in seeing how hard it would be to "prove" the algorithm and typechecker that I was using were "correct". Hence the ambiguity in my question. – Vivek Ghaisas Jun 12 '17 at 18:27
+• (1) is really a question in program verification and has little to do with typing. Just needs showing that your implementation meets its specification. As to (2), first define what it means to be an immediate type error (e.g. terms like 2 + "hello" that are 'stuck'). Once this is formalised, you can then prove type soundness theorem. That means that no typable program can ever evolve into an immediate type error. Formally, you prove that if a program $M$ is typable, and for any $n \geq$: if $M$ runs $n$ steps to become $N$, then $N$ does not have an immediate type error. (1/2) – Martin Berger Jun 12 '17 at 18:32
+• This is typically proven by induction on $n$ and on the derivation of the typing judegement. (2/2) – Martin Berger Jun 12 '17 at 18:32
+• Thank you! Based on your explanation, it seems like (2) is indeed what I was looking for. Could you please make that an answer? (And maybe add in any details that you think might be useful.) I would accept that as the answer! :) – Vivek Ghaisas Jun 12 '17 at 18:45
+
+The question can be interpreted in two ways:
+
+• Whether the implementation does implement a given typing system $T$?
+• Whether the typing system $T$ does prevent the errors you think it should?
+
+The former is really a question in program verification and has little to do with typing. Just needs showing that your implementation meets its specification, see Andrej's answer.
+
+Let me talk about the later question. As Andrej said, from an abstract point of view, a typing system seems to enforce properties on programs. In practise, your typing system $T$ seeks to prevent errors from happening, meaning that typable programs should not exhibit the class of errors of interest. In order to show that $T$ does what you think it should, you have to do two things.
+
+• First, you formally define what it means for a program to have an immediate typing error. There are many ways this can be defined -- it's up to you. Typically we want to prevent programs like 2 + "hello". In other words, you need to define a subset of programs, call them Bad, that contains exactly the programs with immediate typing error.
+
+• Then you must prove that programs that are typable can never evolve into programs in Bad. Let's formalise this. Let your typing judgement be $\Gamma \vdash M : \alpha.$ Recall that that should be read as: program $M$ has type $\alpha$, assuming the free variables are typed as given by the environment $\Gamma$. Then the theorem you want to prove is:
+
+Theorem. Whenever $\Gamma \vdash M : \alpha$ and $M \rightarrow \cdots \rightarrow N$ then $N \notin$ Bad.
+
+How to prove this theorem depends on the details of the language, the typing system and your choice of Bad.
+
+One standard way of defining Bad is to say: a term $M$ has an immediate type error if it is neither a value nor has a reduction step $M \rightarrow N$. (In this case $M$ is often referred to as stuck.) This only works for small-step operational semantics. One standard way of proving the theorem is to show that
+
+• $\Gamma \vdash M : \alpha$ and $M \rightarrow N$ together imply $\Gamma \vdash N : \alpha$. This is called "subject reduction". It is usually proven by simultaneous induction on the derivation of the typing judgement, and the length of the reductions.
+
+• Whenever $\Gamma \vdash M : \alpha$ then $M$ is not in Bad. This is usually also proven by induction on the derivation of the typing judgement.
+
+Note that not all typing systems have "subject reduction", for example session types. In this case, more sophisticated proof techniques are required.
+
+That's a good question! It asks what we expect from types in a typed language.
+
+First note that we can type any programing language with the unitype: just pick a letter, say U, and say that every program has type U. This isn't terribly useful, but it makes a point.
+
+There are many ways to understand types, but from a programmer's point of view the following I think is useful. Think of a type as a specification or a guarantee. To say that $e$ has type $A$ is to say that "we guarantee/expect/demand that $e$ satisfy the property encoded by $A$". Often $A$ is something simple like int, in which case the property is simply "it's an integer".
+
+There is no end to how expressive your types can be. In principle they could be any kind of logical statements, they could use category theory and whatnot, etc. For example, dependent types will let you express things like "this function maps lists to list such that the output is a sorted input". You can go further, at the moment I am listening to a talk on "concurrent separation logics" which allows you to speak about how concurrent programs work with shared state. Fancy stuff.
+
+The art of types in programming language design is one of balancing expressivity and simplicity:
+
+• more expressive types allow us to explain in more detail (to ourselves and to the compiler) what is supposed to be going on
+• simpler types are easier to understand and can be automated more easily in the compiler. (People come up with types which essentially require a proof assistant and user's input to do type checking.)
+
+Simplicity is not to be underestimated, as not every programmer has a PhD in theory of programming languages.
+
+So let us come back to your question: how do you know that your type system is good? Well, prove theorems that show your types to be balanced. There will be two kinds of theorems:
+
+1. Theorems which say that your types are useful. Knowing that a program has a type should imply some guarantees, for instance that the program won't get stuck (that would be a Safety theorem). Another family of theorems would connect the types to semantic models so that we can start using real math to prove things about our programs (those would be Adequacy theorems, and many others). The unitype above is bad because it has not such useful theorems.
+
+2. Theorems which say that your types are simple. A basic one would be that it is decidable whether a given expression has a given type. Another simplicity feature is to give an algorithm for inferring a type. Other theorems about simplicity would be: that an expression has at most one type, or that an expression has a principal type (i.e., the "best" one among all types that it has).
+
+It is difficult to be more specific because types are a very general mechanism. But I hope you see what you should shoot for. Like most aspects of programming language design, there is no absolute measure of success. Instead, there is a space of design posibilities, and the important thing is to understand where in the space you are, or want to be.
+
+• Thank you for that detailed answer! However, I'm still not sure about the answer to my question. As a concrete example, let's take C - a statically typed language with a simple enough type system. If I wrote a typechecker for C, how would I prove that my typechecker is "correct"? How does this answer change if instead I wrote a type checker for Haskell, say HM? How would I now prove "correctness"? – Vivek Ghaisas Jun 12 '17 at 9:55
+• 1. Actually define the type system $T$ for C as a mathematical entity (so that you can prove theorems about it). 2. Implement your typechecker, or describe an algorithm for type checking. 3. Prove the theorem: *If my typechecker checks that $e$ has type $A$ then there is a derivation in the type system $T$ showing that $e$ has type $A$. – Andrej Bauer Jun 12 '17 at 10:24
+• I would recommend doing 2. and 3. as a combination. Also, have a look at CompCert. – Andrej Bauer Jun 12 '17 at 10:25
+• Great answer. One thing I would add is that the literature on type systems often focuses on "soundness" theorems, but another aspect of correctness that one might care about is "completeness" (which seems to be implicit in the OP's "I want my type checker to be able to identify any errors in a piece of code that might occur at runtime"). In particular, in addition to the theorems you mentioned, one might hope to establish: 1. If there is a derivation in the type system $T$ showing that $e$ has type $A$, then the typechecker verifies that $e$ has type $A$, and/or 2. if $e$ does ... – Noam Zeilberger Jun 13 '17 at 9:01
+• ... not have type $A$, then it does not exhibit the expected behavior of an $A$ at runtime (or more simply, if $e$ is not typable, then it goes wrong at runtime). One reason these completeness aspects are sometimes neglected is that they can run into undecidability issues as the type system becomes more expressive (and there is a tradeoff between 1 and 2: as the type system becomes more expressive to catch errors, it becomes more difficult to automate type checking). Still, sometimes it is possible to prove such soundness + completeness theorems, ... – Noam Zeilberger Jun 13 '17 at 9:04
+
+There are a few different things you could mean by "prove that my typechecker works". Which, I suppose, is part of what your question is asking ;)
+
+One half of this question is proving that your type theory is good enough to prove whatever properties about the language. Andrej's answer tackles this area very well imo. The other half of the question is —supposing the language and its type system are already fixed— how can you prove that your particular type checker does in fact implement the type system correctly? There are two main perspectives I can see taking here.
+
+One is: how can we ever trust that some particular implementation matches its specification? Depending on the degree of assurances you want, you may be happy with a large test suite, or you may want some sort of formal verification, or more likely a mixture of both. The upside of this perspective is that it really highlights the importance of setting boundaries on the claims you're making: what exactly does "correct" mean? what portion of the code is checked, vs what part is the assumed-correct TCB? etc. The downside is that thinking too hard about this leads one down philosophical rabbit holes— well, "downside" if you don't enjoy those rabbit holes.
+
+The second perspective is a more mathematical take on correctness. When dealing with languages in maths we often set up "models" for our "theories" (or vice versa) and then try to prove: (a) everything we can do in the theory we can do in the model, and (b) everything we can do in the model we can do in the theory. (These are Soundness and Completeness theorems. Which one's which depends on whether you "started out" from the syntactic theory or from the semantic model.) With this mindset we can think of your type-checking implementation as being a particular model for the type theory in question. So you'd want to prove this two-way correspondence between what your implementation can do and what the theory says you should be able to do. The upside of this perspective is that it really focuses on whether you've covered all the corner cases, whether your implementation is complete in the sense of not leaving out any programs it should accept as type-safe, and whether your implementation is sound in the sense of not letting in any programs it should reject as ill-typed. The downside is your proof of correspondence is likely to be fairly separated from the implementation itself, so it'll only help prove the gross structure of your implementation is good, it may not help catch subtle implementation bugs.
+
+• I'm not sure I can agree with "upside of this perspective is that it really focuses on whether you've covered all the corner cases", especially if the model is only sound, but not complete. I'd propose a different perspective: going through a model is a contingent proof technique that you use for various reasons, e.g. because the model is simpler. There is nothing philosophically more dignified about going through a model -- ultimately you want to know about the actual executable and its behaviour. – Martin Berger Jun 13 '17 at 8:17
+• I thought "model" and "theory" were meant in a broad sense, and wren was just emphasizing the importance of trying to establish a two-way correspondence via a "soundness + completeness theorem". (I also think this is important, and made a comment to Andrej's post.) It's true that in some situations we'll only be able to prove a soundness theorem (or a completeness theorem, depending on your perspective), but having both directions in mind is a useful methodological constraint. – Noam Zeilberger Jun 13 '17 at 9:20
+• @NoamZeilberger "The question is," said Martin, "whether you can make words mean so many different things." – Martin Berger Jun 13 '17 at 9:43
+• When I learned about typing systems and programming language semantics, I found the realisation that models are merely proof techniques about operational semantics, rather than ends in themselves, sublimely liberating. – Martin Berger Jun 13 '17 at 9:46
+• Relating different models through soundness & completeness is an important scientific methodology for the transfer of insight. – Martin Berger Jun 13 '17 at 9:49

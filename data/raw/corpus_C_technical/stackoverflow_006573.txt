@@ -1,0 +1,40 @@
+Question: <p>I'm trying to figure out if there's a reasonably efficient way to perform a lookup in a dictionary (or a hash, or a map, or whatever your favorite language calls it) where the keys are regular expressions and strings are looked up against the set of keys.  For example (in Python syntax):</p>
+
+<pre><code>&gt;&gt;&gt; regex_dict = { re.compile(r'foo.') : 12, re.compile(r'^FileN.*$') : 35 }
+&gt;&gt;&gt; regex_dict['food']
+12
+&gt;&gt;&gt; regex_dict['foot in my mouth']
+12
+&gt;&gt;&gt; regex_dict['FileNotFoundException: file.x does not exist']
+35
+</code></pre>
+
+<p>(Obviously the above example won't work as written in Python, but that's the sort of thing I'd like to be able to do.)</p>
+
+<p>I can think of a naive way to implement this, in which I iterate over all of the keys in the dictionary and try to match the passed in string against them, but then I lose the O(1) lookup time of a hash map and instead have O(n), where n is the number of keys in my dictionary.  This is potentially a big deal, as I expect this dictionary to grow very large, and I will need to search it over and over again (actually I'll need to iterate over it for every line I read in a text file, and the files can be hundreds of megabytes in size).</p>
+
+<p>Is there a way to accomplish this, without resorting to O(n) efficiency?</p>
+
+<p>Alternatively, if you know of a way to accomplish this sort of a lookup in a database, that would be great, too.</p>
+
+<p>(Any programming language is fine -- I'm using Python, but I'm more interested in the data structures and algorithms here.)</p>
+
+<p>Someone pointed out that more than one match is possible, and that's absolutely correct.  Ideally in this situation I'd like to return a list or tuple containing all of the matches.  I'd settle for the first match, though.</p>
+
+<p>I can't see O(1) being possible in that scenario; I'd settle for anything less than O(n), though.  Also, the underlying data structure could be anything, but the basic behavior I'd like is what I've written above: lookup a string, and return the value(s) that match the regular expression keys.</p>
+
+Answer: <p>What you want to do is very similar to what is supported by xrdb. They only support a fairly minimal notion of globbing however.</p>
+
+<p>Internally you can implement a larger family of regular languages than theirs by storing your regular expressions as a character trie. </p>
+
+<ul>
+<li>single characters just become trie nodes. </li>
+<li>.'s become wildcard insertions covering all children of the current trie node. </li>
+<li>*'s become back links in the trie to node at the start of the previous item. </li>
+<li>[a-z] ranges insert the same subsequent child nodes repeatedly under each of the characters in the range. With care, while inserts/updates may be somewhat expensive the search can be linear in the size of the string. With some placeholder stuff the common combinatorial explosion cases can be kept under control. </li>
+<li>(foo)|(bar) nodes become multiple insertions</li>
+</ul>
+
+<p>This doesn't handle regexes that occur at arbitrary points in the string, but that can be modeled by wrapping your regex with .* on either side.</p>
+
+<p>Perl has a couple of Text::Trie -like modules you can raid for ideas. (Heck I think I even wrote one of them way back when)</p>

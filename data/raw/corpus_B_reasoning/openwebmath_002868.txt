@@ -1,0 +1,64 @@
+# Can the previous weather be computed from the current situation?
+
+If one applies today's state-of-the-art weather forecast computations "backwards", i.e. computing how the systems was X days before the current situation based on knowledge of today's situation, at which point do "predictions" deviate significantly from the (known) sitautions ?
+
+In other words, are those computations reversible and even possible? And if so, is the error level comparabliy (i.e. time-symmetric) or not?
+
+Edit: Imagine one would get the data from an Earth-like planet through an observation (satelite etc.) at a given moment, would current weather-models allow to compute how the weather was before that time?
+
+• I've never heard that anyone would do this. Any sources implying that someone does? I would guess that most models can't do this. – Communisty Jul 9 '18 at 9:32
+• The problem I'd think is A definitely causes B, but the inverse, B can often have many causes of A, C, D, etc. I'd think that's a problem in most mathematical modeling of time? – JeopardyTempest Jul 9 '18 at 10:25
+• @JeopardyTempest Sure, but some mathematical algorithms are reversible, some within limits and some simply aren’t. I don’t know into which category the ones used for weather predictions fall - hence me asking. – BmyGuest Jul 9 '18 at 10:27
+• Validation is done by hindcasting, not by reversing the time axis, which seems to be what you're asking about. Reversing the time axis would involve water falling up to the clouds and cyclones moving equatorward and turning into potential vorticity. It seems involved and I'm not sure what benefit would be. – gerrit Jul 9 '18 at 11:58
+• @BmyGuest Gerrit's is the right answer. – gansub Jul 9 '18 at 12:05
+
+The underlying equations for fluid-dynamic models are hyperbolic partial differential equations. They can generally be written in the form $$\frac{\partial}{\partial t} u(t) = D(u(t))$$ where $D$ in some way evaluates the current state of the system and its spatial derivatives.
+
+A numerical simulation then integrates this differential equation, to extrapolate from a start state $u(t_0) = u_0$ the time-dependent $u(t)|_{t>t_0}$.
+
+Well, if we can do that, then surely we could also solve in the inverse time direction, by considering the equation $$\frac{\partial}{\partial t} u(-t) = -D(u(t))$$ and running the integrator with $\tilde t = -t$, $\tilde D = -D$?
+
+Actually, you quickly run into problems when you try that. The operator $D$ can be characterised by its Jacobian, which basically tells you how pertubations in the state influence the derivative. Specifically, the complex eigenvalues of the Jacobian can tell you whether a small deviation will a) amplify over time (positive real part), or b) decay (negative real part), or c) just oscillate (purely imaginary).
+
+For physical systems the eigenvalues tend to be mostly c) or b): you get a lot of wave-like solutions which propagate / oscillate over the system, and tend to decay over time. a) however is more tricky: if you start with a small deviation from the start state, the system will over time deviate ever more and and more. Now, this kind of thing is by no means unheard of especially in meteorology; it's the essence of a chaotic system. Storms can emerge and grow stronger over time, but only by scooping up energy that's already stored in the system. At some point they'll stop.
+
+OTOH, you always have a lot of consistently negative real-part eigenvalues. These correspond to dissipative effects: small-scale pertubations generally are smoothed out to zero by the physical effects, e.g. winds have friction, mixing of air of different temperature averages out the differences, etc.. If you now run the simulation backwards, you turn those negative real parts into positive real parts, and that means the system is suddenly massively chaotic on all length scales. Small pertubation arise out of numerical uncertainties, and grow over all bounds. You would not only end up with states different from the actual weather a week ago, but with states that are completely unlike anything the weather has ever been like – huge, erratic temperature fluctuations and small vortices with crazy wind speeds.
+
+• If I want to put it into less-mathematical more intuitive phrasing, can one simply say: "Many (slightly) different situations would evolve to the same/similar weather situation (and the maths "smooths" over this) - so reverting doesn't get you to one of them (and the maths exaggerates the error)" ? – BmyGuest Jul 9 '18 at 15:55
+• @Mark it'll depend on the level of detail you're trying to resolve. When you just run the dynamics backwards naïvely, I'd estimate you can do about 20-100 simulation time-steps before the state is dominated by unbounded oscillations, depending on the solver. Via the CFL condition, you can calculate what time span that is; it scales linearly with the size of the smallest feature you're resolving. – leftaroundabout Jul 9 '18 at 20:32
+• TLDR: No, because entropy. – workoverflow Jul 10 '18 at 11:50
+• @gansub yes. For most meteorological phenomena, Navier-Stokes behave mostly like the Euler equations, which are one of the classical examples of hyperbolic PDE. Only in the high-viscosity limit do Navier-Stokes turn into the parabolic diffusion equation, but that's AFAIK not relevant for weather prediction. – leftaroundabout Jul 10 '18 at 18:21
+• @leftaroundabout - Here you go - scicomp.stackexchange.com/questions/11830/… – gansub Jul 11 '18 at 13:36
+
+Validation is done by hindcasting, not by reversing the time axis, which seems to be what you're asking about. In hindcasting, we take the state at some time in the past, apply our weather models to that state (and the state before it), run the forecast model, and compare that to the reference state¹ ahead of that point in time.
+
+There is a concept called backtracking, which is (for example) used to calculate where particulates have been first emitted (so we measure some plume, and calculate this originated 18 hours ago at a particular source). But this assumes knowledge of present and past winds, and is therefore different from what you ask.
+
+Reversing the time axis would involve water falling up to the clouds and cyclones moving equatorward and turning into potential vorticity. It seems involved and I'm not sure what benefit would be. I don't think this can be done with existing models, and it would be a lot of effort to make it work.
+
+¹ It's not as simple as that, because the full "actual state" also involves modelling to "fill in the gaps" in time and space, between all the times and places where we have measurements. This is known as re-analysis.
+
+• Maybe "will be done" instead of "can be done". It seems to me that, given enough research effort, it could be done. But the benefit is questionable, so it likely won't be done. – Ian MacDonald Jul 9 '18 at 13:32
+• @IanMacDonald Right. I just meant that it's not supported by current models, but of course, it can theoretically be developed given enough time and expertise. Edited for clarity. – gerrit Jul 9 '18 at 13:36
+
+A completely different approach to the one leftroundabout pointed out is to use recurrent neural networks. These were made to predict the future development of a time series by first learning the hidden model itself and then using it to guesstimate the future values. The advantage of this method is, that not even the slightest knowledge about meteorology is needed, all the modelling of the weather system is done by the algorithm training the neural network.
+
+In fact there was a Kaggle competition with the task to predict rainfall from past data: http://simaaron.github.io/Estimating-rainfall-from-weather-radar-readings-using-recurrent-neural-networks/ . The winner used recurrent neural networks.
+
+In the case of predicting past values from current values the same architecture can be used, as it can learn the backward model as directly as a forward model.
+
+• And can those be used to reverse the time axis? I imagine that a purely statistical approach could, but you're not actually addressing the core question in this answer. – gerrit Jul 12 '18 at 7:07
+
+In a nutshell, no.
+
+The reason why is because of the Butterfly Effect. In a system where the current state depends on the previous state in an iterative way, you can get chaotic effects. Chaotic effects can magnify extremely tiny inputs to gigantic changes over time.
+
+This was first noted by the excellent mathematician and meteorologist Edward Lorenz. This is a decent explanation of how he came to notice that the equations predicting the weather are extremely sensitive to current conditions. You simply can't build a computer with enough sensitivity to do a good job.
+
+Since tiny fluctuations can cause huge effects over time, you have to ask yourself - how much information can your simulation encompass? Lorenz showed that tiny things can change the entire landscape over time. To be accurate, a simulation would have to take into account every source of small changes - sunspot activity, the wobble of the moon, the gravitational tug from Pluto...the list is endless.
+
+So unfortunately for a chaotic system like weather, you can't predict with any accuracy previous or future states.
+
+• While Chaos Theory is indeed valid (leftaroundabout goes into great summarization of the mathematics of how it really works)... we can still make very good predictions at a certain length. Your answer makes it sound like all forecasting is hopeless. – JeopardyTempest Jul 10 '18 at 0:54
+• In particular, "you can't predict with any accuracy previous or future states"... for example, NHC 48 hour tropical cyclone track forecasts are down to about 75 miles average error (whereas persistence+climatology is around 225 miles)... and continues to show improvement by on the order of 25% per decade. In the grand scheme, the window of predictability is pretty limited... but you certainly CAN with some accuracy predict some future states. – JeopardyTempest Jul 10 '18 at 0:56
+• @JeopardyTempest, you are correct. Some prediction is of course possible, I did somewhat overstate the case when I said that any accuracy for all states is impossible. Mathematically that is true, but in practice it is not. You can predict some future states with the caveat that you understand that it is an approximation and not an exact representation, and with weather being a chaotic system it will diverge from your expectations fairly quickly. – BoredBsee Jul 10 '18 at 14:25

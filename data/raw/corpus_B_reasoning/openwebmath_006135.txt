@@ -1,0 +1,87 @@
+# Odd interaction of secnumdepth and section-based counters
+
+In the following MWE:
+
+\documentclass{book}
+\newcounter{exnum}[subsection]
+\begin{document}
+\chapter*{Chapter}
+\section*{Section 1}
+\subsection{Subsection A}
+\setcounter{exnum}{1}
+Exnum is \theexnum.
+\subsection{Subsection B}
+Exnum is \theexnum.
+\end{document}
+
+
+I get the output I expected; namely, the line printed in Subsection A is Exnum is 1 and in Subsection B is Exnum is 0. However, in the actual code, I didn't want subsection numbers printed, so I changed both occurrences of \subsection to \subsection*. The output then consisted of Exnum is 1 in both subsections. As a workaround, starting from the code above, I instead added the line \setcounter{secnumdepth}{1} at the top, just after the documentclass, to prevent printing the subsection numbers, but left the \subsections unstarred. Again the output was Exnum is 1 in both subsections.
+
+What is going on here? Are these two manifestations of the same failure, or are they different problems? And, what don't I understand about what secnumdepth does? I thought it simply prevented printing of section numbers, but clearly it does much more than that.
+
+-
+
+Well, if the subsection counter is not incremented (and that will be the case if you use \subsection* or \setcounter{secnumdepth}{1}) then your counter won't be reset.
+
+Using the titlesec package you can redefine your subsections to suppress the numbering from the document, but to still internally increase the counter, so your new counter will still be reset when a new subsection is created:
+
+\documentclass{book}
+\usepackage{titlesec}
+
+\newcounter{exnum}[subsection]
+
+\titleformat{\subsection}
+{\normalfont\large\bfseries}{}{0pt}{}
+
+\begin{document}
+\chapter*{Chapter}
+\section*{Section 1}
+\subsection{Subsection A}
+\setcounter{exnum}{1}
+Exnum is \theexnum.
+\subsection{Subsection B}
+Exnum is \theexnum.
+\end{document}
+
+-
+Interesting. The documentation for secnumdepth (and subsection*) don't mention actually not incrementing the counter - they just say the counter is not printed. Anyway, this worked fine. Thanks. –  rogerl Nov 23 '11 at 16:29
+
+let the \subsection itself reset the counter:
+
+\documentclass{book}
+\let\SubSection\subsection
+\def\subsection{\setcounter{exnum}{0}\SubSection}
+\newcounter{exnum}
+\begin{document}
+\chapter*{Chapter}
+\section*{Section 1}
+\subsection*{Subsection A}
+\setcounter{exnum}{1}
+Exnum is \theexnum.
+\subsection*{Subsection B}
+Exnum is \theexnum.
+\end{document}
+
+-
+
+Change the way numbers are printed:
+
+\makeatletter
+\def\@seccntformat#1{%
+\def\@seccntformatsubsection#1#2{}
+\makeatother
+
+
+The usual definition is
+
+\def\@seccntformat#1{\csname the#1\endcsname\quad}
+
+
+and we simply add a new command before this; since we are defining only \@seccntformatsubsection, when LaTeX will try \@seccntformatsection it will consider it as \relax; when it wants to typeset a subsection, it will be presented (after the first expansion) with
+
+\@seccntformatsubsection\thesubsection\quad
+
+
+and \@seccntformatsubsectio will gobble the two tokens. Setting \setcounter{secnumdepth}{2} will "number" the subsections, but \subsection{A title} will eventually print without the number.
+
+-

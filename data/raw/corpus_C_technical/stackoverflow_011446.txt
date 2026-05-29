@@ -1,0 +1,40 @@
+Question: <p>Each time a python file is imported that contains a large quantity of static regular expressions, cpu cycles are spent compiling the strings into their representative state machines in memory.</p>
+
+<pre><code>a = re.compile("a.*b")
+b = re.compile("c.*d")
+...
+</code></pre>
+
+<p>Question: Is it possible to store these regular expressions in a cache on disk in a pre-compiled manner to avoid having to execute the regex compilations on each import?</p>
+
+<p>Pickling the object simply does the following, causing compilation to happen anyway:</p>
+
+<pre><code>&gt;&gt;&gt; import pickle
+&gt;&gt;&gt; import re
+&gt;&gt;&gt; x = re.compile(".*")
+&gt;&gt;&gt; pickle.dumps(x)
+"cre\n_compile\np0\n(S'.*'\np1\nI0\ntp2\nRp3\n."
+</code></pre>
+
+<p>And re objects are unmarshallable:</p>
+
+<pre><code>&gt;&gt;&gt; import marshal
+&gt;&gt;&gt; import re
+&gt;&gt;&gt; x = re.compile(".*")
+&gt;&gt;&gt; marshal.dumps(x)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+ValueError: unmarshallable object
+</code></pre>
+
+Answer: <blockquote>
+  <p>Is it possible to store these regular expressions in a cache on disk in a pre-compiled manner to avoid having to execute the regex compilations on each import?</p>
+</blockquote>
+
+<p>Not easily. You'd have to write a custom serializer that hooks into the C <code>sre</code> implementation of the Python regex engine. Any performance benefits would be vastly outweighed by the time and effort required.</p>
+
+<p>First, have you actually profiled the code? I doubt that compiling regexes is a significant part of the application's run-time. Remember that they are only compiled the first time the module is imported in the current execution -- thereafter, the module and its attributes are cached in memory.</p>
+
+<p>If you have a program that basically spawns once, compiles a bunch of regexes, and then exits, you could try re-engineering it to perform multiple tests in one invocation. Then you could re-use the regexes, as above.</p>
+
+<p>Finally, you could compile the regexes into C-based state machines and then link them in with an extension module. While this would likely be more difficult to maintain, it would eliminate regex compilation entirely from your application.</p>

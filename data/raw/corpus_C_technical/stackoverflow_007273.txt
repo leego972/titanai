@@ -1,0 +1,75 @@
+Question: <p>If I'm writing unit tests in python (using the unittest module), is it possible to output data from a failed test, so I can examine it to help deduce what caused the error? I am aware of the ability to create a customized message, which can carry some information, but sometimes you might deal with more complex data, that can't easily be represented as a string.</p>
+
+<p>For example, suppose you had a class Foo, and were testing a method bar, using data from a list called testdata:</p>
+
+<pre><code>class TestBar(unittest.TestCase):
+    def runTest(self):
+        for t1, t2 in testdata:
+            f = Foo(t1)
+            self.assertEqual(f.bar(t2), 2)
+</code></pre>
+
+<p>If the test failed, I might want to output t1, t2 and/or f, to see why this particular data resulted in a failure. By output, I mean that the variables can be accessed like any other variables, after the test has been run.</p>
+
+Answer: <p>Use logging:</p>
+
+<pre><code>import unittest
+import logging
+import inspect
+import os
+
+logging_level = logging.INFO
+
+try:
+    log_file = os.environ["LOG_FILE"]
+except KeyError:
+    log_file = None
+
+def logger(stack=None):
+    if not hasattr(logger, "initialized"):
+        logging.basicConfig(filename=log_file, level=logging_level)
+        logger.initialized = True
+    if not stack:
+        stack = inspect.stack()
+    name = stack[1][3]
+    try:
+        name = stack[1][0].f_locals["self"].__class__.__name__ + "." + name
+    except KeyError:
+        pass
+    return logging.getLogger(name)
+
+def todo(msg):
+    logger(inspect.stack()).warning("TODO: {}".format(msg))
+
+def get_pi():
+    logger().info("sorry, I know only three digits")
+    return 3.14
+
+class Test(unittest.TestCase):
+
+    def testName(self):
+        todo("use a better get_pi")
+        pi = get_pi()
+        logger().info("pi = {}".format(pi))
+        todo("check more digits in pi")
+        self.assertAlmostEqual(pi, 3.14)
+        logger().debug("end of this test")
+        pass
+</code></pre>
+
+<p>Usage:</p>
+
+<pre><code># LOG_FILE=/tmp/log python3 -m unittest LoggerDemo
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.047s
+
+OK
+# cat /tmp/log
+WARNING:Test.testName:TODO: use a better get_pi
+INFO:get_pi:sorry, I know only three digits
+INFO:Test.testName:pi = 3.14
+WARNING:Test.testName:TODO: check more digits in pi
+</code></pre>
+
+<p>If you do not set <code>LOG_FILE</code>, logging will got to <code>stderr</code>.</p>

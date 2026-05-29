@@ -1,0 +1,58 @@
+Question: <p>This is a follow-up to <a href="http://stackoverflow.com/questions/365522/what-is-the-best-way-to-add-two-numbers-without-using-the-operator">my question yesterday</a>:</p>
+
+<p>CMS kindly provided this example of using bitwise operators to add two numbers in C:</p>
+
+<pre><code>#include&lt;stdio.h&gt;
+
+int add(int x, int y) {
+    int a, b;
+    do {
+        a = x &amp; y;
+        b = x ^ y;
+        x = a &lt;&lt; 1;
+        y = b;
+    } while (a);
+    return b;
+}
+
+int main( void ){
+    printf( "6 + 3 = %d", add(6,3));
+    printf( "6 - 3 = %d", add(6,-3));
+    return 0;
+}
+</code></pre>
+
+<p>It works great and I then ported it to Python as follows:</p>
+
+<pre><code>def add(x, y):
+    while True:
+        a = x &amp; y
+        b = x ^ y
+        x = a &lt;&lt; 1
+        y = b
+        if a == 0:
+            break
+    return b
+
+print "6 + 3 = %d" % add(6,3)
+print "6 - 3 = %d" % add(6,-3)
+</code></pre>
+
+<p>They both work for addition and the C program works for subtraction as well.  However, the Python program enters an infinite loop for subtraction.  I am trying to get to the bottom of this and have posted the program here for further experimentation: <a href="http://codepad.org/pb8IuLnY">http://codepad.org/pb8IuLnY</a></p>
+
+<p>Can anyone advise why there would be a difference between the way C handles this and the way CPython handles this?</p>
+
+Answer: <p>As I pointed out in my response to CMS' answer yesterday, left-shifting a negative number is undefined behavior in C so this isn't even guaranteed to work in C (the problem is how to handle the signed bit, do you shift it like a value bit or is it not affected by a shift?  The standards committee couldn't agree on a behavior so it was left undefined).  </p>
+
+<p>When this happens to work in C it relies on fixed bit-width integers so that the leftmost bit gets pushed off the end when you do a shift (it also requires the sign bit to be treated as a value bit for shifting purposes).  All integer types in C are fixed-bit but Python numbers can be arbitrarily large.  Left-shifting a number in Python just causes it to keep getting larger:</p>
+
+<pre><code>&gt;&gt;&gt; 1 &lt;&lt; 100
+1267650600228229401496703205376L
+</code></pre>
+
+<p>You could try something like this:</p>
+
+<pre><code>x = (a &lt;&lt; 1) &amp; 0xffffffff
+</code></pre>
+
+<p>To limit the result to 32-bits, the problem is that the left shift operator in Python doesn't shift the sign bit of a signed number (which is part of what is required to make this particular solution work).  There might be a way to change the behavior of the shift operator but I don't know how.</p>

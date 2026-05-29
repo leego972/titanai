@@ -1,0 +1,47 @@
+Question: <p>I went to all the documentation, also I went to the IRC channel (BTW a great community) and they told me that is not possible to create a model and limit choices in a field where the 'current user' is in a ForeignKey.
+I will try to explain this with an example:</p>
+
+<pre><code>class Project(models.Model):
+  name = models.CharField(max_length=100)
+  employees = models.ManyToManyField(Profile, limit_choices_to={'active': '1'})
+
+class TimeWorked(models.Model):
+  project = models.ForeignKey(Project, limit_choices_to={'user': user})
+  hours = models.PositiveIntegerField()
+</code></pre>
+
+<p>Of course that code doesn't work because there is no 'user' object, but that was my idea and I was trying to send the object 'user' to the model to just limit the choices where the current user has projects, I don't want to see projects where I'm not in.</p>
+
+<p>Thank you very much if you can help me or give me any advice, I don't want to you write all the app, just a tip how to deal with that. I have 2 days with this in my head and I can't figure it out :(</p>
+
+<p><strong>UPDATE</strong>: The solution is here: <a href="http://collingrady.wordpress.com/2008/07/24/useful-form-tricks-in-django/" rel="nofollow">http://collingrady.wordpress.com/2008/07/24/useful-form-tricks-in-django/</a> sending <code>request.user</code> to a model.</p>
+
+Answer: <p>This limiting of choices to current user is a kind of validation that needs to happen dynamically in the request cycle, not in the static Model definition.</p>
+
+<p>In other words: at the point where you are creating an <em>instance</em> of this model you will be in a View and at that point you will have access to the current user and can limit the choices.</p>
+
+<p>Then you just need a custom ModelForm to pass in the request.user to, see the example here:
+<a href="http://collingrady.wordpress.com/2008/07/24/useful-form-tricks-in-django/" rel="nofollow">http://collingrady.wordpress.com/2008/07/24/useful-form-tricks-in-django/</a></p>
+
+<pre><code>from datetime import datetime, timedelta
+from django import forms
+from mysite.models import Project, TimeWorked
+
+class TimeWorkedForm(forms.ModelForm):
+    def __init__(self, user, *args, **kwargs):
+        super(ProjectForm, self).__init__(*args, **kwargs)
+        self.fields['project'].queryset = Project.objects.filter(user=user)
+
+    class Meta:
+        model = TimeWorked
+</code></pre>
+
+<p>then in your view:</p>
+
+<pre><code>def time_worked(request):
+    form = TimeWorkedForm(request.user, request.POST or None)
+    if form.is_valid():
+        obj = form.save()
+        # redirect somewhere
+    return render_to_response('time_worked.html', {'form': form})
+</code></pre>

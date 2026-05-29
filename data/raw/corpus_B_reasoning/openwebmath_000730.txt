@@ -1,0 +1,477 @@
+# Concise Implementation of Linear Regression
+
+When I try to use Huber Loss, I am getting some error which i am unable to decode it.Can you please help me out
+
+Hi @Rosetta, thanks for raising the issue! HuberLoss may have some implementation issues, we will tackle it.
+
+The Gluon model weight matrix W.shape is (1, 2), is different from the W.shape (2, 1) in the last section, I guess that the Gluon model use XW^T + b equation, so in this code example,
+‘’
+w = net[0].weight.data()
+print(‘Error in estimating w’, true_w.reshape(w.shape) - w)
+b = net[0].bias.data()
+print(‘Error in estimating b’, true_b - b)
+‘’
+w.T is needed or not?
+
+Hi @liwei, you are correct! Gluon uses $XW^T + b$. Even though the shape are flipped, it doesn’t affect the final value.
+
+trainer.step normalizes the loss by 1/batch_size. when we already take the loss.mean(), loss get normalized already so there is no need to normalize again in step.
+
+1 Like
+
+Hi @sahu.vaibhav, trainer.step() will update the weights, while loss measures the difference between truth and predictions. That’s why we use loss.mean().
+
+thanks @goldpiggy… i was trying to answer the question.
+
+I am getting this error:
+TypeError: Operator abs registered in backend is known as abs in Python. This is a legacy operator which can only accept legacy ndarrays, while received an MXNet numpy ndarray. Please call as_nd_ndarray() upon the numpy ndarray to convert it to a legacy ndarray, and then feed the converted array to this operator.
+What can be the cause? It was working fine when I used L2loss , but this error popped up when I used Huber’s Loss.
+
+1 Like
+
+I’m getting the same error. Any way to solve this? Any help would be much appreciated.
+
+In order to solve the issue of TypeError: Operator abs registered in backend is known as abs
+I’ve edited python file mxnet/gluon/loss.py installed in my package and changed class HuberLoss with MyHuberLoss.
+
+Reason of failure, as far as I understand, is described into docstring of function hybrid_forward implemented into class MyHuberLoss.
+
+Then I used MyHuberLoss in my notebook in order to experiment Huber loss function
+
+Here is the hack and the modified class :
+
+import mxnet
+from mxnet.gluon import loss
+from mxnet.gluon.loss import _reshape_like
+from mxnet.gluon.loss import _apply_weighting
+import mxnet.numpy as np
+
+class MyHuberLoss(loss.Loss):
+r"""Calculates smoothed L1 loss that is equal to L1 loss if absolute error
+exceeds rho but is equal to L2 loss otherwise. Also called SmoothedL1 loss.
+
+.. math::
+L = \sum_i \begin{cases} \frac{1}{2 {rho}} ({label}_i - {pred}_i)^2 &
+\text{ if } |{label}_i - {pred}_i| < {rho} \\
+|{label}_i - {pred}_i| - \frac{{rho}}{2} &
+\text{ otherwise }
+\end{cases}
+
+label and pred can have arbitrary shape as long as they have the same
+number of elements.
+
+Parameters
+----------
+rho : float, default 1
+Threshold for trimmed mean estimator.
+weight : float or None
+Global scalar weight for loss.
+batch_axis : int, default 0
+The axis that represents mini-batch.
+
+Inputs:
+- **pred**: prediction tensor with arbitrary shape
+- **label**: target tensor with the same size as pred.
+- **sample_weight**: element-wise weighting tensor. Must be broadcastable
+to the same shape as pred. For example, if pred has shape (64, 10)
+and you want to weigh each sample in the batch separately,
+sample_weight should have shape (64, 1).
+
+Outputs:
+- **loss**: loss tensor with shape (batch_size,). Dimenions other than
+batch_axis are averaged out.
+"""
+
+def __init__(self, rho=1, weight=None, batch_axis=0, **kwargs):
+super(MyHuberLoss, self).__init__(weight, batch_axis, **kwargs)
+self._rho = rho
+
+def hybrid_forward(self, F, pred, label, sample_weight=None):
+'''This function uses array operator from module mxnet.ndarray
+This module is recorded in variable F, that is given as parameter function.
+
+Parameters pred and label, in the context of this exercise, both use array type
+mxnet.numpy.ndarray
+
+Triggered error show that module mxnet.ndarray does not support operators
+such as abs and sqrt to be applied to mxnet.ndarray type.
+
+Then, in order to keep direct graph safe, rather then changing array types in order to
+support operators from module mxnet.ndarray, I changed module into F to module
+mxnet.numpy, that is compliant with array type mxnet.numpy.ndarray.
+
+'''
+is_mxnet_numpy = False
+if type(label) == mxnet.numpy.ndarray or type(pred) == mxnet.numpy.ndarray:
+is_mxnet_numpy = False
+
+label = _reshape_like(F, label, pred)
+if is_mxnet_numpy:
+F = mxnet.numpy
+else :
+pass
+
+loss = F.abs(label - pred)
+loss = F.where(loss > self._rho, loss - 0.5 * self._rho,
+(0.5 / self._rho) * F.square(loss))
+loss = _apply_weighting(F, loss, self._weight, sample_weight)
+if is_mxnet_numpy :
+loss_mean = F.mean(loss, axis=self._batch_axis)
+else :
+loss_mean = F.mean(loss, axis=self._batch_axis, exclude=True)
+
+return loss_mean
+
+import mxnet
+from mxnet.gluon import loss
+from mxnet.gluon.loss import _reshape_like
+from mxnet.gluon.loss import _apply_weighting
+import mxnet.numpy as np
+
+class MyHuberLoss(loss.Loss):
+r"""Calculates smoothed L1 loss that is equal to L1 loss if absolute error
+exceeds rho but is equal to L2 loss otherwise. Also called SmoothedL1 loss.
+
+.. math::
+L = \sum_i \begin{cases} \frac{1}{2 {rho}} ({label}_i - {pred}_i)^2 &
+\text{ if } |{label}_i - {pred}_i| < {rho} \\
+|{label}_i - {pred}_i| - \frac{{rho}}{2} &
+\text{ otherwise }
+\end{cases}
+
+label and pred can have arbitrary shape as long as they have the same
+number of elements.
+
+Parameters
+----------
+rho : float, default 1
+Threshold for trimmed mean estimator.
+weight : float or None
+Global scalar weight for loss.
+batch_axis : int, default 0
+The axis that represents mini-batch.
+
+Inputs:
+- **pred**: prediction tensor with arbitrary shape
+- **label**: target tensor with the same size as pred.
+- **sample_weight**: element-wise weighting tensor. Must be broadcastable
+to the same shape as pred. For example, if pred has shape (64, 10)
+and you want to weigh each sample in the batch separately,
+sample_weight should have shape (64, 1).
+
+Outputs:
+- **loss**: loss tensor with shape (batch_size,). Dimenions other than
+batch_axis are averaged out.
+"""
+
+def __init__(self, rho=1, weight=None, batch_axis=0, **kwargs):
+super(MyHuberLoss, self).__init__(weight, batch_axis, **kwargs)
+self._rho = rho
+
+def hybrid_forward(self, F, pred, label, sample_weight=None):
+'''This function uses array operator from module mxnet.ndarray
+This module is recorded in variable F, that is given as parameter function.
+
+Parameters pred and label, in the context of this exercise, both use array type
+mxnet.numpy.ndarray
+
+Triggered error show that module mxnet.ndarray does not support operators
+such as abs and sqrt to be applied to mxnet.ndarray type.
+
+Then, in order to keep direct graph safe, rather then changing array types in order to
+support operators from module mxnet.ndarray, I changed module into F to module
+mxnet.numpy, that is compliant with array type mxnet.numpy.ndarray.
+
+'''
+is_mxnet_numpy = False
+if type(label) == mxnet.numpy.ndarray or type(pred) == mxnet.numpy.ndarray:
+is_mxnet_numpy = True
+
+label = _reshape_like(F, label, pred)
+if is_mxnet_numpy:
+F = mxnet.numpy
+else :
+pass
+
+loss = F.abs(label - pred)
+loss = F.where(loss > self._rho, loss - 0.5 * self._rho,
+(0.5 / self._rho) * F.square(loss))
+loss = _apply_weighting(F, loss, self._weight, sample_weight)
+if is_mxnet_numpy :
+loss_mean = F.mean(loss, axis=self._batch_axis)
+else :
+loss_mean = F.mean(loss, axis=self._batch_axis, exclude=True)
+
+return loss_mean
+
+
+
+As a result, using Huber loss tooks twice number of epochs then L2 loss for getting the same precision for average error over the whole dataset.
+
+I think this is due to mixted slopes provided in Huber loss function. Checking documentation, it is showed that when when error is less or equal Ro parameter in between prediction and true value, then loss function comes as L2 loss function. When error is greater then Ro parameter, then loss function comes as a straight line from which, slope (then gradient) has a lower magnitude then L2 slope.
+
+I’ve no other idea…
+
+@akpd2l @rafribeiro @FBT, the current stable version of mxnet.gluon.loss.HuberLoss does not support operations on numpy arrays, but one can implement loss functions from scratch as it was done in 3.2.6.
+First, recall that the Huber loss function is defined as
+
+huber_loss(y_hat, y; rho) = 0.5/rho * (y_hat - y)**2 if abs(y_hat - y) <= rho
+else abs(y_hat - y) - 0.5*rho
+
+
+It becomes L2 loss for relatively small absolute residuals, and L1 loss, for large ones. So, it is smooth and less influenced by outliers. A switch is controlled by the (hyper)parameter rho. One can choose it experimentally or by measuring the variability of the inliers (e.g. rho=median(y - median(y))).
+Now, define a new python function
+
+def huber_loss(y_hat, y, rho=1.):
+loss = np.abs(y_hat - y)
+loss = np.where(loss <= rho, 0.5/rho * loss**2, loss - 0.5*rho)
+return loss
+
+
+and in 3.3.7 replace l = loss(net(X), y) with l = huber_loss(net(X), y).
+
+@FBT, when comparing two different loss functions used in training, it is more reasonable to choose one common measure for evaluation. In 3.3.7, loss is used for both optimization (line l = loss(net(X), y)) and evaluation (line l = loss(net(features), labels)). Instead, choose a new loss function for evaluation (e.g. L1 loss as it is more descriptive) and compare performances of MyHuberLoss and gluon.loss.L2Loss during training:
+
+loss_eval = gluon.loss.L1Loss()
+l2loss = gluon.loss.L2Loss()
+huber_loss = MyHuberLoss(rho=0.5)  # don't forget to adjust rho
+num_epochs = 3
+for epoch in range(num_epochs):
+for X, y in data_iter:
+l = huber_loss(net(X), y)  # or l = l2loss(net(X), y)
+l.backward()
+trainer.step(batch_size)
+l = loss_eval(net(features), labels)
+print(f'epoch {epoch + 1}, loss {l.mean().asnumpy():f}')
+
+
+In our case, you will observe that the results are closely the same (why?).
+
+For sure simplicity is a far more preferable option for implementation such as for proposed huber_loss. Thanks for this point.
+
+But how such implementation deals with ascendant-compatibility with legacy code? This was the reason of class hacking supporting both mxnet.numpy.ndarray and mxnet.ndarray array types (see docstring from hybrid_forward function)
+
+Concerning usage of different loss functions, I understand the use of L1 loss for interpretability. But at this stage, data is random toy dataset, then, it is diffcult (for me) to find itnerpretability.
+
+Thanks for this information concerning the usage of Huber loss taking into account outliers into data model.
+
+For results from usage of either Huber or L2 loss functions, results on my side are quite differents.
+
+Here below are results and parameters I used.
+
+Reasons for differences : please note that into huber_loss implementation function, loss is returned as an array, while into MyHuberLoss loss is returned as a scalar, because of mean applied on array before return.
+
+This leads to change usage of trainer.step() function. When mean is returned from inside the loss function, then we should use trainer.step(1) ; when array is returned such as in huber_loss , then trainer.step(batch_size) has to be used for gradients calculation from average batch loss.
+
+I guess this last point is related with question 1.
+
+A question : suppose you use batch_size = 90. What happens then for the last batch, sized with 10, when using train_step(batch_size)?
+
+# L1 loss
+epoch 1, loss 4.149518
+epoch 2, loss 3.457200
+epoch 3, loss 2.769157
+
+# Huber loss from MyHuberLoss
+epoch 1, loss 4.144689
+epoch 2, loss 3.453153
+epoch 3, loss 2.767166
+
+# Huber loss from huber_loss
+epoch 1, loss 3.938834
+epoch 2, loss 3.009948
+epoch 3, loss 3.315474
+
+# L2 loss
+epoch 1, loss 1.691334
+epoch 2, loss 0.590921
+epoch 3, loss 0.206460
+
+
+Parameters, training and evaluation :
+
+batch_size = 100
+
+# Feed forward network
+net = nn.Sequential()
+
+# One unique layer, connected with all nodes from input layer
+
+# Parameters initilization
+net.initialize(init.Normal(sigma=0.01))
+
+# Optimizer
+trainer = gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.1})
+
+lossInstance = gluon.loss.L1Loss()
+lossInstance = gluon.loss.L2Loss()
+rho=0.5
+#lossInstance = MyHuberLoss(rho=rho)  # don't forget to adjust rho
+#lossInstance = huber_loss
+num_epochs = 3
+for epoch in range(num_epochs):
+for X, y in data_iter:
+# Compute Error from feed-forward step
+if type(lossInstance) == huber_loss :
+l = lossInstance(net(X), y, rho=rho)
+else  :
+l = lossInstance(net(X), y)
+l.backward()
+
+# Learning stage : update weights, biais
+if type(lossInstance) == MyHuberLoss :
+trainer.step(1)
+else  :
+trainer.step(batch_size)
+
+# Compute error over the full dataset
+l = l1loss(net(features), labels)
+
+print(f'epoch {epoch + 1}, loss {l.mean().asnumpy():f}')
+
+
+Since this chapter is for beginners, I didn’t consider inheriting base mxnet.gluon.loss.Loss class to implement a general loss functor for every backend and followed the previous paragraph’s instructions. If my memory serves me correctly, the book introduces the first custom loss with Gluon API in chapter 9.
+
+Following Gluon API, loss functors are expected to return arrays of shape (batch_size,) or (..., batch_size) (in case of multiple tasks) for Numpy NDArrays. mean is applied over axis 1, which averages loss values over tasks not batch entries. In our case it means that loss(net(X), y) is of shape (batch_size,) as y is of shape (batch_size,1).
+For example,
+
+>>> y = np.array([[1, -1, 4, 3]]).reshape(4, 1)  # shape = (batch_size, 1) as in load_array
+>>> y_hat = np.array([[1, 0, 5, 4]]).reshape(4, 1)
+>>> loss = gluon.loss.L1Loss()
+>>> loss(y_hat, y)
+array([0., 1., 3., 2.])
+
+
+As you can see, averaging was not performed because we have only one regression task, therefore we need to pass batch_size steps into trainer.step and call mean in
+print(f'epoch {epoch + 1}, loss {l.mean().asnumpy():f}') manually.
+Accordingly, I think you should reimplement MyHuberLoss so that you don’t have to check loss types to determine trainer steps. I believe this will also shed some light on your issues.
+
+load_array function from 3.3.2 is based on mxnet.gluon.data.DataLoader, which has option last_batch. The function calls DataLoader with the default last_batch, therefore the last batch will be of shape (10, number_of_features).
+
+import mxnet
+from mxnet.gluon import loss
+from mxnet.gluon.loss import _reshape_like
+from mxnet.gluon.loss import _apply_weighting
+import mxnet.numpy as np
+
+class MyHuberLoss(loss.Loss):
+r"""Calculates smoothed L1 loss that is equal to L1 loss if absolute error
+exceeds rho but is equal to L2 loss otherwise. Also called SmoothedL1 loss.
+
+.. math::
+L = \sum_i \begin{cases} \frac{1}{2 {rho}} ({label}_i - {pred}_i)^2 &
+\text{ if } |{label}_i - {pred}_i| < {rho} \\
+|{label}_i - {pred}_i| - \frac{{rho}}{2} &
+\text{ otherwise }
+\end{cases}
+
+label and pred can have arbitrary shape as long as they have the same
+number of elements.
+
+Parameters
+----------
+rho : float, default 1
+Threshold for trimmed mean estimator.
+weight : float or None
+Global scalar weight for loss.
+batch_axis : int, default 0
+The axis that represents mini-batch.
+
+Inputs:
+- **pred**: prediction tensor with arbitrary shape
+- **label**: target tensor with the same size as pred.
+- **sample_weight**: element-wise weighting tensor. Must be broadcastable
+to the same shape as pred. For example, if pred has shape (64, 10)
+and you want to weigh each sample in the batch separately,
+sample_weight should have shape (64, 1).
+
+Outputs:
+- **loss**: loss tensor with shape (batch_size,). Dimenions other than
+batch_axis are averaged out.
+"""
+
+def __init__(self, rho=1, weight=None, batch_axis=0, **kwargs):
+super(MyHuberLoss, self).__init__(weight, batch_axis, **kwargs)
+self._rho = rho
+
+def hybrid_forward(self, F, pred, label, sample_weight=None):
+'''This function uses array operator from module mxnet.ndarray
+This module is recorded in variable F, that is given as parameter function.
+
+Parameters pred and label, in the context of this exercise, both use array type
+mxnet.numpy.ndarray
+
+Triggered error show that module mxnet.ndarray does not support operators
+such as abs and sqrt to be applied to mxnet.ndarray type.
+
+Then, in order to keep direct graph safe, rather then changing array types in order to
+support operators from module mxnet.ndarray, I changed module into F to module
+mxnet.numpy, that is compliant with array type mxnet.numpy.ndarray.
+
+'''
+is_mxnet_numpy = False
+#if type(label) == mxnet.numpy.ndarray or type(pred) == mxnet.numpy.ndarray:
+if mxnet.util.is_np_array() :
+# Type is mxnet.numpy.ndarray
+is_mxnet_numpy = True
+
+# Use appropriate functions from module mxnet.numpy
+F = mxnet.numpy
+label = label.reshape(pred.shape)
+else :
+# This is a legacy mx.nd.NDArray; default module (mxnet.ndarray)
+# given in parameter is used
+label = _reshape_like(F, label, pred)
+
+loss = F.abs(label - pred)
+loss = F.where(loss > self._rho, loss - 0.5 * self._rho,
+(0.5 / self._rho) * F.square(loss))
+loss = _apply_weighting(F, loss, self._weight, sample_weight)
+if is_mxnet_numpy :
+# Mean does apply on batch axis only; this avoid 1st axis.
+loss_mean = F.mean(loss, axis=tuple(range(1, loss.ndim)))
+else :
+loss_mean = F.mean(loss, axis=self._batch_axis, exclude=True)
+
+return loss_mean
+
+
+
+Concerning return from Loss class, you’ve riht, thanks. MyHuberLoss has been changed accordingly. Return format of loss is an array shaped as (batch_size,), according to documentation.
+
+But this does not change deeply the results and so, does not explain why there is a strong difference while using huber_loss function and MyHuberLoss class.
+
+Computing gradient with the average of loss is equivalent (on the paper) to compute the average gradient using loss array. Gradient operator is a linear operator for addition and multiplication with scalar, and that’s what mean operator do.
+
+Concerning the case where batch_size=90 (case where last batch is lesser size then all others) then last_batch option does not seems to solve this issue. Updating parameters with trainer.step(batch_size) on loss array with size 10 will not provide expected result when batch_size=90.
+
+Also, using trainer.step(1) after calculation of mean for each batch is valiid option in this case and is more relevant.
+
+Better solution is to feed trainer.step with size of loss array, rather then batch_size.
+
+Difference of results while using huber_loss is due to the y.shape and y_hat.shape that are not same !
+
+Following implementation lead to same results :
+
+def huber_loss(y_hat, y, rho=1.):
+loss = np.abs(y_hat - y.reshape(y_hat.shape))
+loss = np.where(loss <= rho, 0.5/rho * loss**2, loss - 0.5*rho)
+return loss
+
+
+As described below :
+
+# L1 loss
+epoch 1, loss 4.147878
+epoch 2, loss 3.456719
+epoch 3, loss 2.767898
+
+# Huber loss from MyHuberLoss
+epoch 1, loss 4.146686
+epoch 2, loss 3.455244
+epoch 3, loss 2.767972
+
+# Huber loss from huber_loss
+epoch 1, loss 4.147504
+epoch 2, loss 3.459582
+epoch 3, loss 2.778563

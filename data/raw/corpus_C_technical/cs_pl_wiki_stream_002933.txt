@@ -1,0 +1,181 @@
+# Vala (programming language)
+
+Vala is an object-oriented programming language with a self-hosting compiler that generates C code and uses the GObject system.
+
+Vala is syntactically similar to C# and includes notable features such as anonymous functions, signals, properties, generics, assisted memory management, exception handling, type inference, and foreach statements. Its developers, Jürg Billeter and Raffaele Sandrini, wanted to bring these features to the plain C runtime with little overhead and no special runtime support by targeting the GObject object system. Rather than compiling directly to machine code or assembly language, it compiles to a lower-level intermediate language. It source-to-source compiles to C, which is then compiled with a C compiler for a given platform, such as GCC or Clang.
+
+Using functionality from native code libraries requires writing vapi files, defining the library interfaces. Writing these interface definitions is well-documented for C libraries. Bindings are already available for a large number of libraries, including libraries that are not based on GObject such as the multimedia library SDL and OpenGL.
+
+Description
+Vala is a programming language that combines the high-level build-time performance of scripting languages with the run-time performance of low-level programming languages. It aims to bring modern programming language features to GNOME developers without imposing any additional runtime requirements and without using a different ABI, compared to applications and libraries written in C. The syntax of Vala is similar to C#, modified to better fit the GObject type system.
+
+History
+Vala was conceived by Jürg Billeter and was implemented by him and Raffaele Sandrini, who wished for a higher level alternative for developing GNOME applications instead of C. They did like the syntax and semantics of C# but did not want to use Mono, so they finished a compiler in May 2006. Initially, it was bootstrapped using C, and one year later (with release of version 0.1.0 in July 2007), the Vala compiler became self-hosted. As of 2021, the current stable release branch with long-term support is 0.48, and the language is under active development with the goal of releasing a stable version 1.0.
+
+Language design
+
+Features
+Vala uses GLib and its submodules (GObject, GModule, GThread, GIO) as the core library, which is available for most operating systems and offers things like platform independent threading, input/output, file management, network sockets, plugins, regular expressions, etc. The syntax of Vala currently supports modern language features as follows:
+Interfaces
+Properties
+Signals
+Foreach
+Lambda expressions
+Type inference for local variables
+Generics
+Non-null types
+Assisted memory management
+Exception handling
+
+Graphical user interfaces can be developed with the GTK GUI toolkit and the Glade GUI builder.
+
+Memory management
+For memory management, the GType or GObject system provides reference counting. In C, a programmer must manually manage adding and removing references, but in Vala, managing such reference counts is automated if a programmer uses the language's built-in reference types rather than plain pointers. The only detail you need to worry about is to avoid generating reference cycles, because in that case this memory management system will not work correctly.
+
+Vala also allows manual memory management with pointers as an option.
+
+Bindings
+Vala is intended to provide runtime access to existing C libraries, especially GObject-based libraries, without the need for runtime bindings. To use a library with Vala, all that needed is an API file (.vapi) containing the class and method declarations in Vala syntax. However, C++ libraries are not supported. At present, vapi files for a large part of the GNU project and GNOME platform are included with each release of Vala, including GTK. There is also a library called Gee, written in Vala, that provides GObject-based interfaces and classes for commonly used data structures. 
+
+It should also be easily possible to write a bindings generator for access to Vala libraries from applications written in other languages, e.g., C#, as the Vala parser is written as a library, so that all compile-time information is available when generating a binding.
+
+Tools
+
+Editors
+Tooling for Vala development has seen significant improvement over the recent years. The following is a list of some popular IDEs and text editors with plug-ins that add support for programming in Vala:
+ GNOME Builder
+ Visual Studio Code, with Vala plugin
+ Vim, with arrufat/vala.vim plugin
+ Emacs, with vala-mode
+ Atom 
+ Geany
+
+Code intelligence
+Currently, there are two actively developing language servers which offer code intelligence for Vala as follows:
+ , designed for any editor that supports LSP, including VSCode, vim, and GNOME Builder 
+ , currently the default language server for Vala in GNOME Builder and provides support to any editor with support for LSP
+
+Build systems
+Currently, there are a number of build systems supporting Vala, including Automake, CMake, Meson, and others.
+
+Debugging
+Debugging for Vala programs can be done with either GDB or LLDB. For debugging in IDEs,
+ GNOME Builder has built-in debugging support for Vala with GDB.
+ Visual Studio Code has extensions for GDB and LLDB, such as cpptools and CodeLLDB.
+
+Examples
+
+Hello world
+A simple "Hello, World!" program in Vala:
+void main () {
+	print ("Hello World\n");
+}
+
+As can be noted, unlike C or C++, there are no header files in Vala. The linking to libraries is done by specifying --pkg parameters during compiling. Moreover, the GLib library is always linked and its namespace can be omitted (print is in fact GLib.print).
+
+Object-oriented programming
+Below is a more complex version which defines a subclass HelloWorld inheriting from the base class GLib.Object, aka the GObject class. It shows some of Vala's object-oriented features:
+class HelloWorld: Object {
+	private uint year = 0;
+	
+	public HelloWorld () {
+	}
+	
+	public HelloWorld.with_year (int year) {
+		if (year>0)
+			this.year = year;
+	}
+
+	public void greeting () {
+		if (year == 0)
+			print ("Hello World\n");
+		else
+			/* Strings prefixed with '@' are string templates. */
+			print (@"Hello World, $(this.year)\n"); 
+	}
+}
+
+void main (string[] args) {
+	var helloworld = new HelloWorld.with_year (2021);
+	helloworld.greeting ();
+}
+As in the case of GObject library, Vala does not support multiple inheritance, but a class in Vala can implement any number of interfaces, which may contain default implementations for their methods. Here is a piece of sample code to demonstrate a Vala interface with default implementation (sometimes referred to as a mixin)
+using GLib;
+
+interface Printable {
+	public abstract string print ();
+
+	public virtual string pretty_print () {
+		return "Please " + print ();
+	}
+}
+
+class NormalPrint: Object, Printable {
+	string print () {
+		return "don't forget about me";
+	}
+}
+
+class OverridePrint: Object, Printable {
+	string print () {
+		return "Mind the gap";
+	}
+
+	public override string pretty_print () {
+		return "Override";
+	}
+}
+
+void main (string[] args) {
+	var normal = new NormalPrint ();
+	var overridden = new OverridePrint ();
+
+	print (normal.pretty_print ());
+	print (overridden.pretty_print ());
+}
+
+Signals and callbacks
+Below is a basic example to show how to define a signal in a class that is not compact, which has a signal system built in by Vala through GLib. Then callback functions are registered to the signal of an instance of the class. The instance can emit the signal and each callback function (also referred to as handler) connected to the signal for the instance will get invoked in the order they were connected in:
+class Foo {
+    public signal void some_event ();   // definition of the signal
+
+    public void method () {
+        some_event ();                  // emitting the signal (callbacks get invoked)
+    }
+}
+
+void callback_a () {
+    stdout.printf ("Callback A\n");
+}
+
+void callback_b () {
+    stdout.printf ("Callback B\n");
+}
+
+void main () {
+    var foo = new Foo ();
+    foo.some_event.connect (callback_a);      // connecting the callback functions
+    foo.some_event.connect (callback_b);
+    foo.method ();
+}
+
+Threading
+A new thread in Vala is a portion of code such as a function that is requested to be executed concurrently at runtime. The creation and synchronization of new threads are done by using the Thread class in GLib, which takes the function as a parameter when creating new threads, as shown in the following (very simplified) example:
+int question(){
+    // Some print operations 
+    for (var i = 0; i < 3; i++){
+        print (".");
+        Thread.usleep (800000);
+        stdout.flush ();
+    }
+
+    return 42;
+}
+
+void main () {
+    if (!Thread.supported ()) {
+        stderr.printf ("Cannot run without thread support.\n");
+        return;
+    }
+    print ("The Ultimate Question of Life, the Universe, and Everything");
+    // Generic parameter is the type of return va

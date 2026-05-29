@@ -1,0 +1,40 @@
+Question: <p>How do I select a(or some) random row(s) from a table using SQLAlchemy? </p>
+
+Answer: <p>Here's four different variations, ordered from slowest to fastest. <code>timeit</code> results at the bottom:</p>
+
+<pre><code>from sqlalchemy.sql import func
+from sqlalchemy.orm import load_only
+
+def simple_random():
+    return random.choice(model_name.query.all())
+
+def load_only_random():
+    return random.choice(model_name.query.options(load_only('id')).all())
+
+def order_by_random():
+    return model_name.query.order_by(func.random()).first()
+
+def optimized_random():
+    return model_name.query.options(load_only('id')).offset(
+            func.floor(
+                func.random() *
+                db.session.query(func.count(model_name.id))
+            )
+        ).limit(1).all()
+</code></pre>
+
+<p><code>timeit</code> results for 10,000 runs on my Macbook against a PostgreSQL table with 300 rows:</p>
+
+<pre><code>simple_random(): 
+    90.09954111799925
+load_only_random():
+    65.94714171699889
+order_by_random():
+    23.17819356000109
+optimized_random():
+    19.87806927999918
+</code></pre>
+
+<p>You can easily see that using <code>func.random()</code> is far faster than returning all results to Python's <code>random.choice()</code>. </p>
+
+<p>Additionally, as the size of the table increases, the performance of <code>order_by_random()</code> will degrade significantly because an <code>ORDER BY</code> requires a full table scan versus the <code>COUNT</code> in <code>optimized_random()</code> can use an index.</p>

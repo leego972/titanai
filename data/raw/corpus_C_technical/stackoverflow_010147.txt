@@ -1,0 +1,70 @@
+Question: <p>I'm downloading an entire directory from a web server. It works OK, but I can't figure how to get the file size before download to compare if it was updated on the server or not. Can this be done as if I was downloading the file from a FTP server?</p>
+
+<pre><code>import urllib
+import re
+
+url = "http://www.someurl.com"
+
+# Download the page locally
+f = urllib.urlopen(url)
+html = f.read()
+f.close()
+
+f = open ("temp.htm", "w")
+f.write (html)
+f.close()
+
+# List only the .TXT / .ZIP files
+fnames = re.findall('^.*&lt;a href="(\w+(?:\.txt|.zip)?)".*$', html, re.MULTILINE)
+
+for fname in fnames:
+    print fname, "..."
+
+    f = urllib.urlopen(url + "/" + fname)
+
+    #### Here I want to check the filesize to download or not #### 
+    file = f.read()
+    f.close()
+
+    f = open (fname, "w")
+    f.write (file)
+    f.close()
+</code></pre>
+
+<hr>
+
+<p>@Jon: thank for your quick answer. It works, but the filesize on the web server is slightly less than the filesize of the downloaded file. </p>
+
+<p>Examples:</p>
+
+<pre><code>Local Size  Server Size
+ 2.223.533  2.115.516
+   664.603    662.121
+</code></pre>
+
+<p>It has anything to do with the CR/LF conversion?</p>
+
+Answer: <p>I have reproduced what you are seeing:</p>
+
+<pre><code>import urllib, os<br>link = "http://python.org"<br>print "opening url:", link<br>site = urllib.urlopen(link)<br>meta = site.info()<br>print "Content-Length:", meta.getheaders("Content-Length")[0]<br><br>f = open("out.txt", "r")<br>print "File on disk:",len(f.read())<br>f.close()<br><br><br>f = open("out.txt", "w")<br>f.write(site.read())<br>site.close()<br>f.close()<br><br>f = open("out.txt", "r")<br>print "File on disk after download:",len(f.read())<br>f.close()<br><br>print "os.stat().st_size returns:", os.stat("out.txt").st_size<br></code></pre>
+
+<p>Outputs this:</p>
+
+<pre><code>opening url: http://python.org<br>Content-Length: 16535<br>File on disk: 16535<br>File on disk after download: 16535<br>os.stat().st_size returns: 16861<br></code></pre>
+
+<p>What am I doing wrong here? Is os.stat().st_size not returning the correct size?</p>
+
+<hr>
+
+<p>Edit:
+OK, I figured out what the problem was:</p>
+
+<pre><code>import urllib, os<br>link = "http://python.org"<br>print "opening url:", link<br>site = urllib.urlopen(link)<br>meta = site.info()<br>print "Content-Length:", meta.getheaders("Content-Length")[0]<br><br>f = open("out.txt", "rb")<br>print "File on disk:",len(f.read())<br>f.close()<br><br><br>f = open("out.txt", "wb")<br>f.write(site.read())<br>site.close()<br>f.close()<br><br>f = open("out.txt", "rb")<br>print "File on disk after download:",len(f.read())<br>f.close()<br><br>print "os.stat().st_size returns:", os.stat("out.txt").st_size<br></code></pre>
+
+<p>this outputs:</p>
+
+<pre><code>$ python test.py<br>opening url: http://python.org<br>Content-Length: 16535<br>File on disk: 16535<br>File on disk after download: 16535<br>os.stat().st_size returns: 16535<br></code></pre>
+
+<p>Make sure you are opening both files for binary read/write.</p>
+
+<pre><code>// open for binary write<br>open(filename, "wb")<br>// open for binary read<br>open(filename, "rb")<br></code></pre>

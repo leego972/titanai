@@ -1,0 +1,68 @@
+Question: <p>The best I can come up with for now is this monstrosity:</p>
+
+<pre><code>&gt;&gt;&gt; datetime.utcnow() \
+...   .replace(tzinfo=pytz.UTC) \
+...   .astimezone(pytz.timezone("Australia/Melbourne")) \
+...   .replace(hour=0,minute=0,second=0,microsecond=0) \
+...   .astimezone(pytz.UTC) \
+...   .replace(tzinfo=None)
+datetime.datetime(2008, 12, 16, 13, 0)
+</code></pre>
+
+<p>I.e., in English, get the current time (in UTC), convert it to some other timezone, set the time to midnight, then convert back to UTC.</p>
+
+<p>I'm not just using now() or localtime() as that would use the server's timezone, not the user's timezone.</p>
+
+<p>I can't help feeling I'm missing something, any ideas?</p>
+
+Answer: <p>I think you can shave off a few method calls if you do it like this:</p>
+
+<pre><code>&gt;&gt;&gt; from datetime import datetime
+&gt;&gt;&gt; datetime.now(pytz.timezone("Australia/Melbourne")) \
+            .replace(hour=0, minute=0, second=0, microsecond=0) \
+            .astimezone(pytz.utc)
+</code></pre>
+
+<p>BUTâ¦ there is a bigger problem than aesthetics in your code: it will give the wrong result on the day of the switch to or from Daylight Saving Time.</p>
+
+<p>The reason for this is that neither the datetime constructors nor <code>replace()</code> take DST changes into account.</p>
+
+<p>For example:</p>
+
+<pre><code>&gt;&gt;&gt; now = datetime(2012, 4, 1, 5, 0, 0, 0, tzinfo=pytz.timezone("Australia/Melbourne"))
+&gt;&gt;&gt; print now
+2012-04-01 05:00:00+10:00
+&gt;&gt;&gt; print now.replace(hour=0)
+2012-04-01 00:00:00+10:00 # wrong! midnight was at 2012-04-01 00:00:00+11:00
+&gt;&gt;&gt; print datetime(2012, 3, 1, 0, 0, 0, 0, tzinfo=tz)
+2012-03-01 00:00:00+10:00 # wrong again!
+</code></pre>
+
+<p>However, the documentation for <code>tz.localize()</code> states:</p>
+
+<blockquote>
+  <p>This method should be used to construct localtimes, rather
+  than passing a tzinfo argument to a datetime constructor.</p>
+</blockquote>
+
+<p>Thus, your problem is solved like so:</p>
+
+<pre><code>&gt;&gt;&gt; import pytz
+&gt;&gt;&gt; from datetime import datetime, date, time
+
+&gt;&gt;&gt; tz = pytz.timezone("Australia/Melbourne")
+&gt;&gt;&gt; the_date = date(2012, 4, 1) # use date.today() here
+
+&gt;&gt;&gt; midnight_without_tzinfo = datetime.combine(the_date, time())
+&gt;&gt;&gt; print midnight_without_tzinfo
+2012-04-01 00:00:00
+
+&gt;&gt;&gt; midnight_with_tzinfo = tz.localize(midnight_without_tzinfo)
+&gt;&gt;&gt; print midnight_with_tzinfo
+2012-04-01 00:00:00+11:00
+
+&gt;&gt;&gt; print midnight_with_tzinfo.astimezone(pytz.utc)
+2012-03-31 13:00:00+00:00
+</code></pre>
+
+<p>No guarantees for dates before 1582, though.</p>

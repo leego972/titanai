@@ -1,0 +1,460 @@
+================================================================================
+TITAN AI — TRAINING PACK 031: DATA ENGINEERING AND STREAMING ARCHITECTURES
+BATCH vs STREAM, APACHE SPARK, FLINK, DATA LAKES, LAKEHOUSE, PIPELINE PATTERNS
+================================================================================
+
+================================================================================
+PART 1: DATA ARCHITECTURE FUNDAMENTALS
+================================================================================
+
+--- BATCH VS STREAM PROCESSING ---
+
+BATCH PROCESSING:
+  Process large volumes of data at scheduled intervals.
+  Run: Every hour, every night, every week.
+  Latency: Minutes to hours (data must accumulate before processing).
+  Example: Nightly ETL from OLTP to data warehouse. Weekly sales report.
+  
+  Characteristics:
+  - High throughput (process TB of data at once)
+  - Bounded dataset (you know where the data starts and ends)
+  - Replayable (if job fails, re-run on same static dataset)
+  - Higher latency (acceptable when freshness not critical)
+
+STREAM PROCESSING:
+  Process data continuously as it arrives.
+  Latency: Milliseconds to seconds.
+  Example: Real-time fraud detection, live dashboard, anomaly detection.
+  
+  Characteristics:
+  - Unbounded dataset (data keeps arriving forever)
+  - Event time vs processing time: When event occurred vs when you processed it
+  - Out-of-order events: Event from 5 minutes ago arrives now
+  - Stateful: Must maintain state across events (running sum, window aggregations)
+  - Exactly-once semantics: Hard to achieve, critical for correctness
+
+THE LAMBDA ARCHITECTURE (classic):
+  Batch layer: Recompute full truth from all historical data (batch job).
+  Speed layer: Process recent data in real-time (stream job, approximate).
+  Serving layer: Merge results from batch and speed layers for queries.
+  
+  Problem: Maintain two separate code paths for same logic.
+  Batch job and stream job must produce same results. Divergence happens.
+  Complex, expensive to maintain. Increasingly replaced.
+
+THE KAPPA ARCHITECTURE (simpler):
+  Everything is streaming. Batch = stream with bounded data.
+  Single code path. Replay historical data through stream processor for reprocessing.
+  
+  Requirement: Stream processor fast enough for both real-time AND historical replay.
+  Apache Flink: Handles this well. Kafka for durable log replay.
+  
+  Modern preference: Kappa architecture for new systems. Lambda for legacy.
+
+--- DATA LAKE VS DATA WAREHOUSE VS LAKEHOUSE ---
+
+DATA WAREHOUSE (Snowflake, Redshift, BigQuery):
+  Structured data only. Schema-on-write: Define schema before loading.
+  Optimized for: Analytical SQL queries. BI tools.
+  Not for: Raw files, images, ML training data, semi-structured data.
+  
+  Snowflake specific:
+  Virtual warehouses: Separate compute clusters. Each scales independently.
+  Zero-copy cloning: Clone a table in seconds (metadata only, shared storage).
+  Time travel: Query any historical state. SELECT * FROM orders AT(OFFSET => -3600).
+  Data sharing: Share data with external organizations without moving it.
+
+DATA LAKE (S3, GCS, ADLS):
+  Raw data in any format (CSV, JSON, Parquet, Avro, images, video).
+  Schema-on-read: Define structure when querying, not when storing.
+  Cheap storage. But: Hard to query, no ACID, no versioning, "data swamp" risk.
+  
+  Common formats:
+  CSV: Human-readable but slow to query (no columnar optimization).
+  JSON: Flexible schema, verbose, slow for analytics.
+  Parquet: Columnar, compressed, fast for analytical queries. PREFERRED for analytics.
+  Avro: Row-based, schema evolution support. Good for Kafka messages.
+  ORC: Columnar, optimized for Hive. Less common than Parquet.
+
+DATA LAKEHOUSE (Delta Lake, Apache Iceberg, Apache Hudi):
+  Combines data lake storage with data warehouse features.
+  Built on top of: Object storage (S3, GCS).
+  Adds: ACID transactions, schema evolution, time travel, UPSERT/DELETE.
+  
+  This is the dominant pattern for modern data platforms (2023+).
+
+================================================================================
+PART 2: APACHE SPARK — PRODUCTION GUIDE
+================================================================================
+
+--- SPARK FUNDAMENTALS ---
+
+SPARK EXECUTION MODEL:
+  Driver: Coordinates execution. Your SparkSession.
+  Executors: Workers that run tasks. Multiple per cluster.
+  RDD: Resilient Distributed Dataset. Core abstraction. Fault-tolerant.
+  DataFrame/Dataset: Higher-level abstraction. Optimized execution via Catalyst.
+  Job → Stages → Tasks: Unit of execution hierarchy.
+  
+  Catalyst Optimizer: Transforms your DataFrame operations into efficient execution plan.
+  Tungsten: Physical execution optimization. CPU-efficient, off-heap memory.
+
+SPARK JOBS IN PRACTICE:
+  from pyspark.sql import SparkSession
+  from pyspark.sql import functions as F
+  from pyspark.sql.types import *
+  
+  spark = SparkSession.builder \
+      .appName("OrderAnalytics") \
+      .config("spark.sql.adaptive.enabled", "true") \
+      .config("spark.sql.shuffle.partitions", "200") \
+      .getOrCreate()
+  
+  # Read from S3 in Parquet format
+  orders = spark.read.parquet("s3://company-datalake/orders/2025/01/")
+  customers = spark.read.parquet("s3://company-datalake/customers/")
+  
+  # Complex transformation — Catalyst optimizes this
+  result = orders \
+      .filter(F.col("status") == "completed") \
+      .filter(F.col("created_at") >= "2025-01-01") \
+      .join(customers, "customer_id", "left") \
+      .groupBy("customer_id", "customer_segment") \
+      .agg(
+          F.count("*").alias("order_count"),
+          F.sum("total").alias("total_revenue"),
+          F.avg("total").alias("avg_order_value"),
+          F.max("created_at").alias("last_order_date")
+      ) \
+      .filter(F.col("order_count") >= 3) \
+      .orderBy(F.col("total_revenue").desc())
+  
+  # Write result back to S3 as Parquet
+  result.write \
+      .mode("overwrite") \
+      .partitionBy("customer_segment") \
+      .parquet("s3://company-datalake/analytics/customer_ltv/")
+
+SPARK PERFORMANCE OPTIMIZATION:
+
+1. Avoid shuffles (most expensive operation):
+  Shuffle: Redistribute data across partitions (across network). Very slow.
+  Causes: groupBy, join, orderBy, distinct, repartition.
+  
+  # BAD: Two shuffles (join + group)
+  df1.join(df2, "key").groupBy("other_key").count()
+  
+  # BETTER: Broadcast join if df2 is small (< 10MB)
+  from pyspark.sql.functions import broadcast
+  df1.join(broadcast(df2), "key").groupBy("other_key").count()
+  # Broadcast: Sends entire df2 to each executor. No shuffle needed.
+
+2. Partition strategy:
+  Too few partitions: Large partitions, underutilized parallelism.
+  Too many partitions: Task scheduling overhead dominates.
+  Rule of thumb: 2-4 partitions per CPU core in cluster.
+  
+  Check partition count: df.rdd.getNumPartitions()
+  Repartition when reading: df.repartition(200)
+  
+  # Coalesce (reduce partitions, no full shuffle):
+  df.coalesce(1).write.csv("output/")  # Write to single file
+  
+  # Repartition by column for skew-free joins:
+  df.repartition(200, "customer_id").write.parquet("output/")
+
+3. Data skew:
+  Skew: One partition has 90% of data (hot key).
+  Symptoms: Most tasks complete in 1 min. One task takes 10 min. Stragglers.
+  
+  # Detect skew: Check partition sizes
+  df.groupBy(F.spark_partition_id()).count().orderBy("count", ascending=False).show()
+  
+  # Fix with salting:
+  import random
+  SALT_RANGE = 10
+  
+  skewed_df = df.withColumn("salt", (F.rand() * SALT_RANGE).cast("int"))
+  other_df = other_df \
+      .withColumn("_salt", F.array([F.lit(i) for i in range(SALT_RANGE)])) \
+      .withColumn("salt", F.explode("_salt")) \
+      .drop("_salt")
+  
+  result = skewed_df.join(other_df, ["customer_id", "salt"]).drop("salt")
+  # Key "customer123" becomes "customer123_0", "customer123_1", etc.
+  # Distributed across 10 partitions instead of 1
+
+4. AQE (Adaptive Query Execution — Spark 3.0+):
+  spark.conf.set("spark.sql.adaptive.enabled", "true")
+  spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
+  spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+  
+  AQE automatically:
+  - Coalesces post-shuffle partitions (eliminates tiny partitions)
+  - Converts sort-merge joins to broadcast joins at runtime
+  - Handles data skew automatically (splits skewed partitions)
+
+================================================================================
+PART 3: APACHE FLINK — STREAM PROCESSING
+================================================================================
+
+--- FLINK ARCHITECTURE ---
+
+Flink: Distributed stateful stream processor. True streaming (not micro-batch like Spark Streaming).
+
+KEY CONCEPTS:
+  Sources: Kafka, Kinesis, files, custom.
+  Transformations: map, flatMap, filter, keyBy, window, process.
+  Sinks: Kafka, databases, files, custom.
+  State: Per-key state (ValueState, ListState, MapState). Distributed, fault-tolerant.
+  Checkpoints: Periodic state snapshots to distributed storage. Recovery from failure.
+  Watermarks: Signal that all events before time T have arrived. Enable windowing.
+
+STREAMING JOB EXAMPLE (Python PyFlink):
+  from pyflink.datastream import StreamExecutionEnvironment
+  from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer, FlinkKafkaProducer
+  from pyflink.common.serialization import SimpleStringSchema
+  from pyflink.datastream.functions import MapFunction, KeyedProcessFunction
+  from pyflink.common.state import ValueStateDescriptor
+  
+  env = StreamExecutionEnvironment.get_execution_environment()
+  env.set_parallelism(4)
+  env.enable_checkpointing(60000)  # Checkpoint every 60 seconds
+  
+  # Read from Kafka
+  consumer_props = {
+      'bootstrap.servers': 'kafka:9092',
+      'group.id': 'fraud-detector'
+  }
+  
+  stream = env.add_source(
+      FlinkKafkaConsumer('transactions', SimpleStringSchema(), consumer_props)
+  )
+  
+  # Parse JSON, filter, key by user, detect fraud pattern
+  fraud_alerts = stream \
+      .map(lambda x: json.loads(x)) \
+      .filter(lambda tx: tx['amount'] > 0) \
+      .key_by(lambda tx: tx['user_id']) \
+      .process(FraudDetector())
+  
+  # Fraud detector with stateful processing
+  class FraudDetector(KeyedProcessFunction):
+      def open(self, runtime_context):
+          self.last_tx_state = runtime_context.get_state(
+              ValueStateDescriptor('last_tx', Types.MAP(Types.STRING(), Types.FLOAT()))
+          )
+      
+      def process_element(self, tx, ctx):
+          last_tx = self.last_tx_state.value()
+          
+          if last_tx is not None:
+              # Flag: Large transaction after small one (fraud pattern)
+              if tx['amount'] > 500 and last_tx['amount'] < 10:
+                  yield {'alert': 'SUSPICIOUS_PATTERN', 'user': tx['user_id'],
+                         'amount': tx['amount'], 'previous': last_tx['amount']}
+              
+              # Flag: Multiple countries within 1 hour
+              if tx['country'] != last_tx['country']:
+                  time_diff = tx['timestamp'] - last_tx['timestamp']
+                  if time_diff < 3600:
+                      yield {'alert': 'IMPOSSIBLE_TRAVEL', 'user': tx['user_id'],
+                             'from': last_tx['country'], 'to': tx['country']}
+          
+          self.last_tx_state.update(tx)
+  
+  env.execute("Fraud Detection Pipeline")
+
+EVENT TIME AND WATERMARKS:
+  Problem: Events arrive out of order. A transaction from 5 minutes ago arrives now.
+  Without watermarks: Window closes too early, misses late events.
+  With watermarks: "Wait N seconds for late events before closing window."
+  
+  Watermark = timestamp minus max_lateness.
+  When watermark passes time T: All windows ending at T can be computed.
+  
+  env.watermark_strategy = WatermarkStrategy \
+      .for_bounded_out_of_orderness(Duration.of_seconds(10)) \
+      .with_timestamp_assigner(lambda event, _: event['timestamp'] * 1000)
+  
+  # Window: 5-minute tumbling window, waiting up to 10s for late events
+  windowed = keyed_stream \
+      .window(TumblingEventTimeWindows.of(Time.minutes(5))) \
+      .allowed_lateness(Time.seconds(30)) \
+      .aggregate(SumAggregator())
+
+================================================================================
+PART 4: APACHE ICEBERG — MODERN DATA LAKEHOUSE
+================================================================================
+
+--- ICEBERG DEEP DIVE ---
+
+WHAT ICEBERG SOLVES:
+  S3/GCS stores files. No transactions. No schema enforcement. No version history.
+  
+  Without Iceberg:
+  Two writers simultaneously add files → Some files listed, some not → Inconsistent reads.
+  DELETE requires rewriting entire partition → Very slow.
+  SCHEMA CHANGE requires manual coordination → Error-prone.
+  
+  Iceberg adds:
+  ACID transactions on object storage.
+  Schema evolution (add/drop/rename columns safely).
+  Time travel (read any historical snapshot).
+  Partition evolution (change partitioning without rewriting data).
+  Row-level deletes and updates (via delete files, not rewrites).
+
+ICEBERG TABLE FORMAT:
+  Catalog: Tracks current metadata pointer.
+  Metadata files: Table schema, partition spec, current snapshot.
+  Snapshot: List of manifest files.
+  Manifest file: List of data files with statistics.
+  Data files: Actual Parquet/ORC/Avro files.
+  
+  Each write creates: New snapshot → points to new+unchanged manifest files.
+  Time travel: Read any snapshot → consistent view of data at that point.
+  Concurrent writes: Optimistic concurrency control → retry on conflict.
+
+ICEBERG WITH SPARK:
+  spark.read.format("iceberg").load("s3://bucket/warehouse/db/orders")
+  
+  # Time travel:
+  spark.read.format("iceberg") \
+      .option("as-of-timestamp", "2025-01-14 12:00:00") \
+      .load("s3://bucket/warehouse/db/orders")
+  
+  spark.read.format("iceberg") \
+      .option("snapshot-id", "12345678") \
+      .load("s3://bucket/warehouse/db/orders")
+  
+  # UPSERT (Merge into):
+  spark.sql("""
+      MERGE INTO prod.orders t
+      USING staging.order_updates s
+      ON t.order_id = s.order_id
+      WHEN MATCHED AND s.status = 'cancelled' THEN DELETE
+      WHEN MATCHED THEN UPDATE SET *
+      WHEN NOT MATCHED THEN INSERT *
+  """)
+  
+  # Schema evolution:
+  spark.sql("ALTER TABLE prod.orders ADD COLUMN notes STRING AFTER status")
+  # Safe: Existing files don't need rewriting. Old NULL where column doesn't exist.
+  
+  # Partition evolution:
+  spark.sql("ALTER TABLE prod.orders REPLACE PARTITION FIELD order_date WITH days(order_date)")
+  # Old data: Old partitioning. New data: New partitioning. All in same table.
+
+================================================================================
+PART 5: DATA PIPELINE RELIABILITY PATTERNS
+================================================================================
+
+--- IDEMPOTENT DATA PIPELINES ---
+
+IDEMPOTENCY: Running pipeline multiple times produces same result.
+Critical because: Networks fail, jobs crash, retries happen.
+Without idempotency: Duplicate records in warehouse.
+
+Patterns:
+
+1. Overwrite partition (simplest):
+  Write entire partition each run. Overwrite previous.
+  df.write.mode("overwrite").partitionBy("date").parquet("output/")
+  Re-run: Overwrites same partition. Same result.
+  Limitation: Cannot append new events to existing partition during the day.
+
+2. Checkpoint file approach:
+  Write output to temp location. Atomic rename when complete.
+  Reader sees: Either old data or new data. Never partial write.
+  
+  temp_path = "s3://bucket/output/_temp_20250115_120000/"
+  final_path = "s3://bucket/output/2025-01-15/"
+  
+  df.write.parquet(temp_path)
+  s3.rename(temp_path, final_path)  # Atomic on same bucket
+
+3. Deduplication on write (for streaming → batch):
+  Keep track of processed event IDs.
+  Before writing: Check if event already processed.
+  
+  WITH ranked AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY processed_at DESC) AS rn
+      FROM staging_events
+  )
+  INSERT INTO events SELECT * FROM ranked WHERE rn = 1
+
+--- DATA QUALITY PATTERNS ---
+
+GREAT EXPECTATIONS (open-source data quality):
+  Define expectations: Rules your data should meet.
+  Validate on every pipeline run: Alert when data violates expectations.
+  Data docs: Auto-generated documentation of data quality.
+  
+  import great_expectations as gx
+  
+  context = gx.get_context()
+  
+  validator = context.get_validator(
+      datasource_name="my_datasource",
+      data_asset_name="orders"
+  )
+  
+  # Define expectations
+  validator.expect_column_to_exist("order_id")
+  validator.expect_column_values_to_not_be_null("order_id")
+  validator.expect_column_values_to_be_unique("order_id")
+  validator.expect_column_values_to_be_between("total", min_value=0, max_value=100000)
+  validator.expect_column_values_to_be_in_set("status", ["pending", "completed", "cancelled"])
+  validator.expect_column_values_to_match_regex("email", r"^[^@]+@[^@]+\.[^@]+$")
+  
+  results = validator.validate()
+  
+  if not results.success:
+      failed = [r for r in results.results if not r.success]
+      for failure in failed:
+          logger.error(f"Data quality check failed: {failure.expectation_config.expectation_type}")
+      raise DataQualityError("Pipeline aborted: Data quality checks failed")
+
+SLA MONITORING WITH AIRFLOW:
+  from airflow import DAG
+  from airflow.operators.python import PythonOperator
+  from airflow.utils.dates import days_ago
+  from datetime import timedelta
+  
+  default_args = {
+      'owner': 'data-platform',
+      'depends_on_past': False,
+      'email_on_failure': True,
+      'email': ['data-eng@company.com'],
+      'sla': timedelta(hours=2),  # Alert if task doesn't complete in 2 hours
+      'retries': 3,
+      'retry_delay': timedelta(minutes=5),
+      'execution_timeout': timedelta(hours=3),
+  }
+  
+  with DAG(
+      'orders_daily_etl',
+      default_args=default_args,
+      schedule_interval='0 2 * * *',  # 2am daily
+      start_date=days_ago(1),
+      catchup=False,
+      sla_miss_callback=alert_slack_on_sla_miss,  # Custom Slack alert
+  ) as dag:
+      
+      extract = PythonOperator(task_id='extract', python_callable=extract_orders)
+      transform = PythonOperator(task_id='transform', python_callable=transform_orders)
+      load = PythonOperator(task_id='load', python_callable=load_to_warehouse)
+      validate = PythonOperator(task_id='validate', python_callable=run_data_quality_checks)
+      
+      extract >> transform >> load >> validate
+
+================================================================================
+END OF PACK 031: DATA ENGINEERING AND STREAMING
+Total: Lambda vs Kappa architecture, Data warehouse/lake/lakehouse comparison,
+Snowflake features (time travel, zero-copy clone, data sharing), Spark execution
+model, performance optimization (broadcast joins, partitioning, salting for skew,
+AQE), Apache Flink stateful streaming (fraud detection with KeyedProcessFunction,
+watermarks, event time), Apache Iceberg format (ACID on object storage, time travel,
+schema/partition evolution), idempotent pipeline patterns, Great Expectations data
+quality validation, Airflow SLA monitoring.
+================================================================================

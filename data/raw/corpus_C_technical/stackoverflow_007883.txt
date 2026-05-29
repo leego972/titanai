@@ -1,0 +1,45 @@
+Question: <p>Why does the following behave unexpectedly in Python?</p>
+
+<pre><code>&gt;&gt;&gt; a = 256
+&gt;&gt;&gt; b = 256
+&gt;&gt;&gt; a is b
+True           # This is an expected result
+&gt;&gt;&gt; a = 257
+&gt;&gt;&gt; b = 257
+&gt;&gt;&gt; a is b
+False          # What happened here? Why is this False?
+&gt;&gt;&gt; 257 is 257
+True           # Yet the literal numbers compare properly
+</code></pre>
+
+<p>I am using Python 2.5.2. Trying some different versions of Python, it appears that Python 2.3.3 shows the above behaviour between 99 and 100.</p>
+
+<p>Based on the above, I can hypothesize that Python is internally implemented such that "small" integers are stored in a different way than larger integers and the <code>is</code> operator can tell the difference. Why the leaky abstraction? What is a better way of comparing two arbitrary objects to see whether they are the same when I don't know in advance whether they are numbers or not?</p>
+
+Answer: <p><code>is</code> <em>is</em> the identity equality operator (functioning like <code>id(a) == id(b)</code>); it's just that two equal numbers aren't necessarily the same object. For performance reasons some small integers happen to be <a href="http://en.wikipedia.org/wiki/Memoization" rel="nofollow">memoized</a> so they will tend to be the same (this can be done since they are immutable).</p>
+
+<p><a href="http://en.wikipedia.org/wiki/PHP" rel="nofollow">PHP's</a> <code>===</code> operator, on the other hand, is described as checking equality and type: <code>x == y and type(x) == type(y)</code> as per Paulo Freitas' comment. This will suffice for common numbers, but differ from <code>is</code> for classes that define <code>__eq__</code> in an absurd manner:</p>
+
+<pre><code>class Unequal:
+    def __eq__(self, other):
+        return False
+</code></pre>
+
+<p>PHP apparently allows the same thing for "built-in" classes (which I take to mean implemented at C level, not in PHP). A slightly less absurd use might be a timer object, which has a different value every time it's used as a number. Quite why you'd want to emulate Visual Basic's <code>Now</code> instead of showing that it is an evaluation with <code>time.time()</code> I don't know.</p>
+
+<p>Greg Hewgill (OP) made one clarifying comment "My goal is to compare object identity, rather than equality of value. Except for numbers, where I want to treat object identity the same as equality of value."</p>
+
+<p>This would have yet another answer, as we have to categorize things as numbers or not, to select whether we compare with <code>==</code> or <code>is</code>. <a href="http://en.wikipedia.org/wiki/CPython" rel="nofollow">CPython</a> defines the <a href="http://docs.python.org/2/c-api/number.html" rel="nofollow">number protocol</a>, including PyNumber_Check, but this is not accessible from Python itself.</p>
+
+<p>We could try to use <code>isinstance</code> with all the number types we know of, but this would inevitably be incomplete. The types module contains a StringTypes list but no NumberTypes. Since Python 2.6, the built in number classes have a base class <a href="https://docs.python.org/2/library/numbers.html#numbers.Number" rel="nofollow"><code>numbers.Number</code></a>, but it has the same problem:</p>
+
+<pre><code>import numpy, numbers
+assert not issubclass(numpy.int16,numbers.Number)
+assert issubclass(int,numbers.Number)
+</code></pre>
+
+<p>By the way, <a href="http://en.wikipedia.org/wiki/NumPy" rel="nofollow">NumPy</a> will produce separate instances of low numbers.</p>
+
+<p>I don't actually know an answer to this variant of the question. I suppose one could theoretically use ctypes to call <code>PyNumber_Check</code>, but even that function <a href="http://mail.python.org/pipermail/python-dev/2002-November/030237.html" rel="nofollow">has been debated</a>, and it's certainly not portable. We'll just have to be less particular about what we test for now.</p>
+
+<p>In the end, this issue stems from Python not originally having a type tree with predicates like <a href="http://en.wikipedia.org/wiki/Scheme_%28programming_language%29" rel="nofollow">Scheme's</a> <code>number?</code>, or <a href="http://en.wikipedia.org/wiki/Haskell_%28programming_language%29" rel="nofollow">Haskell's</a> <a href="https://en.wikipedia.org/wiki/Type_class" rel="nofollow">type class</a> <a href="http://www.haskell.org/ghc/docs/7.4-latest/html/libraries/base-4.5.1.0/Prelude.html#t:Num" rel="nofollow">Num</a>. <code>is</code> checks object identity, not value equality. PHP has a colorful history as well, where <code>===</code> apparently behaves as <code>is</code> only on objects <a href="http://www.php.net/manual/en/language.operators.comparison.php" rel="nofollow">in PHP5, but not PHP4</a>. Such are the growing pains of moving across languages (including versions of one).</p>

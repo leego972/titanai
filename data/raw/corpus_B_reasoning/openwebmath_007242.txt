@@ -1,0 +1,34 @@
+# Why does it appear impossible to fit Gaussians to arbitrary probability density functions $p$?
+
+I want to fit a Gaussian $$q$$ to a pdf $$p$$ by minimizing the energy $$E = -\int q(x) \log p(x) dx$$. This should result in a "delta function" Gaussian with $$\sigma \rightarrow 0$$ and $$\mu \rightarrow x^*$$, where $$x^*$$ is the mode of the target distribution.
+
+If I try to do this via gradient descent, I get
+
+\begin{align} \nabla_\mu E &= - \int \log p \, \nabla_\mu q \,\, dx \\ &= - \int \log p \, \cdot (q \cdot \nabla_\mu (\log q)) \,\, dx \\ &= - \mathbb E_q[ \nabla_\mu (\log q) \log p] \\ &= \mathbb E_q[ \Sigma^{-1}(x-\mu) \log p] \\ \end{align}
+
+where the second line comes from the chain rule.
+
+But according to the last line, if I draw from $$q$$, I get $$\mu$$ in expectation, which means my gradient will be usually be zero if I attempt gradient descent. What's going on here?
+
+The last expectation isn't 0. For example, suppose you approximate $$\log p$$ with a linear function around $$\mu$$: $$\log p \approx (x-\mu)^Tw+c$$. Then you have:
+
+\begin{align} &\mathbb{E}_q[\Sigma^{-1}(x-\mu)((x-\mu)^Tw+c)] \\ &\text{now pull out all the terms not involving x} \\ &= \Sigma^{-1}\mathbb{E}_q[(x-\mu)(x-\mu)^T]w + c\Sigma^{-1}\mathbb{E}_q[(x-\mu)] \\ &= \Sigma^{-1}\Sigma w + 0 \\ &= w \end{align}
+
+So in fact, this is equivalent to gradient ascent on the gradient of $$\log p$$ (assuming small enough $$\sigma)$$.
+
+To get some intuition for this problem, write the energy as a moment:
+
+$$E(\mu,\sigma) \equiv \mathbb{E}(-\log p(X) | X \sim \text{N}(\mu, \sigma^2)).$$
+
+Taking $$\sigma=0$$ and $$\mu=x^*$$ (where the latter is the mode of $$p$$) so that the distribution in the expectation is a delta function at the mode of target distribution then you get:
+
+$$E(x^*,0) = \mathbb{E}(-\log p(X) | X = x^*) = \mathbb{E}(-\log p(x^*)) = -\log p(x^*).$$
+
+Now, to show this is the minimum, we note that the mode $$x^*$$ satisfies $$p(x^*) = \max p(x)$$, so we have:
+
+\begin{align} E(\mu,\sigma) &= \mathbb{E}(-\log p(X) | X \sim \text{N}(\mu, \sigma^2)) \\[12pt] &= - \int \limits_\mathbb{R} \log p(x) \cdot \text{N}(x|\mu, \sigma^2) \ dx \\[6pt] &\geqslant - \int \limits_\mathbb{R} \Big( \max_{x} \log p(x) \Big) \cdot \text{N}(x|\mu, \sigma^2) \ dx \\[6pt] &= - \int \limits_\mathbb{R} \log \Big( \max_{x} p(x) \Big) \cdot \text{N}(x|\mu, \sigma^2) \ dx \\[6pt] &= - \int \limits_\mathbb{R} \log p(x^*) \cdot \text{N}(x|\mu, \sigma^2) \ dx \\[6pt] &= - \log p(x^*) \int \limits_\mathbb{R} \text{N}(x|\mu, \sigma^2) \ dx \\[6pt] &= - \log p(x^*). \\[6pt] \end{align}
+
+This establishes that $$E(x^*,0) \geqslant E(\mu, \sigma^2)$$ for all $$\mu \in \mathbb{R}$$ and $$\sigma \geqslant 0$$, which means that the delta function at the mode is a minimising input for the energy function. There is not really any need for gradient descent (or any other iterative method) here, except possibly to find the mode of $$p$$.
+
+• What exactly do you mean by "there is not really any need for gradient descent"? Given an initialization of $\mu$, don't I need to move in the direction of the gradient in order to approach $x^*$? – actinidia May 15 at 6:51
+• It depends on whether or not you already have an explicit formula for $x^*$. For many distributions the mode has an explicit closed form, in which case iterative methods are not needed. – Ben May 15 at 9:00

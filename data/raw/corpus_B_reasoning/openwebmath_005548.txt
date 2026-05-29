@@ -1,0 +1,54 @@
+# Current sink for microcontroller port not constant
+
+I have designed a two-transistor current sink for my application. I need it to keep the current constant which flows through an IR-LED:
+
+simulate this circuit – Schematic created using CircuitLab
+
+The current should be constant at:
+
+I = UBE1 / R1 = ~0.7 V / 120 Ohm = ~5.8 mA
+
+Now the problem is that the current will not stay constant as desired when varying the voltage between 2.6 V and 3.3 V. It varies between 1.6 mA and 4 mA. What do I miss here?
+
+• Connect R2's one end directly to the +3V supply instead of Q2's collector. – Rohat Kılıç Mar 5 '18 at 10:54
+• @RohatKılıç seems to work better now. What's the reason? – arminb Mar 5 '18 at 13:32
+• For some excitement, make Q2 a PNP with emitter to the right. This becomes an SCR, and the current will run away. – analogsystemsrf Mar 5 '18 at 13:50
+
+What do I miss here?
+
+You forgot to take into account the forward volt drop of the LED. It might be betweeen 0.8 volts and 3 volts depending on technology.
+
+Thus, if your supply voltage is 2.6 volts, the "current control circuit" might only receive (maybe) 1.5 volts across it and, given that the two transistors might need at least 1.4 to 1.6 volts across their circuit to begin reasonable conduction, you are on the edge of it just starting to conduct.
+
+If your supply voltage did rise higher I'm sure it would begin current limiting around the 5 or 6 mA mark. Here is a slightly improved version of your circuit: -
+
+Note that Rb connects directly to the positive rail - it will help but only a little bit because to get conduction from both transistors you still need 1.4 volts to 1.6 volts from Q2's collector to ground (your IO port).
+
+Pictures from here.
+
+Let me try a slightly more detailed version of Andy aka's answer.
+
+Start by assuming the circuit is working properly, and the emitter of Q1 is grounded. Then the base of Q1 will be at about 0.7 volts, and the base of Q2 at about 1.4 volts. It should be apparent that the collector of Q2 MUST be greater than the base, since the voltage across R2 provides the base current to Q2. How much greater?
+
+Well, since the collector-emitter voltage is greater than the base-emitter voltage the transistor is operating in linear mode, and let's use a gain of 100 as a starting point. Since the emitter current is 5.8 mA (remember, we've assumed the circuit is working properly), the base current for Q2 is 58 uA. Applying Ohm's Law, we get a resistor voltage of about 2.7 volts, for a collector voltage of (1.4 + 2.7), or 4.1 volts. Add an LED Vf of about 1.2 volts (for an IR LED), and the minimum supply voltage will be about 5.3 volts.
+
+So it's no surprise that the circuit isn't doing well at 2.6 to 3.3 volts.
+
+• What can I change to keep it well at 2.6 to 3.3 volts? – arminb Mar 6 '18 at 13:34
+• @arminb - change your circuit. With your setup, the minimum supply voltage is 1.4 plus the LED voltage, or something like 3 volts (you haven't specified the LED characteristics. You need to look them up, and edit your question to include that information.) I would recommend an op amp which will run at 2.6 volts in a standard current source circuit. – WhatRoughBeast Mar 6 '18 at 22:04
+
+If you want to have active on/off control of the LED and can adjust the sense of your MCU output (in other words, you don't care whether it is active HI or active LO to turn it on), then the following is probably what you want:
+
+simulate this circuit – Schematic created using CircuitLab
+
+Your original circuit (ignoring the flaws) required your I/O pin to sink ALL of the LED current. That's doable, given the relatively low current. But there's no point designing that level of current into the circuit if it isn't necessary. The above circuit greatly relaxes the load on the I/O pin to perhaps $200\:\mu\text{A}$.
+
+I assumed that since your rail voltage was $3\:\text{V}$, that this was also your I/O pin output voltage when HI. So $R_2$ is figured on that basis.
+
+In this circuit topology, $Q_2$'s $V_\text{BE}\approx 700\:\text{mV}$ and $Q_1$'s $V_\text{BE}\approx 650\:\text{mV}$. So the base voltage seen by the I/O pin will be about $1.35\:\text{V}$. If the output of the I/O pin is $3\:\text{V}$ at light current load, then $R_2=\frac{3\:\text{V}-1.35\:\text{V}}{200\:\mu\text{A}}\approx 8.2\:\text{k}\Omega$. (That's assuming that $Q_2$ goes into saturation by the time that $\beta_2\approx 30$.) I made $R_2$ to provide even more, closer to $250\:\mu\text{A}$, just to make absolutely sure.
+
+Almost any I/O pin can source $250\:\mu\text{A}$ without difficulty. And the load is light enough that the I/O pin will present nearly its $V_\text{CC}$ without much of a drop.
+
+Since $Q_2$ starts going into saturation when its collector is at $1.35\:\text{V}$ (which is fine as there is plenty of base current available -- so it can go even lower, if needed), there is $1.65\:\text{V}$ available for the IR LED. Without the datasheet, I can't tell you for sure that this is okay at the current you are using. But probably so given this is an IR LED. Still, the circuit can saturate $Q_2$ and add a few tens of millivolts across the IR LED, just fine. So I think you should be okay.
+
+NOTE: A constant current through an untested LED isn't much of a guarantee regarding stable intensity nor equal intensity between two different LEDs. I just want to make sure you understand that using an IR LED as a "standard candle" requires a lot more than just pumping a relatively fixed current through it. (This is an IR LED, so clearly the human logarithmic responses to intensity aren't part of the picture, either.) But since you aren't using any kind of accurate current source anyway, I suppose this isn't an issue for your application.

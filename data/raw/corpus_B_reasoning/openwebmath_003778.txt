@@ -1,0 +1,202 @@
+# [LyX/master] DocBook: support for <info> tags in inner sections.
+
+Thibaut Cuvelier tcuvelier at lyx.org
+Fri Oct 30 00:30:56 UTC 2020
+
+commit 661c5d256b74b2ca9fa9501a2a6f2e2ef7b6b099
+Author: Thibaut Cuvelier <tcuvelier at lyx.org>
+Date:   Mon Oct 26 03:55:25 2020 +0100
+
+DocBook: support for <info> tags in inner sections.
+
+Previously, this code only worked correctly for the root tag.
+---
+autotests/export/docbook/svmono_light.xml |   11 +++++---
+lib/layouts/stdsections.inc               |    3 ++
+lib/layouts/svcommon.inc                  |    2 +
+src/output_docbook.cpp                    |   37 +++++++++++++++++-----------
+4 files changed, 34 insertions(+), 19 deletions(-)
+
+diff --git a/autotests/export/docbook/svmono_light.xml b/autotests/export/docbook/svmono_light.xml
+index 6b8b689..4a2aa4c 100644
+--- a/autotests/export/docbook/svmono_light.xml
++++ b/autotests/export/docbook/svmono_light.xml
+@@ -4,21 +4,22 @@
+<title>Untitled Document</title>
+<chapter xml:id="chap.intro">
+<info>
+<abstract role='not-printed'>
+-<para>Each chapter should be preceded by an abstract (10–15 lines long) that summarizes the content. The abstract will appear <emphasis>online at  and be available with unrestricted access. This allows unregistered users to read the abstract as a teaser for the complete chapter. As a general rule the abstracts will not appear in the printed version of your book unless it is the style of your particular book or that of the series to which your book belongs.</emphasis><!-- \indent -->
++<para>Each chapter should be preceded by an abstract (10–15 lines long) that summarizes the content. The abstract will appear <emphasis>online at <link xlink:href="www.SpringerLink.com">www.SpringerLink.com</link> and be available with unrestricted access. This allows unregistered users to read the abstract as a teaser for the complete chapter. As a general rule the abstracts will not appear in the printed version of your book unless it is the style of your particular book or that of the series to which your book belongs.</emphasis><!-- \indent -->
+Please use the 'starred' version of the <code>abstract</code> environment for typesetting the text of the online abstracts. Use the plain <code>abstract</code> if the abstract is also to appear in the printed version of the book.</para>
+</abstract>
+<abstract>
+-<para>Each chapter should be preceded by an abstract (10–15 lines long) that summarizes the content. The abstract will appear <emphasis>online at  and be available with unrestricted access. This allows unregistered users to read the abstract as a teaser for the complete chapter. As a general rule the abstracts will not appear in the printed version of your book unless it is the style of your particular book or that of the series to which your book belongs.</emphasis><!-- \indent -->
++<para>Each chapter should be preceded by an abstract (10–15 lines long) that summarizes the content. The abstract will appear <emphasis>online at <link xlink:href="www.SpringerLink.com">www.SpringerLink.com</link> and be available with unrestricted access. This allows unregistered users to read the abstract as a teaser for the complete chapter. As a general rule the abstracts will not appear in the printed version of your book unless it is the style of your particular book or that of the series to which your book belongs.</emphasis><!-- \indent -->
+Please use the 'starred' version of the <code>abstract</code> environment for typesetting the text of the online abstracts. Use the plain <code>abstract</code> if the abstract is also to appear in the printed version of the book.</para>
+</abstract>
+</info>
++<para>bla</para>
+</section>
+@@ -34,7 +35,9 @@
+</m:mrow>
+</m:math>
+</informalequation>
+- however, for multiline equations we recommend to use the <emphasis role='sans'>eqnarray</emphasis> environment.
++ however, for multiline equations we recommend to use the <emphasis role='sans'>eqnarray</emphasis> environment<footnote>
++<para>In physics texts please activate the class option <code>vecphys</code> to depict your vectors in <emphasis role='bold'><emphasis>boldface-italic</emphasis> type - as is customary for a wide range of physical subjects.</emphasis></para>
++</footnote>.
+<informalequation xml:id="eq.01">
+<alt role='tex'>a\times b & = & c\nonumber \\
+\vec{a}\cdot\vec{b} & = & c\label{eq:01}
+diff --git a/lib/layouts/stdsections.inc b/lib/layouts/stdsections.inc
+index ae153e8..4516d07 100644
+--- a/lib/layouts/stdsections.inc
++++ b/lib/layouts/stdsections.inc
+@@ -41,6 +41,7 @@ Style Part
+HTMLTag               h1
+DocBookTag            title
+DocBookTagType        paragraph
++	DocBookInInfo         maybe
+DocBookSectionTag     part
+DocBookForceAbstractTag	partintro
+End
+@@ -77,6 +78,7 @@ Style Chapter
+HTMLTag               h1
+DocBookTag            title
+DocBookTagType        paragraph
++	DocBookInInfo         maybe
+DocBookSectionTag     chapter
+End
+
+@@ -111,6 +113,7 @@ Style Section
+HTMLTag               h2
+DocBookTag            title
+DocBookTagType        paragraph
++	DocBookInInfo         maybe
+DocBookSectionTag     section
+End
+
+diff --git a/lib/layouts/svcommon.inc b/lib/layouts/svcommon.inc
+index 0bc1f36..1cbd2b4 100644
+--- a/lib/layouts/svcommon.inc
++++ b/lib/layouts/svcommon.inc
+@@ -115,6 +115,7 @@ Style Part
+DocBookTag            title
+DocBookTagType        paragraph
+DocBookSectionTag     part
++	DocBookInInfo         maybe
+DocBookForceAbstractTag	partintro
+End
+
+@@ -166,6 +167,7 @@ Style Chapter
+Align		Left
+DocBookTag            title
+DocBookTagType        paragraph
++	DocBookInInfo         maybe
+DocBookSectionTag     chapter
+End
+
+diff --git a/src/output_docbook.cpp b/src/output_docbook.cpp
+index 23d4db8..a0316ba 100644
+--- a/src/output_docbook.cpp
++++ b/src/output_docbook.cpp
+@@ -553,6 +553,8 @@ void makeEnvironment(Text const &text,
+closeTag(xs, par->layout().docbookiteminnertag(), par->layout().docbookiteminnertagtype());
+++p;
+
++				// Insert a new line after each "paragraph" (i.e. line in the listing), except for the last one.
++				// Otherwise, there would one more new line in the output than in the LyX document.
+if (p != pars.end())
+xs << xml::CR();
+}
+@@ -811,12 +813,12 @@ DocBookInfoTag getParagraphsWithInfo(ParagraphList const &paragraphs,
+// Skip paragraphs that don't generate anything in DocBook.
+Paragraph const & par = paragraphs[cpit];
+Layout const &style = par.layout();
+-		if (hasOnlyNotes(par) || style.docbookininfo() == "never")
++		if (hasOnlyNotes(par))
+continue;
+
+-		// There should never be any section here. (Just a sanity check: if this fails, this function could end up
+-		// processing the whole document.)
+-		if (isLayoutSectioning(par.layout())) {
++		// There should never be any section here, except for the first paragraph (a title can be part of <info>).
++		// (Just a sanity check: if this fails, this function could end up processing the whole document.)
++		if (cpit != bpit && isLayoutSectioning(par.layout())) {
+LYXERR0("Assertion failed: section found in potential <info> paragraphs.");
+break;
+}
+@@ -1102,7 +1104,8 @@ void docbookParagraphs(Text const &text,
+// Don't output the ID as a DocBook <anchor>.
+ourparams.docbook_anchors_to_ignore.emplace(label->screenLabel());
+
+-							// Cannot have multiple IDs per tag.
++							// Cannot have multiple IDs per tag. If there is another ID inset in the document, it will
++							// be output as a DocBook anchor.
+break;
+}
+}
+@@ -1136,16 +1139,14 @@ void docbookParagraphs(Text const &text,
+}
+}
+
+-		// Generate this paragraph.
+-		par = makeAny(text, buf, xs, ourparams, par);
+-
++		// Generate the <info> tag if a section was just opened.
+// Some sections may require abstracts (mostly parts, in books: DocBookForceAbstractTag will not be NONE),
+// others can still have an abstract (it must be detected so that it can be output at the right place).
+// TODO: docbookforceabstracttag is a bit contrived here, but it does the job. Having another field just for this would be cleaner, but that's just for <part> and <partintro>, so it's probably not worth the effort.
+if (isLayoutSectioning(style)) {
+// This abstract may be found between the next paragraph and the next title.
+pit_type cpit = std::distance(text.paragraphs().begin(), par);
+-			pit_type ppit = std::get<1>(hasDocumentSectioning(paragraphs, cpit, epit));
++			pit_type ppit = std::get<1>(hasDocumentSectioning(paragraphs, cpit + 1L, epit));
+
+// Generate this abstract (this code corresponds to parts of outputDocBookInfo).
+DocBookInfoTag secInfo = getParagraphsWithInfo(paragraphs, cpit, ppit, true,
+@@ -1166,9 +1167,9 @@ void docbookParagraphs(Text const &text,
+// Output the elements that should go in <info>, before and after the abstract.
+for (auto pit : secInfo.shouldBeInInfo) // Typically, the title: these elements are so important and ubiquitous
+// that mandating a wrapper like <info> would repel users. Thus, generate them first.
+-					makeAny(text, buf, xs, runparams, paragraphs.iterator_at(pit));
++					makeAny(text, buf, xs, ourparams, paragraphs.iterator_at(pit));
+for (auto pit : secInfo.mustBeInInfo)
+-					makeAny(text, buf, xs, runparams, paragraphs.iterator_at(pit));
++					makeAny(text, buf, xs, ourparams, paragraphs.iterator_at(pit));
+
+// Deal with the abstract in <info> if it is standard (i.e. its tag is <abstract>).
+if (!secInfo.abstract.empty() && hasStandardAbstract) {
+@@ -1178,7 +1179,7 @@ void docbookParagraphs(Text const &text,
+}
+
+for (auto const &p : secInfo.abstract)
+-						makeAny(text, buf, xs, runparams, paragraphs.iterator_at(p));
++						makeAny(text, buf, xs, ourparams, paragraphs.iterator_at(p));
+
+if (!secInfo.abstractLayout) {
+xs << xml::EndTag("abstract");
+@@ -1202,14 +1203,20 @@ void docbookParagraphs(Text const &text,
+xs << xml::StartTag(style.docbookforceabstracttag());
+xs << xml::CR();
+for (auto const &p : secInfo.abstract)
+-						makeAny(text, buf, xs, runparams, paragraphs.iterator_at(p));
++						makeAny(text, buf, xs, ourparams, paragraphs.iterator_at(p));
+xs << xml::EndTag(style.docbookforceabstracttag());
+xs << xml::CR();
+}
+
+-				// Skip all the text that just has been generated.
+-				par = paragraphs.iterator_at(ppit);
++				// Skip all the text that has just been generated.
++				par = paragraphs.iterator_at(secInfo.epit);
++			} else {
++				// No <info> tag to generate, proceed as for normal paragraphs.
++				par = makeAny(text, buf, xs, ourparams, par);
+}
++		} else {
++			// Generate this paragraph, as it has nothing special.
++			par = makeAny(text, buf, xs, ourparams, par);
+}
+}

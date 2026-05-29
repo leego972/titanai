@@ -1,0 +1,64 @@
+Question: <p>I have a bunch of files with coordinates in UTM form. For each coordinate I have easting, northing and zone. I need to convert this to LatLng for use with Google Map API to show the information in a map.</p>
+
+<p>I have found some online calculators that does this, but no actual code or libraries. <a href="http://trac.osgeo.org/proj4js/">http://trac.osgeo.org/proj4js/</a> is a projection library for Javascript, but looking at the demo it doesn't include UTM projection.</p>
+
+<p>I am still pretty fresh to the entire GIS domain, so what I want is something ala:</p>
+
+<pre><code>(lat,lng) = transform(easting, northing, zone)
+</code></pre>
+
+Answer: <p>I'm new to this as well and have been studying up on the subject recently.</p>
+
+<p>Here's a method I found using the python <a href="http://pypi.python.org/pypi/GDAL" rel="nofollow">gdal</a> pacakge (the <em>osr</em> package is included in gdal).  The gdal package is pretty powerful, but the documentation could be better.  </p>
+
+<p>This is derived from a discussion here:
+<a href="http://www.mail-archive.com/gdal-dev@lists.osgeo.org/msg12398.html" rel="nofollow">http://www.mail-archive.com/gdal-dev@lists.osgeo.org/msg12398.html</a></p>
+
+<pre><code>import osr
+
+def transform_utm_to_wgs84(easting, northing, zone):
+    utm_coordinate_system = osr.SpatialReference()
+    utm_coordinate_system.SetWellKnownGeogCS("WGS84") # Set geographic coordinate system to handle lat/lon
+    is_northern = northing &gt; 0    
+    utm_coordinate_system.SetUTM(zone, is_northern)
+
+    wgs84_coordinate_system = utm_coordinate_system.CloneGeogCS() # Clone ONLY the geographic coordinate system 
+
+    # create transform component
+    utm_to_wgs84_transform = osr.CoordinateTransformation(utm_coordinate_system, wgs84_coordinate_system) # (&lt;from&gt;, &lt;to&gt;)
+    return utm_to_wgs84_transform.TransformPoint(easting, northing, 0) # returns lon, lat, altitude
+</code></pre>
+
+<p>And here's the method for converting from a lat, lon in wgs84 (what most gps units report) to utm:</p>
+
+<pre><code>def transform_wgs84_to_utm(lon, lat):    
+    def get_utm_zone(longitude):
+        return (int(1+(longitude+180.0)/6.0))
+
+    def is_northern(latitude):
+        """
+        Determines if given latitude is a northern for UTM
+        """
+        if (latitude &lt; 0.0):
+            return 0
+        else:
+            return 1
+
+    utm_coordinate_system = osr.SpatialReference()
+    utm_coordinate_system.SetWellKnownGeogCS("WGS84") # Set geographic coordinate system to handle lat/lon  
+    utm_coordinate_system.SetUTM(get_utm_zone(lon), is_northern(lat))
+
+    wgs84_coordinate_system = utm_coordinate_system.CloneGeogCS() # Clone ONLY the geographic coordinate system 
+
+    # create transform component
+    wgs84_to_utm_transform = osr.CoordinateTransformation(wgs84_coordinate_system, utm_coordinate_system) # (&lt;from&gt;, &lt;to&gt;)
+    return wgs84_to_utm_transform.TransformPoint(lon, lat, 0) # returns easting, northing, altitude    
+</code></pre>
+
+<p>I also found that if you've already got django/gdal installed and you know the <a href="http://reference.mapinfo.com/common/docs/mapxtend-dev-web-none-eng/miaware/doc/guide/xmlapi/coordsys/systems.htm" rel="nofollow">EPSG</a> code for the UTM zone you're working on, you can just use the <code>Point()</code>  <em>transform()</em> method.</p>
+
+<pre><code>from django.contrib.gis.geos import Point
+utm2epsg = {"54N": 3185, ...}
+p = Point(lon, lat, srid=4326) # 4326 = WGS84 epsg code
+p.transform(utm2epsg["54N"])
+</code></pre>

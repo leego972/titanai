@@ -1,0 +1,14 @@
+Question: <p>I am a little new to pyOpenSSL.  I am trying to figure out how to associate the generated socket to an ssl cert.  verify_cb gets called which give me access to the cert and a conn but how do I associate those things when this happens:</p>
+
+<p>cli,addr = self.server.accept()</p>
+
+Answer: <p>After the handshake is complete, you can get the client certificate.  While the client certificate is also available in the verify callback (verify_cb), there's not really any reason to try to do anything aside from verify the certificate in that callback.  Setting up an application-specific mapping is better done after the handshake has completely successfully.  So, consider using the OpenSSL.SSL.Connection instance returned by the accept method to get the certificate (and from there, the commonName) and associate it with the connection object at that point.  For example,</p>
+
+<pre><code>client, clientAddress = self.server.accept()
+client.do_handshake()
+commonNamesToConnections[client.get_peer_certificate().commonName] = client
+</code></pre>
+
+<p>You might want to check the mapping to make sure you're not overwriting any existing connection (perhaps using a list of connections instead of just mapping each common name to one).  And of course you need to remove entries when connections are lost.</p>
+
+<p>The `do_handshakeÂ´ call forces the handshake to actually happen.  Without this, the handshake will happen when application data is first transferred over the connection.  That's fine, but it would make setting up this mapping slightly more complicated.</p>

@@ -1,0 +1,44 @@
+Question: <p>I have a web report that uses a Django form (new forms) for fields that control the query used to generate the report (start date, end date, ...). The issue I'm having is that the page should work using the form's initial values (unbound), but I can't access the cleaned_data field unless I call is_valid(). But is_valid() always fails on unbound forms.</p>
+
+<p>It seems like Django's forms were designed with the use case of editing data such that an unbound form isn't really useful for anything other than displaying HTML.</p>
+
+<p>For example, if I have:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+else:
+    form = MyForm(request.method.POST)
+
+if form.is_valid():
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>is_valid() will fail if this is a GET (since it's unbound), and if I do:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+    do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+else:
+    form = MyForm(request.method.POST)
+    if form.is_valid():
+       do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>the first call to do_query triggers exceptions on form.cleaned_data, which is not a valid field because is_valid() has not been called. It seems like I have to do something like:</p>
+
+<pre><code>if request.method == 'GET':
+    form = MyForm()
+    do_query(form['start_date'].field.initial, form['end_date'].field.initial)
+else:
+    form = MyForm(request.method.POST)
+    if form.is_valid():
+       do_query(form.cleaned_data['start_date'], form.cleaned_data['end_date'])
+</code></pre>
+
+<p>that is, there isn't a common interface for retrieving the form's values between a bound form and an unbound one.</p>
+
+<p>Does anyone see a cleaner way to do this?</p>
+
+Answer: <p><em>Unbound</em> means there is no data associated with form (either initial or provided later), so the validation may fail. As mentioned in other answers (and in your own conclusion), you have to provide initial values and check for both bound data and initial values.</p>
+
+<p>The use case for forms is form processing <strong>and</strong> validation, so you must have some data to validate before you accessing <code>cleaned_data</code>.</p>

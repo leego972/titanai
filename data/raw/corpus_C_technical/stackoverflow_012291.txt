@@ -1,0 +1,94 @@
+Question: <p>I start by creating a string variable with some <strong>non-ascii</strong> <em>utf-8</em> encoded data on it:</p>
+
+<pre><code>&gt;&gt;&gt; text = 'Ã¡'
+&gt;&gt;&gt; text
+'\xc3\xa1'
+&gt;&gt;&gt; text.decode('utf-8')
+u'\xe1'
+</code></pre>
+
+<p>Using <code>unicode()</code> on it raises errors...</p>
+
+<pre><code>&gt;&gt;&gt; unicode(text)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+UnicodeDecodeError: 'ascii' codec can't decode byte 0xc3 in position 0: 
+                    ordinal not in range(128)
+</code></pre>
+
+<p>...but if I know the encoding I can use it as second parameter:</p>
+
+<pre><code>&gt;&gt;&gt; unicode(text, 'utf-8')
+u'\xe1'
+&gt;&gt;&gt; unicode(text, 'utf-8') == text.decode('utf-8')
+True
+</code></pre>
+
+<p>Now if I have a class that returns this text in the <code>__str__()</code> method:</p>
+
+<pre><code>&gt;&gt;&gt; class ReturnsEncoded(object):
+...     def __str__(self):
+...         return text
+... 
+&gt;&gt;&gt; r = ReturnsEncoded()
+&gt;&gt;&gt; str(r)
+'\xc3\xa1'
+</code></pre>
+
+<p><code>unicode(r)</code> seems to use <code>str()</code> on it, since it raises the same error as <code>unicode(text)</code> above:</p>
+
+<pre><code>&gt;&gt;&gt; unicode(r)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+UnicodeDecodeError: 'ascii' codec can't decode byte 0xc3 in position 0: 
+                    ordinal not in range(128)
+</code></pre>
+
+<p>Until now everything is as planned!</p>
+
+<p><strong>But as no one would ever expect, <code>unicode(r, 'utf-8')</code> won't even try:</strong></p>
+
+<pre><code>&gt;&gt;&gt; unicode(r, 'utf-8')
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: coercing to Unicode: need string or buffer, ReturnsEncoded found
+</code></pre>
+
+<p>Why? Why this inconsistent behavior? Is it a bug? is it intended? Very awkward.</p>
+
+Answer: <p>The behaviour does seem confusing, but intensional. I reproduce here the entirety of the unicode documentation from the <a href="http://docs.python.org/lib/built-in-funcs.html" rel="nofollow">Python Built-In Functions documentation</a> (for version 2.5.2, as I write this):</p>
+
+<blockquote>
+  <p><strong>unicode([object[, encoding [, errors]]])</strong></p>
+  
+  <p>Return the Unicode string version of object using one of the following modes:</p>
+  
+  <p>If encoding and/or errors are given, unicode() will decode the
+     object which can either be an 8-bit string or a character buffer
+     using the codec for encoding. The encoding parameter is a string
+     giving the name of an encoding; if the encoding is not known,
+     LookupError is raised. Error handling is done according to
+     errors; this specifies the treatment of characters which are
+     invalid in the input encoding. If errors is 'strict' (the
+     default), a ValueError is raised on errors, while a value of
+     'ignore' causes errors to be silently ignored, and a value of
+     'replace' causes the official Unicode replacement character,
+     U+FFFD, to be used to replace input characters which cannot be
+     decoded. See also the <a href="http://docs.python.org/lib/module-codecs.html" rel="nofollow">codecs</a> module.</p>
+  
+  <p>If no optional parameters are given, unicode() will mimic the
+     behaviour of str() except that it returns Unicode strings
+     instead of 8-bit strings. More precisely, if object is a Unicode
+     string or subclass it will return that Unicode string without
+     any additional decoding applied.</p>
+  
+  <p>For objects which provide a __unicode__() method, it will call
+     this method without arguments to create a Unicode string. For
+     all other objects, the 8-bit string version or representation is
+     requested and then converted to a Unicode string using the codec
+     for the default encoding in 'strict' mode.</p>
+  
+  <p>New in version 2.0. Changed in version 2.2: Support for __unicode__() added. </p>
+</blockquote>
+
+<p>So, when you call <code>unicode(r, 'utf-8')</code>, it requires an 8-bit string or a character buffer as the first argument, so it coerces your object using the <code>__str__()</code> method, and attempts to decode that using the <code>utf-8</code> codec. Without the <code>utf-8</code>, the <code>unicode()</code> function looks for a for a <code>__unicode__()</code> method on your object, and not finding it, calls the <code>__str__()</code> method, as you suggested, attempting to use the default codec to convert to unicode.</p>

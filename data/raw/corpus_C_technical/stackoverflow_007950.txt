@@ -1,0 +1,40 @@
+Question: <p>For some reasons, I would like to do an explicit quoting of a string value (becoming a part of constructed SQL query) instead of waiting for implicit quotation performed by <code>cursor.execute</code> method on contents of its second parameter.</p>
+
+<p>By "implicit quotation" I mean:</p>
+
+<pre><code>value = "Unsafe string"
+query = "SELECT * FROM some_table WHERE some_char_field = %s;"
+cursor.execute( query, (value,) ) # value will be correctly quoted
+</code></pre>
+
+<p>I would prefer something like that:</p>
+
+<pre><code>value = "Unsafe string"
+query = "SELECT * FROM some_table WHERE some_char_field = %s;" % \
+    READY_TO_USE_QUOTING_FUNCTION(value)
+cursor.execute( query ) # value will be correctly quoted, too
+</code></pre>
+
+<p>Is such low level <code>READY_TO_USE_QUOTING_FUNCTION</code> expected by Python DB API specification (I couldn't find such functionality in <a href="http://www.python.org/dev/peps/pep-0249/">PEP 249</a> document). If not, maybe Psycopg2 provides such function? If not, maybe Django provides such function? I would prefer not to write such function myself...</p>
+
+Answer: <p>Ok, so I was curious and went and looked at the source of psycopg2. Turns out I didn't have to go further than the examples folder :)</p>
+
+<p>And yes, this is psycopg2-specific. Basically, if you just want to quote a string you'd do this:</p>
+
+<pre><code>from psycopg2.extensions import adapt
+
+print adapt("Hello World'; DROP DATABASE World;")
+</code></pre>
+
+<p>But what you probably want to do is to write and register your own adapter;</p>
+
+<p>In the examples folder of psycopg2 you find the file <a href="http://sourcecodebrowser.com/psycopg2/2.4.5/myfirstrecipe_8py_source.html">'myfirstrecipe.py'</a> there is an example of how to cast and quote a specific type in a special way.</p>
+
+<p>If you have objects for the stuff you want to do, you can just create an adapter that conforms to the 'IPsycopgSQLQuote' protocol (see pydocs for the myfirstrecipe.py-example...actually that's the only reference I can find to that name) that quotes your object and then registering it like so:</p>
+
+<pre><code>from psycopg2.extensions import register_adapter
+
+register_adapter(mytype, myadapter)
+</code></pre>
+
+<p>Also, the other examples are interesting; esp. <a href="http://sourcecodebrowser.com/psycopg2/2.4.5/dialtone_8py_source.html">'dialtone.py'</a> and <a href="http://sourcecodebrowser.com/psycopg2/2.4.5/simple_8py_source.html">'simple.py'</a>.</p>

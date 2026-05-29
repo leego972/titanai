@@ -1,0 +1,61 @@
+Question: <p>I have two Python dictionaries, and I want to write a single expression that returns these two dictionaries, merged.  The <code>update()</code> method would be what I need, if it returned its result instead of modifying a dict in-place.</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a':1, 'b': 2}
+&gt;&gt;&gt; y = {'b':10, 'c': 11}
+&gt;&gt;&gt; z = x.update(y)
+&gt;&gt;&gt; print z
+None
+&gt;&gt;&gt; x
+{'a': 1, 'b': 10, 'c': 11}
+</code></pre>
+
+<p>How can I get that final merged dict in z, not x?</p>
+
+<p>(To be extra-clear, the last-one-wins conflict-handling of <code>dict.update()</code> is what I'm looking for as well.)</p>
+
+Answer: <p><code>**</code> creates an intermediary dict, which means that the total number of copies
+is actually higher doing the <code>dict(one, **two)</code> form, but all that happens in C
+so it's still generally faster than going to itertools, unless there are a huge number of copies (or, probably, if the copies are very expensive). As always if you actually care about speed you should time your use case.</p>
+
+<p>Timing on Python 2.7.3 with an empty dict:</p>
+
+<pre><code>$ python -m timeit "dict({}, **{})"
+1000000 loops, best of 3: 0.405 usec per loop
+
+$ python -m timeit -s "from itertools import chain" \
+    "dict(chain({}.iteritems(), {}.iteritems()))"
+1000000 loops, best of 3: 1.18 usec per loop
+</code></pre>
+
+<p>With 10,000 (tiny) items:</p>
+
+<pre><code>$ python -m timeit -s 'd = {i: str(i) for i in xrange(10000)}' \
+    "dict(d, **d)"
+1000 loops, best of 3: 550 usec per loop
+
+$ python -m timeit -s "from itertools import chain" -s 'd = {i: str(i) for i in xrange(10000)}' \
+    "dict(chain(d.iteritems(), d.iteritems()))"
+1000 loops, best of 3: 1.11 msec per loop
+</code></pre>
+
+<p>With 100,000 items:</p>
+
+<pre><code>$ python -m timeit -s 'd = {i: str(i) for i in xrange(100000)}' \
+    "dict(d, **d)"
+10 loops, best of 3: 19.6 msec per loop
+
+$ python -m timeit -s "from itertools import chain" -s 'd = {i: str(i) for i in xrange(100000)}' \
+    "dict(chain(d.iteritems(), d.iteritems()))"
+10 loops, best of 3: 20.1 msec per loop
+</code></pre>
+
+<p>With 1,000,000 items:</p>
+
+<pre><code>$ python -m timeit -s 'd = {i: str(i) for i in xrange(1000000)}' \
+    "dict(d, **d)"
+10 loops, best of 3: 273 msec per loop
+
+$ python -m timeit -s "from itertools import chain" -s 'd = {i: str(i) for i in xrange(1000000)}' \
+    "dict(chain(d.iteritems(), d.iteritems()))"
+10 loops, best of 3: 233 msec per loop
+</code></pre>

@@ -1,0 +1,250 @@
+## MathML inside Javadoc Using MathJax and a Custom Taglet
+
+Posted in Java by chadretz on December 19, 2010
+
+I am writing a baseball statistics application. It is called StatMantis and it’s another in a long line of personal projects I’ll probably never finish. It contains many statistics which have equations that deserve to be in the javadocs. After I researched all the possible ways to accomplish this and I settled on MathML. For example, in my Batting Average On Balls In Play (BABIP) statistic, there is a formula. I wanted one of those badass formula displays like Wikipedia has. So I had javadoc on the class that looked like this:
+
+/**
+* This calculates Batting Average on Balls In Play (BABIP). See the Wikipedia reference
+* <a href="http://en.wikipedia.org/wiki/Batting_average_on_balls_in_play">here</a>.
+* This is a pitching and batting statistic. This is calculated as:
+* <p>
+* $* <mfrac> * <mrow> * <mi>H</mi> * <mo>-</mo> * <mi">HR</mi> * </mrow> * <mrow> * <mi>AB</mi> * <mo>-</mo> * <mi>K</mi> * <mo>-</mo> * <mi>HR</mi> * <mo>+</mo> * <mi>SF</mi> * </mrow> * </mfrac> *$
+*/
+
+
+I noticed several projects out there that I could utilize to put a MathML equation in my javadoc. JEuclid was my first choice. It could output to an AWT image. It could even given me information to generate an image map to link to the other factors in the equation. But I would have to hack up the standard Sun (…er…Oracle) doclet and do mass hackery for this simple thing. I decided it wasn’t worth the effort since the javadoc tool is difficult to extend. Hopefully one day a project like javadoc-ng will get finished and solve my problems (wink wink, sorry if you’re still waiting on me Harmony guys). So after I couldn’t find anything I liked on the MathML implementations page I almost gave up. I couldn’t find any that were interactive and cross browser. I specifically wanted the href feature of the MathML 3 spec so I could link to my other classes.
+
+Then I found MathJax and it looked like it would solve all my problems. So the first thing I did was toss it in the <footer> element of the javadoc ant task. The distribution is extremely large, and yes you need just about all of it. So I put MathJax in there and edited config/MathJax.js. I changed jax: ["input/TeX","output/HTML-CSS"] to jax: ["input/MathML", "output/HTML-CSS"] and extensions: ["tex2jax.js"] to extensions: ["mml2jax.js"]. This is needed because the input is MathML, not TeX. Once the config was changed, I added the following in my javadoc ant task:
+
+<footer><![CDATA[
+<script type=\"text/javascript\" src=\"{@docroot}/MathJax/MathJax.js\"></script>
+]]></footer>
+
+
+I put this in the footer, because it seems like the header is rendered twice, which isn’t cool. Also, per the javadoc footer documentation I have to escape the quotes. The {@docroot} makes sure it sets the relative links properly. Once I executed this I was very happy to see my formula appear properly.
+
+Now I wanted to link each part of the equation to its representative class. My first approach was to utilize the inline {@link} tag. This outputs a code tag wrapped in an anchor tag which links the piece. I wrote at least a dozen different javascript functions to pull the href out of the anchor and put it on the <mi> tag and move the text out from inside the code tag. Everything I tried ended up in extreme failure because IE sucks balls. Specifically, I can’t edit my math tags via DOM because IE doesn’t understand it. I also couldn’t insert a manipulated MathML string as innerHTML on the parent, because it trimmed off pieces for no reason.
+
+So I decided that I needed another, non-client side approach to having links. Post processing the HTML was my first guess, but that is not a very elegant solution. So I decided to extend Javadoc w/ a custom Taglet. I tried to find the existing Taglet that Sun built for {@link} so I could use the same algorithm to obtain the URL, but it’s not there. They get the benefit of having everything there including the RootDoc. So I wrote my own Taglet and tried it in many scenarios. I quickly realized I would not be able to link to all possible methods/fields because the Taglet interface simply doesn’t provide enough information. Similarly, I can’t validate the values entered in my taglet either. Without further ado, here is the custom Taglet (collapsed by default):
+
+/*
+*
+* use this file except in compliance with the License. You may obtain a copy of
+*
+*
+* Unless required by applicable law or agreed to in writing, software
+* WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+* License for the specific language governing permissions and limitations under
+*/
+
+import java.util.Map;
+
+import com.sun.tools.doclets.Taglet;
+
+/**
+* Taglet that supports the linkhref inline tag. This tag will return just the
+* HREF to a javadoc class file (not any of the methods/fields)
+*
+*/
+public class LinkHrefTaglet implements Taglet {
+
+@SuppressWarnings({ "rawtypes", "unchecked" })
+public static void register(Map tagletMap) {
+Taglet t = (Taglet) tagletMap.get(tag.getName());
+if (t != null) {
+tagletMap.remove(tag.getName());
+}
+tagletMap.put(tag.getName(), tag);
+}
+
+@Override
+public String getName() {
+}
+
+@Override
+public boolean inConstructor() {
+return true;
+}
+
+@Override
+public boolean inField() {
+return true;
+}
+
+@Override
+public boolean inMethod() {
+return true;
+}
+
+@Override
+public boolean inOverview() {
+return true;
+}
+
+@Override
+public boolean inPackage() {
+return true;
+}
+
+@Override
+public boolean inType() {
+return true;
+}
+
+@Override
+public boolean isInlineTag() {
+return true;
+}
+
+private PackageDoc getPackageDoc(Tag tag) {
+Doc holder = tag.holder();
+if (holder instanceof ProgramElementDoc) {
+return ((ProgramElementDoc) holder).containingPackage();
+} else if (holder instanceof PackageDoc) {
+return (PackageDoc) holder;
+} else {
+throw new RuntimeException("Unrecognized holder: " + holder);
+}
+}
+
+private ClassDoc getTopLevelClassDoc(ClassDoc classDoc) {
+if (classDoc.containingClass() == null) {
+return classDoc;
+} else {
+return getTopLevelClassDoc(classDoc);
+}
+}
+
+private ClassDoc getTopLevelClassDoc(Tag tag) {
+Doc holder = tag.holder();
+if (holder instanceof PackageDoc) {
+return null;
+} else if (holder instanceof ClassDoc) {
+return getTopLevelClassDoc((ClassDoc) holder);
+} else if (holder instanceof ProgramElementDoc) {
+return getTopLevelClassDoc(((ProgramElementDoc) holder)
+.containingClass());
+} else {
+throw new RuntimeException("Unrecognized holder: " + holder);
+}
+}
+
+private ClassDoc findClass(String className, ClassDoc[] classImports) {
+for (ClassDoc classDoc : classImports) {
+if (classDoc.name().equals(className)) {
+return classDoc;
+}
+}
+return null;
+}
+
+private ClassDoc findClass(String className, PackageDoc... packageImports) {
+for (PackageDoc packageDoc : packageImports) {
+for (ClassDoc found : packageDoc.allClasses(true)) {
+if (found.name().equals(className)) {
+return found;
+}
+}
+}
+return null;
+}
+
+private String error(Tag tag, String error) {
+System.err.println(tag.position() + ": warning - " + error);
+return "javascript: //error";
+}
+
+@Override
+@SuppressWarnings("deprecation")
+public String toString(Tag tag) {
+PackageDoc packageDoc = getPackageDoc(tag);
+ClassDoc topLevelClassDoc = getTopLevelClassDoc(tag);
+//k, what I'm gonna do is what the main one does...go up to the root
+StringBuilder href = new StringBuilder();
+int dotIndex = packageDoc.name().indexOf('.');
+while (dotIndex != -1) {
+href.append("../");
+dotIndex = packageDoc.name().indexOf('.', dotIndex + 1);
+}
+//package name is empty when it is the root package
+if (!packageDoc.name().isEmpty()) {
+href.append("../");
+}
+//now that we have the root, begin the string parse
+String classInTag = tag.text();
+int poundIndex = classInTag.indexOf('#');
+if (poundIndex != -1) {
+classInTag = classInTag.substring(0, poundIndex);
+}
+//ok, if it's qualified, we just assume it's all good
+if (classInTag.indexOf('.') == -1) {
+ClassDoc classDoc;
+if (topLevelClassDoc == null) {
+//not in a class scope? just try inside this package
+classDoc = findClass(classInTag, packageDoc);
+if (classDoc == null) {
+//they should qualify it then
+return error(tag, "Can't locate linkhref class " + classInTag +
+". The name should be qualified.");
+}
+} else {
+//nope? ok, first try my inner classes
+classDoc = findClass(classInTag, topLevelClassDoc.innerClasses(true));
+if (classDoc == null) {
+//nope? ok, try my single-type-imports
+classDoc = findClass(classInTag,
+topLevelClassDoc.importedClasses());
+if (classDoc == null) {
+//nope? ok, try my type-import-on-demands
+classDoc = findClass(classInTag, topLevelClassDoc.importedPackages());
+if (classDoc == null) {
+//nope? ok, finally try my own package
+findClass(classInTag, topLevelClassDoc.containingPackage());
+if (classDoc == null) {
+//not even now? well, just assume it's there because
+classInTag = topLevelClassDoc.containingPackage().name() +
+'.' + classInTag;
+}
+}
+}
+}
+}
+if (classDoc != null) {
+classInTag = classDoc.qualifiedName();
+}
+}
+if (classInTag.indexOf('.') == -1) {
+return error(tag, "Unable get linkhref for class " + classInTag +
+" because it is in the root package");
+}
+// ok, now make the link by replacing the dots w/ slashes
+href.append(classInTag.replace('.', '/'));
+href.append(".html");
+// all good
+return href.toString();
+}
+
+@Override
+public String toString(Tag[] tags) {
+// not for inline tags...nope
+return null;
+}
+
+}
+
+
+It works only for class/interface references and doesn’t do any real validation. Regardless, it solves my problem perfectly, and now my mathematical formulas appear in my javadoc complete with links to other classes. Check out the build-javadoc target in the ANT script to see how to include it in the javadoc task. Overall, it works well and I am happy with it. Here is what the aforementioned BABIP javadoc looks like now:
+
+/**
+* This calculates Batting Average on Balls In Play (BABIP). See the Wikipedia reference
+* <a href="http://en.wikipedia.org/wiki/Batting_average_on_balls_in_play">here</a>.
+* This is a pitching and batting statistic. This is calculated as:
+* <p>
+* <math style="font-size: 200%">
+*     <mfrac>
+*         <mrow>
+*             <mo>-</mo>
+*         </mrow>
+*         <mrow>
+*             <mo>-</mo>

@@ -1,0 +1,27 @@
+Question: <p>In my app i need to save changed values (old and new) when model gets saved. Any examples or working code?</p>
+
+<p>I need this for premoderation of content. For example, if user changes something in model, then administrator can see all changes in separate table and then decide to apply them or not.</p>
+
+Answer: <p>Continuing on Muhuk's suggestion &amp; adding Django's signals and a unique dispatch_uid you could reset the state on save without overriding save():</p>
+
+<pre><code>from django.db.models.signals import post_save
+
+class DirtyFieldsMixin(object):
+    def __init__(self, *args, **kwargs):
+        super(DirtyFieldsMixin, self).__init__(*args, **kwargs)
+        post_save.connect(self._reset_state, sender=self.__class__, 
+                            dispatch_uid='%s-DirtyFieldsMixin-sweeper' % self.__class__.__name__)
+        self._reset_state()
+
+    def _reset_state(self, *args, **kwargs):
+        self._original_state = self._as_dict()
+
+    def _as_dict(self):
+        return dict([(f.name, getattr(self, f.name)) for f in self._meta.local_fields if not f.rel])
+
+    def get_dirty_fields(self):
+        new_state = self._as_dict()
+        return dict([(key, value) for key, value in self._original_state.iteritems() if value != new_state[key]])
+</code></pre>
+
+<p>Which would clean the original state once saved without having to override save(). The code works but not sure what the performance penalty is of connecting signals at __init__</p>

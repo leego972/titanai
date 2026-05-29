@@ -1,0 +1,48 @@
+Question: <p>Is there a way to define a column (primary key) as a <a href="https://en.wikipedia.org/wiki/Universally_unique_identifier">UUID</a> in <a href="http://www.sqlalchemy.org/">SQLAlchemy</a> if using <a href="http://www.postgresql.org/">PostgreSQL</a> (Postgres)?</p>
+
+Answer: <p>Here is an approach based on the <a href="http://docs.sqlalchemy.org/en/rel_0_9/core/custom_types.html?highlight=guid#backend-agnostic-guid-type" rel="nofollow">Backend agnostic GUID</a> from the SQLAlchemy docs, but using a BINARY field to store the UUIDs in non-postgresql databases.</p>
+
+<pre><code>import uuid
+
+from sqlalchemy.types import TypeDecorator, BINARY
+from sqlalchemy.dialects.postgresql import UUID as psqlUUID
+
+class UUID(TypeDecorator):
+    """Platform-independent GUID type.
+
+    Uses Postgresql's UUID type, otherwise uses
+    BINARY(16), to store UUID.
+
+    """
+    impl = BINARY
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(psqlUUID())
+        else:
+            return dialect.type_descriptor(BINARY(16))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            if not isinstance(value, uuid.UUID):
+                if isinstance(value, bytes):
+                    value = uuid.UUID(bytes=value)
+                elif isinstance(value, int):
+                    value = uuid.UUID(int=value)
+                elif isinstance(value, str):
+                    value = uuid.UUID(value)
+        if dialect.name == 'postgresql':
+            return str(value)
+        else:
+            return value.bytes
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == 'postgresql':
+            return uuid.UUID(value)
+        else:
+            return uuid.UUID(bytes=value)
+</code></pre>

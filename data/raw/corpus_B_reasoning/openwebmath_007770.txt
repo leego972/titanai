@@ -1,0 +1,85 @@
+# Iterating Composition over a list of tuples
+
+I produce a function list with
+
+Tuples[{a, r}, 2]
+(* {{a, a}, {a, r}, {r, a}, {r, r}} *)
+
+
+where functions a and r represent adding some fraction and taking the reciprocal:
+
+a[z_, fraction_] := z + fraction
+
+r[z_] := 1/z
+
+
+I want to Composition[] each of the ordered pairs in the tuples list, e.g.
+
+a[a[x,frac]], then a[r[x]], etc. into a new list:
+
+{a[a[x,frac]],a[r[x,frac]],r[a[x,frac]],r[r[x,frac]]}
+
+
+with the values for each of the list elements being the computed values of each of the composed functions.
+
+The second term above would look like this:
+
+Composition[a, r][y]
+
+(* 1/2 + 1/y *)
+
+• What is r[x,frac] supposed to return when you've only defined r[z_]? What about a[r[x,frac]] when you've only defined a to take two arguments? e.g. The example you give at the end will evaluate to a[1/y] not 1/2+1/ywith a, r defined the way they are here. – N.J.Evans Nov 4 '16 at 17:02
+• Good point. My mistake. A single argument for both functions works just fine, since the fraction used in the add function a[] can be passed down from the calling function. – James T. Nov 4 '16 at 21:08
+
+Unless you really want the functions to take different numbers of arguments (which is not clear from the question):
+
+a[z_] := z + 1/2
+r[z_] := 1/z
+
+tuples = Tuples[{a, r}, 2]
+
+Composition[##][x] & @@@ tuples
+
+
+{1 + x, 1/2 + 1/x, 1/(1/2 + x), x}
+
+• Thanks so much! I have almost no experience with that type of expression/notation, and had wondered if that was the way to go here. Took me a bit to see how it works, but it is clear to me now. So elegant and concise. And I really appreciate how quickly you solved this for me. As for the use of the fraction in the function a[], that can be a variable in the calling function. – James T. Nov 4 '16 at 21:05
+• See also the other answer by march. If you find the answers given here useful, feel free to upvote them by clicking the top-oriented grey triangle. The answer you like most can be accepted by clicking the grey checkmark. – corey979 Nov 4 '16 at 21:08
+• If I wanted to get the successive compositions of each ordered pair from the inside out using ComposeList[], how would I have to modify the expression? In other words, I want a list {{x,a[x],a[a[x]]},...}. – James T. Nov 4 '16 at 21:40
+• That looks more like a NestList. You already answered: ComposeList. But do not extend the scope of the initial question in comments. It's better to ask a new one. – corey979 Nov 4 '16 at 21:44
+
+I will redefine your functions so that they both take two inputs, and the both output fraction so that in the composition, we can keep track of what fraction is, even though r doesn't depend on it:
+
+Clear[a, r]
+a[{z_, frac_}] := {z + frac, frac}
+r[{z_, frac_}] := {1/z, frac}
+
+
+Then, we will define a function that takes as inputs z and frac, forms all compositions of the function, then applies the compositions to the inputs. Finally, at the end, we extract just the desired output:
+
+applyComposition[z_, frac_] := First /@ With[
+{f = Composition @@@ Tuples[{a, r}, 2]},
+Through[f[{z, frac}]]
+]
+
+
+Then,
+
+applyComposition[x, frac]
+(* {2 frac + x, frac + 1/x, 1/(frac + x), x} *)
+
+• Thanks for an interesting different approach! – James T. Nov 4 '16 at 21:11
+
+A pure operator version of corey's answer (i.e., a version without a pure function) could go:
+
+tf = Through @* (Composition @@@ tuples)
+
+
+Through@*{a@*a, a@*r, r@*a, r@*r}
+
+Then:
+
+tf[x]
+`
+
+{1 + x, 1/2 + 1/x, 1/(1/2 + x), x}

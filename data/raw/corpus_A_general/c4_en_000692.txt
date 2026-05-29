@@ -1,0 +1,28 @@
+Where is the mail stored in the filesystem?
+I have zentyal 3 with zarafa configured as the mail gateway.
+Where in the file system is the user mail stored? I would like to know for backup purposes etc.
+Ie if I was restoring the server from an image what would I need to restore from the backup to recover the mail.
+Re: Where is the mail stored in the filesystem?
+Found using forum search feature.
+Christian is correct. It is stored in a mysql database. Xtrabackup (Percona.com) for live incremental backups or mysqldump to backup just the email. By default mysql is setup for one big file instead of table per file.
+Use the ssh connection method with your regular user name.
+password is stored in /var/lib/zentyal/conf/sa-mysql.passwd.
+This gets you initial connection as sa. You can then add a user with needed privileges to do what it is you want to do. I do not recommend using the sa regularly. I assume that you are going to the mysql-dump route?
+Hmm. . . this gets asked often enough that maybe it should be a sticky or in the tips and tricks section. Add on that eventually the email system will get sluggish and prone to crashing because of the "all tables in one file" decision and I think that a decent write up is in order. Sort of follows along with my next free time (chuckle) project which is to play with clustering Zentyal. I haven't forgotten that, christian. Just incredibly busy.
+*hint hint* volunteers please step forward..
+Firstly thanks for everybodies help on this.
+I'm running zentyal 3.0 (core 3.0.17) so what I'm about to say may not be relevant to earlier versions.
+there are a few corrections to what folks have said on here.
+The mail isn't actually stored in the MySql zarafa db. I loaded around 8000 mail items into the zarafa and it didn't significatnly affect the size of the database.
+The mail and also the zarafa-search indexes (if enabled) are actually stored in the file systm under /var/lib/zarafa.
+The configuration files would give the impression that this is just attachments but it appears to be all emails as well. Each email and attachement is stored in a nested, numbered folder structure as a gziped file.
+I wanted all my data stored on a NAS rather then on the server itself. This was quite easy to achive for the mail. It was simply a matter of copying /var/lib/zarafa to a new location and then creating a symlink from the /var/lib folder to the new location.
+Re: [SOLVED] Where is the mail stored in the filesystem?
+I am taking a closer look at users and privileges concerning mysql in the latest version. The file structure that you describe is really just the index.
+copy the directory somewhere for safe keeping.
+One not of caution -- I don't store attachments outside the database so I can't verify where they are.
+Did you setup file per table? If not they are stored in /var/lib/mysql/ibdata1. You will find that ibdata1 is rather large.
+BTW mysql doen't play nice over nfs. If you want real-time redundancy, you will have to setup replication (now you are getting into HA and load balancing).
+I was wondering about backing this file up. I run automysqlbackup which backs up all the databases. Will this be included somewhere? In the zarafa db backup? I wonder because it's sat outside the zarafa folder?
+If you configured it to backup all databases then yes it will do the work. There are pluses and minuses to using mysql-dump. While every mysql install will have the tool, it still demands server downtime while backing up. Incremental, no downtime backups can be had with xtrabackup.
+The design decision (not bug) in mysql s innodb engine causes it to become unstable over time in my experience. The database doesn't shrink as you remove data. Instead the file stays the same size and just the row information is removed. It tends to make things too big for the memory and storage footprint after some time. It also fragments the data causing queries to run slower. Normal optimization tools don't work on innodb in the single file configuration. Some will find this as an issue and some will never know. I know because I support 100+ email accounts on my system and it is very active.

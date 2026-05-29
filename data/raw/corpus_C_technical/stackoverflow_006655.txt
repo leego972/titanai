@@ -1,0 +1,67 @@
+Question: <p>I am currently trying to create a win32 service using pywin32. My main point of reference has been this tutorial:</p>
+
+<p><a href="http://code.activestate.com/recipes/551780/">http://code.activestate.com/recipes/551780/</a></p>
+
+<p>What i don't understand is the initialization process, since the Daemon is never initialized directly by Daemon(), instead from my understanding its initialized by the following:</p>
+
+<pre><code>mydaemon = Daemon
+__svc_regClass__(mydaemon, "foo", "foo display", "foo description")
+__svc_install__(mydaemon)
+</code></pre>
+
+<p>Where <strong>svc_install</strong>, handles the initalization, by calling Daemon.<strong>init</strong>() and passing some arguments to it. </p>
+
+<p>But how can i initialize the daemon object, without initalizing the service? I want to do a few things, before i init the service. Does anyone have any ideas?</p>
+
+<pre><code>class Daemon(win32serviceutil.ServiceFramework):
+    def __init__(self, args):
+        win32serviceutil.ServiceFramework.__init__(self, args)
+        self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+
+    def SvcDoRun(self):
+        self.run()
+
+    def SvcStop(self):
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        win32event.SetEvent(self.hWaitStop)
+
+    def start(self):
+        pass
+
+    def stop(self):
+        self.SvcStop()
+
+    def run(self):
+        pass
+
+def __svc_install__(cls):
+    win32api.SetConsoleCtrlHandler(lambda x: True, True)
+    try:
+        win32serviceutil.InstallService(
+            cls._svc_reg_class_,
+            cls._svc_name_,
+            cls._svc_display_name_,
+            startType = win32service.SERVICE_AUTO_START
+            )
+        print "Installed"
+    except Exception, err:
+        print str(err)
+
+def __svc_regClass__(cls, name, display_name, description):
+
+    #Bind the values to the service name
+    cls._svc_name_ = name
+    cls._svc_display_name_ =  display_name
+    cls._svc_description_ = description
+    try:
+        module_path = sys.modules[cls.__module__].__file__
+    except AttributeError:
+        from sys import executable
+        module_path = executable
+    module_file = os.path.splitext(os.path.abspath(module_path))[0]
+    cls._svc_reg_class_ = '%s.%s' % (module_file, cls.__name__)
+</code></pre>
+
+Answer: <p>I've never used these APIs, but digging through the code, it looks like the class passed in is used to register the name of the class in the registry, so you can't do any initialization of your own.  But there's a method called GetServiceCustomOption that may help:</p>
+
+<p><a href="http://mail.python.org/pipermail/python-win32/2006-April/004518.html">http://mail.python.org/pipermail/python-win32/2006-April/004518.html</a></p>

@@ -1,0 +1,38 @@
+[Source: Wikipedia-stream | Part 2]
+# DMARC
+
+mple.com. Compare this to SPF at example.com, and DKIM at selector._domainkey.example.com.
+
+The content of the TXT resource record consists of name=value tags, separated by semicolons, similar to SPF and DKIM. For example:
+ "v=DMARC1;p=none;sp=quarantine;pct=100;rua=mailto:dmarcreports@example.com;"
+
+Here, v is the version, p is the policy (see below), sp the subdomain policy, pct is the percent of "bad" email on which to apply the policy, and rua is the URI to send aggregate reports to. In this example, the entity controlling the example.com DNS domain intends to monitor SPF and/or DKIM failure rates and doesn't expect email to be sent from subdomains of example.com. Note that a subdomain can publish its own DMARC record; receivers must check it out before falling back to the organizational domain record.
+
+Step by step adoption
+The protocol provides for various ratchets, or transitional states, to allow mail admins to gradually transition from not implementing DMARC at all the way through to an unyielding setup.  The concept of stepwise adoption assumes that the goal of DMARC is the strongest setting, which is not the case for all domains. Regardless of intent, these mechanisms allow for greater flexibility.
+
+Policy
+First and foremost, there are three policies:
+
+ none is the entry level policy.  No special treatment is required by receivers, but enables a domain to receive feedback reports.
+ quarantine asks receivers to treat messages that fail DMARC check with suspicion.  Different receivers have different means to implement that, for example flag messages or deliver them in the spam folder.
+ reject asks receivers to outright reject messages that fail DMARC check.
+
+The policy published can be mitigated by applying it to only a percentage of the messages that fail DMARC check.  Receivers are asked to select the given percentage of messages by a simple Bernoulli sampling algorithm.  The rest of the messages should undergo the lower policy; that is, none if p=quarantine, quarantine if p=reject.  If not specified, pct defaults to 100% of messages.  The case p=quarantine; pct=0; is being used to force mailing list managers to rewrite the From: field, as some don't do so when p=none.
+
+Finally, the subdomain policy, sp= and the newly added no-domain policy allow tweaking the policy for specific subdomains.
+
+Reports 
+DMARC is capable of producing two separate types of reports. Aggregate reports are sent to the address specified following the rua. Forensic reports are emailed to the address following the ruf tag. These mail addresses must be specified in URI mailto format (e.g. mailto:worker@example.net ). Multiple reporting addresses are valid and must each be in full URI format, separated by a comma.
+
+Target email addresses can belong to external domains. In that case, the target domain has to set up a DMARC record to say it agrees to receive them, otherwise it would be possible to exploit reporting for spam amplification. For example, say receiver.example receives a mail message From: someone@sender.example and wishes to report it. If it finds ruf=mailto:some-id@thirdparty.example, it looks for a confirming DNS record in the namespace administered by the target, like this:
+
+ sender.example._report._dmarc.thirdparty.example IN TXT "v=DMARC1;"
+
+Aggregate reports 
+Aggregate Reports are sent as XML files, typically once per day. The subject mentions the "Report Domain", which indicates the DNS domain name about which the report was generated, and the "Submitter", which is the entity issuing the report. The payload is in an attachment with a long filename consisting of bang-separated elements such as the report-issuing receiver, the begin and end epochs of the reported period as Unix-style time stamps, an optional unique identifier and an extension which depends on the possible compression (used to be .zip).
+
+For example:
+example.com!example.org!1475712000!1475798400.xml.gz.
+
+The XML content consists of a header, containing the policy on which the report is based and report metadata, followed by a number of records. Records can be put in a database as a relation and viewed in a tabular form. The XML schema is defined in Appendix C of specifications and a raw record is exemplified in dmarc.org. Here we stick with a relational example, which better conveys the nature of the data. DMARC records can also be directly transformed in HTML by applying an XSL stylesheet.

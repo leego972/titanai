@@ -1,0 +1,310 @@
+# Le sport, une activité de riches ?
+
+Allez, un petit billet léger pour bien commencer les vacances de Noël. Toujours sur le projet R de la formation en Data Science pour l’Actuariat, Cyril Legrand a proposé de fusionner deux bases, une sur le revenu moyen par foyer (fiscal) par commune, et une sur le nom de licenciés dans les clubs sportifs. Il est faire un peu de retraitement des codes INSEE pour la jointure, car par exemple Marseille est codée sur les arrondissements dans une des bases, sur la ville dans l’autre.
+
+# A quelle distance d’une banque habite-t-on ?
+
+Dans le cadre du projet de R de la formation en Data Science pour l’Actuariat, je vais continuer à mettre en ligne des morceaux de codes qui peuvent être utiles, dans un contexte spatial. Le dernier billet, sur cartographier le vote pour le Brexit, avait été repris (et bien amélioré) sur le site des voisins de rgeomatic. Aujourd’hui, je vais m’inspirer du travail d’Etienne Flichy qui mixe répartition de la population sur le territoire, et localisation des agences bancaires.
+
+On parle des banques ici, mais si on a une base avec les coiffeurs, les boulangeries, etc, on peut faire la même chose ! (autant dire qu’on va pouvoir s’amuser quand la base sirene sera rendue ouverte – dans les semaines à venir). On va supposer que l’on a une base avec toutes les banques géocodées. Bon, pour l’exercice, on va utiliser la localisation des agences bancaires, en utilisant les données de cbanque.com. C’est assez facile d’aller scraper le site, quand on regarde la façon dont sont faites les pages, e.g. http://cbanque.com/pratique/agences/credit-cooperatif/35/. Là on récupère les adresses (postales) et on peut utiliser https://adresse.data.gouv.fr/csv/ (ou différents outils) pour géolocaliser les adresses.
+
+# Working with “large” datasets, with dplyr and data.table
+
+A few months ago, I was doing some training on data science for actuaries, and I started to get interesting puzzeling questions. For instance, Fleur was working on telematic data, and she’s been challenging my (rudimentary) knowledge of R. As claimed by Donald Knuth, “we should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil“. So usually, in my courses, and my training, codes are very basic, and easy to understand. But usually poorly efficient. Since I was challenged, to work on very large datasets, we’ve been working on R functions to manipulate those possibly (very) large dataset, and to run some simple functions as fast as possible (with simple filter and aggregation functions).
+
+In order to illustrate, let us generate our “large” telematic dataset. Assume that we have 10,000 drivers, each of them drives about 200 times, and each time, we have, say, 80 locations. That mean around 160 million observations. It is “large”, but not huge.
+
+> rm(list=ls())
+> N_id=10000
+> N_tr=200
+> T_tr=80
+
+In order to have a code as general as possible, assume that we have some kind of randomness,
+
+> set.seed(1)
+> N=rpois(N_id,N_tr)
+> N_traj=rpois(sum(N),T_tr)
+
+By “observation”, we consider a driver Id., a Trajectory Id., and a location (latitude and longitude) at some specific dates (e.g. every 15 sec.). Again, just because we want some dataset to illustrate, swe will draw drivers’s home randomly (here uniformly on some square)
+
+> origin_lat=runif(N_id,-5,5)
+> origin_lon=runif(N_id,-5,5)
+
+And, then, from those locations, we generate a 2-dimensional random walk,
+
+> lat=lon=Traj_Id=rep(NA,sum(N_traj))
+> Pers_Id=rep(NA,length(N_traj))
+> s=1
+> for(i in 1:N_id){Pers_Id[s:(s+N[i])]=i;s=s+N[i]}
+> s=1
+> for(i in 1:length(N_traj)){lat[s:(s+N_traj[i])]=origin_lat[Pers_Id[i]]+
++  cumsum(c(0,rnorm(N_traj[i]-1,0,sd=.2)));
++  lon[s:(s+N_traj[i])]=origin_lon[Pers_Id[i]]+
++  cumsum(c(0,rnorm(N_traj[i]-1,0,sd=.2)));
++  s=s+N_traj[i]}
+
+We have something which looks like
+
+# Names in the U.S., from James Smith to Jose Rodriguez
+
+Two weeks ago, @mona published an interesting post on her blog, about a difficult question, What’s The Most Common Name In America? There were stats about first names, in the U.S., and last names, too. Those informations are – somehow – easy to get. But usually, it is more complicated to get the first and the last name together. For confidentiality issues ! Datasets – the ones I deal with – are supposed to be anonymized, so I never see the first and the last names.  In a previous post, a few years ago, I did mention the so-called Social Security Death Master File. In that file, we have Social Security numbers, with the date of birth, the date of death as well as the first and the last name. So I did use those files to get stats about the first and the last names of American citizens. Of course, it is very restrictive. I have only U.S. citizens that have a Social Security number (which is not compulsary in the U.S. as far as I understood) and who passed away (as mentioned in the name of the dataset: the death master file). Another great thing about that dataset is that I have the date of birth, so I can look at some cohort effect (see opendata.stackexchange for an interesting discussion on that dataset).
+
+# Extracting datasets from excel files in a zipped folder
+
+The title of the post is a bit long, but that’s the problem I was facing this morning: importing dataset from files, online. I mean, it was not a “problem” (since I can always download, and extract manually the files), more a challenge (I should be able to do it in R, directly). The files are located on ressources-actuarielles.net, in a zip file. Those are mortality tables used in French speaking African countries, and I guess that one problem came from special characters, such as “é” or “è”… When you open the zip file, you see a folder
+
+and in that folder, several files that I would like to import
+
+# How to import some parts of a large database
+
+In the introduction of Computational Actuarial Science with R, there was a short paragraph on how could we import only some parts of a large database, by selecting specific variables. The trick was to use the following
+
+> read.table.select.columns=function(datatablename,
+I,sep=";"){
+sep=sep,skip=0,nrows=1)
++ mycols=rep("NULL",ncol(datanc))
++ names(mycols)=names(datanc)
++ mycols[I]=NA
+sep=sep,colClasses=mycols)
++ return(datat)}
+
+For instance, if we use the same dataset as in the introduction, we can import only two variables of interest,
+
+> loc="http://myweb.fsu.edu/jelsner/extspace/extremedatasince1899.csv"
+"Wmax"),sep=",")
+Region      Wmax
+1    Basin 105.56342
+2    Basin  40.00000
+3    Basin  35.41822
+4    Basin  51.06743
+5  Florida  87.34328
+6    Basin  96.64138
+7     Gulf  35.41822
+8       US  35.41822
+9       US  87.34328
+10      US 106.35318
+> dim(dt1)
+[1] 2100    2
+
+# R package for Computational Actuarial Science
+
+A webpage for the book is now hosted on
+
+http://cas.uqam.ca/
+
+So far, it is a very basic page, but information regarding the package can be found there. For instance, to install the package, with all the datasets, the R code is
+
+> install.packages("CASdatasets", repos = "http://cas.uqam.ca/pub/R/")
+
+The reference manual provides a description of all datasets.
+
+# Regression on categorical variables
+
+This morning, Stéphane asked me tricky question about extracting coefficients from a regression with categorical explanatory variates. More precisely, he asked me if it was possible to store the coefficients in a nice table, with information on the variable and the modality (those two information being in two different columns). Here is some code I did to produce the table he was looking for, but I guess that some (much) smarter techniques can be used (comments – see below – are open). Consider the following dataset
+
+> base
+x sex   hair
+1  1   H  Black
+2  4   F  Brown
+3  6   F  Black
+4  6   H  Black
+5 10   H  Brown
+6  5   H Blonde
+
+with two factors,
+
+> levels(base$hair) [1] "Black" "Blonde" "Brown" > levels(base$sex)
+[1] "F" "H"
+
+Let us run a (standard linear) regression,
+
+> reg=lm(x~hair+sex,data=base)
+
+which is here
+
+> summary(reg)
+
+Call:
+lm(formula = x ~ hair + sex, data = base)
+
+Residuals:
+1          2          3          4          5          6
+-3.714e+00 -2.429e+00  2.429e+00  1.286e+00  2.429e+00 -2.220e-16
+
+Coefficients:
+Estimate Std. Error t value Pr(>|t|)
+(Intercept)   3.5714     3.4405   1.038    0.408
+hairBlonde    0.2857     4.8655   0.059    0.959
+hairBrown     2.8571     3.7688   0.758    0.528
+sexH          1.1429     3.7688   0.303    0.790
+
+Residual standard error: 4.071 on 2 degrees of freedom
+Multiple R-squared: 0.2352,	Adjusted R-squared: -0.9121
+F-statistic: 0.205 on 3 and 2 DF,  p-value: 0.886
+
+If we want to extract the names of the factors (assuming here that there are no numbers in the name of the factor), and the values of the associated modality, one can use
+
+> VARIABLE=c("",gsub("[-^0-9]", "", names(unlist(reg$xlevels)))) > MODALITY=c("",as.character(unlist(reg$xlevels)))
+> names=data.frame(VARIABLE,MODALITY,NOMVAR=c(
++ "(Intercept)",paste(VARIABLE,MODALITY,sep="")[-1]))
+> regression=data.frame(NOMVAR=names(coefficients(reg)),
++ COEF=as.numeric(coefficients(reg)))
+> merge(names,regression,all.x=TRUE)
+NOMVAR VARIABLE MODALITE      COEF
+1 (Intercept)                   3.5714286
+2   hairBlack     hair    Black        NA
+3  hairBlonde     hair   Blonde 0.2857143
+4   hairBrown     hair    Brown 2.8571429
+5        sexF      sex        F        NA
+6        sexH      sex        H 1.1428571
+
+or, if we want modalities exluding references,
+
+> merge(names,regression)
+NOMVAR VARIABLE MODALITE      COEF
+1 (Intercept)                   3.5714286
+2  hairBlonde     hair   Blonde 0.2857143
+3   hairBrown     hair    Brown 2.8571429
+4        sexH      sex        H 1.1428571
+
+In order to reproduce the table Stéphane sent me, let us use the following code to produce an html table,
+
+> library(xtable)
+> htlmtable <- xtable(merge(names,regression))
+> print(htlmtable,type="html")
+NOMVAR VARIABLE MODALITY COEF
+1 (Intercept) 3.57
+2 hairBlonde hair Blonde 0.29
+3 hairBrown hair Brown 2.86
+4 sexH sex H 1.14
+
+So yes, it is possible to build a table with the variable, modalities, and coefficients. This function can be interesting on prospective mortality, when we do have a large number of modalities per factor (years, ages and year of birth). Consider the following datasets
+
+> DEATH=read.table(
++ "http://freakonometrics.free.fr/DeathsSwitzerland.txt",
++ "http://freakonometrics.free.fr/ExposuresSwitzerland.txt",
+> DEATH$Age=as.numeric(as.character(DEATH$Age))
+> DEATH=DEATH[-which(is.na(DEATH$Age)),] > EXPOSURE$Age=as.numeric(as.character(EXPOSURE$Age)) > EXPOSURE=EXPOSURE[-which(is.na(EXPOSURE$Age)),]
+> base=data.frame(y=as.factor(DEATH$Year),a=as.factor(DEATH$Age),
++ c=as.factor(DEATH$Year-DEATH$Age),D=DEATH$Total,E= EXPOSURE$Total)
+> base=base[base$E>0,] and the following nonlinear model, based on Lee-Carter model (including a cohort effect), $N_{x,t}\sim\mathcal{P}(E_{x,t}\cdot \exp[\alpha_x+\beta_x \kappa_t + \gamma_x \delta_{t-x}])$ can be estimated using > library(gnm) > reg=gnm(D~a+Mult(a,y)+Mult(a,c),offset=log(E),family=poisson,data=base) In order to extract the 671 coefficients from the regresssion, > length(coefficients(reg)) [1] 671 (as properly as possible) we have to be careful: names of coefficients are not that simple to handle. For instance, we can see things like > coefficients(reg)[200] Mult(., year).age98 0.04203519 In order to extract them, define > na=length((reg$xlevels)$age) > ny=length((reg$xlevels)$year) > nc=length((reg$xlevels)$cohort) > VARIABLElong=c("",rep("age",na),rep("Mult(., year).age",na), + rep("Mult(a, .).y",ny), + rep("Mult(., cohort).age",na),rep("Mult(age, .).cohort",nc)) > VARIABLEshort=c("",rep("age",na),rep("age",na),rep("year",ny), + rep("age",na),rep("cohort",nc)) > MODALITY=c("",(reg$xlevels)$age,(reg$xlevels)$age, + (reg$xlevels)$year,(reg$xlevels)$age,(reg$xlevels)$cohort) > names=data.frame(VARIABLElong,VARIABLEshort, + MODALITY,NOMVAR=c("(Intercept)",paste(VARIABLElong,MODALITY,sep="")[-1])) > regression=data.frame(NOMVAR=names(coefficients(reg)), + COEF=as.numeric(coefficients(reg))) Here we go, now we have the coefficients from the regression in a nice table, > outputreg=merge(names,regression) > outputreg[1:10,] NOMVAR VARIABLElong VARIABLEshort MODALITY COEF 1 (Intercept) -8.22225458 2 age1 age age 1 -0.87495451 3 age10 age age 10 -1.67145704 4 age100 age age 100 4.91041650 5 age11 age age 11 -1.00186990 6 age12 age age 12 -1.05953497 7 age13 age age 13 -0.90952859 8 age14 age age 14 0.02880668 9 age15 age age 15 0.42830738 10 age16 age age 16 1.35961403 It is now possible to plot all the coefficients, as functions of the age, the year of observation, or the year of birth. For instance, for the standard average age effect (namely $\alpha_x$ as a function of $x$), we can use > typevariable=as.character(unique(outputreg$VARIABLElong))
+> basegraph=outputreg[outputreg$VARIABLElong==typevariable[2],] > x=as.numeric(as.character(basegraph$MODALITY))
+> y=basegraph$COEF > plot(x,y,type="p",col="blue",xlab="Age") while the cohort effect ($\delta_t$ as a function of $t$) is obtained using > basegraph=outputreg[outputreg$VARIABLElong==typevariable[5],]
+> x=as.numeric(as.character(basegraph$MODALITY)) > y=basegraph$COEF
+> plot(x,y,type="p",col="blue",xlab="Cohort (year of birth)",ylim=c(0,10))
+
+# Open data and ecological fallacy
+
+A couple of days ago, on Twitter, @alung mentioned an old post I did publish on this blog about open-data, explaining how difficult it was to get access to data in France (the post, published almost 18 months ago can be found here, in French). And  @alung was wondering if it was still that hard to access nice datasets. My first answer was that actually, people were more receptive, and I now have more people willing to share their data. And on the internet, amazing datasets can be found now very easily. For instance in France, some detailed informations can be found about qualitifications, houses and jobs, by small geographical areas, on http://www.recensement.insee.fr (thanks @coulmont for the link). And that is great for researchers (and anyone actually willing to check things by himself).
+
+But one should be aware that those aggregate data might not be sufficient to build up econometric models, and to infere individual behaviors. Thinking that relationships observed for groups necessarily hold for individuals is a common fallacy (the so-called ” ecological fallacy“).
+
+In a popular paper, Robinson (1950) discussed “ecological inference“, stressing the difference between ecological correlations (on groups) and individual correlations (see also Thorndike (1937)) He considered two aggregated quantities, per american state: the percent of the population that was foreign-born, and the percent that was literate. One dataset used in the paper was the following
+
+> library(eco)
+> data(forgnlit30)
+> tail(forgnlit30)
+Y          X         W1          W2 ICPSR
+43 0.076931986 0.03097168 0.06834300 0.077206504    66
+44 0.006617641 0.11479052 0.03568792 0.002847920    67
+45 0.006991899 0.11459207 0.04151310 0.002524065    68
+46 0.012793782 0.18491515 0.05690731 0.002785916    71
+47 0.007322475 0.13196654 0.03589512 0.002978594    72
+48 0.007917342 0.18816461 0.02949187 0.002916866    73
+
+The correlation between  foreign-born and literacy was
+
+> cor(forgnlit30$X,1-forgnlit30$Y)
+[1] 0.2069447
+
+So it seems that there is a positive correlation, so a quick interpretation could be that in the 30’s, amercians were iliterate, but hopefully, literate immigrants got the idea to come in the US. But here, it is like in Simpson’s paradox, because actually, the sign should be negative, as obtained on individual studies. In the state-based-data study, correlation was positive mainly because foreign-born people tend to live in states where the native-born are relatively literate…
+
+Hence, the problem is clearly how individuals were grouped. Consider the following set of individual observations,
+
+> n=1000
+> r=-.5
+> Z=rmnorm(n,c(0,0),matrix(c(1,r,r,1),2,2))
+> X=Z[,1]
+> E=Z[,2]
+> Y=3+2*X+E
+> cor(X,Y)
+[1] 0.8636764
+
+Consider now some regrouping, e.g.
+
+> I=cut(Z[,2],qnorm(seq(0,1,by=.05)))
+> Yg=tapply(Y,I,mean)
+> Xg=tapply(X,I,mean)
+
+Then the correlation is rather different,
+
+>  cor(Xg,Yg)
+[1] 0.1476422
+
+Here we have a strong positive individual correlation, and a small (positive correlation) on grouped data, but almost anything is possible.
+
+Models with random coefficients have been used to make ecological inferences. But that is a long story, andI will probably come back with a more detailed post on that topic, since I am still working on this with @coulmont (following some comments by @frbonnet on his post on recent French elections on http://coulmont.com/blog/).
+
+# Open data might be a false good opportunity…
+
+I am always surprised to see many people on Twitter tweeting about #opendata, e.g. @data4all, @usdatagov, @datapublicatwit, @ProPublica or @open3 among so many others… Initially, I was also very enthousiastic, but I have to admit thatopen data are rarely raw data. Which is what I am usually looking for, as a statistician…
+Consider the following example: I was wondering (Valentine’s day is approaching)when will a man born in 1975 (say) get married – if he ever gets married ?More technically, I was looking for a distribution of the age of first marriage (given the year of birth), including the proportion of men that will never get married, for that specific cohort.
+
+The only data I found on the internet is the following, on statistics.gov.uk/
+
+Note that we can also focus on women (e.g. here). Is it possible to use that opendata to get an estimation of the distribution of first marriage for some specific cohort ? (and to answer the question I asked). Here, we have two dimensions: on line , the year (of the marriage), and on column , the age of the man when he gets married. Assume that those were rawdata, i.e. that we have the number of marriages of men of age  during the year .
+
+We are interested at a longitudinal lecture of the table, i.e. consider some man born year , we want to estimate (or predict) the age he will get married, if he gets married. With raw data, we can do it… The first step is to build up triangles (to have a cohort vs. age lecture of the data), and then to consider a model, e.g.
+
+where  is a year effect, and  is a cohort effect.
+
+base=read.table("http://freakonometrics.free.fr/mariage-age-uk.csv",
+m=base[1:16,]
+m=m[,3:10]
+m=as.matrix(m)
+triangle=matrix(NA,nrow(m),ncol(m))
+n=ncol(m)
+for(i in 1:16){
+triangle[i,]=diag(m[i-1+(1:n),])
+}
+triangle[nrow(m),1]=m[nrow(m),1]
+
+triangle
+[,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8]
+[1,]   12  104  222  247  198  132   51   34
+[2,]    8   89  228  257  202  102   75   49
+[3,]    4   80  209  247  168  129   92   50
+[4,]    4   73  196  236  181  140   88   45
+[5,]    3   78  242  206  161  114   68   47
+[6,]   11  150  223  199  157  105   73   39
+[7,]   12  117  194  183  136   96   61   36
+[8,]   11  118  202  175  122   92   62   40
+[9,]   15  147  218  162  127   98   72   48
+[10,]   20  185  204  171  138  112   82   NA
+[11,]   31  197  240  209  172  138   NA   NA
+[12,]   34  196  233  202  169   NA   NA   NA
+[13,]   35  166  210  199   NA   NA   NA   NA
+[14,]   26  139  210   NA   NA   NA   NA   NA
+[15,]   18  104   NA   NA   NA   NA   NA   NA
+[16,]   10   NA   NA   NA   NA   NA   NA   NA
+
+Y=as.vector(triangle)
+YEARS=seq(1918,1993,by=5)
+AGES=seq(22,57,by=5)
+X1=rep(YEARS,length(AGES))
+X2=rep(AGES,each=length(YEARS))
+reg=glm(Y~as.factor(X1)+as.factor(X2),family="poisson")
+summary(reg)
+
+Call:
+glm(formula = Y ~ as.factor(X1) + as.factor(X2), family = "poisson")
+
+Deviance Residuals:
+Min       1Q   Median       3Q      Max
+-5.4502  -1.1611  -0.0603   1.0471   4.6214
+
+Coefficients:
+Estimate Std. Error z value Pr(>|z|)
+(Intercept)        2.8300461  0.0712160  39.739  < 2e-16 ***
+as.factor(X1)1923  0.0099503  0.0446105   0.223 0.823497
+as.factor(X1)1928 -0.0212236  0.044960

@@ -1,0 +1,150 @@
+# General structure
+
+In this document, all paths are relative to the working directory of the server (with current data, world/map/) The script settings are initialized by the following line in conf/map_athena.conf, which is read by map_config_read(cfgName)
+
+import: npc/scripts.conf
+
+
+npc/scripts.conf is a manually-maintained file that loads functions, and then defers to the automatically-generated npc/_import.txt for map-local things. It is also used to enable holiday quests.
+
+Besides "import:", the only other relevant option is "npc:", which schedules an script file to load (though it may not necessarily contain an npc). There's also "delnpc:", which removes it from the list of things to load. As a special exception, "npc: clear" or "delnpc: all" will empty the list.
+
+You should not need "npc: clear" or any form of "delnpc:"
+
+In addition, item scripts (equip and use) are be loaded from db/itemdb.txt, but this is only a script-body, not a script file. equip scripts are evaluated every time the players stats need to be recalculated (which happens a lot); they must not modify the player's equipment.
+
+## script files
+
+The function that actually loads the list of script files is do_init_npc().
+
+Each line in a file must have less than 1020 bytes.
+
+The first thing this does for each files is skip lines that consist only of comments (// at the the very beginning of the line), compress runs of spaces to a single space (I think), and normalizes the runs of tabs-and-pipes into a single tab (for compatibility purposes). That's probably more details than a "Basics" page should have.
+
+Then, it tries to match either 3 or 4 words separated by tabs (in current data, normalized from pipes) or separated by spaces (huh?).
+
+It checks whether the first word not one of "-" or "function", and scans for a mapname terminated by a comma. If the map is not on the server, or the mapname is too long, it skips to the next line. This will probably cause bad things to happen.
+
+The second word must be one of "warp", "shop", "script", "monster", or "mapflag". There is also "duplicate..." but that shouldn't be used. All of these require 4 words except "mapflag", which may have only 3 in some cases.
+
+If the second word is "script" and the first word is "function", it is a function; otherwise it is the second word.
+
+### warp
+
+npc_parse_warp(w1, w2, w3, w4)
+
+The first word is mapname, x, y. Spaces are optional after the commas. The mapname can contain anything but a comma.
+
+The fourth word is xs, ys,mapname, to_x, to_y. There must not be a space before mapname, or it will be considered part of it.
+
+w3 is the name of the warp.
+
+### shop
+
+npc_parse_shop(w1, w2, w3, w4) w1 is mapname, x, y, dir.
+
+w4 is repeated ,<id>:<value> or ,<name>:<value> for the items in the shop.
+
+w3 is the name of the shop NPC.
+
+### monster
+
+npc_parse_mob(w1, w2, w3, w4)
+
+w1 is mapname,x,y,xs,ys where xs and ys are optional and default to 0. This represents the spawn area.
+
+w4 is mobclass, num, delay1, delay2,eventname where the delays and eventname are optional and default to 0 and "".
+
+num times, a new mob spawner is created. w3 is the name; "--en--" or "--ja--" means to copy the appropriate name from the mob db.
+
+(A mob spawner is just a mob that automatically respawns after it is killed, after a certain delay)
+
+### mapflag
+
+npc_parse_mapflag(w1, w2, w3, w4)
+
+w1 is mapname
+
+w3 is one of: nosave nomemo noteleport nowarp nowarpto noreturn monster_noteleport nobranch nopenalty pvp pvp_noparty pvp_noguild pvp_nightmaredrop pvp_nocalcrank gvg gvg_noparty nozenypenalty notrade noskill nopvp noicewall snow fog sakura leaves rain no_player_drops town
+
+Many of those don't necessarily work.
+
+if w3 is nosave, w4 is "SavePoint" or mapname,x,y
+
+if w3 is pvp_nightmaredrop, w4 is arg1, arg2, per; arg1 may be "random" or an item id; arg2 may be "inventory", "equip", or "all".
+
+### script
+
+npc_parse_script(w1, w2, w3, w4, <...>)
+
+w1 is "-" or mapname, x, y, dir
+
+w4 must have a comma.
+
+Then a script body is parsed from { to }. See below.
+
+If the npc is on a map, w4 is class,xs,ys or just class.
+
+If class is negative but the NPC is on a map, the first line of the body may be used as an event called exname.
+
+w3 is name or name::exname. If exname is not provided, it is the same as name.
+
+The parsed script body is scanned for labels starting with "On" (not case sensitive), and each of these is made available as an event called exname::labelname
+
+Then it looks for labels of the form OnTime<ticks>, case sensitive, and these are registered as timer events.
+
+### function
+
+npc_parse_function(w1, w2, w3, w4, <...>)
+
+A script body is parsed from { to }.
+
+Then the script is registered as a function (for use with callfunc) with the name w3, which currently has a maximum of 49 characters.
+
+# Script Body
+
+To avoid too much header depth, this is at the top level. Of course, it is also where you spend most of your time.
+
+A script body start with a { and goes to the first }. It may occur in a script or function, an item use or equip script, or in the magic file.
+
+The function that handles this is parse_script(), and it returns some bytecode.
+
+Inside a script body, there is label: line; or just line;
+
+line is empty or command args. Commands are checked for number of arguments.
+
+args is 0 to 128 expressions. There is a warning if args are not separated by commas, except after the condition expression of the if command.
+
+Note that if statements *are* properly nested, so this can be used for short-circuiting since the && and || operators don't do it.
+
+An expression is a subexpression with -1 precedence
+
+A subexpression can be a bare - (i.e, followed by a comma or semicolon after skipping spaces), which is interpreted as a label meaning the next line.
+
+A subexpression can be a -, !, or ~ followed by an expression with 100 precedence. This does what you expect, except for function calls.
+
+A subexpression can be a simple expression, followed by an operator with the following precedences:
+
+6 + - 7 * / % 8 ( <function call> 1 && 5 & >> << 0 || 4 | 3 ^ 2 == != >= > <= <
+
+If it is a function call, the left simple expression must be a function, and 0 to 128 arguments are parsed followed by a ). Functions are checked for number of parameters.
+
+If it is not a function call, another subexpression is parsed with the given priority.
+
+A simple expression may be a parenthesized subexpression with -1 precedence.
+
+A simple expression may be an integer, with optional sign. Integers may be decimal, octal, or hexadecimal.
+
+A simple expression may be a string literal, delimited by "". There's something funky with backslashes. A string must not contain an embedded newline.
+
+Otherwise, a string is a name, which may be a function, a label, or a variable. If a name is not a function and is followed by a [, it is translated into a call to the getelementofarray function (which returns a reference). The subexpression has precedence -1 and must be followed by a ].
+
+Note that there is much magic to make labels work properly before they're declared.
+
+# Variables
+
+A variable is not a builtin function or label, and matches the following:
+
+An optional $, an option @ or l, two optional # (in which case there should be no$ or @), a sequence of alnum or _, and an optional $. The meanings are as follows: {| class="wikitable" style="width:650px;" border="1" |- ! Prefix !! Suffix !! meaning !! functions |- | || || Any name found in "db/const.txt" of type 0 is flattened at script compile time. || N/A |- | || || Any name found in db/const.txt of type 1 is a special player paramter, and special logic is used to get/set it. || pc_readparam, pc_setparam |- | || || A permanent variable attached to the character object, stored by the char-server in "save/athena.txt" || pc_readglobalreg, pc_setglobalreg |- | @ or l || || A temporary variable attached to a player. Reset when the player logs out or when the server restarts. Don't start variable names with l, this will be removed! || pc_readreg, pc_setreg |- | @ or l ||$ || A temporary variable attached to a player. Reset when the player logs out or when the server restarts. Don't start variable names with l, this will be removed! || pc_readregstr, pc_setregstr |- | $|| || A global permanent variable, stored by the map-server in "save/mapreg.txt". || mapreg_db search, mapreg_setreg |- |$ || $|| A global permanent variable, stored by the map-server in "save/mapreg.txt". || mapregstr_db search, mapreg_setregstr |- |$@ || || A global temporary variable. This is important for scripts which are called with no RID attached. || mapreg_db search, mapreg_setreg |- | $@ ||$ || A global temporary variable. This is important for scripts which are called with no RID attached. || mapregstr_db search, mapreg_setregstr |- | # || || A permanent account-based variable, stored by the char-server in "save/accreg.txt". || pc_readaccountreg, pc_setaccountreg |- | ## || || A permanent account-based variable, stored by the login-server in "save/account.txt". These used to be broken, but should work now. You shouldn't use these until we get implement worlds on the main server. || pc_readaccountreg2, pc_setaccountreg2 |}
+
+The $suffix indicates a string, and is only allowed for player temporary, global persistent, and global temporary variables. == Arrays == Variables of player temporary, global persistent, or global temporary scope may be arrays. @array[0] is equivalent to @array, but you should always include the [0] if you use an array. Array indices go from 0 to 127. =Old Introduction= This page is made after Fredzilla's "Athena Script Commands, A reference manual for the eAthena scripting language" originally located at: http://buwinow5.tripod.com/ . More recent versions can be found at: http://eathena-project.googlecode.com/svn/trunk/doc/script_commands.txt , and http://eathena.ws/board/ but they are unlikely to be compatible with actual TMW versions of the server This document is a reference manual for all the scripting commands and functions available in current eAthena SVN. It is not a simple tutorial. When people tell you to "Read The F***ing Manual", they mean this. The information was mostly acquired through looking up how things actually work in the source code of the server, which was written by many people over time, and lots of them don't speak English and never left any notes - or are otherwise not available for comments. As such, anything written in here might not be correct, it is only correct to the best of our knowledge, which is limited. This document is poorly structured and rather messy in general. In fact, further cleaning up and reordering this document is probably pointless, due to upcoming switch to Lua scripting language, which will rid us of most of the problems mentioned herein and make a new manual necessary. But while we have this one, we should make the most of it, and it might be helpful in making sure the new Lua engine can actually do everything useful that the old engine could. This is not a place to teach you basic programming. This document will not teach you basic programming by itself. It's more of a reference for those who have at least a vague idea of what they want to do and want to know what tools they have available to do it. We've tried to keep it as simple as feasible, but if you don't understand it, getting a clear book on programming in general will help better than yelling around the forum for help. A little learning never caused anyone's head to explode. =Structure= The commands and functions are listed in no particular order: *Name of the command and how to call it. Descriptive text Small example if possible. Will usually be incomplete, it's there just to give you an idea of how it works in practice. To find a specific command, use Ctrl+F, (or whatever keys call up a search function in whatever you're reading this with) put an * followed by the command name, and it should find the command description for you. If you find anything omitted, please respond. :) =Syntax= Throughout this document, wherever a command wants an argument, it is given in <angle brackets>. This doesn't mean you should type the angle brackets. :) If an argument of a command is optional, it is given in {curly brackets}. You've doubtlessly seen this convention somewhere, if you didn't, get used to it, that's how big boys do it. If a command can optionally take an unspecified number of arguments, you'll see a list like this: command <argument>{,<argument>...<argument>} This still means they will want to be separated by commas. Where a command wants a string, it will be given in "quotes", if it's a number, it will be given without them. Normally, you can put an expression, like a bunch of functions or operators returning a value, in (round brackets) instead of most numbers. Round brackets will not always be required, but they're often a good idea. Wherever you refer to a map name, it's always '''mapname.gat''' or '''mapname.afm''' if you are using AFM maps, (if you don't know what they are, you aren't using them) and not just ''"mapname"''. While some commands do know that if you didn't give ''".gat"'', it should add it, it's pretty tricky to tell which ones they are. =Script loading structure= Scripts are loaded by the map server as referenced in the 'conf/map_athena.conf' configuration file, but in the default configuration, it doesn't load any script files itself. Instead, it loads the file '''npc/scripts_main.conf''' which itself contains references to other files. The actual scripts are loaded from txt files, which are linked up like this: npc: <path to a filename> Any line like this, invoked, ultimately, by '''map_athena.conf''' will load up the script contained in this file, which will make the script available. No file will get loaded twice, to prevent possible errors. Another configuration file option of relevance is: delnpc: <path to a filename> This will unload a specifiled script filename from memory, which, while seemingly useless, may sometimes be required. Whenever '''//''' is encountered in a line upon reading, everything beyond this on that line is considered to be a '''comment''' and is ignored. This works wherever you place it. Upon loading all the files, the server will execute all the '''top-level command'''s in them. No variables exist yet at this point, no commands can be called other than those given in this section. These commands set up the basic server script structure - create NPC objects, spawn monster objects, set map flags, etc. No code is actually executed at this point except them. The top-level commands the scripting are pretty confusing, since they aren't structured like you would expect commands, command name first, but rather, normally start with a map name. * The confusing '''tab symbols''' in the '''top-level commands''', used to divide their arguments have been replaced by the symbol "'''|'''" ==Top Level Commands== Here is a list of valid top-level commands: ===Set a map flag:=== <map name>|mapflag|<flag> This will, upon loading, set a specified map flag on a map you like. These are normally in files inside 'conf/mapflag' and are loaded first, so by the time the server's up, all the maps have the flags they should have. Map flags determine the behavior of the map regarding various common problems, for a better explanation, see '[[setmapflag]]'. ===Create a permanent monster spawn:=== <map name>,<x1>,<y1>,<x2>,<y2>|monster|<monster name>{,<level>}|<mob id>,<amount>,<delay1>,<delay2>,<event name> '''Map name''' is the name of the map the monsters will spawn on. x1/y1-y1/y2 is a square of map coordinates which will limit where they will initially spawn. Putting zeros instead of these coordinates will spawn the monsters randomly. It's not certain whether monsters will later be able to venture out of this square when randomly moving or not. (Can anyone confirm?) '''Monster name''' is the name the monsters will have on screen, and has no relation whatsoever to their names anywhere else. It's the mob id that counts, which identifies monster record in 'mob_db.txt' database of monsters. If the mob name is given as "--ja--", the 'japanese name' field from the monster database is used, (which, in eAthena, actually contains an english name) if it's "--en--", it's the 'english name' from the monster database (which contains an uppercase name used to summon the monster with a GM command). If you add 4000 to the monster ID, the monster will be spawned in a 'big version', (monster size class will increase) and if you add 2000, the 'tiny version' of the monster will be created. This will not, however, make the monster spawn with a bigger or smaller sprite, like with @monstersmall/@monsterbig GM commands. Monster size class relates only to the damage calculation. '''Amount''' is the amount of monsters that will be spawned when this command is executed, it is affected by spawn rates in 'battle_athena.conf'. '''Delay1''' and '''delay2''' are the monster respawn delays - the first one counts the time since a monster defined in this spawn was last respawned and the second one counts the time since the monster of this spawn was last killed. Whichever turns out to be higher will be used. If the resulting number is smaller than a random value between 5 and 10 seconds, this value will be used instead. (Which is normally the case if both delay values are zero.) If both delay values are -1, the monster will never respawn upon death until the server restarts. The times are given in 1/1000ths of a second. '''Level''' overrides the monster's level from the monster id database, if it is 0, the level from the database is used. '''Event name''' is an event label that will be triggered every time a monster of that spawn is killed. If you do not wish to define such an event, put '0' there. For a full description, of how monster kill events work, see the 'monster' command. ===Define a warp point=== <from map name>,<fromX>,<fromY>,<facing>|warp|<warp name>|<spanx>,<spany>,<to map name>,<toX>,<toY> This will define a warp NPC that will warp a player between maps, and while most arguments of that are obvious, some deserve special mention. '''SpanX''' and '''SpanY''' will make the warp sensitive to a character who didn't step directly on it, but walked into a zone which is centered on the warp from coordinates and is SpanX in each direction across the X axis and SpanY in each direction across the Y axis. '''Warp''' NPC objects also have a name, because you can use it to refer to them later with 'enablenpc'/'disablenpc' '''Facing''' of a warp object is irrelevant, it is not used in the code and all current scripts have a zero in there. ===Define an NPC object:=== <map name>,<x>,<y>,<facing>|script|<NPC Name>|<sprite id>,{<code>} <map name>,<x>,<y>,<facing>|script|<NPC Name>|<sprite id>,<triggerX>,<triggerY>,{<code>} This will place an NPC object on a specified map at the specified location, and is a top-level command you will use the most in your custom scripting. The NPCs are triggered by clicking on them, and/or by walking in their trigger area, if defined, see that below. '''Facing''' is a direction the NPC sprite will face in. Not all NPC sprites have different images depending on the direction you look from, so for some facing will be meaningless. Facings are counted counterclockwise in increments of 45 degrees, where 0 means facing towards the top of the map. (So to turn the sprite towards the bottom of the map, you use facing 4, and to make it look southeast it's facing 5.) '''Sprite''' id is the sprite number used to display this particular NPC. For a full list of sprite id numbers see http://kalen.s79.xrea.com/npc/npce.shtml You may also use a monster's ID number instead to display a monster sprite for this NPC. It is possible to use a job sprite as well, but you must first define it as a monster sprite in 'mob_avail.txt', a full description on how to do this is for another manual. A '-1' sprite id will make the

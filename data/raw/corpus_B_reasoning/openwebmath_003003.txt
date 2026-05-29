@@ -1,0 +1,198 @@
+# Changing a bezier curve by dragging a point on the curve itself rather than a control point
+
+I'm developing an iPhone app that allows users to cut out part of an image from its background. In order to do this, they'll connect a bunch of bezier curves together to form the clipping path. Rather than have them move the control points of the curves in order to change the curve, I'd like them to be able to move a point on the curve itself. At this point, I'm not set on using quadratic rather than cubic beziers, or vice versa. The rest of this post will discuss the issue from the point of view of quadratic curves, but I would love an answer that provides solutions to both.
+
+It seems to me that there are two possible methods for accomplishing this:
+
+1. By determining the relationship between the point on the curve and the true control point. If this can be done, then the new location of the control point can be calculated based on the new location of the point on the curve.
+
+2. By using an equation that can estimate a bezier curve based on two end points and a third point on the curve (if cubic, then a third and fourth point on the curve).
+
+Are either of these possible? I've been googling this for a while and have come across a couple potential solutions using method #2, but I don't fully understand either:
+
+Solution 1 (click here): I think I understand the code in this example well enough, but I don't know how to calculate t.
+
+Solution 2 (click here): This code is written in C#. I tried converting it to Objective-C (the language used for iPhone apps), but ultimately got stuck on the "solvexy()" function because I don't see how i or j are used after calculating their values.
+
+In regards to method #1, it seems to me that there should be some mathematical relationship between the control point, and the point on the curve through which a tangent to the curve at that point would be perpendicular to a line drawn from the control point to that point.
+
+Here are a couple illustrations: quadratic, cubic.
+
+The idea is that this point which lies on the curve, through which the perpendicular tangent is drawn, is the point that users would be dragging in order to modify the curve.
+
+-
+Solution 1: $t$ looks like the parameter along the curve, with $t\in[0,1]$, I'd say. Solution 2: i and j are output parameters; they get assigned to the corresponding argument in the caller; in this case first x1, x2, then y1, y2. You might want to take a look at the sidebar to the right; there are lots of answers to similar questions there; e.g. math.stackexchange.com/questions/5166/…, math.stackexchange.com/questions/42395/…. –  joriki Jul 26 '11 at 11:22
+Thanks for the clarification in the C# code. I'll give it another try with that info. And I did read those two questions you linked to. The first one's answer is that a Bezier should not be used, but rather a parametric spline. So I spent a while looking into how to create a parametric spline (as well as what one is in the first place) in objective-c, but couldn't come up with anything. In the second post you link to it seems that the OP is asking about how to create a Bezier simply from two end points, but I will know at least one other point that the curve must pass through. –  maxedison Jul 26 '11 at 12:12
+Approach 2 is underspecified. Given $P(0)$, $P(1)$, $P(t)$, and $t\in(0,1)$ you have a unique quadratic Bézier curve and can find the non-interpolated control point using the Bernstein polynomials, but you're not specifying $t$. I suspect you could specify two interpolated points and get a unique quadratic Bézier curve, but I haven't worked through the details. –  Peter Taylor Jul 26 '11 at 12:23
+Someone should have inserted the linked illustrations into the question before FreeImageHosting deleted them... (Using the StackExchange "insert image" button uploads the images to Imgur, which SE has a partnership with, so the images will stay up as long as SE does.) –  Rahul May 25 '14 at 18:07
+
+I think the simplest thing that would work in your application is to show the user 4 special points on the parametric cubic curve, and allow the user to manipulate those 4 special points. (Allowing the user to pick any point on the curve, and move it, makes things more complicated).
+
+I think this is the same as what Stephen H. Noskowicz calls "Cubic Four Point" representation, aka the quadratic Lagrange with t1 = 1/3 and t2 = 2/3.
+
+While your user is moving those 4 special points U0, U1, U2, U3 around, periodically you find a cubic Bezier curve that goes through those 4 points using John Burkardt's approach:
+
+P0 = U0
+P1 = (1/6)*( -5*U0 + 18*U1 - 9*U2 + 2*U3 )
+P2 = (1/6)*(  2*U0 -  9*U1 +18*U2 - 5*U3 )
+P3 = U3.
+
+
+That gives you the Bezier curve representation of the same cubic curve -- a series of 4 control points. You then feed those 4 control points (the endpoints P0 and P3, and the intemediate control points P1 and P2) into any Bezier curve plotter.
+
+The resulting curve (usually) doesn't touch P1 or P2, but it will start at X0, go exactly through X1 and X2, and end at X3.
+
+(This uses the special points at t=0, 1/3, 2/3, and 1. It's possible to, instead, use the special points at t=1, 1/4, 3/4, and 1, as shown at How do I find a Bezier curve that goes through a series of points? . Or, I suppose, any 4 distinct t values. But I suspect the 0, 1/3, 2/3, 1 values are used most often, and I don't see any advantage to using any other fixed values).
+
+-
+
+If your only problem is to find the point at which the tangent line is perpendicular to the direction to the control point and to find the control point that has this property for a given waypoint on the curve, you can try the following. Let's do quadratic curves. If A is the beginning, B is the end (both fixed), C is the control and X is the waypoint, we have the system
+
+$X=(1-t)^2A+2t(1-t)C+t^2B$ (curve equation)
+
+$\langle X-C,-(1-t)A+(1-2t)C+tB\rangle=0$ (orthogonality relation).
+
+Suppose we know $C$. Then plugging $X$ from the first equation into the second, we get a cubic equation for $t$, which we can solve quickly by either bisection, or Newton, or a combination of both.
+
+The inverse problem is similar. Express $C$ from the first equation and plug the result into the second one. Now you'll get a fifth degree equation to solve but if bisection is quick enough for you (you do not need really high precision for point dragging), you can do everything without too heavy thinking (we need to make sure that the singularities at the endpoints are dealt with in some reasonable way, so if the user drags the point close to one of the endpoints you don't have an aberrant behavior but I do not want to think of this singularity problem before you tell me if this approach works for you in general).
+
+The cubic curves have two controls, so the problem is ill-posed for them as stated.
+
+-
+
+This site: http://pomax.github.io/bezierinfo/
+
+describes a way of using de Casteljau's algorithm 'in reverse' to do something like this, they call it 'curve moulding'. It has javascript source code as well.
+
+(de Casteljau uses points on lines (linear interpolation) to draw beziers, not higher degree equations)
+
+-
+
+Ego surfing, I happend by and saw this. Though I see this is quite old. An algorithm for "grabbing a curve" that has off the curve control points is quite simple. I guess I didn't include it in my book. Bummer, but I got it from David Forsey in 2000 on UseNet comp.graphics.algorithms. It pairs the cursor with, IIR the nearest control point, then just moves the control point the same distance as the cursor.
+
+Sorry I didn't see the edit link before...
+
+--
+Regards, Steve Noskowicz
+
+.................................. Here is my rewrite followed by the original I found on the net. If the formatting is too screwy, email me for an original on my site or... noskosteve /at/ Yahoo /dot/ com:
+
+PAGE 1
+
+How to "grab" a spot on a curve to move it (familiar notation).
+
+For a parmetric cubic curve, a point on the curve at parameter t (Pt) is defined by:
+
+P(t) or Pt = Sum Pi*Bi(t) = P1B1(t) + P2B2(t) + P3B3(t) + P4B4(t).
+
+Pi are the 4 control points and Bi are the respective weighting functions.
+
+To "grab" a spot on the curve and relocate it, you are moving some Pt to Pt'. Let the amount you move it be Pt = (New point - old point) = Pt'- Pt.
+
+Choose a control point to be moved. (see page 2). Any will do, but choosing the "closest" in parametric space works best. Let's say we'll move P2. Call the new position P2'.
+
+This makes P2 = P2' - P2
+
+The old point on the curve was: Pt = P1B1(t) + P2B2(t) + P3B3(t) + P4B4(t)
+
+The new point on the curve will be: Pt'= P1B1(t) + P2'B2(t) + P3B3(t) + P4B4(t)
+
+Subtract the Old from the New: Pt = Pt'- Pt = (P2' - P2) B2(t) = P2*B2(t)
+
+Solving for P2: P2 = Pt / B2(t)
+
+Then solve for the New P2 (P2'): P2' = P2 + [ Pt / B2(t) ]
+
+OR P2' = P2 + ( [Pt'- Pt] / B2(t) )
+
+So... In general: Given: a point on the curve called Pt at parameter "t", "near" control point "n". To move that point on the curve to a new location which differs in position by Pt, move Pn by Pt/Bn(t)
+
+In other words: Select a spot on the curve to be moved and its new location. Determine the parameter value of this spot. Calculate the change in spot position, Pt. Divide this change, Pt, by the basis function (for the target control point or Bn(t) ) which is evaluated at the selected parameter (t).
+Finally, add this to the control point (P2) location. This is the same function and t for all dimensions, so only one calculation is required.
+
+Note that this requires calculating the weighting function for the target control point at the parameter value (t) of the location selected on the curve. You obtain it from the scan for the target "t".
+
+This works with any basis function.
+
+Concept:
+
+if Curve = Control Pt*Weight
+then Control Pt = Curve / Weight
+
+PAGE 2
+
+Further areas for consideration.
+
+Finding the point on the curve to be moved.
+
+First, the parameter value of the selected (grabbed) location on the curve must be determined. This must be a sequential search rather than binary because the curve may double back. This could make the true closest point "un-findable" if the curve approaches then moves away from the cursor before going back to closest location the cursor. It can be a coarse-fine search, such as stepping in t steps of 0.1 or larger to find the bracketing locations, then subdividing that sub-segment to hit the curve. The limit being the closest to the nearest pixel on the screen.
+
+This takes the form of re-calculating the curve without needing to draw it; only calculating the distance.
+
+Choosing the target control point.
+
+For the cubic Bézier, the following are proposed.
+
+1) Because the end control points are directly accessable, one method is to divide the segment, and therefore the parameter range, in halves and pick the inner control point related to the half occupied by the grab-location.
+
+P1 0.0 - 0.5
+P2 0.5 - 1.0
+
+This, however, can cause an extreme effect upon a control point (and the curve) when the curve is grabbed very near an end. In an attempt to alleviate this, #2 is suggested.
+
+2) Divide the segment, and therefore the parameter range, into 6ths. (It could actually be any fraction, but this seems "natural") The end points are used for the first sixth (0-1/6) and last sixth (5/6-1). The inner control points are then used for the inner thirds. That is 1/6 to 3/6 and 3/6 to 5/6 Given P0, P1, P2, P3, the range of "t" to use for each point is:
+
+P0 0.0 - 0.16667
+P1 0.16667 - .5
+P2 0.5 - 0.83333
+P3 0.83333 - 1.0
+
+The weighting functions in the Basic Image Editor are:
+
+P0 W1(t) = Ft1*t3 + Fu1*t2 + Fv1*t + Fw1
+P1 W2(t) = Ft2*t3 + Fu2*t2 + Fv2*t + Fw2
+P2 W3(t) = Ft3*t3 + Fu3*t2 + Fv3*t + Fw3
+P3 W4(t) = Ft4*t3 + Fu4*t2 + Fv4*t + Fw4
+
+PAGE 3
+
+Original posting. Conversion to standard names is on page 1
+
+Date: Fri, 07 Jan 2000 14:48:10 -0800
+From: David Forsey
+Newsgroups: comp.graphics.algorithms
+Subject: Re: Q: Bezier curve editing
+
+Toby wrote:
+
+I would be most grateful if anyone could answer this straightforward question for me.
+
+In graphics programs (such as Corel Draw) the user can directly manipulate (cubic) Bezier curves. The user can "grab" a point on the curve and drag it around. The control points move so that the new point is on the new curve (at the same parameter value, I suppose). The endpoints stay fixed.
+
+How do the control points move? A direct solution can't work because only 3 points are known on the new curve, and 4 would be needed for a cubic. I wondered about cubic Hermite interpolation, but don't see where the tangent vectors would come from.
+
+For the parmetric cubic curve C(U), for a point P on the curve at parameter u.
+
+P = C(u) = Sum Vi Bi(u) = V1B1(u) + V2B2(u) + V3B3(u) + V4B4(u).
+
+(where the Vi are the 4 control points and the Bi are the basis functions)
+
+You want to move P to P'. Let deltaP = P'- P.
+
+Choose a control point that will be used to change the shape of the curve. Anyone will do, but choosing the closest in parametric space works best. Lets say we'll move V2. To make it clear lets call this new position X.
+
+The old point on the curve was: P = V1B1(u) + V2B2(u) + V3B3(u) + V4B4(u) The new point on the curve will be: P'= V1B1(u) + XB2(u) + V3B3(u) + V4B4(u)
+
+Subtract them appropriately: deltaP = (V2 - X) B2(u) = deltaV2 B2(u)
+
+A little algebra: deltaV = deltaP / B2(u) Shouldn't this be: deltaV2 = deltaP / B2(u)
+
+So... to move a point P on the curve by deltaP, move V2 by deltaP/B2(u)
+
+This works with any basis function, b-spline or bezier or whatever as well as for surfaces.
+
+You can also move multiple control vertices to move that point on the curve. See "A Technique for the Direct Manipulation of Spline Curves", Bartels/Beatty Graphic Interface '89. There are subsequent papers that cover altering the tangent and curvature at specified points on a spline.
+
+ Dave
+
+-

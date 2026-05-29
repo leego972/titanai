@@ -1,0 +1,63 @@
+Question: <p>I have a PHP application which needs to output a python script, more specifically a bunch of variable assignment statements, eg.</p>
+
+<pre><code>subject_prefix = 'This String From User Input'
+msg_footer = """This one too."""
+</code></pre>
+
+<p>The contents of subject_prefix et al need to be written to take user input; as such, I need to escape the contents of the strings. Writing something like the following isn't going to cut it; we're stuffed as soon as someone uses a quote or newline or anything else that I'm not aware of that could be hazardous:</p>
+
+<pre><code>echo "subject_prefix = '".$subject_prefix."'\n";
+</code></pre>
+
+<p>So. Any ideas?</p>
+
+<p>(Rewriting the app in Python isn't possible due to time constraints. :P )</p>
+
+<p><strong>Edit, years later:</strong></p>
+
+<p>This was for integration between a web-app (written in PHP) and Mailman (written in Python). I couldn't modify the install of the latter, so I needed to come up with a way to talk in its language to manage its configuration.</p>
+
+<p>This was also a <em>really</em> bad idea.</p>
+
+Answer: <p><strong>Do not</strong> try write this function in PHP.  You will inevitably get it wrong and your application will inevitably have an arbitrary remote execution exploit.</p>
+
+<p>First, consider what problem you are actually solving.  I presume you are just trying to get data from PHP to Python.  You might try to write a .ini file rather than a .py file.  Python has an excellent ini syntax parser, <a href="http://www.python.org/doc/2.5.2/lib/module-ConfigParser.html" rel="nofollow">ConfigParser</a>.  You can write the obvious, and potentially incorrect, quoting function in PHP and nothing serious will happen if (read: when) you get it wrong.</p>
+
+<p>You could also write an XML file.  There are too many XML parsers and emitters for PHP and Python for me to even list here.</p>
+
+<p>If I <strong>really</strong> can't convince you that this is a <em>terrible, terrible</em> idea, then you can at least use the pre-existing function that Python has for doing such a thing: <code>repr()</code>.</p>
+
+<p>Here's a handy PHP function which will run a Python script to do this for you:</p>
+
+<pre><code>&lt;?php
+
+function py_escape($input) {
+    $descriptorspec = array(
+        0 =&gt; array("pipe", "r"),
+        1 =&gt; array("pipe", "w")
+        );
+    $process = proc_open(
+        "python -c 'import sys; sys.stdout.write(repr(sys.stdin.read()))'",
+        $descriptorspec, $pipes);
+    fwrite($pipes[0], $input);
+    fclose($pipes[0]);
+    $chunk_size = 8192;
+    $escaped = fread($pipes[1], $chunk_size);
+    if (strlen($escaped) == $chunk_size) {
+        // This is important for security.
+        die("That string's too big.\n");
+    }
+    proc_close($process);
+    return $escaped;
+}
+
+// Example usage:
+$x = "string \rfull \nof\t crappy stuff";
+print py_escape($x);
+</code></pre>
+
+<p>The <code>chunk_size</code> check is intended to prevent an attack whereby your input ends up being two really long strings, which look like <code>("hello " + ("." * chunk_size))</code> and <code>'; os.system("do bad stuff")</code> respectively.  Now, that naive attack won't work exactly, because Python won't let a single-quoted string end in the middle of a line, and those quotes in the <code>system()</code> call will themselves be quoted, but if the attacker manages to get a line continuation ("\") into the right place and use something like <code>os.system(map(chr, ...))</code> then they can inject some code that will run.</p>
+
+<p>I opted to simply read one chunk and give up if there was more output, rather than continuing to read and accumulate, because there are also limits on Python source file line length; for all I know, that could be another attack vector.  Python is not intended to be secure against arbitrary people writing arbitrary source code on your system so this area is unlikely to be audited.</p>
+
+<p>The fact that I had to think of all this for this trivial example is just another example of why you shouldn't use python source code as a data interchange format.</p>

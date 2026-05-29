@@ -1,0 +1,120 @@
+Question: <p>This is a part algorithm-logic question (how to do it), part implementation question (how to do it best!). I'm working with Django, so I thought I'd share with that.</p>
+
+<p>In Python, it's worth mentioning that the problem is somewhat related to <a href="http://stackoverflow.com/questions/773/how-do-i-use-pythons-itertoolsgroupby">how-do-i-use-pythons-itertoolsgroupby</a>.</p>
+
+<p>Suppose you're given two Django Model-derived classes:</p>
+
+<pre><code>from django.db import models
+
+class Car(models.Model):
+    mods = models.ManyToManyField(Representative)
+</code></pre>
+
+<p>and</p>
+
+<pre><code>from django.db import models
+
+class Mods(models.Model):
+   ...
+</code></pre>
+
+<p>How does one get a list of Cars, grouped by Cars with a common set of Mods?</p>
+
+<p>I.e. I want to get a class likeso:</p>
+
+<pre><code>Cars_by_common_mods = [ 
+  { mods: { 'a' }, cars: { 'W1', 'W2' } },
+  { mods: { 'a', 'b' }, cars: { 'X1', 'X2', 'X3' }, },
+  { mods: { 'b' }, cars: { 'Y1', 'Y2' } },
+  { mods: { 'a', 'b', 'c' }, cars: { 'Z1' } },
+]
+</code></pre>
+
+<p>I've been thinking of something like:</p>
+
+<pre><code>def cars_by_common_mods():
+  cars = Cars.objects.all()
+
+  mod_list = []      
+
+  for car in cars:
+    mod_list.append( { 'car': car, 'mods': list(car.mods.all()) } 
+
+  ret = []
+
+  for key, mods_group in groupby(list(mods), lambda x: set(x.mods)):
+    ret.append(mods_group)
+
+  return ret
+</code></pre>
+
+<p>However, that doesn't work because (perhaps among other reasons) the groupby doesn't seem to group by the mods sets. I guess the mod_list has to be sorted to work with groupby. All to say, I'm confident there's something simple and elegant out there that will be both enlightening and illuminating.</p>
+
+<p><em>Cheers &amp; thanks!</em></p>
+
+Answer: <p>Have you tried sorting the list first? The algorithm you proposed should work, albeit with lots of database hits.</p>
+
+<pre><code>import itertools
+
+cars = [
+    {'car': 'X2', 'mods': [1,2]},
+    {'car': 'Y2', 'mods': [2]},
+    {'car': 'W2', 'mods': [1]},
+    {'car': 'X1', 'mods': [1,2]},
+    {'car': 'W1', 'mods': [1]},
+    {'car': 'Y1', 'mods': [2]},
+    {'car': 'Z1', 'mods': [1,2,3]},
+    {'car': 'X3', 'mods': [1,2]},
+]
+
+cars.sort(key=lambda car: car['mods'])
+
+cars_by_common_mods = {}
+for k, g in itertools.groupby(cars, lambda car: car['mods']):
+    cars_by_common_mods[frozenset(k)] = [car['car'] for car in g]
+
+print cars_by_common_mods
+</code></pre>
+
+<p>Now, about those queries:</p>
+
+<pre><code>import collections
+import itertools
+from operator import itemgetter
+
+from django.db import connection
+
+cursor = connection.cursor()
+cursor.execute('SELECT car_id, mod_id FROM someapp_car_mod ORDER BY 1, 2')
+cars = collections.defaultdict(list)
+for row in cursor.fetchall():
+    cars[row[0]].append(row[1])
+
+# Here's one I prepared earlier, which emulates the sample data we've been working
+# with so far, but using the car id instead of the previous string.
+cars = {
+    1: [1,2],
+    2: [2],
+    3: [1],
+    4: [1,2],
+    5: [1],
+    6: [2],
+    7: [1,2,3],
+    8: [1,2],
+}
+
+sorted_cars = sorted(cars.iteritems(), key=itemgetter(1))
+cars_by_common_mods = []
+for k, g in itertools.groupby(sorted_cars, key=itemgetter(1)):
+    cars_by_common_mods.append({'mods': k, 'cars': map(itemgetter(0), g)})
+
+print cars_by_common_mods
+
+# Which, for the sample data gives me (reformatted by hand for clarity)
+[{'cars': [3, 5],    'mods': [1]},
+ {'cars': [1, 4, 8], 'mods': [1, 2]},
+ {'cars': [7],       'mods': [1, 2, 3]},
+ {'cars': [2, 6],    'mods': [2]}]
+</code></pre>
+
+<p>Now that you've got your lists of car ids and mod ids, if you need the complete objects to work with, you could do a single query for each to get a complete list for each model and create a lookup <code>dict</code> for those, keyed by their ids  - then, I believe, Bob is your proverbial father's brother.</p>

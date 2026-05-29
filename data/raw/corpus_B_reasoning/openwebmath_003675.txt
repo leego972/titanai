@@ -1,0 +1,153 @@
+##### Modeling Friction in Contact
+
+In contact-impact interactions, friction plays an important role in accurately capturing the sliding behavior. In LS-DYNA, the coulomb treatment of friction is used where a static and a dynamic friction can be defined which are used to determine the shear force while resisting penetration. By default, all contact definitions model a friction-less sliding which is a good start for initial models. The first step in activating friction in contacts is to use a non-zero static friction parameter, FS, in the *CONTACT_{OPTION} keyword. Optionally, one can define a dynamic friction, FD, which will only be used for a non-zero decay coefficient, DC. It is common to see a positive sliding energy when using non-zero friction parameters. It must be noted that non-zero friction parameters do not apply for FORCE_TRANSDUCER and TIED contacts which remain tied for the duration of the simulation. When TIED contacts are defined with failure parameters and are defined to be converted into penalty-type contacts after failure, then the non-zero friction parameters will be used to determine the shear contact forces. Figure 1 illustrates the nature of the penetration removal process when a node is detected as penetrating the closest master segment. When a penetrating node is first detected, by checking the sign of the projected normal distance to the closest master segment, a penalty force is first calculated based on the stiffness and the absolute penetration value. This force is then resolved in a local coordinate system embedded at the master element (contact point) to determine the normal and shear components. The sliding resistance is then computed using the friction parameters of the master segment and the normal force component as shown.
+
+(Click image to enlarge)
+
+Transitioning from Static to Dynamic Friction
+By default, LS-DYNA considers only a static value (FS). In reality, the friction is dependent on relative velocity with which the parts are sliding and this friction is usually less than the static friction value. To model this behavior, two parameters, FD and DC. The transition from static to dynamic friction is modeled using an exponentially decaying function, $\mu = FD + (FS-FD)e^{-DC*\|v_{rel}|}$, that is based on the instantaneous relative velocity of the sliding node and the corresponding master segment. The transition from static to dynamic friction is as shown below.
+
+(Click image to enlarge)
+
+Part Based Friction
+By default, the non-zero friction parameters defined in the *CONTACT_{OPTION} keyword are used for all segments. This may be acceptable when all parts involved are composed of similar material, but it may be inaccurate when dissimilar materials are defined to interact using SINGLE_SURFACE contact definitions. In such cases, LS-DYNA provides an option to define friction parameters at the component level using the *PART_CONTACT keyword. To let LS-DYNA use the values defined at the component level, FS must be set to -1. When FS=-1, a quick look-up is done prior to computing the shear force magnitude to determine the frictional parameters using the master segment’s part definition.
+
+Part Pair Based Friction
+While the part based friction parameter definition is an improvement compared to the global values, which is applied to all parts(segments), the concept of choosing the master segment friction values can still over/under predict the sliding resistance. To illustrate this, consider two dissimilar materials such as foam (F1) and steel (S1) that interact purely by contact treatment. Using component based definitions, we can input frictional values of 0.6 and 0.2 (using FS) for the respective materials using the *PART_CONTACT keyword. Now lets consider the case of S1 sliding on F1 which will cause LS-DYNA to look up the friction parameters of the master segment (F1 in this case) to give a value of 0.6. Next consider the case of F1 sliding on S1 which will result in a friction value of 0.2. As you can see, we come up with two different frictional parameters for the same PAIR of materials interacting with each other. This is easily overcome by using the *DEFINE_FRICTION keyword available in LS-DYNA versions 970 and later. The *DEFINE_FRICTION keyword allows us to define an unlimited number of interacting part pairs and their corresponding friction parameters. When using this option, the parameter FS must to set to -2, and the parameters defined in *DEFINE_FRICTION will override all values defined using the *PART_CONTACT keyword. Now using the earlier example, lets pick a pair of F1/S1 and define an average friction value of 0.4. With this definition, when either F1 slides on S1 or S1 slides on F1, instead of looking up the part based contact parameters, LS-DYNA looks up the pair definition and uses the average value of 0.4 which provides more accurate resistance.
+
+Graphical viewing of frictional energy
+The frictional sliding energy is dissipative and can be optionally written out to binary file using the option FRCENG in *CONTROL_CONTACT which requires the parameters SPR and MPR to be set to unity along with using the command line argument “s=interface_file”. Once these options are used, LS-DYNA outputs a binary file named “interface_file” which can be viewed using LS-PrePost. Among other variables, the frictional energy is output as the component “surface energy density” which can be fringed on the contact surface.
+
+• Weldon says:
+
+How can I read and view the frictional sliding energy (interface_file) using LS-PrePost?
+
+• Suri Bala says:
+
+When SPR=MPR=1 & s=interface file is requested, LS-DYNA outputs the interface file which can be read by LS-PREPOST directly as you would any D3PLOT file. Once open, you can view the history variables under the FCOMP button. The last paragraph in the above post describes this.
+
+• Francesco Previtali says:
+
+Dear Suri,
+reading your article it seems to me that shear force in tied and tiebreak contacts is due exclusively to friction, which means F= FS*Fn where FS is the coefficient of friction and Fn is the force due to penetration normal to master segment.
+In your presentation â€œTie-Break Contacts in LS-DYNAâ€, at page 3 you wrote â€œThere is no sliding allowed between the elements used in the tiebreak definitionsâ€, so I thought normal and tangential displacements of slave nodes were treated in the same way.
+Now I am a bit confused: where am I wrong?
+
+I am using tiebreak contacts in order to tie two parts of a mesh, one more coarse and the other finer (element dimension is half of the coarse ones), and I merged the coincident nodes. I used FS=0 and FD=0 in contact definition: might it be the cause of the problem?
+
+Thank you
+
+• Suri Bala says:
+
+Francesco,
+
+When using TIED or TIEBREAK contacts, it is not recommended to merge the nodes even if they are coincident. Coincident nodes are treated by slave and master nodes getting 100% of the forces.
+
+There is also no sliding in TIED contacts. TIEBREAK allows sliding only after failure in which case the FS/FD are used when there is any sliding.
+
+Regards,
+Suri
+
+• Francesco Previtali says:
+
+Suri,
+thank you for the kind answer.
+
+I have one more question: having used a nodes_to_surface approach, I excluded coincident nodes from the slave node set. Is it still a problem?
+
+Thank you again.
+Kindest regards
+
+Francesco
+
+• Suri Bala says:
+
+Francesco,
+
+That should not be a problem.
+
+Suri
+
+• Paolo Capozzi says:
+
+Dear Suri,
+
+I’m trying to obtain the frictional energy plot but I can’t find the command line of LS-DYNA. I launch LS-DYNA through the Ansys product launcher and it just asks for the working directory and the keyword input file. How can I specify the s=interface_file without using the command line?
+
+Thank you.
+
+Best regards,
+
+Paolo
+
+• Suri Bala says:
+
+Paolo,
+
+I am sorry but I have never used Ansys product to run LS-DYNA.
+Also, I don’t think there is any other way to output interface data besides using the ‘s’ option in the command line.
+
+If you can locate the LSDYNA exe, it may be easier to simply it execute it your self.
+
+Suri
+
+• Magnus Bergh (FOI Sweden) says:
+
+Dear Suri,
+I’m trying to model friction in a 2D plane geometry. I’m interested in the dissipated energy (want to estimate frictional heating); is it possible to edit this in 2D? Seems like I need to set SPR and MPR on the generic CONTACT-card which is for 3D?
+
+Best Regards,
+Magnus Bergh
+
+• Liliana Beldie says:
+
+Dear Suri,
+
+I have been trying for a while now to use *CONTACT_SLIDING_ONLY and/or *CONTACT_SLIDING_ONLY_PENALTY. In a small example the _penalty contact seems to be working ok, but in a few lager problems modelling brain skull it causes the models to blows up with negative volume in solid elements, although no deformations are present which could cause negative volumes, so I take it it is down to the contact. This happens even with using a simple linear material for both components (so it is not due to a viscous material). It has been suggested that this type of contact is not usable anymore in Dyna. Can you please let me know if this is the case and what other type of contact I can use instead to model the sliding sticking behaviour that I am after (or how can I make the sliding_penalty contact to work). Thank you, I appreciate your help.
+
+Best regards,
+Liliana
+
+• Suri Bala says:
+
+Liliana Beldie,
+
+These are old contacts and I have not really worked with them much. It could be normals not aligned properly but I am not positive about that. Have you tried *CONTACT_NODES_TO_SURFACE_TIEBREAK with OPTION = 4 ?
+
+Suri Bala
+LSTC
+
+• Liliana says:
+
+Dear Suri,
+
+Thank you for your reply. Do you mean using *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_TIEBREAK? (the *CONTACT_TIEBREAK_NODES_TO_SURFACE does not seem to have an option). Thanks.
+
+Liliana
+
+• Suri Bala says:
+
+Dear Liliana
+
+Yes.
+
+Suri Bala
+LSTC
+
+• Mani says:
+
+Dear Suri,
+
+I am doing an bird strike analysis on an inclined wall. To perform this analysis, I have run two iterations to define the contact between the bird and the wall, in both iterations thickness of the wall remains same.
+
+Iteration-1. Defined two contact definitions between bird and wall. CONTACT_ERODING_SURFACE_TO_SURFACE & CONTACT_AUTOMATIC_SURFACE_TO_SURFACE are used. The reason to use CONTACT_AUTOMATIC_SURFACE_TO_SURFACE is take care of contact between the wall and other parts of the assembly.
+
+Iteration-2. Defined one contact definitions between bird and wall. CONTACT_ERODING_SURFACE_TO_SURFACE is used.
+
+The results obtained from these two iterations are entirely different. In iteration-1, the bird skims over the wall without eroding the wall.
+In iteration-2, the bird erodes the wall.
+
+Could you please tell me, what is the reason for the differences in the results?
+
+Thanks,
+Mani

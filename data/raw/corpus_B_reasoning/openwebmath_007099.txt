@@ -1,0 +1,140 @@
+# xmlconf
+
+Unit XMLConf provides the TXMLConfig component. It uses a TXMLDocument object to do the work of reading and writing the XMLfile, but descends directly from TComponent.
+
+##### Disclaimer
+
+This documentation is not authoritative, it is based on the usual process of (1) examining the source code (2) experimentation (3) pondering "I wonder if that is what the author had in mind ?"
+
+## Configuration
+
+##### property Filename: String (published)
+
+The file name of the xml file. Setting the filename to a different name:
+
+• Flushes the current xml file.
+• Frees the xmldocument object
+• If Filename exists and StartEmpty is false:
+• A new xmldocument is created by reading the file, which must have the same root element as RootName otherwise an exception is raised.
+• Otherwise, a new xmldocument object is created with root element RootName
+
+I have not checked this by experiment, but it appears that an empty xmldocument is created (in memory) when the component is created, and this can be modified. However, it cannot be saved until it has a file name - there is no default file name - hence all modifications will inevitably be lost when the file name is set.
+
+##### property StartEmpty: Boolean (published)
+
+Controls whether an existing xmlfile is read from Filename.
+
+• Default is false - an existing file is read.
+##### property RootName: DOMString (published)
+
+The name of the root element in the file. Must match the value in the file when an existing file is read.
+
+• Default is 'CONFIG'. It is simplest to leave this alone unless you have a good reason to change it.
+##### procedure Flush (public)
+
+Writes the xml file - as long as there is a file name set.
+
+##### procedure Clear (public)
+
+Recreates the xmldocument as an empty document.
+
+## Working with keys and paths
+
+XMLConfig maintains a "stack" of paths (as an array of widestrings). The overall path to an element might be
+
+ <rootName>/key1/key2/key3/key4/value="some_value".
+
+
+This would appear in the file
+
+ <CONFIG><key1><key2><key3><key4 value="some_value"/></key3></key2></key1></CONFIG
+
+
+(neglecting any other elements). However, the path stack can contain paths, not just nodes, so it could be four elements deep as key1;key2; key3;key4, but just as well only two elements as key1/key2;key3/key4, or three elements as key1;key2/key3;key4.
+
+Further, when reading or setting a value, a complete path can then be specified, so the path "stack" can be completely ignored and the full path (past RootName) specified for each value. Each value has an effective path, and the path stack is just a convenient way of getting to a specific effective path.
+
+##### procedure OpenKey(const aPath: WideString) (public)
+
+"Pushes" aPath onto the stack. If the effective path was <RootName>/key1, and aPath = key2/key3, after the call to OpenKey, the effective path is <RootName>/key1/key2/key3.
+
+##### procedure CloseKey (public)
+
+"Pops" the top path off the stack. Note that this is the last entered path, NOT the top element. Thus after the OpenKey example above followed by a CloseKey call, the stack reverts to <RootName>/key1, not <RootName>/key1/key2
+
+##### procedure ResetKey (public)
+
+Completely clears the stack. The effetive path reverts to <RootName>
+
+## Setting, Getting and Deleting Values
+
+All values are actually read and written as strings, with other overloaded types providing defined 'AsString' translations.
+
+##### function GetValue(const APath: WideString; const ADefault: WideString): WideString (public)procedure SetValue(const APath: WideString; const AValue: WideString) (public)
+
+Sets or Gets a string value from RootName/Effective_path_from_stack/APath. The path is created if it does not exist on Setting, and ADefault is returned if the path does not exist on Getting.
+
+##### function GetValue(const APath: WideString; ADefault: Integer): Integer; (public)procedure SetValue(const APath: WideString; AValue: Integer); (public)
+
+The integer values are converted to/from strings using IntToStr and strToIntDef
+
+##### function GetValue(const APath: WideString; ADefault: Boolean): Boolean; (public)procedure SetValue(const APath: WideString; AValue: Boolean); (public)
+
+The boolean values are stored as "True" or "False".
+
+Warning - some other FCL/LCL XML components (eg those descended from TCustomPropertyStorage, such as TXMLPropStorage) store booleans using integer values, despite using XMLConifg as the storage component. This is, of course, only a problem if you use the same files from both components, or switch from one to the other during development, as I did.
+
+##### procedure SetDeleteValue(const APath: WideString; const AValue, DefValue: WideString); (public)procedure SetDeleteValue(const APath: WideString; AValue, DefValue: Integer); (public)procedure SetDeleteValue(const APath: WideString; AValue, DefValue: Boolean); (public)
+
+If AValue = DefValue, the element is deleted. Otherwise, it is set to AValue.
+
+I have not used this, but presumably could be used to store eg values of properties with well defined defaults only when they were different from the defaults.
+
+##### procedure DeletePath(const APath: WideString); (public)
+
+Deletes everything beyond path APath
+
+##### procedure DeleteValue(const APath: WideString); (public)
+
+Deletes a value specified by APath. If APath does not specify a value , it does nothing
+
+##### property Modified: Boolean read FModified; (public)
+
+Allows you to see if the xmldocument has been modified, and hence, needs to be flushed. However, flush does nothing if the document is not modified, so it is easier just to call flush anyway.
+
+## Example
+
+The following sequence of instructions:
+
+ XmlConfig1.Filename := FILE_NAME ;        // reads the file if it already exists, but...
+XmlConfig1.Clear ;                        // if the file already exists, clear the data, we want to start from scratch
+XmlConfig1.SetValue ('L1/L2/L3', '333') ; // add a few data
+XmlConfig1.SetValue ('L1/L2/L4', '44') ;
+XmlConfig1.SetValue ('L1/L2/L3', '33') ;  // this will overwrite the previous value
+XmlConfig1.OpenKey  ('L1/L2') ;           // from now on, all keys will be relative to L1/L2
+XmlConfig1.SetValue ('Lm', 'mm') ;        // these will be added in L1/L2
+XmlConfig1.SetValue ('Lm/Ln', 'nn') ;
+XmlConfig1.SetValue ('/Lx/Ly', 'yy') ;    // but because of the initial "/", this will be added to the root
+XmlConfig1.CloseKey ;
+XmlConfig1.SetValue ('L6/L7', '77') ;     // L6 will be deleted
+XmlConfig1.SetValue ('L9', '99') ;
+XmlConfig1.SetValue ('L9/L99', '9999') ;  // the previous L9 was an attibute, this one will be a node
+XmlConfig1.DeletePath ('L6') ;
+XmlConfig1.Flush ;
+
+
+will give this XML:
+
+ <?xml version="1.0" encoding="utf-8"?>
+<CONFIG L9="99">
+<L1>
+<L2 L3="33" L4="44" Lm="mm">
+<Lm Ln="nn"/>
+</L2>
+</L1>
+<Lx Ly="yy"/>
+<L9 L99="9999"/>
+</CONFIG>
+
+
+Note that the last item in the aPath parameter for SetValue is actually an attribute: XmlConfig1.SetValue ('L1/L2/L3', '333') actually sets attribute L3 for element L1/L2.

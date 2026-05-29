@@ -1,0 +1,55 @@
+Question: <p>I have a file and I don't know how big it's going to be (it could be quite large, but the size will vary greatly).  I want to search the last 10 lines or so to see if any of them match a string.  I need to do this as quickly and efficiently as possible and was wondering if there's anything better than:</p>
+
+<pre><code>s = "foo"
+last_bit = fileObj.readlines()[-10:]
+for line in last_bit:
+    if line == s:
+        print "FOUND"
+</code></pre>
+
+Answer: <p>Here's an answer like MizardX's, but without its apparent problem of taking quadratic time in the worst case from rescanning the working string repeatedly for newlines as chunks are added.</p>
+
+<p>Compared to the activestate solution (which also seems to be quadratic), this doesn't blow up given an empty file, and does one seek per block read instead of two.</p>
+
+<p>Compared to spawning 'tail', this is self-contained. (But 'tail' is best if you have it.)</p>
+
+<p>Compared to grabbing a few kB off the end and hoping it's enough, this works for any line length.</p>
+
+<pre><code>import os
+
+def reversed_lines(file):
+    "Generate the lines of file in reverse order."
+    part = ''
+    for block in reversed_blocks(file):
+        for c in reversed(block):
+            if c == '\n' and part:
+                yield part[::-1]
+                part = ''
+            part += c
+    if part: yield part[::-1]
+
+def reversed_blocks(file, blocksize=4096):
+    "Generate blocks of file's contents in reverse order."
+    file.seek(0, os.SEEK_END)
+    here = file.tell()
+    while 0 &lt; here:
+        delta = min(blocksize, here)
+        here -= delta
+        file.seek(here, os.SEEK_SET)
+        yield file.read(delta)
+</code></pre>
+
+<p>To use it as requested:</p>
+
+<pre><code>from itertools import islice
+
+def check_last_10_lines(file, key):
+    for line in islice(reversed_lines(file), 10):
+        if line.rstrip('\n') == key:
+            print 'FOUND'
+            break
+</code></pre>
+
+<p><strong>Edit:</strong> changed map() to itertools.imap() in head(). <strong>Edit 2:</strong> simplified reversed_blocks(). <strong>Edit 3:</strong> avoid rescanning tail for newlines. <strong>Edit 4:</strong> rewrote reversed_lines() because str.splitlines() ignores a final '\n', as BrianB noticed (thanks).</p>
+
+<p>Note that in very old Python versions the string concatenation in a loop here will take quadratic time. CPython from at least the last few years avoids this problem automatically.</p>

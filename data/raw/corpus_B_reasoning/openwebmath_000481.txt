@@ -1,0 +1,47 @@
+# Difference between calculated inclusion probability and what is returned by sampling function?
+
+I have a (small) population from which I wish to sample. I assign probabilities proportional to $y$. I enumerate the possible samples and then determine the probability of each sample occurring based on the product of the probabilities for each $y_i$ in the sample. I add up the probabilities for the samples that contain the $y_1$ and I believe (incorrectly?) that under the assumption of independence (i.e. with replacement sampling) this gives me the inclusion probability for $y_1$. I look at the inclusion probabilities returned by the inclusionprobabilities function in the sampling package and I get a different answer. I do not understand why, is someone able to explain?
+
+library(survey)
+library(sampling)
+library(gtools)
+
+set.seed(123)
+y <- c(1190,26751,68570,34536)
+p <- y/sum(y)
+
+df <- data.frame(permutations(n=length(y), r=2, v=1:length(y), repeats.allowed = T))
+df$p <- p[df$X1] * p[df$X2]; df # X1 and X2 denote the index of the y value that is included # in the sample. X1 X2 p 1 1 1 0.00008245932 2 1 2 0.00185367169 3 1 3 0.00475145854 4 1 4 0.00239312195 5 2 1 0.00185367169 6 2 2 0.04167022794 7 2 3 0.10681198947 8 2 4 0.05379697926 9 3 1 0.00475145854 10 3 2 0.10681198947 11 3 3 0.27378782541 12 3 4 0.13789611111 13 4 1 0.00239312195 14 4 2 0.05379697926 15 4 3 0.13789611111 16 4 4 0.06945282329 samplesSet <- data.frame(df[1 == df$X1  | 1 == df$X2, ]) sum(samplesSet$p)
+
+pik <- inclusionprobabilities(y, 2)
+data.frame(pik=pik,name=1:length(y))
+
+
+Update: Thanks both @whuber and @StasK. It is clear that the inclusion probabilities reflect sampling without replacement. However, I am uncertain what the inclusion probabilities returned by inclusionprobabilities are. They seem to be calculated as:
+
+$$n \frac{y_i}{\sum_{i=1}^{N} y_i}$$
+
+and have an adjustment to ensure that no probability is greater than 1 and also that the sum of the probabilities corresponds to the sample size.
+
+If I assume that my population is $y=\{1,2,3\}$ such that the probabilities of selection are $\frac{1}{6}$, $\frac{2}{6}$ and $\frac{3}{6}$ and then I take a sample of 2, I calculate the inclusion probabilities to be $\frac{5}{12}$, $\frac{11}{15}$ and $\frac{17}{20}$ respectively. Clearly, these are not what is returned by inclusionprobabilities and so my question now is have I calculated the inclusion probabilities incorrectly or is the inclusionprobabilities function returning something that represents the inclusion probabilities but isn't actually the inclusion probabilities?
+
+myn <- 2
+a <- c(1,2,3)
+p <- myn * a/sum(a); p
+[1] 0.3333333 0.6666667 1.0000000
+
+inclusionprobabilities(a, myn)
+[1] 0.3333333 0.6666667 1.0000000
+
+
+Thanks.
+
+• The help is indeed abysmal. Protect yourself by testing this function on simple arguments with known answers. For instance, inclusionprobabilities(1:2,2) returns the vector 1 1. What does that tell you about the assumed form of sampling? Could this possibly reflect sampling with replacement? (Such prophylactic testing is essential when learning to use any package--the ultimate arbiter of questions like this is what the computer does, not what the help pages seem to say!) – whuber Jan 23 '15 at 16:53
+• Sampling with unequal probabilities is really weird, and it does not always give you the answer you expect, although that mostly has to do for sampling with replacement. Selection probabilities, and especially the pairwise selection probabilities, depend on the particular sampling algorithm, see Hanif & Brewer (1983) -- nearly impossible to find -- and Tille 2006. If inclusionprobabilities() indeed refer to sampling WOR, you need to filter on X1!=X2. – StasK Jan 24 '15 at 4:31
+• Thank you @whuber. The return of 1 1 tells me that it does not reflect sampling with replacement. I have done some additional tests and updated my original question. It is still not clear to me what the inclusionprobabilities() function is returning. – t-student Jan 27 '15 at 4:59
+
+Sampling with replacement is boring. Sampling without replacement is very interesting. That's why the authors of library(sampling) restricted their attention to sampling WOR. So inclusionprobabilities() takes the baseline rates in your y, and figure out what would the inclusion probabilities be should a proper unequal probability WOR sampling algorithm applied to these numbers.
+Looking at the source code, I imagine that your snippet of code reproduces the "regular" case of inclusionprobabilities() when none of the inclusion probabilities exceed 1. In that regular case, the inclusion probabilities are simply the input probabilities scaled up so that their sum is equal to the target sample size. Note that inclusion probabilities refer to the units on the frame, rather than the specific samples, as your code does.
+For sampling with replacement, I believe your calculations are correct, in that probability of each pair is the product of probabilities. Then what inclusionprobabilities refers to are the sums across all rows where either X1 or X2 are equal to 1, 2, 3 or 4 (the indices of the original units):
+for(k in 1:4) {
+print(sum(df$p[df$X1==k|df\$X2==k]))

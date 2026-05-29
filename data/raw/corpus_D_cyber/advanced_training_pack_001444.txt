@@ -1,0 +1,440 @@
+================================================================================
+TITAN AI — TRAINING PACK 019: DEVSECOPS — SECURITY IN THE SOFTWARE DELIVERY PIPELINE
+SAST, DAST, SCA, SECRETS SCANNING, SBOM, POLICY AS CODE, SUPPLY CHAIN SECURITY
+================================================================================
+
+================================================================================
+PART 1: THE SHIFT-LEFT PHILOSOPHY
+================================================================================
+
+--- WHY SHIFT LEFT ---
+
+COST OF FIXING A VULNERABILITY BY STAGE (IBM RESEARCH):
+  Design stage:        $1x
+  Development:         $6x
+  Integration/testing: $15x
+  Production:          $100x
+  
+  A SQL injection found during code review costs $6 to fix (30 minutes of developer time).
+  The same vulnerability found after it's been exploited in production costs:
+  Incident response + forensics + customer notification + regulatory fines + brand damage = $100K+.
+  
+  Shift-left means: Move security checks as early as possible in the pipeline.
+  Fastest feedback loop = cheapest fix = least risk.
+
+THE DEVSECOPS PIPELINE — COMPLETE MAP:
+
+  IDE (pre-commit)          → Code commit         → PR review        
+  │                           │                     │
+  Linting/SAST (IDE plugin)   Secret scan           Security review
+  IaC scan (Checkov)          Dependency check      Architecture review
+  
+  CI Pipeline                 Artifact Build        Deploy
+  │                           │                     │
+  SAST (full scan)            Container scan        DAST
+  SCA (dependencies)          SBOM generation       Penetration test
+  Secret scan                 Image signing         Runtime monitoring
+  IaC policy check            Policy gate           
+
+================================================================================
+PART 2: STATIC APPLICATION SECURITY TESTING (SAST)
+================================================================================
+
+--- SAST TOOLS — WHEN AND HOW ---
+
+SEMGREP (best open-source SAST):
+  Pattern-based analysis. Writes rules in YAML that look like code.
+  Fast: Scans 100K lines in seconds.
+  Language-aware: Not just regex — understands code structure.
+  
+  Custom rule example (detect SQL injection):
+  rules:
+    - id: sql-injection-string-concat
+      message: "Possible SQL injection: user input concatenated into query"
+      severity: ERROR
+      languages: [python]
+      patterns:
+        - pattern: |
+            $DB.execute($QUERY + $INPUT)
+        - pattern: |
+            $DB.execute(f"... {$INPUT} ...")
+        - pattern: |
+            $DB.execute("..." % $INPUT)
+      fix: |
+        Use parameterized queries: db.execute("... WHERE id=%s", (user_input,))
+  
+  Running:
+  semgrep --config=p/python --config=p/security-audit --config=custom-rules/ ./src
+  semgrep --config=p/owasp-top-ten ./src
+  # Output: File, line, severity, message, code snippet
+
+BANDIT (Python-specific):
+  bandit -r ./src -ll -ii  # -ll = medium+ severity, -ii = medium+ confidence
+  bandit -r ./src -f json -o bandit-results.json
+  
+  Detects: Hardcoded passwords, eval() usage, weak crypto, subprocess injection,
+          yaml.load() without Loader, assert in security checks, HTTP without TLS
+
+SEMGREP IN CI PIPELINE (GitHub Actions):
+  name: SAST Scan
+  on: [pull_request]
+  
+  jobs:
+    semgrep:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: returntocorp/semgrep-action@v1
+          with:
+            config: >-
+              p/python
+              p/security-audit  
+              p/owasp-top-ten
+              ./.semgrep/custom-rules.yaml
+          env:
+            SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        
+        # Fail build on HIGH severity findings
+        - name: Check results
+          run: |
+            if [ $(cat semgrep-results.json | jq '.results | map(select(.extra.severity == "ERROR")) | length') -gt 0 ]; then
+              echo "High severity SAST findings - failing build"
+              exit 1
+            fi
+
+--- WHAT SAST CANNOT FIND (important limitations) ---
+
+SAST finds: Code patterns that look dangerous (potential injections, crypto misuse).
+SAST cannot find:
+  - Runtime behavior (depends on actual data flow at execution)
+  - Logic flaws (code is syntactically correct but semantically wrong)
+  - Second-order vulnerabilities (injection stored, triggered later)
+  - Business logic issues (discount code abuse, price manipulation)
+  - Configuration issues (wrong S3 bucket permissions, weak TLS config)
+  - Dependencies vulnerabilities (needs SCA for that)
+
+================================================================================
+PART 3: SOFTWARE COMPOSITION ANALYSIS (SCA)
+================================================================================
+
+--- DEPENDENCY VULNERABILITY SCANNING ---
+
+The Log4Shell (CVE-2021-44228) lesson:
+  One vulnerable library (log4j 2.x) in your dependency tree.
+  CVSS 10.0. Remote code execution with a single malformed HTTP header.
+  Affected: Thousands of companies that had never heard of log4j.
+  Why: Transitive dependency — they used Library A, which used Library B, which used log4j.
+  Discovery to exploitation: <24 hours.
+  
+  SCA scans ALL dependencies (direct and transitive) against CVE databases.
+
+TOOLS:
+
+pip-audit (Python):
+  pip-audit -r requirements.txt -f json -o pip-audit-results.json
+  pip-audit --desc  # Include descriptions of vulnerabilities
+
+npm audit (JavaScript):
+  npm audit --json > npm-audit-results.json
+  npm audit fix     # Auto-fix where safe (minor versions)
+  npm audit fix --force  # Fix including major version bumps (CAREFUL)
+
+OWASP Dependency Check:
+  dependency-check --project "My App" --scan ./src --format JSON
+  # Checks: Java, .NET, Python, JavaScript, Go, Ruby
+
+Snyk (commercial, very comprehensive):
+  snyk test --severity-threshold=high
+  snyk monitor  # Continuous monitoring, alerts on new CVEs
+  snyk container test myimage:latest  # Also scans container images
+
+SBOM (SOFTWARE BILL OF MATERIALS):
+  Complete inventory of all components in your software.
+  Like an ingredient list for code.
+  
+  Format standards:
+  CycloneDX (preferred, OWASP): Rich vulnerability metadata
+  SPDX (Linux Foundation): License compliance focus
+  
+  Generate SBOM:
+  # Python
+  pip-audit --format=cyclonedx-json > sbom.json
+  
+  # Container image
+  syft nginx:latest -o cyclonedx-json > image-sbom.json
+  
+  WHY SBOM MATTERS:
+  Executive Order 14028 (US Government): All federal software must include SBOM.
+  Supply chain attacks: If you know exactly what you're running, you can rapidly
+  assess exposure when new CVEs drop.
+  Log4Shell response: "How many of our apps use log4j?"
+  Without SBOM: Days of manual searching.
+  With SBOM: grep "log4j" *.sbom.json → Answer in 30 seconds.
+
+================================================================================
+PART 4: SECRETS SCANNING
+================================================================================
+
+--- DETECTING SECRETS IN CODE ---
+
+THE PROBLEM AT SCALE:
+  AWS key accidentally committed to GitHub: Average time to abuse = 4 minutes.
+  Bots scan GitHub continuously. Committed secrets are exploited before you notice.
+  
+  Common secrets accidentally committed:
+  AWS Access Keys, API keys (Stripe, Twilio, SendGrid), database passwords,
+  private SSH keys, OAuth tokens, JWT secrets, certificate private keys.
+
+GITLEAKS (open source, fast, accurate):
+  # Scan current repo history
+  gitleaks detect --source . --report-format json --report-path findings.json
+  
+  # Scan git history (finds secrets even if removed in later commit)
+  gitleaks detect --source . --log-opts="--all" --report-path findings.json
+  
+  Custom rule for internal API keys:
+  [[rules]]
+  description = "Internal API Key"
+  id = "internal-api-key"
+  regex = '''INTERNAL_[A-Z0-9]{32}'''
+  tags = ["api-key", "internal"]
+  
+  [rules.allowlist]
+  description = "Test files"
+  paths = ["test/", "docs/"]
+  regexes = ["INTERNAL_EXAMPLE", "INTERNAL_PLACEHOLDER"]
+
+TRUFFLEHOG (finds high-entropy strings, validates keys):
+  trufflehog git https://github.com/company/repo --only-verified
+  # Only-verified: Actually tests if found keys are valid/active
+  # Reduces false positives significantly
+  
+  trufflehog filesystem ./src  # Scan local files
+
+PRE-COMMIT HOOK (catch secrets before commit):
+  .pre-commit-config.yaml:
+  repos:
+    - repo: https://github.com/gitleaks/gitleaks
+      rev: v8.18.0
+      hooks:
+        - id: gitleaks
+    
+    - repo: https://github.com/Yelp/detect-secrets
+      rev: v1.4.0
+      hooks:
+        - id: detect-secrets
+          args: ['--baseline', '.secrets.baseline']
+  
+  Install: pre-commit install
+  Now: git commit blocked if secrets detected.
+  Bypass only: git commit --no-verify (logged, auditable, requires justification)
+
+ROTATING LEAKED SECRETS PROCEDURE:
+  1. Immediately: Rotate the secret (generate new value, update all consumers)
+  2. Revoke old secret (AWS: Delete access key, Stripe: Delete key, etc.)
+  3. Check CloudTrail/audit logs: Was the key used by attacker? What did they do?
+  4. Remove from git history (git filter-branch or BFG Repo Cleaner)
+     git-filter-repo --path-glob "*.env" --invert-paths
+  5. Force-push cleaned history
+  6. Notify anyone who has cloned the repo to re-clone
+  7. Post-mortem: How did it happen? What process failed? Update pre-commit hooks.
+
+================================================================================
+PART 5: CONTAINER AND INFRASTRUCTURE SECURITY
+================================================================================
+
+--- CONTAINER IMAGE SCANNING ---
+
+TRIVY (comprehensive container scanner):
+  trivy image nginx:latest
+  trivy image --severity HIGH,CRITICAL nginx:latest  # Only high/critical
+  trivy image --format json nginx:latest > image-scan.json
+  
+  # In Dockerfile CI:
+  trivy image --exit-code 1 --severity CRITICAL myapp:${BUILD_TAG}
+  # Exit code 1 = CRITICAL vulnerabilities → Fail pipeline
+
+DOCKERFILE SECURITY BEST PRACTICES:
+
+Minimal base images:
+  # BAD: Full OS image, huge attack surface
+  FROM ubuntu:22.04
+  
+  # BETTER: Minimal image
+  FROM python:3.12-slim
+  
+  # BEST: Distroless (only runtime, no shell, no package manager)
+  FROM gcr.io/distroless/python3-debian12
+
+Non-root execution:
+  # BAD: Running as root (default)
+  CMD ["python", "app.py"]
+  
+  # GOOD: Create and use non-root user
+  RUN useradd --uid 10001 --no-create-home appuser
+  USER 10001
+  CMD ["python", "app.py"]
+
+Read-only filesystem:
+  # In kubernetes spec or docker run:
+  docker run --read-only --tmpfs /tmp myapp:latest
+  
+  # If attacker gets code execution: Can't write files to persist.
+  # Can't create new executables. Limits post-exploitation.
+
+Multi-stage builds (remove build tools from final image):
+  # Stage 1: Build
+  FROM python:3.12 AS builder
+  COPY requirements.txt .
+  RUN pip install --user -r requirements.txt
+  
+  # Stage 2: Runtime (only what's needed to run, not to build)
+  FROM gcr.io/distroless/python3
+  COPY --from=builder /root/.local /root/.local
+  COPY ./src /app
+  WORKDIR /app
+  CMD ["app.py"]
+  
+  Final image: No pip, no apt, no curl, no build tools. Minimal attack surface.
+
+--- INFRASTRUCTURE AS CODE SECURITY ---
+
+CHECKOV (IaC security scanner — Terraform, CloudFormation, Kubernetes):
+  checkov -d ./infrastructure --framework terraform
+  checkov -d ./kubernetes --framework kubernetes
+  checkov -f ./cloudformation.yaml --framework cloudformation
+  
+  Detects:
+  Terraform: S3 buckets without encryption, open security groups (0.0.0.0/0 on 22),
+             IAM roles with *, EC2 instances without IMDSv2, RDS without backup,
+             Lambda without reserved concurrency
+  Kubernetes: Containers as root, privileged containers, host path mounts,
+              no resource limits, no network policies, missing securityContext
+
+TFSEC (Terraform-specific, faster):
+  tfsec ./infrastructure --format json --out tfsec-results.json
+  
+  Custom check (deny public S3 buckets):
+  # .tfsec/custom-checks.yaml:
+  checks:
+    - code: CUS001
+      description: "S3 buckets must not be publicly accessible"
+      impact: "Public S3 bucket may expose sensitive data"
+      resolution: "Ensure bucket has block_public_acls = true"
+      required_types: [resource]
+      required_labels: [aws_s3_bucket_public_access_block]
+      block:
+        attributes:
+          - name: block_public_acls
+            value: true
+            required: true
+
+OPA (Open Policy Agent) — POLICY AS CODE:
+  Define security policies as code. Enforce in CI, admission controllers, etc.
+  
+  Example: Deny privileged containers in Kubernetes
+  # policy.rego:
+  package kubernetes.admission
+  
+  deny[msg] {
+    input.request.kind.kind == "Pod"
+    container := input.request.object.spec.containers[_]
+    container.securityContext.privileged == true
+    msg := sprintf("Privileged container not allowed: %v", [container.name])
+  }
+  
+  deny[msg] {
+    input.request.kind.kind == "Pod"
+    container := input.request.object.spec.containers[_]
+    not container.securityContext.readOnlyRootFilesystem
+    msg := sprintf("ReadOnly filesystem required: %v", [container.name])
+  }
+  
+  # In CI: Test your K8s manifests against policy
+  opa eval --data policy.rego --input pod-manifest.json "data.kubernetes.admission.deny"
+  # Returns empty array = compliant. Returns violations = fail build.
+
+================================================================================
+PART 6: SUPPLY CHAIN SECURITY
+================================================================================
+
+--- THE SOLARWINDS MODEL — UNDERSTANDING THE THREAT ---
+
+Attack: Compromise build pipeline → inject malicious code into legitimate signed update.
+Result: 18,000 organizations unknowingly installed backdoored Orion software.
+Duration: 14 months before discovery.
+
+Why it succeeded:
+  - Code was legitimately signed by SolarWinds
+  - Malicious DLL was dormant for 2 weeks after install (evaded sandboxes)
+  - C2 used legitimate Avro/HTTPS traffic patterns
+  - Malicious code was small (small diff in a large codebase)
+
+SLSA (Supply-chain Levels for Software Artifacts):
+  Framework for securing the software supply chain.
+  
+  SLSA Level 1: Provenance documented (who built what, when, from what)
+  SLSA Level 2: Signed provenance from hosted build service
+  SLSA Level 3: Hardened build platform (two-person review, isolated builds)
+  SLSA Level 4: Hermetic reproducible builds (same inputs → bit-for-bit identical output)
+  
+  Implementation with GitHub Actions + Sigstore:
+  name: Build and Provenance
+  jobs:
+    build:
+      outputs:
+        hashes: ${{ steps.hash.outputs.hashes }}
+      steps:
+        - uses: actions/checkout@v4
+        - name: Build
+          run: |
+            make release
+            sha256sum artifact.tar.gz > artifact.sha256
+        
+        - name: Generate hashes
+          id: hash
+          run: |
+            echo "hashes=$(cat artifact.sha256 | base64 -w0)" >> $GITHUB_OUTPUT
+    
+    provenance:
+      needs: build
+      uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+      with:
+        base64-subjects: "${{ needs.build.outputs.hashes }}"
+
+SIGSTORE / COSIGN (signing container images):
+  # Sign image after build
+  cosign sign --key cosign.key gcr.io/project/myapp:v1.0.0
+  
+  # Verify before deploy
+  cosign verify --key cosign.pub gcr.io/project/myapp:v1.0.0
+  
+  # In Kubernetes: OPA/Kyverno policy that requires signed images
+  # Any unsigned image → admission controller rejects deployment
+  apiVersion: kyverno.io/v1
+  kind: ClusterPolicy
+  metadata:
+    name: verify-image-signatures
+  spec:
+    validationFailureAction: enforce
+    rules:
+    - name: check-image-signature
+      match:
+        resources: {kinds: [Pod]}
+      verifyImages:
+      - imageReferences: ["gcr.io/project/*"]
+        attestors:
+        - entries:
+          - keyless:
+              subject: "https://github.com/company/repo/.github/workflows/release.yaml@refs/heads/main"
+              issuer: "https://token.actions.githubusercontent.com"
+
+================================================================================
+END OF PACK 019: DEVSECOPS
+Total: Shift-left philosophy with cost data, full pipeline security map, SAST
+(Semgrep with custom rules, Bandit), SCA (pip-audit, npm audit, Snyk, SBOM generation),
+secrets scanning (Gitleaks, Trufflehog, pre-commit hooks, rotation procedure),
+container security (Trivy, Dockerfile best practices, distroless, multi-stage),
+IaC security (Checkov, tfsec, OPA policy as code), supply chain security
+(SLSA framework, Sigstore/Cosign image signing, Kyverno policy).
+================================================================================

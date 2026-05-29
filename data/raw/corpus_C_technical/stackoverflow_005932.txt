@@ -1,0 +1,132 @@
+Question: <p>I have a device that supports 4-color graphics (much like CGA in the old days).</p>
+
+<p>I wanted to use <a href="http://www.pythonware.com/products/pil/">PIL</a> to read the image and convert it using my 4-color palette (of red, green, yellow, black), but I can't figure out if it's even possible at all.  I found some mailing list archive posts that seem to suggest other people have tried to do so and failed.</p>
+
+<p>A simple python example would be much appreciated!</p>
+
+<p>Bonus points if you add something that then converts the image to a byte string where each byte represents 4 pixels of data (with each two bits representing a color from 0 to 3)</p>
+
+Answer: <p>First: your four colour palette (black, green, red, yellow) has <em>no</em> blue component. So, you have to accept that your output image will hardly approximate the input image, unless there is no blue component to start with.</p>
+
+<p>Try this code:</p>
+
+<pre><code>import Image
+
+def estimate_color(c, bit, c_error):
+    c_new= c -  c_error
+    if c_new &gt; 127:
+        c_bit= bit
+        c_error= 255 - c_new
+    else:
+        c_bit= 0
+        c_error= -c_new
+    return c_bit, c_error
+
+def image2cga(im):
+    "Produce a sequence of CGA pixels from image im"
+    im_width= im.size[0]
+    for index, (r, g, b) in enumerate(im.getdata()):
+        if index % im_width == 0: # start of a line
+            r_error= g_error= 0
+        r_bit, r_error= estimate_color(r, 1, r_error)
+        g_bit, g_error= estimate_color(g, 2, g_error)
+        yield r_bit|g_bit
+
+def cvt2cga(imgfn):
+    "Convert an RGB image to (K, R, G, Y) CGA image"
+    inp_im= Image.open(imgfn) # assume it's RGB
+    out_im= Image.new("P", inp_im.size, None)
+    out_im.putpalette( (
+        0, 0, 0,
+        255, 0, 0,
+        0, 255, 0,
+        255, 255, 0,
+    ) )
+    out_im.putdata(list(image2cga(inp_im)))
+    return out_im
+
+if __name__ == "__main__":
+    import sys, os
+
+    for imgfn in sys.argv[1:]:
+        im= cvt2cga(imgfn)
+        dirname, filename= os.path.split(imgfn)
+        name, ext= os.path.splitext(filename)
+        newpathname= os.path.join(dirname, "cga-%s.png" % name)
+        im.save(newpathname)
+</code></pre>
+
+<p>This creates a PNG palette image with only the first four palette entries set to your colours. This sample image:</p>
+
+<p><a href="http://tzotzioy.googlepages.com/new_pic_baby2.jpg"><img src="http://tzotzioy.googlepages.com/new_pic_baby2.jpg" width="320"></a></p>
+
+<p>becomes</p>
+
+<p><a href="http://tzotzioy.googlepages.com/cga-new_pic_baby2.png"><img src="http://tzotzioy.googlepages.com/cga-new_pic_baby2.png" width="320"></a></p>
+
+<p>It's trivial to take the output of <code>image2cga</code> (yields a sequence of 0-3 values) and pack every four values to a byte.</p>
+
+<p>If you need help about what the code does, please ask and I will explain.</p>
+
+<h3>EDIT1: Do not reinvent the wheel</h3>
+
+<p>Of course, turns out I was too enthusiastic and âas Thomas discoveredâ the Image.quantize method can take a palette image as argument and do the quantization with far better results than my ad-hoc method above:</p>
+
+<pre><code>def cga_quantize(image):
+    pal_image= Image.new("P", (1,1))
+    pal_image.putpalette( (0,0,0, 0,255,0, 255,0,0, 255,255,0) + (0,0,0)*252)
+    return image.convert("RGB").quantize(palette=pal_image)
+</code></pre>
+
+<h3>EDIT1, cont: Pack the pixels into bytes</h3>
+
+<p>For "added value", here follows code to produce the packed string (4 pixels per byte):</p>
+
+<pre><code>import itertools as it
+
+# setup: create a map with tuples [(0,0,0,0)â¥(3,3,3,3)] as keys
+# and values [chr(0)â¥chr(255)], because PIL does not yet support
+# 4 colour palette images
+
+TUPLE2CHAR= {}
+
+# Assume (b7, b6) are pixel0, (b5, b4) are pixel1â¦
+# Call it "big endian"
+
+KEY_BUILDER= [
+    (0, 64, 128, 192), # pixel0 value used as index
+    (0, 16, 32, 48), # pixel1
+    (0, 4, 8, 12), # pixel2
+    (0, 1, 2, 3), # pixel3
+]
+# For "little endian", uncomment the following line
+## KEY_BUILDER.reverse()
+
+# python2.6 has itertools.product, but for compatibility purposes
+# let's do it verbosely:
+for ix0, px0 in enumerate(KEY_BUILDER[0]):
+    for ix1, px1 in enumerate(KEY_BUILDER[1]):
+        for ix2, px2 in enumerate(KEY_BUILDER[2]):
+            for ix3, px3 in enumerate(KEY_BUILDER[3]):
+                TUPLE2CHAR[ix0,ix1,ix2,ix3]= chr(px0+px1+px2+px3)
+
+# Another helper function, copied almost verbatim from itertools docs
+def grouper(n, iterable, padvalue=None):
+    "grouper(3, 'abcdefg', 'x') --&gt; ('a','b','c'), ('d','e','f'), ('g','x','x')"
+    return it.izip(*[it.chain(iterable, it.repeat(padvalue, n-1))]*n)
+
+# now the functions
+def seq2str(seq):
+    """Takes a sequence of [0..3] values and packs them into bytes
+    using two bits per value"""
+    return ''.join(
+        TUPLE2CHAR[four_pixel]
+        for four_pixel in grouper(4, seq, 0))
+
+# and the image related function
+# Note that the following function is correct,
+# but is not useful for Windows 16 colour bitmaps,
+# which start at the *bottom* rowâ¦
+def image2str(img):
+    return seq2str(img.getdata())
+</code></pre>

@@ -1,0 +1,35 @@
+Question: <p>I would like create my own collection that has all the attributes of python list and also knows how to save/load itself into/from a database.  Also I want to make the load implicit and lazy, as in it doesn't happen at the point of creation of the list, but waits until its first used.</p>
+
+<p>Is there a single<code>__xxx__</code>method I can override to load the list on first usage of any list property  (such as<code>len</code>,<code>getitem</code>,<code>iter</code>...etc) without having to override them all?</p>
+
+Answer: <p>Not exactly.  For emulating things <em>other</em> than lists, there's <code>__getattribute__</code>, but unfortunately Python doesn't consider operators like <code>x[y]</code> or <code>x(y)</code> to be <em>exactly</em> the same as <code>x.__getitem__(y)</code> or <code>x.__call__(y)</code>.  Operators like that are attributes of the class, not attributes of the instance, as you can see here:</p>
+
+<pre><code>&gt;&gt;&gt; class x(object):
+...     def __getattribute__(self, o):
+...         print o
+... 
+&gt;&gt;&gt; x()[3]
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: 'x' object does not support indexing
+</code></pre>
+
+<p>However, you can take advantage of Python's dynamic nature to effectively eliminate that distinction.  If your main concern is to save yourself typing, and to produce less code that needs maintaining, you can do something like this:</p>
+
+<pre><code>class override(object):
+    def __init__(self, methodName):
+        self.methodName = methodName
+
+    def __get__(self, oself, cls):
+        oself._load(self.methodName)
+        return getattr(super(oself.__class__, oself), self.methodName)
+
+class LazyList(list):
+    def _load(self, name):
+        print 'Loading data for %s...' % (name,)
+
+    for methodName in set(dir(list)) - set(dir(object)):
+        locals()[methodName] = override(methodName)
+</code></pre>
+
+<p>You probably don't want to use <code>dir()</code> in real life, but a suitable fixed list of strings could work as a substitute.</p>

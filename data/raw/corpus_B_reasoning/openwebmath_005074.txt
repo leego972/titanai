@@ -1,0 +1,117 @@
+# C++ Gurus: Mixin/Dependent Name Question (Maybe)
+
+## Recommended Posts
+
+I'm trying to implement a cheap little RTTI system for hierarchies of classes using only single inheritance. To do this, between each level of inheritance, I sandwich in a class that generates the RTTI info. This class (called TInheritor, in my code) needs to know the name of the direct subclass and needs to be able to access static members of the direct base class. In code:
+// Normal inheritance looks like this:
+namespace Normal
+{
+class CBase { };
+class CDerived : public CBase { };
+}
+
+// With the RTTI system:
+namespace RTTI
+{
+template< typename tSub, typename tSuper >
+class TInheritor : public tSuper
+{
+public:
+// Static RTTI stuff.
+private:
+TInheritor( ) { }
+friend tSub;
+};
+class CBase { };
+class CDerived : TInheritor< CDerived, CBase > { };
+}
+
+
+This works just fine, but I'd prefer to use a syntax like this:
+namespace RTTI
+{
+class CBase : public /* some starter mechanism.*/ { };
+class CDerived : public CBase::TInheritor< CDerived > { };
+}
+
+
+The problem is: I haven't been able to figure out how to make something like that work. Here's my attempted implementation:
+// Includes
+#include <iostream>
+
+// Class definitions
+template< typename tSub, typename tSuper >
+class TIntermediate : public tSuper
+{
+public:
+template< typename tNewSub > class TInheritor;
+};
+
+template< typename tSub, typename tSuper> template< typename tNewSub >
+class TIntermediate<tSub, tSuper>::TInheritor : public TIntermediate<tNewSub, tSub>
+{
+private:
+TInheritor( ) { }
+friend tNewSub;
+};
+
+class CDummy { };
+class CBase : public TIntermediate< CBase, CDummy >
+{
+public:
+void Print( ) { std::cout << "Base" << std::endl; }
+};
+
+class CDerived : public CBase::TInheritor< CDerived >
+{
+public:
+void Print( ) { std::cout << "Derived" << std::endl; }
+};
+
+class CDoubleDerived : public CDerived::TInheritor< CDoubleDerived >
+{
+};
+
+// Main
+int _tmain(int argc, _TCHAR* argv[])
+{
+CDoubleDerived dubDer;
+dubDer.Print( );  // Prints "Base"!!!
+
+return 0;
+}
+
+
+Both CDerived and CDoubleDerived inherit from CBase::TInheritor, meaning CDoubleDerived never inherits from CDerived at all. Changing the class definitions as follows makes everything work as expected, but ruins the nice syntax:
+class CDummy { };
+class CBase : public TIntermediate< CDummy, CDummy >::TInheritor< CBase > { };
+class CDerived : public CBase::TIntermediate<CBase,CDummy>::TInheritor< CDerived > { };
+class CDoubleDerived : public CDerived::TIntermediate<CDerived,CBase>::TInheritor< CDoubleDerived > { };
+
+
+Now, for anyone who's still awake, my question: Is there a way to make my desired syntax work? If not, why not? (I feel like it has something to do with #35.18 in the C++ FAQ Lite, but I can't quite make the connection.) Thanks for you help, John Edwards
+
+##### Share on other sites
+Your first option sounds like the happy medium.
+
+##### Share on other sites
+Yeah, it certainly works, and I think it's just a matter of preference whether it or the second method is better (they are both about the same number of keystrokes). At this point I'm just kind of curious as to why the second method doesn't behave as you would expect it to in the absence of templates. I don't need to know the answer to finish implementing my system, but I'm always interested in developing a deeper understanding of the workings of C++.
+
+John Edwards
+
+## Create an account
+
+Register a new account
+
+• ### Forum Statistics
+
+• Total Topics
+627715
+• Total Posts
+2978782
+
+• 9
+• 21
+• 14
+• 12
+• 42

@@ -1,0 +1,76 @@
+Newton-X is a general-purpose program package for excited-state molecular dynamics, which is used to simulate absorption spectrum with GAUSSIAN09 in our group.
+
+There is a tutorial written by Andy Dang about why we need Newton-X, how to run it on Hyak and how to analyse its data. One can find another tutorial on Newton-X website, which is also the reference of the following content. A fast setup could be achieved by my python script. Scripts attached here can run both in python2 and in python3.
+
+Newton-X Setup
+
+Procedures
+
+1. geometry and normal mode input
+
+In the working directory prepare two files: one is the optimized geometry in gaussian input format and the other is the normal mode calculation output file (gaussian frequency log file, usually calcuated with b3lyp method):
+
+opt.gjf freq.log
+
+To work in the newton-x environment on Hyak, run module load contrib/newtonX or module load contrib/newton-x. Their difference is that newton-x contains other package like gaussin09.
+
+4. newton-x working directory
+
+Creat a new directory TDDFT_SPEC in the working directory, copy/move geom to it, copy/move freq.log to it with a new name freq.out:
+
+5. energy and transition moment input
+
+Move to the directory TDDFT_SPEC and create a new subdirectory called JOB_AD. Move into JOB_AD and prepare two files named, basis and gaussian$.$com.
+basis contains the basis set information, like 6-31+g(d,p). gaussian$.$com is same with the very first optimized geometry file opt.gjf but with different link command lines and route card, like (%rwf and %nosave could be deleted):
+
+Note that the subdirectory must be named with JOB_AD and the name of these two files must be basis and gaussian$.$com since Newton-X will search for them.
+
+Back to the directory TDDFT_SPEC, use command $NX/nxinp and answer several quesitons by instructions to genetrate the newton-x input file initqp_input. Answers to the questions are 1 (Generate initial condition); 2 (Winger); numer of atoms; 300 (number of initial conditions); geom; 4 (gaussian output); freq.out; 0.975 (modified frequency); 310 (temperature); n; 1 (check energy); 1 (ground state); number of states; 1 ; 100 (de, width of restriction); 6.5; 0 (seed value); 1; 7 (exit), respectively. Here, the large “de” implies that this restriction will not be used. It can be imposed later on. 7. splitting jobs This step is to split the job among several computers (nodes), could be skipped and go directly to run the newton-x by $NX/initcond.pl > initcond.log.
+
+To split the job, run NX/split_initcond.pl in the directory TDDFT_SPEC. Two questions will be asked, the first one is the number of directories to split the job and the second one is if the job run in a batch system. The answer to the second question is “n”. This program produces one file named split_initcond.log and a directory called INITIAL_CONDITIONS. If the answer to the first quesiton is 10, 10 subdirectories called I1,I2,…,I10 are inside INITIAL_CONDITIONS, each one containing a complete set of input files but with 30 (300 $\div$ 10) initial conditions and iseed=-1 not 0.
+
+8. submit newton-x job
+
+In every directory containing a complete set of input files (geom, freq.out, initqp_input and JOB_AD), create a sbatch file to submit the job to Hyak node.
+
+Scripts
+
+python script newtonx.py can do exactly what step 2 to step 8 do.
+
+• Usage
+• python newtonx.py geometry-gif-file freq-log
+• Descriptions
+• TDDFT_SPEC folder is created, which contains geom, freq.log, initqp_input, split_initcond.log, newtonx$.$sh, JOB_AD, INITIAL_CONDITIONS
+• I1 I2 … in INITIAL_CONDITIONS, each subfolder containing a complete set input – geom, freq.out, initqp_input (iseed=1234,2468,…), JOB_AD and a sbatch file – nx_submit.sh
+• nx_submit.sh is the sbatch file same with what is listed in step 8, but with partition=ckpt, account=stf-ckpt.
+• newtonx$.$sh contains a list of bash command like: cd absolute-path-of-I1; sbatch -p ckpt -A stf-ckpt --time=20:00:00 nx_submit.sh
+• after satisfied with everything, run bash newtonx.sh to submit all jobs to hyak nodes; the final partition, account and time are decided by the setting in newtonx$.$sh even if newtonx$.$sh is different from nx_submit.sh
+• Note
+• why ckpt?
+• increasing the number of splitting jobs speeds up the task greatly
+• ckpt queue is a good choice to run short jobs that finish within 4 hours
+• why iseed=1234,2468,…,1234*n?
+• different iseed values guarantee no repeated jobs
+• iseed=-1 may generate a super large number not suit for ckpt queue
+
+Newton-X Result
+
+Procedures
+
+After all sub-tasks finish, go to the directory INITIAL_CONDITIONS and run $NX/merge_initcond.pl. This program will ask the number of jobs to be merged and it will create a new directory called I_merged with merged results. All important data are in final_optput.1.N file, which contains transition information from state 1 to state N. spectrum simulation Move to this directory and proceed with the spectrum simulation by command $NX/nxinp. The answers to the questions it will ask are 5 (spectra); 1 (spectra); 1 (initial state); 2-N (array of final states); F (Absorption); 0 (no restriction); -1(read osc strength from file); local; 1 (random seed); lorentz; 0.1 (delta); 310 (temperature); 1 (refraction index); 0.005 (distance between consecutive points in the spectrum); 3 (kappa: the range of the spectrum is defined between Emin-kappa*delta and Emax+kappa*delta); 7 (exit), among which delta contronls the width of the curve.
+
+The simulated cross section using a Lorentzian line shape with phenomenological broadening $\delta=0.1eV$ is written to cross-section.dat, containing four columns of data – DE/ev, lambda/nm, sigma/A^2 and +/-error/A^2.
+
+Script
+
+All the above steps can be achieved by script nxplot.py. (This script is to be updated, especially for plot function)
+
+• Usage
+• python nxplot.py
+• run inside the directory INITIAL_CONDITIONS
+• Descriptions
+• check if jobs completed
+• merge splitting jobs
+• spectrum simulation
+• extract the lamda and sigma columns if lamda within 0-1200nm from cross-section.dat and written to cross-section.tsv
+• plot cross-section.tsv if in python3 environment

@@ -1,0 +1,311 @@
+# Project Euler 8 - Redux
+
+Spurred by this question: Project Euler #8 I decided to try to solve it with as clean code as possible.
+
+Here is the problem formulation:
+
+The four adjacent digits in the 1000-digit number that have the greatest product are 9 × 9 × 8 × 9 = 5832.
+
+73167176531330624919225119674426574742355349194934 96983520312774506326239578318016984801869478851843 85861560789112949495459501737958331952853208805511 12540698747158523863050715693290963295227443043557 66896648950445244523161731856403098711121722383113 62229893423380308135336276614282806444486645238749 30358907296290491560440772390713810515859307960866 70172427121883998797908792274921901699720888093776 65727333001053367881220235421809751254540594752243 52584907711670556013604839586446706324415722155397 53697817977846174064955149290862569321978468622482 83972241375657056057490261407972968652414535100474 82166370484403199890008895243450658541227588666881 16427171479924442928230863465674813919123162824586 17866458359124566529476545682848912883142607690042 24219022671055626321111109370544217506941658960408 07198403850962455444362981230987879927244284909188 84580156166097919133875499200524063689912560717606 05886116467109405077541002256983155200055935729725 71636269561882670428252483600823257530420752963450
+
+Find the thirteen adjacent digits in the 1000-digit number that have the greatest product. What is the value of this product?
+
+This is my implementation:
+
+#include <vector>
+#include <string>
+#include <iostream>
+#include <cstdint>
+
+static const char* c_input =
+"73167176531330624919225119674426574742355349194934"
+"96983520312774506326239578318016984801869478851843"
+"85861560789112949495459501737958331952853208805511"
+"12540698747158523863050715693290963295227443043557"
+"66896648950445244523161731856403098711121722383113"
+"62229893423380308135336276614282806444486645238749"
+"30358907296290491560440772390713810515859307960866"
+"70172427121883998797908792274921901699720888093776"
+"65727333001053367881220235421809751254540594752243"
+"52584907711670556013604839586446706324415722155397"
+"53697817977846174064955149290862569321978468622482"
+"83972241375657056057490261407972968652414535100474"
+"82166370484403199890008895243450658541227588666881"
+"16427171479924442928230863465674813919123162824586"
+"17866458359124566529476545682848912883142607690042"
+"24219022671055626321111109370544217506941658960408"
+"07198403850962455444362981230987879927244284909188"
+"84580156166097919133875499200524063689912560717606"
+"05886116467109405077541002256983155200055935729725"
+"71636269561882670428252483600823257530420752963450";
+
+std::vector<std::string> partition(const std::string& input){
+std::vector<std::string> ans;
+
+std::string::size_type pos = 0;
+while (pos < input.size()){
+auto first_non_zero = input.find_first_not_of('0', pos);
+// Only zeros left
+if (first_non_zero == std::string::npos)
+break;
+
+auto next_zero = input.find('0', first_non_zero);
+
+// No zeros left, assume end of string
+if (next_zero == std::string::npos)
+next_zero = input.size();
+
+ans.emplace_back(input.substr(first_non_zero, next_zero - first_non_zero));
+pos = next_zero;
+}
+return ans;
+}
+
+int toint(char digit){
+return digit - '0';
+}
+
+int main(int, char**){
+const auto problem_parts = partition(c_input);
+typedef decltype(problem_parts)::size_type size_type;
+const size_type num_digits = 13;
+uint64_t ans = 0;
+
+for (const auto& problem : problem_parts){
+if (problem.size() < num_digits)
+continue;
+
+uint64_t running_product = 1;
+for (size_type i = 0; i < num_digits; ++i){
+running_product *= toint(problem[i]);
+}
+
+for (size_type i = num_digits; i < problem.size(); ++i){
+// Carefull of rounding and overflow here, division first and then multiplication.
+running_product = running_product / toint(problem[i - num_digits]) * toint(problem[i]);
+if (running_product > ans)
+ans = running_product;
+}
+}
+
+std::cout << "Answer: " << ans << std::endl;
+return 0;
+}
+
+
+Is there anything I can do to improve this, nitpicking welcome.
+
+• What's your time? – Martin York Mar 7 '15 at 2:19
+• Not sure what the partition() is doing. But Why not just keep 13 running totals. Then you just have to loop over the data once and you don't need the relatively expensive division. – Martin York Mar 7 '15 at 9:12
+• @LokiAstari The running time is just about instant. It has linear time complexity in the size of the input string. The number of adjacent factors to consider doesn't affect the run time. The problem can be partitioned into smaller problems by realizing that all 0s will create a zero product around them. Thus splitting the input into subproblems by the zeros creates simpler problems to solve. I'm partitioning the problem as is commonly said. I do not understand your proposal of keeping 13 running totals, could you elaborate? – Emily L. Mar 8 '15 at 10:54
+• Your idea is better. – Martin York Mar 8 '15 at 15:16
+
+It is good the way you do not use using namespace std;. This practice will save you a lot of headaches later on.
+
+In fact, the only problem I found with this code is that you do not use braces around one-line if statements.
+
+if (next_zero == std::string::npos)
+next_zero = input.size();
+
+
+Using braces will not change the runtime behavior of your code, but it can help you prevent errors if you make a mistake, like Apple did with their Apple SSL bug.
+
+## Process once
+
+In partition you are already touching every element in the string once, you might as well convert the character to an int here and return std::vector<int>. Thereby saving all the other toInt calls.
+
+## Bug
+
+I think you will miss the maximum product if it's in the first 13 digits of a partition, in the first for loop you prime running_product with 13 digits (index 0 through 12), entering the second for loop ans is the result from the last partition, or zero, but at the 'if' check running_product is looking at digits (index 1 through 13). Therefore the result of indices 0-12 is never used as ans. Also if the partition has exactly num_digits digits ans would be not checked.
+
+    uint64_t running_product = 1;
+for (size_type i = 0; i < num_digits; ++i){
+running_product *= toint(problem[i]);
+}
+
+if (running_total > ans) ans = running_total;
+
+for (size_type i = num_digits; i < problem.size(); ++i){
+...
+}
+
+
+Adding another check is a quick fix for this.
+
+## Avoid no brace blocks
+
+This is a little bit of a taste issue, the one line block without braces is something that may cause hard to find errors when dealing with older code or multiple team members. If you do it be consistent (There is one loop that has braces with one line, most of the others don't. When it is used I personally prefer to have the statement in one line rather than in two making it a better indication that this is a one liner. E.g.
+
+if (first_non_zero == std::string::npos) break;
+
+
+## Allocations
+
+This is a small euler example, what you are doing is perfectly fine, in a larger scope for a case like this, i'd prefer an algorithm that doesn't have to allocate space again for most of the incoming data. You could easily modify the lower loop to recalculate your running_total when hitting a zero, yes that might cause more multiplications and test but allocations are a bigger drain than multiplication.
+
+Just determining the partition size rather than actually physically partitioning the string into substring what have the same effect without the allocations.
+
+## Standard types aren't necessarily in the global namespace
+
+#include <cstdint>
+
+
+You can't subsequently use std::uint64_t without qualification. You could bring it in (within the main() function):
+
+using std::uint64_t;
+
+
+It would give the compiler a little more latitude (and get us back to not depending on optional features), however to write:
+
+using result_type = std::uint_fast64_t;
+
+
+(We only care that we can hold any number up to 9^13, i.e. 2,541,865,828,329, or 43 bits).
+
+## Bug: size_type isn't what you think
+
+You seem to be using the size type of a vector as the size type of its elements:
+
+typedef decltype(problem_parts)::size_type size_type;
+const size_type num_digits = 13;
+
+
+I think what's meant is
+
+typedef decltype(problem_parts)::value_type::size_type size_type;
+const size_type num_digits = 13;
+
+
+Or, in modern language,
+
+using size_type = decltype(problem_parts)::value_type::size_type;
+
+
+## Reduce the number of strings used
+
+The partition() function is clear and obvious. But it does take its input as a std::string and it does create a whole vector of std::string before you start any of the calculations. You could avoid a bunch of copying by accepting input as a C-style string and by producing each output on demand, rather than all at once in a collection.
+
+A quick win would be to use string_view objects in place of the strings that are collected in the vector:
+
+#include <string_view>
+#include <cstring>
+
+std::vector<std::string_view> partition(const char *input) {
+const char *const input_end = input + std::strlen(input);
+
+std::vector<std::string_view> ans;
+ans.reserve(1 + (input_end - input) / 10); // Assume digits uniformly distributed, and round up
+
+for (auto pos = input;  pos != input_end;  ) {
+auto first = std::find_if(pos, input_end, [](const char c){ return c != '0';});
+pos = std::find(first, input_end, '0');
+
+if (pos != first)
+ans.emplace_back(first, pos - first);
+}
+
+return ans;
+}
+
+
+With no other changes to the program, this eliminates a bunch of small allocations:
+
+before:   total heap usage: 28 allocs, 28 frees, 83,358 bytes allocated
+
+after:    total heap usage:  3 allocs,  3 frees, 75,344 bytes allocated
+
+
+Similarly, you could avoid creating and adding "short" strings to the result vector; the trade-off is that you have to move the knowledge of what's "short" through to partition(). See the final worked example.
+
+## Use a simpler main() declaration
+
+We can just use the form that takes no arguments, since we don't accept any command-line arguments:
+
+int main()
+
+
+## Spelling mistake
+
+// Careful of rounding and overflow here, ...
+
+
+(only one 'l' in 'careful'). You did ask for for some nitpicking, after all!
+
+Note that you don't really need any care about overflow - even if you multiply first, you still have at least 18 bits of headroom (roughly 806,351 times as much as you need). Rounding would only be an issue if you were to write
+
+        running_product *= toint(problem[i]) /  toint(problem[i - num_digits]);
+
+
+Separate *= and /= would be fine, of course.
+
+# Worked example
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <string_view>
+#include <vector>
+
+static auto const c_input =
+"73167176531330624919225119674426574742355349194934"
+"96983520312774506326239578318016984801869478851843"
+"85861560789112949495459501737958331952853208805511"
+"12540698747158523863050715693290963295227443043557"
+"66896648950445244523161731856403098711121722383113"
+"62229893423380308135336276614282806444486645238749"
+"30358907296290491560440772390713810515859307960866"
+"70172427121883998797908792274921901699720888093776"
+"65727333001053367881220235421809751254540594752243"
+"52584907711670556013604839586446706324415722155397"
+"53697817977846174064955149290862569321978468622482"
+"83972241375657056057490261407972968652414535100474"
+"82166370484403199890008895243450658541227588666881"
+"16427171479924442928230863465674813919123162824586"
+"17866458359124566529476545682848912883142607690042"
+"24219022671055626321111109370544217506941658960408"
+"07198403850962455444362981230987879927244284909188"
+"84580156166097919133875499200524063689912560717606"
+"05886116467109405077541002256983155200055935729725"
+"71636269561882670428252483600823257530420752963450";
+
+std::vector<std::string_view> partition(const char *input, std::size_t min_length) {
+auto const input_end = input + std::strlen(input);
+
+std::vector<std::string_view> ans;
+ans.reserve(1 + (input_end - input) / 10); // Assume digits uniformly distributed, and round up
+
+for (auto pos = input;  pos != input_end;  ) {
+auto const first = std::find_if(pos, input_end, [](const char c){ return c != '0';});
+pos = std::find(first, input_end, '0');
+
+std::size_t length = pos - first;
+if (length >= min_length)
+ans.emplace_back(first, length);
+}
+
+return ans;
+}
+
+int main() {
+using result_type = std::uint_least64_t;
+
+std::size_t num_digits = 13;
+auto const problem_parts = partition(c_input, num_digits);
+using size_type = decltype(problem_parts)::value_type::size_type;
+result_type ans = 0;
+
+for (const auto& problem : problem_parts) {
+result_type running_product = 1;
+for (size_type i = 0;  i < problem.size();  ++i) {
+running_product *= problem[i] - '0';
+if (i >= num_digits)
+running_product /= problem[i - num_digits] - '0';
+if (running_product > ans)
+ans = running_product;
+}
+}
+
+std::cout << "Answer: " << ans << std::endl;
+return 0;
+}

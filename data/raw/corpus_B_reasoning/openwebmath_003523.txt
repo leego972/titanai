@@ -1,0 +1,29 @@
+Sunday, November 18, 2012
+
+Cube Law
+
+I have spent the past few days playing with Bayesian statistics, courtesy of JAGS (which is a Markov chain Monte Carlo (MCMC) engine where the acronym stands for Just Another Gibbs Sampler).
+
+The problem I have been wrestling with is what the British call the Cube Law. In first past the post voting systems, with a two-party outcome, the Cube Law asserts that the ratio of seats a party wins at an election is approximately a cube of the ratio of votes the party won in that election. We can express this algebraically as follows (where s is the proportion of seats won by a party and v is the proportion of votes won by the party). Both s and v lie in the range from 0 to 1.
+My question was whether the relationship held up under Australia's two-party-preferred voting system. For the record, I came across this formula in Simon Jackman's rather challenging text: Bayesian Analysis for the Social Sciences.
+
+My first challenge was to make the formula tractable for analysis. I could not work out how Jackman did his analysis (in part because I could not work out how to generate an inverse gamma distribution from within JAGS, and it did not dawn on me initially to just use normal distributions). So I decided to pick at the edges of the problem and see if there was another way to get to grips with it. There are a few ways of algebraically rearranging the Cube Law identity. In the first of the following equations, I have made the power term (relabeled k) the subject of the equation, In the second, I made the proportion of seats won the subject of the equation.
+In the end, I decided to run with the second equation, largely because I thought it could be modeled simply from the beta distribution which provides diverse output in the range 0 to 1. The next challenge was to construct a linking function from the second equation to the beta distribution. I am not sure whether my JAGS solution is efficient or correct, but here goes (constructive criticism welcomed).
+
+    model {        # likelihood function        for(i in 1:length(s)) {            s[i] ~ dbeta(alpha[i], beta[i]) # s is a proportion between 0 and 1            alpha[i] <- theta[i] * phi            beta[i]  <- (1-theta[i]) * phi            theta[i] <- v[i]^k / ( v[i]^k + (1 - v[i])^k )   # Cube Law        }        # prior distributions        phi ~ dgamma(0.01, 0.01)        k ~ dnorm(0, 1 / (sigma ^ 2))   # vaguely informative prior        sigma ~ dnorm(0, 1/10000) I(0,) # uninformative prior, positive    }
+
+The results were interesting. I used the Wikipedia data for Federal elections since 1937. And I framed the analysis from the ALP perspective (ALP TPP vote share and the ALP proportion of seats won).
+
+The mean result for k was 2.94. The posterior distribution for k had a 95% credibility interval between 2.282 and 3.606. The median in the posterior distribution was 2.939 (pretty well the same as the mean; and both were very close to the magical 3 of the Cube Law). It would appear that the Federal Parliament, in terms of the ALP share of TPP vote and seats won operates pretty close to the Cube Law. The distribution of k, over 4 chains each with 50,000 iterations of the MCMC was:
+
+The files I used in this analysis can be found here.
+
+Technical follow-up: Simon Jackman deals with the Cube Law with what looks like an equation from a classical linear regression of logits (logs of odds). The core of this regression equation is as follows:
+
+By way of comparison, the k in my equation is algebraically analogous to the β1 in Jackman's equation. Our results are close: I found a mean of 2.94, Jackman a mean of 3.04. In my equation, I implicitly treat β0 as zero. Jackman found a mean of -0.11. He uses the β0 to asses bias in the electoral system. Nonetheless, the density kernel I found for k (below) looks very similar to the kernel Jackman found for his β1 on page 149 of his text. [This last result may surprise a little as my data spanned the period 1937 to 2010, while Jackman's data spanned a shorter period: 1949 to 2004].
+
+I suspect the pedagogic point of this example in Jackman's text was the demonstration of a particular "improper" prior density  and the use of its conjugate posterior density. I suspect I could have used Jackman's approach with normal priors and posteriors. For me it was a useful learning experience looking at other approaches as a result of not knowing how get an inverse gamma distribution working in JAGS. Nonetheless, if you know how to do the inverse gamma, please let me know.
+
+1 comment:
+
+1. Why not just use the dgamma function and then take its reciprocal?

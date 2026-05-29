@@ -1,0 +1,40 @@
+Question: <p>Using Django's built in models, how would one create a triple-join between three models.</p>
+
+<p>For example:</p>
+
+<ul>
+<li>Users, Roles, and Events are the models.</li>
+<li>Users have many Roles, and Roles many Users.  (ManyToMany)</li>
+<li>Events have many Users, and Users many Events. (ManyToMany)</li>
+<li>But for any given Event, any User may have only one Role.</li>
+</ul>
+
+<p>How can this be represented in the model?</p>
+
+Answer: <p>While trying to find a faster three-table join for my own Django models, I came across this question.  By default, Django 1.1 uses INNER JOINs which can be slow on InnoDB.  For a query like:</p>
+
+<pre><code>def event_users(event_name):
+    return User.objects.filter(roles__events__name=event_name)
+</code></pre>
+
+<p>this might create the following SQL:</p>
+
+<pre><code>SELECT `user`.`id`, `user`.`name` FROM `user` INNER JOIN `roles` ON (`user`.`id` = `roles`.`user_id`) INNER JOIN `event` ON (`roles`.`event_id` = `event`.`id`) WHERE `event`.`name` = "event_name"
+</code></pre>
+
+<p>The INNER JOINs can be very slow compared with LEFT JOINs.  An even faster query can be found under gimg1's answer: <a href="http://stackoverflow.com/questions/10257433/mysql-query-to-join-three-tables#10257569">Mysql query to join three tables</a></p>
+
+<pre><code>SELECT `user`.`id`, `user`.`name` FROM `user`, `roles`, `event` WHERE `user`.`id` = `roles`.`user_id` AND `roles`.`event_id` = `event`.`id` AND `event`.`name` = "event_name"
+</code></pre>
+
+<p>However, you will need to use a custom SQL query: <a href="https://docs.djangoproject.com/en/dev/topics/db/sql/" rel="nofollow">https://docs.djangoproject.com/en/dev/topics/db/sql/</a></p>
+
+<p>In this case, it would look something like:</p>
+
+<pre><code>from django.db import connection
+def event_users(event_name):
+    cursor = connection.cursor()
+    cursor.execute('select U.name from user U, roles R, event E' \
+                   ' where U.id=R.user_id and R.event_id=E.id and E.name="%s"' % event_name)
+    return [row[0] for row in cursor.fetchall()]
+</code></pre>

@@ -1,0 +1,222 @@
+# OSGeo (GDAL/OGR) exercise Geoscripting.¶
+
+In this assignment you’ll interpret the previously build ArcGIS model/script in a complete open source python environment that makes use of the OSGeo (GDAL/OGR) module.
+
+For this assignment you need the OS-GEO linux vitual machine, which is installed on the lab PC’s. The installation includes a python version which has all modules needed pre-installed.
+
+To load the OSGeo modules in python (http://gdal.org/python/):
+
+In [2]:
+import os
+from osgeo import ogr
+from osgeo import osr
+
+
+As in the ArcPy assignment a point should be created first, which can next be used as the centre of a buffer operation.
+
+In [3]:
+wkt = "POINT (173914.00 441864.00)"
+pt = ogr.CreateGeometryFromWkt(wkt)
+print pt.GetX(), pt.GetY()
+
+173914.0 441864.0
+
+
+This will construct an in memory geometry of a point.
+
+An empty dataset (shape-file) should be created where the constructed buffers can be stored, so they can also be used to visualize the results later on. A driver and file should be specified.
+
+In [13]:
+driver = ogr.GetDriverByName('ESRI Shapefile')
+outputSf = 'test.shp'
+
+# Remove output shapefile if it already exists
+if os.path.exists(outputSf):
+driver.DeleteDataSource(outputSf)
+
+# Create output shapefile
+datasource = driver.CreateDataSource(outputSf)
+
+
+And set the coordinate reference system, the reference of the National Dutch Grid (rijksdriehoekstelsel) is known in the Geodetic Parameter Dataset as EPSG28992 (http://www.epsg.org/)
+
+In [14]:
+proj = osr.SpatialReference()
+proj.ImportFromEPSG(28992)
+
+Out[14]:
+0
+
+Use these parameters to construct a new layer for the to be constructed buffers
+
+In [15]:
+layer = datasource.CreateLayer('test', geom_type=ogr.wkbPolygon, srs = proj)
+feature = ogr.Feature(layer.GetLayerDefn())
+
+
+As all necessary conditions are set, and the final buffer operation can be performed. Features can be buffered with a given radius e.g. 1000 meters in size.
+
+Search in the OSGeo documentation how to construct a buffer around the in memory point-geometry http://gdal.org/python/ .
+
+Hint: You need the OGR module to perform vector based spatial operations. Make sure you work with geometries
+
+In [16]:
+bufferDistance = 5000
+poly = pt.Buffer(bufferDistance)
+
+
+Each new geometry of a constructed buffer should be added to the shape-file.
+
+In [17]:
+# Wkt of the constructed buffer polygon
+polygon = ogr.CreateGeometryFromWkt(poly.ExportToWkt())
+feature.SetGeometry(polygon)
+
+# Add the features to the layer/shapefile
+layer.CreateFeature(feature)
+
+Out[17]:
+0
+
+Make it a habit to clean-up the memory after finishing loops/scripts:
+
+In [18]:
+# Clean-up the added buffer polygon for next loop
+polygon.Destroy()
+
+feature.Destroy()
+datasource.Destroy()
+
+
+The result of the assignment can be visualized in QGIS
+
+# The results can be visualized using Cartopy and Matplotlib¶
+
+In [19]:
+import cartopy.crs as ccrs
+import cartopy.io.img_tiles as cimgt
+from cartopy.feature import ShapelyFeature
+
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+%matplotlib inline
+
+
+Plot the buffered location on the OSM basemap
+
+To be able to use epsg codes for projection settings, cartopy depends on pyepsg, this module is not installed by default.
+I can be obtained from https://pypi.python.org/pypi/pyepsg/0.1.0.
+Unpack and open the folder in the command shell to install:
+python setup.py install
+
+In [20]:
+ax = plt.axes(projection=ccrs.epsg(28992))
+
+extent = [(pt.GetX()-10000), (pt.GetX()+10000), (pt.GetY()-10000), (pt.GetY()+10000)]
+#extent = [(pt.GetX()-1000), (pt.GetY()-1000), (pt.GetX()+1000), (pt.GetY()+1000)]
+#extent = [51.5, 5.0, 52.0, 6.0]
+print extent
+#ax.set_extent(extent, crs=ccrs.PlateCarree())
+ax.set_extent(extent, crs=ccrs.epsg(28992))
+
+#Add the OSM basemap (this makes the drawing very slow)
+bg = cimgt.OSM()
+
+#fname = 'test.shp'
+ccrs.epsg(28992), facecolor='red')
+
+[163914.0, 183914.0, 431864.0, 451864.0]
+
+Out[20]:
+<cartopy.mpl.feature_artist.FeatureArtist at 0xaccbe08c>
+In [21]:
+plt.show()
+
+
+## Reproject the buffer object to lon/lat¶
+
+In [22]:
+from osgeo import ogr, osr
+import os
+
+driver = ogr.GetDriverByName('ESRI Shapefile')
+
+# input SpatialReference
+inSpatialRef = osr.SpatialReference()
+inSpatialRef.ImportFromEPSG(28992)
+
+# output SpatialReference
+outSpatialRef = osr.SpatialReference()
+outSpatialRef.ImportFromEPSG(4326)
+
+# create the CoordinateTransformation
+coordTrans = osr.CoordinateTransformation(inSpatialRef, outSpatialRef)
+
+# get the input layer
+inDataSet = driver.Open(r'test.shp')
+inLayer = inDataSet.GetLayer()
+
+# create the output layer
+outputShapefile = r'test_4326.shp'
+if os.path.exists(outputShapefile):
+driver.DeleteDataSource(outputShapefile)
+outDataSet = driver.CreateDataSource(outputShapefile)
+outLayer = outDataSet.CreateLayer("test_4326", geom_type=ogr.wkbMultiPolygon)
+
+inLayerDefn = inLayer.GetLayerDefn()
+for i in range(0, inLayerDefn.GetFieldCount()):
+fieldDefn = inLayerDefn.GetFieldDefn(i)
+outLayer.CreateField(fieldDefn)
+
+# get the output layer's feature definition
+outLayerDefn = outLayer.GetLayerDefn()
+
+# loop through the input features
+inFeature = inLayer.GetNextFeature()
+while inFeature:
+# get the input geometry
+geom = inFeature.GetGeometryRef()
+# reproject the geometry
+geom.Transform(coordTrans)
+# create a new feature
+outFeature = ogr.Feature(outLayerDefn)
+# set the geometry and attribute
+outFeature.SetGeometry(geom)
+for i in range(0, outLayerDefn.GetFieldCount()):
+outFeature.SetField(outLayerDefn.GetFieldDefn(i).GetNameRef(), inFeature.GetField(i))
+# add the feature to the shapefile
+outLayer.CreateFeature(outFeature)
+# destroy the features and get the next input feature
+outFeature.Destroy()
+inFeature.Destroy()
+inFeature = inLayer.GetNextFeature()
+
+# close the shapefiles
+inDataSet.Destroy()
+outDataSet.Destroy()
+
+
+## Draw the reprojected buffer on a basemap¶
+
+In [3]:
+from mpl_toolkits.basemap import Basemap
+import matplotlib.pyplot as plt
+import numpy as np
+
+In [13]:
+%matplotlib inline
+
+fig = plt.figure(figsize=(6,4))
+
+ax = plt.subplot(111)
+
+#Let's create a basemap around Netherlands & Belgium
+m = Basemap(resolution='i',projection='merc', llcrnrlat=51.5,urcrnrlat=52.5,llcrnrlon=5.0,urcrnrlon=6.0,lat_ts=51.5)
+m.drawcountries(linewidth=0.5,color='gray')
+m.drawcoastlines(linewidth=0.5,color='gray')
+m.drawmapboundary(fill_color='gray')
+
+#m.drawparallels(np.arange(51.,5.,1.),labels=[1,0,0,0],color='gray',dashes=[3,1],linewidth=0.4) # draw parallels
+#m.drawmeridians(np.arange(1.,9.,1.),labels=[0,0,0,1],color='gray',dashes=[3,1],linewidth=0.4) # draw meridians
+
+#m.fillcontinents(color='black',lake_color='gray')

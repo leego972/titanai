@@ -1,0 +1,42 @@
+Question: <p>I'm using the <a href="http://docs.python.org/library/subprocess.html">subprocess module</a> to start a subprocess and connect to it's output stream (stdout). I want to be able to execute non-blocking reads on its stdout. Is there a way to make .readline non-blocking or to check if there is data on the stream before I invoke <code>.readline</code>? I'd like this to be portable or at least work under Windows and Linux.</p>
+
+<p>here is how I do it for now (It's blocking on the <code>.readline</code> if no data is avaible):</p>
+
+<pre><code>p = subprocess.Popen('myprogram.exe', stdout = subprocess.PIPE)
+output_str = p.stdout.readline()
+</code></pre>
+
+Answer: <p>This version of non-blocking read <strong>doesn't</strong> require special modules and will work out-of-the-box on majority of Linux distros.</p>
+
+<pre><code>import os
+import sys
+import time
+import fcntl
+import subprocess
+
+def async_read(fd):
+    # set non-blocking flag while preserving old flags
+    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+    # read char until EOF hit
+    while True:
+        try:
+            ch = os.read(fd.fileno(), 1)
+            # EOF
+            if not ch: break                                                                                                                                                              
+            sys.stdout.write(ch)
+        except OSError:
+            # waiting for data be available on fd
+            pass
+
+def shell(args, async=True):
+    # merge stderr and stdout
+    proc = subprocess.Popen(args, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if async: async_read(proc.stdout)
+    sout, serr = proc.communicate()
+    return (sout, serr)
+
+if __name__ == '__main__':
+    cmd = 'ping 8.8.8.8'
+    sout, serr = shell(cmd.split())
+</code></pre>

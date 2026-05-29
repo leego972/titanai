@@ -1,0 +1,272 @@
+• Create Account
+
+## Simulating CRT persistence?
+
+Old topic!
+
+Guest, the last post of this topic is over 60 days old and at this point you may not reply in this topic. If you wish to continue this conversation start a new topic.
+
+14 replies to this topic
+
+### #1magicstix  Members
+
+191
+Like
+0Likes
+Like
+
+Posted 17 November 2012 - 07:36 PM
+
+HI all,
+I want to simulate CRT persistence in a render-to-texture effect. Essentially I'm looking to simulate an old CRT screen, like an analog oscilloscope or a radar screen. If I were using OpenGL, I figure the best way to do this would be to use an accumulation buffer, but DirectX lacks such a capability.
+
+So then, what would be the best way to achieve this effect with hardware acceleration in D3D11?
+
+### #2Hodgman  Moderators
+
+49430
+Like
+1Likes
+Like
+
+Posted 17 November 2012 - 08:24 PM
+
+You can make an "accumulation buffer" just by creating a new render target (texture) and accumulating values into it.
+
+e.g. to keep 10% of the previous frame around (and 1% of the frame before that, and 0.1% of the frame before that...)
+Render scene to target #1.
+Blend target #1 into target #2 with 90% alpha.
+Display target #2 to screen.
+
+### #3magicstix  Members
+
+191
+Like
+0Likes
+Like
+
+Posted 22 November 2012 - 10:30 PM
+
+Is there a way to blend the two targets in a blit-style approach? The only way I know to do it would require me to render two quads, one into the other, and I assume that's not best practice.
+
+### #4Hodgman  Moderators
+
+49430
+Like
+3Likes
+Like
+
+Posted 23 November 2012 - 07:55 AM
+
+You only need one quad -- bind the "bottom" layer as the current render-target, then draw a quad textured with the "top" layer.
+Rendering quads is indeed the standard way to do it - it's what the GPUs are designed to be good at. Most specialized 2D operations have been thrown out of the hardware these days.
+
+Actually, it's often done with a single triangle that's large enough to just cover the screen, e.g. if the screen is the box:
+|\
+| \
+|__\
+|  |\
+|__|_\
+
+### #5magicstix  Members
+
+191
+Like
+0Likes
+Like
+
+Posted 23 November 2012 - 02:04 PM
+
+So basically it's just like rendering to the backbuffer without clearing it between frames?
+
+### #6magicstix  Members
+
+191
+Like
+0Likes
+Like
+
+Posted 02 December 2012 - 04:57 PM
+
+I can't quite get my blending to work right on this. The image gives a nice trail, but never quite fades out completely:
+
+I have my blending set up as follows:
+rtbd.BlendEnable    = true;
+rtbd.SrcBlend	 = D3D11_BLEND_SRC_ALPHA;
+rtbd.DestBlend	 = D3D11_BLEND_SRC_ALPHA;
+rtbd.SrcBlendAlpha    = D3D11_BLEND_ONE;
+rtbd.DestBlendAlpha    = D3D11_BLEND_ONE;
+
+
+I've tried other blend settings but this is the only one that gives a trail. Others will remove the trail completely and leave me with just the dot. I'm not clearing the 2nd render target between frames (which in this case happens to be the back buffer) but I am clearing the first RTV between frames (the texture for the screen-sized quad). The dot itself is rendered as a small quad with exponential alpha fall-off from the center.
+
+Any ideas on what I'm doing wrong?
+
+### #7Such1  Members
+
+435
+Like
+0Likes
+Like
+
+Posted 02 December 2012 - 05:33 PM
+
+I think you are not clearing the buffers after u used them.
+
+### #8magicstix  Members
+
+191
+Like
+0Likes
+Like
+
+Posted 02 December 2012 - 05:51 PM
+
+I think you are not clearing the buffers after u used them.
+
+Like I said in the post, I'm not clearing the back buffer. This is intended because it gives the accumulated trail in the first place. The problem is the trail never reaches zero.
+
+### #9Such1  Members
+
+435
+Like
+0Likes
+Like
+
+Posted 02 December 2012 - 08:33 PM
+
+You have 2 backBuffer, you should do something like this:
+clean both buffers
+loop:
+render buffer1 on buffer2 with 90%
+clean buffer1
+render what you want on buffer 2
+switch places between buffer 1 and 2
+your image is now on buffer1
+
+### #10CryZe  Members
+
+773
+Like
+0Likes
+Like
+
+Posted 03 December 2012 - 02:04 AM
+
+Do what Such1 said. Also your blend state description should look like this:
+rtbd.BlendEnable    = true;
+rtbd.SrcBlend    = D3D11_BLEND_SRC_ALPHA;
+rtbd.DestBlend   = D3D11_BLEND_INV_SRC_ALPHA;
+rtbd.SrcBlendAlpha    = D3D11_BLEND_ONE;
+rtbd.DestBlendAlpha    = D3D11_BLEND_ZERO;
+
+
+Edited by CryZe, 03 December 2012 - 02:05 AM.
+
+### #11unbird  Members
+
+8298
+Like
+1Likes
+Like
+
+Posted 03 December 2012 - 02:59 PM
+
+This might actually be a precision problem. Are you using low-color-resolution rendertargets/backbuffer/textures (8 bit per channel) ?
+
+### #12magicstix  Members
+
+191
+Like
+1Likes
+Like
+
+Posted 03 December 2012 - 05:22 PM
+
+This might actually be a precision problem. Are you using low-color-resolution rendertargets/backbuffer/textures (8 bit per channel) ?
+
+I'm using 32-bit color for the backbuffer (R8G8B8A8) but 32 bit float for the texture render target. I didn't know your backbuffer could go higher than 32bit (8 bit per channel) color... When I try R32G32B32A32_FLOAT for the back buffer I get a failure in trying to set up the swap chain.
+
+Maybe I need to accumulate in a second texture render target instead of the back buffer?
+
+-- Edit --
+
+I forgot to mention I've changed my blending a bit. I'm using a blend factor now instead of straight alpha blend, but I'm still having the same effect with not getting it to fade completely to zero.
+
+Here are my current settings:
+rtbd.BlendEnable    = true;
+rtbd.SrcBlend	 = D3D11_BLEND_SRC_COLOR;
+rtbd.DestBlend	 = D3D11_BLEND_BLEND_FACTOR;
+rtbd.SrcBlendAlpha    = D3D11_BLEND_ONE;
+rtbd.DestBlendAlpha    = D3D11_BLEND_ONE;
+
+/* .... */
+float blendFactors[] = {.99, .97, .9, 0};
+g_pImmediateContext->OMSetBlendState(g_pTexBlendState, blendFactors, 0xFFFFFFFF);
+
+
+If I understand this correctly, it should eventually fade to completely black, since the blend factor will make it slightly darker every frame, yet I'm still left with the not-quite-black trail.
+
+Edited by magicstix, 03 December 2012 - 05:42 PM.
+
+### #13Such1  Members
+
+435
+Like
+0Likes
+Like
+
+Posted 03 December 2012 - 07:45 PM
+
+Why do you have this? float blendFactors[] = {.99, .97, .9, 0};
+shouldn't it be something like:
+float blendFactors[] = {.9, .9, .9, .9};
+And no, it will never fade completely(theoretically), but it should get really close.
+
+### #14Hodgman  Moderators
+
+49430
+Like
+1Likes
+Like
+
+Posted 03 December 2012 - 09:06 PM
+
+Did you try CryZe's blend mode, AKA "alpha blending"?
+
+it will never fade completely(theoretically), but it should get really close.
+
+You've got to keep the 8-bit quantization in mind with regards to this.
+If the background is 1/255, then when you multiply by 0.99, you still end up with 1/255 -- e.g. intOutput = round( 255 * ((intInput/255)*0.99) )
+
+Instead of directly blending the previous contents and the current image, there's other approaches you could try.
+e.g. you could render the previous contents into a new buffer using a shader that subtracts a value from it, and then add the current image into that buffer. This way you'll definitely reach zero, even in theory
+
+### #15magicstix  Members
+
+191
+Like
+1Likes
+Like
+
+Posted 03 December 2012 - 10:52 PM
+
+Did you try CryZe's blend mode, AKA "alpha blending"?
+
+it will never fade completely(theoretically), but it should get really close.
+
+You've got to keep the 8-bit quantization in mind with regards to this.
+If the background is 1/255, then when you multiply by 0.99, you still end up with 1/255 -- e.g. intOutput = round( 255 * ((intInput/255)*0.99) )
+
+Instead of directly blending the previous contents and the current image, there's other approaches you could try.
+e.g. you could render the previous contents into a new buffer using a shader that subtracts a value from it, and then add the current image into that buffer. This way you'll definitely reach zero, even in theory
+
+Yes I tried Cryze's recommendation, however it didn't look right either. I like how color blending looks over pure alpha better anyway, since I can fade the individual channels separately and get a "warmer" looking fade that looks even more like a CRT. I see your point about the dynamic range, and I agree that subtracting would be best, except when you subtract 1 from 0 you still clamp at zero, so the accumulation buffer's dark bits would block out where the "new" accumulated yellow bits should go.
+
+I think I'll try and get around the dynamic range issue by rendering into a second texture, one that's 32-bit float, instead of using the backbuffer. This is how it'd be used in practice anyway, so using the backbuffer for this test is probably not a real representation of the technique. Hopefully the greater dynamic range will let the accumulation eventually settle on zero.
+
+Here's what I mean by the "warmer" look of using color blending instead of alpha, it looks a lot more phosphor-like:
+
+Old topic!
+
+Guest, the last post of this topic is over 60 days old and at this point you may not reply in this topic. If you wish to continue this conversation start a new topic.

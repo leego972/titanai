@@ -1,0 +1,64 @@
+# SVM : support vector has margin of 0?
+
+I am trying to generate the separating hyperplane of binary classification for 3D points.
+
+Here are my points, which are linearly separable.
+
+Class 0: [[0,0,0], [0,1,1], [1,0,1], [0.5,0.4,0.4]]
+Class 1: [[1,3,1], [2,0,2], [1,1,1]]
+
+
+From sklearn.svm.SVC(kernel='linear'), the following is produced:
+
+w = clf.coeff_ = [ 1.   0.5  0.5]
+b = clf.intercept_ = -2.0
+sv = clf.support_vectors_ =
+array([[ 0.,  1.,  1.],
+[ 1.,  0.,  1.],
+[ 2.,  0.,  2.],
+[ 1.,  1.,  1.]])
+
+
+The understanding is, if w.dot(x)+b returns a negative value, then x is of Class 0; if positive value, then Class 1. However, w.dot([1,1,1])+b = 0 !! This means that [1,1,1], which is a support vector from Class 1, lies on the separating plane..... while no SVs from Class 0 lie on the sep. plane.
+
+SO MY QUESTION IS...
+
+My data is linearly separable, so theoretically an SVM should have margins >0 for both classes. But here, my SVM has a =0 for class1 and >0 margin for class0. Why is this the case? And if my hyperplane is incorrect, how can I calculate the correct hyperplane? Thank you.
+
+CODE
+
+from sklearn import svm
+X0 = [[0,0,0], [0,1,1], [1,0,1], [0.5,0.4,0.4]]
+Y0 = [0] * len(X0)
+X1 = [[1,3,1], [2,0,2], [1,1,1]]
+Y1 = [1] * len(X1)
+X = X0 + X1
+Y = Y0 + Y1
+clf = svm.SVC(kernel='linear')
+clf.fit(X, Y)
+sv = clf.support_vectors_
+w = clf.coef_[0]
+b = clf.intercept_[0]
+print([w.dot(X0[i])+b for i in range(len(X0))]) # negative class
+print([w.dot(X1[i])+b for i in range(len(X1))]) # positive class
+
+• You are asking a question about the fundamentals of svm, but you are using a bit of python that makes it look like a programming question. I don't think this should be closed. Can you plot the convergence (classification error, or Cohens kappa) of the fitted classification function as a function of iterations? – EngrStudent May 22 '18 at 16:30
+
+By default, most SVM implementations are soft-margin SVM, which allows a point to be within the margin, or even on the wrong side of the decision boundary, even if the data is linearly separable. However, there is a penalty associated with each point which violates the traditional SVM constraints.
+
+If we set the coefficient on the penalty to some very large value, we get something closer to hard-margin SVM which does what you'd expect:
+
+>>> clf = svm.SVC(kernel='linear', C = 10000.)
+>>> clf.fit(X, Y)
+>>> w = clf.coef_[0]
+>>> b = clf.intercept_[0]
+>>> print([w.dot(X0[i])+b for i in range(len(X0))]) # negative class
+[-2.9999999999999987, -0.9999999999999987, -0.9999999999999991, -1.1999999999999988]
+>>> print([w.dot(X1[i])+b for i in range(len(X1))]) # positive class
+[5.000000000000002, 1.0000000000000004, 1.0000000000000009]
+
+
+As you can see, the margins are now equal on both sides.
+
+• Hi @shimao, thanks for your answer! I tried your C=10000, but it returned hyperplane values w [2. 2. 0.] b -2.9999999999999987 which is equates to inf*x + inf*y + 0*z = -3, so that doesn't help with respect to the hyperplane. So I tried C=2, and then values make more sense :) – tamtam May 20 '18 at 13:48
+• @tamtam $2x+2y+0z = -3$ is a perfectly valid hyperplane – shimao May 20 '18 at 13:56

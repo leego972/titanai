@@ -1,0 +1,270 @@
+# [Matroska-devel] EBML Namespaces
+
+Steve Lhomme steve.lhomme at free.fr
+Sun Apr 30 17:51:43 CEST 2006
+
+HAESSIG Jean-Christophe wrote:
+> The lowlevel EBML parser's job will be to demultiplex the
+> elements from different vocabularies and feed them to the
+> correct application. Since the namespace information is only
+> a means to multiplexing, it is not forwarded to the application
+> and therefore "removed".
+
+Technically I think an application should "register" itself as capable
+of understanding namespace X. This way this application gets the element
+in the order they appear, while separating the namespaces could mean a
+'desynchronisation' of the level where the ID was found.
+
+Then if the "host" app wants to handle namespace separately in the code,
+it's its responsability.
+
+> Below is a schematic of my idealized vision of the EBML logical
+> infrastructure :
+>                                        _____
+>                  Lowlevel             /     \
+>                  parser     --------->|     | X application
+>      ______        __      /elements  |     |
+>     |      |      /  \    / in NS X   \_____/
+>     |      |----->|  |----             _____
+>     |      |      |  |---- elements   /     \
+>     |______|      \__/    \in NS Y    |     | Y application
+>     EBML File      ^|      ---------->|     |
+>                    ||elements         \_____/
+>        registration||    _____          |EBML API
+>        &state after||   /     \         |e.g. seeking
+>        seeking     |*-->|     |<--------*
+>                    *----|     | EBML application
+>                         \_____/
+>
+> A plain old EBML application (e.g. Matroska) without namespaces
+> Would extend the EBML application.
+> A new one (with namespace support) would implement a new
+> application module and register to the lowlevel parser.
+
+Yes, we probably meant the same thing then ;)
+
+> Now where do I see the NS IDs precisely ?
+>
+>      [Class-ID][Size][Data         ****]
+>      /        \_______________________________
+>     /                                         \
+>     [Length Descriptor][Namespace][Class Value]
+>
+> The lowlevel parser reads the length descriptor and extracts
+> the value bits (NS+CLASS). In these bits are the namespace of
+> the element and the class ID value. Before the parser tries
+> to decode the NS, all the possible NS values that this element
+> may use must be known to the parser (that's somewhat obvious,
+> but it doesn't mean that NS definitions have to physically be
+> written before the element using them -- think XML ;).
+>
+> The possible NS values must be prefix codes, this allows the
+> parser to scan the values bits from left to right and exactly
+> know when the NS ID ends. The rest of the value bits are the
+> Class-ID value which is forwarded to the corresponding
+> application.
+>
+> Examples with 3 namespaces :
+> 0 : EBML
+> 10 : NSX
+> 11 : NSY
+
+Would you have a variable length size or use 00, 01, 10, 11 ?
+
+The number of namespaces in the file is written in the EBML which is
+mandatory to read. So it's known beforehand how many bits will be needed
+to read the namespace. And therefore I think it's better to have a fixed
+length, it will use less space. The impact on backward compatibility
+(matroska) is about the same as some Class-ID will need to be extended
+by 1 octet to remain valid.
+
+Now as we're probably heading for this compatibility issue (only for
+files including more than 1 namespace) I'd also like to introduce the
+EbmlMaster bit in the ID header. So that it's possible for an EBML
+parser to parse the whole tree without knowing anything about the semantic.
+
+> 0x8F   = 0b10001111   Namespace      : EBML
+>            LNVVVVVV   Class-ID value : 15(dec)
+>
+> 0xDB   = 0b11011011   Namespace      : NSX
+>            LNNVVVVV   Class-ID value : 27(dec)
+>
+> 0x7D09 = 0b01111101 00001001   Namespace      : NSY
+>            LLNNVVVV VVVVVVVV   Class-ID value : 3337(dec)
+>
+>>> EBML is supposed to be a byte-aligned format and it would
+>>> require at least 1 extra byte for each element. This is not
+>>> bad in itself, but it would waste a great amount of bits,
+>>> since I do not expect files with more than 5 mixed namespaces
+>>> to be frequent. Therefore, I expect the namespace value to take
+>>> up to 3 bits in most cases, this is why I try to pack it into
+>>> an existing field.
+>> Well, what happens when you need 6 or 7 ? You don't have any
+>> more bits left. Adding another byte or 2 gives room for
+>
+> When I say that I do not expect files using more than 5 namespaces
+> to be frequent it doesn't mean that I want to disallow files which
+> need to use more... It only means that we should be able to encode
+> the NS on less than 1 byte (preferably only 2 or 3 bits) for the most
+> frequent case. Cases requiring 300+ simultaneous namespaces will
+> still be allowed, but they will use more bits (8,9,10,more) to
+> express the namespace of the various contained elements.
+
+OK that's fine. Unfortunately the matroska IDs were designed to make use
+of as many different bits as possible (less false alarm in case of
+errors). And we needed as varied elements as possible in a format where
+all tags would be global. Now with namespaces that constraint will fall.
+
+> Moreover, even if we have files using many namespaces, I really
+> doubt they will massively mix them -- a localized use of some
+> namespace is more likely. Therefore we should definitely have
+> some namespace switching feature, and namespace IDs should not
+> be globally fixed for a given file.
+
+Yes, there is no point at a level X to use different namespaces in
+random order as their semantic is orthogonal. So the elements will
+probably end up being grouped by namespace. Given that it means
+Atamido's proposition for a new special tag might be enough ! But it
+should be a Class-A tag to avoid overhead. In this case it would be 3
+octets for each added namespace: the ID, the size of the namespace
+(could be more than one if that element is an EbmlMaster), the namespace
+value. Another option would be to use a new EBML type, similar to
+EbmlMaster but with a namespace ID before the other elements.
+
+Using such an element/type could be problematic though. It can keep
+matroska compatibility easily only if we revert to the default/main
+namespace in absence of that container element. That means, as proposed
+before, we always assume, in the absence of a namespace, that we use the
+default. That proposition also allow to chain namespaces (like
+std::iterator::int).
+
+Seeking anywhere in the file (at the EBML level) is still a problem (in
+all cases proposed) as we are unable to recover the complete namespace
+context. It could only work for 0 or 1 namespace in the chain.
+
+Another problem if we don't have the notion of default namespace is to
+seek in matroska (semantic level) because that means the level 0 would
+need to be contained in the default namespace, and therefore would need
+to be prepended with that new ID. That means it's not backward
+compatible at all.
+
+Now chaining namespaces may not be so clean. Imagine you have a
+namespace for "comments" and a namespace for "signature". You can put
+signature anywhere in the file. But if what you add a comment in a
+signature or a signature in a comment ? How to interpret
+"signature::comment" or "comment::signature" IDs ? In that case we only
+need to use "comment" or "signature"... So is namespace chaining a
+feature we want ? Or we always revert to the last seen namespace ? (in
+which case seeking becomes easy)
+
+>> I'm not too concerned about the overhead because right now if
+>> you need a lot of IDs you need to use 2 octets long ones.
+>> While with a namespace most IDs for each namespace won't need
+>> a lot of room (127 possibilities for Class A IDs). So in the
+>> end there should be a good balance.
+>
+> EBML is a wonderful structured format. I don't mean to restrain
+> format writers from defining the format they like, but using a
+> lot of IDs in some flat space is not what I would call good
+> engineering. As for XML, I think the tree-like encapsulating
+
+You're right. Even matroska could do with a better element mapping.
+Especially to show how matroska is modular. We could easily see if a
+parser supports a module and not the others... (like tags or chapters)
+
+>> Using 3 bits in the ID header would reduce the number of
+>> possible Class A IDs of a format to 2^4-1 = 15 ! That's too
+>> small IMO. So I think adding another bit will give us more
+>> freedom and space and almost no cost.
+>
+> With a variable-width NS-ID embedded in the ID header, a
+> separation in classes is less relevant. In cases where only 2
+> namespaces are used, only 1 bit is needed, thus 6 bits are left
+> to encode the element ID value. Format writers should be aware
+> that element IDs ranging from 0 to 63(dec) use at least 1 byte,
+> maybe more, depending on the number of namespaces actually in
+> use. For example, if the namespace ID for one element uses 2
+> bits, element ID values ranging from 32 to 4095 will need 2
+> bytes. If the namespace ID 3 bits, element ID values ranging
+> from 16 to 2047 will need 2 bytes, and element ID values
+> ranging from 2048 to 262143 will need 3 bytes, etc...
+>
+> The following chart summarizes how much bytes are required to
+> encode an element ID assuming various NS ID lengths. In fact
+> it could be a little smarter than that (there are still some
+> wasted bits but for the moment I don't know what to do with
+> them).
+>
+> |NS ID Length               Bytes Required ------->
+> v  1       2           3               4                   5
+> 0 0-127 128-16383 16384-2097151 2097152-268435455 268435456-34359738367
+> 1 0-63   64-8191   8192-1048575 1048576-134217727 134217728-17179869183
+> 2 0-31   32-4095   4096-524287   524288-67108863   67108864-8589934591
+> 3 0-15   16-2047   2048-262143   262144-33554431   33554432-4294967295
+> 4 0-7    8-1023    1024-131071   131072-16777215   16777216-2147483647
+> 5 0-3    4-511      512-65535     65536-8388607     8388608-1073741823
+> 6 0-1    2-255      256-32767     32768-4194303     4194304-536870911
+> 7  *     1-127      128-16383     16384-2097151     2097152-268435455
+> 8  *     1-63        64-8191       8192-1048575     1048576-134217727
+>
+> Also, I don't intend to change the Reserved Values : these are still
+> 127,16383,2097151,268435455,34359738367, etc, regardless of the
+> inserted NS ID.
+>
+>>> You seem to be prepared to make big changes to the format,
+>> but I don't
+>>> know to what extent whe should break compatibility...
+>> Again, for current Matroska files it shouldn't be a problem
+>> as matroska would be the default namespace. In that case the
+>> namespace shouldn't be used for such IDs. That means older
+>> files will play without any problem in namespace-aware
+>> parsers. Only newer files containing some namespace will not
+>> be usable by older parsers. Which AFAIK is the same with what
+>> you propose.
+>>
+>> BTW, we still haven't discussed how to define the namespace
+>> in the EBML header, but the DocType existing today will
+>> remain. And that is the way to define the special namespace
+>> that will be used as default... The other namespaces will
+>> probably fall back in an list. It's like the DocType in XML
+>> (like html). At least we got the right name for that field ;)
+>
+> I understand that you are referring to a "default" namespace as
+> in XML. Well, that's not how I see it. If there is some kind of
+> default namespace i.e. not expressed for elements in this
+> namespace we still need a way to tell that the namespace value
+> is present or absent. I intend to have two kinds of files :
+> * Files without namespaces, i.e. NS length = 0. This
+> mathematically forbids the presence of namespaces since the
+> empty code is a prefix for all codes.
+> * Files using namespaces, i.e. NS length >= 1. There can be
+> only 2 namespaces (0 & 1, each using one bit), or more, as
+> seen in the previous examples, but each element holds a
+> namespace ID.
+
+This is only necessary for your proposal (and mine). As seen above
+having multiple namespaces nested might not be a problem. And we need to
+have a default fall back value (when we're out of the new element/type).
+
+>> Yes that would be a limit but seeking in a file format is a
+>> very special feature not used a lot for most formats. It
+>> makes sense in A/V formats where there is a timeline, but
+>> then you need to know the semantic to know what you're
+>> looking for when seeking.
+>
+> A good seeking feature could be quite useful in applications
+> without a timeline : large images can be tiled and zooming to
+> a precise position can be sped up by seeking info indexed by
+> (x,y) coordinates. Databases using EBML would clearly benefit
+> from seeking features. I think I could find many other
+> examples...
+
+Yes, I've been dreaming about a DB that would be EBML based or a file
+system. And given custom attributes are present in modern file systems
+it could be an option. Seeking in a file system would also be very
+important.
+
+Steve (thinks we're getting somewhere)
+
+--
+robUx4 on blog <http://robux4.blogspot.com/>

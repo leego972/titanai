@@ -1,0 +1,48 @@
+Question: <p>I want my Python script to copy files on Vista. When I run it from a normal <code>cmd.exe</code> window, no errors are generated, yet the files are NOT copied. If I run <code>cmd.exe</code> "as administator" and then run my script, it works fine.</p>
+
+<p>This makes sense since User Account Control (UAC) normally prevents many file system actions.</p>
+
+<p>Is there a way I can, from within a Python script, invoke a UAC elevation request (those dialogs that say something like "such and such app needs admin access, is this OK?")</p>
+
+<p>If that's not possible, is there a way my script can at least detect that it is not elevated so it can fail gracefully?</p>
+
+Answer: <p>Recognizing this question was asked years ago, I think a more elegant solution is offered on <a href="https://github.com/frmdstryr/pywinutils" rel="nofollow">github</a> by frmdstryr using his module pyminutils: </p>
+
+<p>Excerpt:</p>
+
+<pre><code>import pythoncom
+from win32com.shell import shell,shellcon
+
+def copy(src,dst,flags=shellcon.FOF_NOCONFIRMATION):
+    """ Copy files using the built in Windows File copy dialog
+
+    Requires absolute paths. Does NOT create root destination folder if it doesn't exist.
+    Overwrites and is recursive by default 
+    @see http://msdn.microsoft.com/en-us/library/bb775799(v=vs.85).aspx for flags available
+    """
+    # @see IFileOperation
+    pfo = pythoncom.CoCreateInstance(shell.CLSID_FileOperation,None,pythoncom.CLSCTX_ALL,shell.IID_IFileOperation)
+
+    # Respond with Yes to All for any dialog
+    # @see http://msdn.microsoft.com/en-us/library/bb775799(v=vs.85).aspx
+    pfo.SetOperationFlags(flags)
+
+    # Set the destionation folder
+    dst = shell.SHCreateItemFromParsingName(dst,None,shell.IID_IShellItem)
+
+    if type(src) not in (tuple,list):
+        src = (src,)
+
+    for f in src:
+        item = shell.SHCreateItemFromParsingName(f,None,shell.IID_IShellItem)
+        pfo.CopyItem(item,dst) # Schedule an operation to be performed
+
+    # @see http://msdn.microsoft.com/en-us/library/bb775780(v=vs.85).aspx
+    success = pfo.PerformOperations()
+
+    # @see sdn.microsoft.com/en-us/library/bb775769(v=vs.85).aspx
+    aborted = pfo.GetAnyOperationsAborted()
+    return success is None and not aborted    
+</code></pre>
+
+<p>This utilizes the COM interface and automatically indicates that admin privileges are needed with the familiar dialog prompt that you would see if you were copying into a directory where admin privileges are required and also provides the typical file progress dialog during the copy operation.</p>

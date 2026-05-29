@@ -1,0 +1,178 @@
+Categories:
+
+Semi-structured Data Functions (Parsing)
+
+# PARSE_JSON¶
+
+Interprets an input string as a JSON document, producing a VARIANT value.
+
+TRY_PARSE_JSON
+
+## Syntax¶
+
+PARSE_JSON( <expr> )
+
+
+## Arguments¶
+
+expr
+
+An expression of string type (e.g. VARCHAR) that holds valid JSON information.
+
+## Returns¶
+
+The returned value is of type VARIANT and contains a JSON document.
+
+## Usage Notes¶
+
+• This function supports an input expression with a maximum size of 8 MB compressed.
+
+• If the input is NULL, the output is also NULL. However, if the input string is 'null', then it is interpreted as a JSON null value so that the result is not SQL NULL, but a valid VARIANT value containing null. An example is included in the Examples section below.
+
+• When parsing decimal numbers, PARSE_JSON attempts to preserve exactness of the representation by treating 123.45 as NUMBER(5,2), not as a DOUBLE. However, numbers using scientific notation (e.g. 1.2345e+02) or numbers which cannot be stored as fixed-point decimals due to range or scale limitations are stored as DOUBLE. Because JSON does not represent values such as TIMESTAMP, DATE, TIME, or BINARY natively, these have to be represented as strings.
+
+• In JSON, an object (also called a “dictionary” or a “hash”) is an unordered set of key-value pairs.
+
+• TO_JSON and PARSE_JSON are (almost) converse or reciprocal functions.
+
+• The PARSE_JSON function takes a string as input and returns a JSON-compatible variant.
+
+• The TO_JSON function takes a JSON-compatible variant and returns a string.
+
+The following is (conceptually) true if X is a string containing valid JSON:
+
+X = TO_JSON(PARSE_JSON(X));
+
+For example, the following is (conceptually) true:
+
+'{"pi":3.14,"e":2.71}' = TO_JSON(PARSE_JSON('{"pi":3.14,"e":2.71}'))
+
+However, the functions are not perfectly reciprocal for two reasons:
+
+• The order of the key-value pairs in the string produced by TO_JSON is not predictable.
+
+• The string produced by TO_JSON can have less whitespace than the string passed to PARSE_JSON.
+
+The following are equivalent JSON, but not equivalent strings:
+
+• {"pi": 3.14, "e": 2.71}
+
+• {"e":2.71,"pi":3.14}
+
+## Examples¶
+
+This shows an example of storing different types of data in a VARIANT column by calling PARSE_JSON to parse strings.
+
+Create and fill a table. Note that the INSERT statement uses the PARSE_JSON function.
+
+create or replace table vartab (n number(2), v variant);
+
+insert into vartab
+select column1 as n, parse_json(column2) as v
+from values (1, 'null'),
+(2, null),
+(3, 'true'),
+(4, '-17'),
+(5, '123.12'),
+(6, '1.912e2'),
+(7, '"Om ara pa ca na dhih"  '),
+(8, '[-1, 12, 289, 2188, false,]'),
+(9, '{ "x" : "abc", "y" : false, "z": 10} ')
+AS vals;
+
+
+Query the data:
+
+select n, v, typeof(v) from vartab;
++---+------------------------+------------+
+| N | V                      | TYPEOF(V)  |
+|---+------------------------+------------|
+| 1 | null                   | NULL_VALUE |
+| 2 | NULL                   | NULL       |
+| 3 | true                   | BOOLEAN    |
+| 4 | -17                    | INTEGER    |
+| 5 | 123.12                 | DECIMAL    |
+| 6 | 1.912000000000000e+02  | DOUBLE     |
+| 7 | "Om ara pa ca na dhih" | VARCHAR    |
+| 8 | [                      | ARRAY      |
+|   |   -1,                  |            |
+|   |   12,                  |            |
+|   |   289,                 |            |
+|   |   2188,                |            |
+|   |   false,               |            |
+|   |   undefined            |            |
+|   | ]                      |            |
+| 9 | {                      | OBJECT     |
+|   |   "x": "abc",          |            |
+|   |   "y": false,          |            |
+|   |   "z": 10              |            |
+|   | }                      |            |
++---+------------------------+------------+
+
+
+The following example shows NULL handling for PARSE_JSON and TO_JSON:
+
+SELECT TO_JSON(NULL), TO_JSON('null'::VARIANT),
+PARSE_JSON(NULL), PARSE_JSON('null');
++---------------+--------------------------+------------------+--------------------+
+| TO_JSON(NULL) | TO_JSON('NULL'::VARIANT) | PARSE_JSON(NULL) | PARSE_JSON('NULL') |
+|---------------+--------------------------+------------------+--------------------|
+| NULL          | "null"                   | NULL             | null               |
++---------------+--------------------------+------------------+--------------------+
+
+
+The following examples demonstrate the relationship among PARSE_JSON, TO_JSON, and TO_VARIANT:
+
+Create a table and add VARCHAR, generic VARIANT, and JSON-compatible VARIANT data. The INSERT statement inserts a VARCHAR value, and the UPDATE statement generates a JSON value that corresponds to that VARCHAR.
+
+CREATE or replace TABLE jdemo2 (varchar1 VARCHAR, variant1 VARIANT,
+variant2 VARIANT);
+INSERT INTO jdemo2 (varchar1) VALUES ('{"PI":3.14}');
+UPDATE jdemo2 SET variant1 = PARSE_JSON(varchar1);
+
+
+This query shows that TO_JSON and PARSE_JSON are conceptually reciprocal functions:
+
+SELECT varchar1, PARSE_JSON(varchar1), variant1,  TO_JSON(variant1),
+PARSE_JSON(varchar1) = variant1, TO_JSON(variant1) = varchar1
+FROM jdemo2;
++-------------+----------------------+--------------+-------------------+---------------------------------+------------------------------+
+| VARCHAR1    | PARSE_JSON(VARCHAR1) | VARIANT1     | TO_JSON(VARIANT1) | PARSE_JSON(VARCHAR1) = VARIANT1 | TO_JSON(VARIANT1) = VARCHAR1 |
+|-------------+----------------------+--------------+-------------------+---------------------------------+------------------------------|
+| {"PI":3.14} | {                    | {            | {"PI":3.14}       | True                            | True                         |
+|             |   "PI": 3.14         |   "PI": 3.14 |                   |                                 |                              |
+|             | }                    | }            |                   |                                 |                              |
++-------------+----------------------+--------------+-------------------+---------------------------------+------------------------------+
+
+
+However, the functions are not exactly reciprocal; differences in whitespace or order of key-value pairs can prevent the output from matching the input. For example:
+
+SELECT
+TO_JSON(PARSE_JSON('{"b":1,"a":2}')),
+TO_JSON(PARSE_JSON('{"b":1,"a":2}')) = '{"b":1,"a":2}',
+TO_JSON(PARSE_JSON('{"b":1,"a":2}')) = '{"a":2,"b":1}'
+;
++--------------------------------------+--------------------------------------------------------+--------------------------------------------------------+
+| TO_JSON(PARSE_JSON('{"B":1,"A":2}')) | TO_JSON(PARSE_JSON('{"B":1,"A":2}')) = '{"B":1,"A":2}' | TO_JSON(PARSE_JSON('{"B":1,"A":2}')) = '{"A":2,"B":1}' |
+|--------------------------------------+--------------------------------------------------------+--------------------------------------------------------|
+| {"a":2,"b":1}                        | False                                                  | True                                                   |
++--------------------------------------+--------------------------------------------------------+--------------------------------------------------------+
+
+
+Although both PARSE_JSON and TO_VARIANT can take a string and return a variant, they are not equivalent. The following code uses PARSE_JSON to update one column and TO_VARIANT to update the other column. (The update to column variant1 is unnecessary because it was updated earlier using an identical function call; however, the code below updates it again so that you can see side-by-side which functions are called to update the columns).
+
+UPDATE jdemo2 SET
+variant1 = PARSE_JSON(varchar1),
+variant2 = TO_VARIANT(varchar1);
+
+
+The query below shows that the output of PARSE_JSON and the output of TO_VARIANT are not the same. In addition to the trivial difference(s) in whitespace, there are significant differences in quotation marks.
+
+SELECT variant1, variant2, variant1 = variant2 FROM jdemo2;
++--------------+-----------------+---------------------+
+| VARIANT1     | VARIANT2        | VARIANT1 = VARIANT2 |
+|--------------+-----------------+---------------------|
+| {            | "{\"PI\":3.14}" | False               |
+|   "PI": 3.14 |                 |                     |
+| }            |                 |                     |
++--------------+-----------------+---------------------+

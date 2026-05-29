@@ -1,0 +1,352 @@
+# Exploring shortest paths – part 2
+
+Earlier this month I started exploring the question of computing the shortest path from one object in a binary image to another. I described the following basic algorithm:
+
+1. Compute the distance transform for just the upper left block of foreground pixels.
+2. Compute the distance transform for just the lower right block of foreground pixels.
+3. Add the two distance transforms together.
+4. The pixels in the regional minimum of the result lie along one or more of the shortest paths from one block to the other.
+
+This algorithm only works for path-based approximations to the Euclidean distance transform; it doesn't work for the Euclidean distance transform itself.
+
+The Image Processing Toolbox function supports three path-based approximations to the Euclidean distance transform: 'cityblock', 'chessboard', and 'quasi-euclidean'.
+
+Today I want to compare these three and discuss ambiguities associated with the idea of "shortest path" on an image.
+
+Let's work with another small test image:
+
+bw = logical([ ...
+0 0 0 0 0 0 0
+0 1 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 1 0
+0 0 0 0 0 0 0  ]);
+
+One way to get two binary images, each containing one object from the original, is to use a label matrix:
+
+L = bwlabel(bw);
+bw1 = (L == 1)
+bw1 =
+
+0     0     0     0     0     0     0
+0     1     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+
+
+bw2 = (L == 2)
+bw2 =
+
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     1     0
+0     0     0     0     0     0     0
+
+
+
+Step 1 of the algorithm is to compute the distance transform for the first object. I'll use the 'cityblock' distance transform approximation. In this approximation, only horizontal and vertical path segments are allowed. Diagonal segments are not allowed. The distance between a pixel and any of its N, E, S, or W neighbors is 1.
+
+D1 = bwdist(bw1, 'cityblock')
+D1 =
+
+2     1     2     3     4     5     6
+1     0     1     2     3     4     5
+2     1     2     3     4     5     6
+3     2     3     4     5     6     7
+4     3     4     5     6     7     8
+5     4     5     6     7     8     9
+6     5     6     7     8     9    10
+7     6     7     8     9    10    11
+8     7     8     9    10    11    12
+9     8     9    10    11    12    13
+10     9    10    11    12    13    14
+
+
+
+Step 2 is to compute the distance transform for the second object.
+
+D2 = bwdist(bw2, 'cityblock')
+D2 =
+
+14    13    12    11    10     9    10
+13    12    11    10     9     8     9
+12    11    10     9     8     7     8
+11    10     9     8     7     6     7
+10     9     8     7     6     5     6
+9     8     7     6     5     4     5
+8     7     6     5     4     3     4
+7     6     5     4     3     2     3
+6     5     4     3     2     1     2
+5     4     3     2     1     0     1
+6     5     4     3     2     1     2
+
+
+
+Step 3 is to add the distance transforms together.
+
+D = D1 + D2
+D =
+
+16    14    14    14    14    14    16
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+14    12    12    12    12    12    14
+16    14    14    14    14    14    16
+
+
+
+The smallest value of D, 12, is the minimum path length (for paths consisting only of horizontal and vertical segments) from one object to the other.
+
+Step 4 is to find the set of pixels in the regional minimum of D. This set represents the shortest path.
+
+paths = imregionalmin(D);
+
+To help visualize the path I'll use imoverlay from the MATLAB Central File Exchange. The code below will overlay the pixels on the shortest path in gray.
+
+P = false(size(bw));
+P = imoverlay(P, paths, [.5 .5 .5]);
+P = imoverlay(P, bw, [1 1 1]);
+imshow(P, 'InitialMagnification', 'fit')
+
+Uh oh, why do we have a big rectangular block of gray instead of a single path? The answer is that there isn't a unique shortest path. There are many paths you could travel to get from one object to the other that all have the same path length, 12. Here are just a view of them:
+
+subplot(2,2,1)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 6 6];
+y = [2 2 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2)
+hold off
+
+subplot(2,2,2)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 2 6];
+y = [2 10 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2);
+hold off
+
+subplot(2,2,3)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 3 3 4 4 5 5 6 6 6 6 6 6];
+y = [2 2 3 3 4 4 5 5 6 7 8 9 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2)
+hold off
+
+subplot(2,2,4)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 2 2 2 2 2 3 3 4 4 5 5 6];
+y = [2 3 4 5 6 7 7 8 8 9 9 10 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2)
+hold off
+
+Next, let's look at the 'chessboard' distance. In this distance transform approximation, a path can consist of horizontal, vertical, and diagonal segments, and the path length between a pixel and any of its neighbors (N, NE, E, SE, S, SW, W, and NW) is 1.0.
+
+D1 = bwdist(bw1, 'chessboard')
+D2 = bwdist(bw2, 'chessboard')
+D = D1 + D2
+D1 =
+
+1     1     1     2     3     4     5
+1     0     1     2     3     4     5
+1     1     1     2     3     4     5
+2     2     2     2     3     4     5
+3     3     3     3     3     4     5
+4     4     4     4     4     4     5
+5     5     5     5     5     5     5
+6     6     6     6     6     6     6
+7     7     7     7     7     7     7
+8     8     8     8     8     8     8
+9     9     9     9     9     9     9
+
+D2 =
+
+9     9     9     9     9     9     9
+8     8     8     8     8     8     8
+7     7     7     7     7     7     7
+6     6     6     6     6     6     6
+5     5     5     5     5     5     5
+5     4     4     4     4     4     4
+5     4     3     3     3     3     3
+5     4     3     2     2     2     2
+5     4     3     2     1     1     1
+5     4     3     2     1     0     1
+5     4     3     2     1     1     1
+
+D =
+
+10    10    10    11    12    13    14
+9     8     9    10    11    12    13
+8     8     8     9    10    11    12
+8     8     8     8     9    10    11
+8     8     8     8     8     9    10
+9     8     8     8     8     8     9
+10     9     8     8     8     8     8
+11    10     9     8     8     8     8
+12    11    10     9     8     8     8
+13    12    11    10     9     8     9
+14    13    12    11    10    10    10
+
+
+
+You can see that the shortest path length for the 'chessboard' distance is 8 instead of 12. Let's look at the pixels on the various shortest paths.
+
+paths = imregionalmin(D)
+
+P = false(size(bw));
+P = imoverlay(P, paths, [.5 .5 .5]);
+P = imoverlay(P, bw, [1 1 1]);
+clf
+imshow(P, 'InitialMagnification', 'fit')
+paths =
+
+0     0     0     0     0     0     0
+0     1     0     0     0     0     0
+1     1     1     0     0     0     0
+1     1     1     1     0     0     0
+1     1     1     1     1     0     0
+0     1     1     1     1     1     0
+0     0     1     1     1     1     1
+0     0     0     1     1     1     1
+0     0     0     0     1     1     1
+0     0     0     0     0     1     0
+0     0     0     0     0     0     0
+
+
+
+Now the set of gray pixels is not rectangular, but it still encompasses multiple possible shortest paths. And, surprisingly, it seems to include some pixels on which the path actually moves temporarily away from its destination.
+
+Here are several possible paths, all of length 8 (according to the 'chessboard' distance transform).
+
+subplot(2,2,1)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 3 4 5 6 6 6 6 6];
+y = [2 3 4 5 6 7 8 9 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2)
+hold off
+
+subplot(2,2,2)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 2 2 2 2 3 4 5 6];
+y = [2 3 4 5 6 7 8 9 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2);
+hold off
+
+subplot(2,2,3)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 1 2 1 2 3 4 5 6];
+y = [2 3 4 5 6 7 8 9 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2)
+hold off
+
+subplot(2,2,4)
+imshow(P, 'InitialMagnification', 'fit')
+x = [2 3 4 3 2 3 4 5 6];
+y = [2 3 4 5 6 7 8 9 10];
+hold on
+plot(x, y, 'g', 'LineWidth', 2)
+hold off
+
+Finally, let's look at the 'quasi-euclidean' distance transform. In this variation, paths from one pixel to another can consist of horizontal, vertical, and diagonal segments. The distance from a pixel to one of its horizontal or vertical neighbors is 1, while the distance to one of its diagonal neighbors is sqrt(2).
+
+Here's the computation again, this time specifying 'quasi-euclidean':
+
+D1 = bwdist(bw1, 'quasi-euclidean');
+D2 = bwdist(bw2, 'quasi-euclidean');
+D = D1 + D2
+D =
+
+12.4853   11.6569   11.6569   12.2426   12.8284   13.4142   14.8284
+11.0711    9.6569   10.2426   10.8284   11.4142   12.0000   13.4142
+10.4853    9.6569    9.6569   10.2426   10.8284   11.4142   12.8284
+10.4853    9.6569    9.6569    9.6569   10.2426   10.8284   12.2426
+10.4853    9.6569    9.6569    9.6569    9.6569   10.2426   11.6569
+11.0711    9.6569    9.6569    9.6569    9.6569    9.6569   11.0711
+11.6569   10.2426    9.6569    9.6569    9.6569    9.6569   10.4853
+12.2426   10.8284   10.2426    9.6569    9.6569    9.6569   10.4853
+12.8284   11.4142   10.8284   10.2426    9.6569    9.6569   10.4853
+13.4142   12.0000   11.4142   10.8284   10.2426    9.6569   11.0711
+14.8284   13.4142   12.8284   12.2426   11.6569   11.6569   12.4853
+
+
+
+You can see that the shortest path length is approximately 9.6569.
+
+min(D(:))
+ans =
+
+9.6569
+
+
+
+As before, let's find the set of pixels that belong to a shortest path.
+
+paths = imregionalmin(D)
+paths =
+
+0     0     0     0     0     0     0
+0     1     0     0     0     0     0
+0     1     1     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     0     0     0
+0     0     0     0     1     1     0
+0     0     0     0     0     1     0
+0     0     0     0     0     0     0
+
+
+
+That looks like trouble! The shortest-path pixels don't actually connect the two objects, as you can see below:
+
+P = false(size(bw));
+P = imoverlay(P, paths, [.5 .5 .5]);
+P = imoverlay(P, bw, [1 1 1]);
+clf
+imshow(P, 'InitialMagnification', 'fit')
+
+Where has our algorithm gone astray? That's the question I'll tackle next time.
+
+#### All the posts in this series
+
+• the basic idea of finding shortest paths by adding two distance transforms together (part 1)
+• the nonuniqueness of the shortest paths (part 2)
+• handling floating-point round-off effects (part 3)
+• using thinning to pick out a single path (part 4)
+• using bwdistgeodesic to find shortest paths subject to constraint (part 5)
+
+Published with MATLAB® 7.13
+
+|

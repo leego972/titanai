@@ -1,0 +1,101 @@
+[Source: Wikipedia-stream | Part 2]
+# E (verification language)
+
+a_payload.size() not in [128..256];   // this is a hard constraint
+};
+'>
+
+Assertions 
+e supports assertions with temporal expressions. A temporal expression is used at the same syntactic level as fields and methods and is thereby declarative by nature. A temporal expression describes timed behavior.
+
+Example 
+<'
+unit temporal_example_u {
+  event a;   // declaring an event 'a'
+  event b;   // declaring an event 'b'
+  event c;   // declaring an event 'c'
+  
+  // This assertion expects that the next cycle after event a
+  // has been detected that event b followed by event c occurs.
+  expect @a => {@b;@c}
+};
+'>
+
+Coverage 
+e supports coverage that are grouped according to their sampled event and those groups are internally structured with items. Items can be simple items or complex items such as crossed items or transitional items.
+
+Example 
+unit coverage_example_u {
+  event cov_event_e;   // collecting coverage will be tied to this event
+
+  cover cov_event_e is {
+    item  a: uint (bits: 4);   // this item has 16 buckets from 0 to 15
+    item  b: bool;            // this item has two buckets: TRUE and FALSE
+    cross a, b;               // this item contains a cross multiplication matrix of a and b
+    trans b;                  // this item is derived of item b and has four buckets
+                              // transitioning each TRUE - FALSE combination
+  };
+};
+
+Messaging & Reporting 
+Messaging within e can be done with various methods.
+
+Example 
+unit message_example_u {
+  example_message_method() is {
+    out("This is an unconditional, unformatted output message.");
+    outf("This is an unconditional, formatted output message displaying in HEX %x",15);
+    print "This is an unconditional message.";
+    message( LOW, "This is a conditional message, usually tied to a message logger. ",
+                  "You can also concatenate strings like this and even add objects like ",me,
+                  " in this output." );
+    messagef( LOW, "This conditional output is formatted %x.",15 );
+  };
+};
+
+Interfacing With Other Languages 
+An e testbench is likely to be run with RTL or higher-level models. Bearing this in mind, e is capable of interfacing with VHDL, Verilog, C, C++ and SystemVerilog.
+
+Example of an e <-> Verilog Hookup 
+// This code is in a Verilog file tb_top.v
+module testbench_top;
+  reg a_clk;   
+  always #5 a_clk = ~a_clk;
+  initial begin
+    a_clk = 0;
+  end
+endmodule
+
+This code is in a signal_map.e file
+<'
+unit signal_map_u {
+  // Define a port named 'a_clk_p'
+  a_clk_p: in simple_port of bit is instance;
+  // Set the port's hdl_path property to point to the 'a_clk' signal in the top-level testbench
+  keep a_clk_p.hdl_path() == "~/testbench_top/a_clk";
+};
+'>
+
+Aspect-Oriented Programming Support in e 
+The process of functional verification requires to raise the level of abstraction of any Design Under Test (DUT) beyond the RTL level. This necessity calls for a language that is capable of encapsulating data and models, which is readily available in object-oriented languages. To address this need has  been designed to be e an object-oriented language and on top of that has been augmented with aspect-oriented mechanisms that facilitate not only writing highly flexible and reusable testbenches, but also helps verification engineers by enabling to patch discovered RTL bugs without having to rewrite or touch any of the already existing code base.
+Aspect-oriented programming in e allows verification engineers to structure their testbench in aspects. An object is therefore the sum of all its aspects, which may be distributed over multiple files. The following sections illustrate basic aspect-oriented mechanisms in e.
+
+Subtyping Mechanism 
+Subtyping is the prime example of what object-oriented languages without aspect-oriented features can not accomplish. Subtyping allows a verification engineer to add functionality to an already defined/implemented class without having to derive from a base class. The following code shows the original implementation of a base-class and how it is extended. Once the extension took place, all base-class objects contain the extensions as well. The constraints given in the two different subtypes would usually cause a contradiction, however both subtypes are handled separately and thus each subtype yields a different constraint calculation.
+
+Subtyping Mechanism Example 
+subtyping_example.e
+<'
+// This enum type definition is used to declare the subtypes ODD and EVEN
+type ctrl_field_type_t: [ODD, EVEN];
+unit base_ex_u {
+  // The subtype_field is the determinant field which calculation is being applied
+  subtype_field: ctrl_field_type_t;
+  data_word    : uint (bits: 32);
+  parity_bit   : bit;
+  
+  // Subtyping the ODD type
+  when ODD'subtype_field base_ex_u {
+    // This is a simple constraint that XORs the index bit 0 of data_word and increments that value
+    keep parity_bit == (data_word[0:0] ^ data_word[0:0] + 1);
+  };

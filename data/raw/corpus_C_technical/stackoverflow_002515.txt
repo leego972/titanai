@@ -1,0 +1,29 @@
+Question: <p>In my app i need to save changed values (old and new) when model gets saved. Any examples or working code?</p>
+
+<p>I need this for premoderation of content. For example, if user changes something in model, then administrator can see all changes in separate table and then decide to apply them or not.</p>
+
+Answer: <p>I've found Armin's idea very useful. Here is my variation;</p>
+
+<pre><code>class DirtyFieldsMixin(object):
+    def __init__(self, *args, **kwargs):
+        super(DirtyFieldsMixin, self).__init__(*args, **kwargs)
+        self._original_state = self._as_dict()
+
+    def _as_dict(self):
+        return dict([(f.name, getattr(self, f.name)) for f in self._meta.local_fields if not f.rel])
+
+    def get_dirty_fields(self):
+        new_state = self._as_dict()
+        return dict([(key, value) for key, value in self._original_state.iteritems() if value != new_state[key]])
+</code></pre>
+
+<p>Edit: I've tested this BTW.</p>
+
+<p>Sorry about the long lines. The difference is (aside from the names) it only caches local non-relation fields. In other words it doesn't cache a parent model's fields if present.</p>
+
+<p>And there's one more thing; you need to reset _original_state dict after saving. But I didn't want to overwrite save() method since most of the times we discard model instances after saving.</p>
+
+<pre><code>def save(self, *args, **kwargs):
+    super(Klass, self).save(*args, **kwargs)
+    self._original_state = self._as_dict()
+</code></pre>

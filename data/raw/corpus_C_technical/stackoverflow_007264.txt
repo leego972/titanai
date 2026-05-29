@@ -1,0 +1,77 @@
+Question: <p>If I'm writing unit tests in python (using the unittest module), is it possible to output data from a failed test, so I can examine it to help deduce what caused the error? I am aware of the ability to create a customized message, which can carry some information, but sometimes you might deal with more complex data, that can't easily be represented as a string.</p>
+
+<p>For example, suppose you had a class Foo, and were testing a method bar, using data from a list called testdata:</p>
+
+<pre><code>class TestBar(unittest.TestCase):
+    def runTest(self):
+        for t1, t2 in testdata:
+            f = Foo(t1)
+            self.assertEqual(f.bar(t2), 2)
+</code></pre>
+
+<p>If the test failed, I might want to output t1, t2 and/or f, to see why this particular data resulted in a failure. By output, I mean that the variables can be accessed like any other variables, after the test has been run.</p>
+
+Answer: <p>I don't think this is quite what your looking for, there's no way to display variable values that don't fail, but this may help you get closer to outputting the results the way you want.</p>
+
+<p>You can use the <strong><a href="http://docs.python.org/library/unittest.html#id3">TestResult object</a></strong> returned by the <strong>TestRunner.run()</strong> for results analysis and processing.  Particularly, TestResult.errors and TestResult.failures</p>
+
+<p>About the TestResults Object:</p>
+
+<p><a href="http://docs.python.org/library/unittest.html#id3">http://docs.python.org/library/unittest.html#id3</a></p>
+
+<p>And some code to point you in the right direction:</p>
+
+<pre><code>&gt;&gt;&gt; import random
+&gt;&gt;&gt; import unittest
+&gt;&gt;&gt;
+&gt;&gt;&gt; class TestSequenceFunctions(unittest.TestCase):
+...     def setUp(self):
+...         self.seq = range(5)
+...     def testshuffle(self):
+...         # make sure the shuffled sequence does not lose any elements
+...         random.shuffle(self.seq)
+...         self.seq.sort()
+...         self.assertEqual(self.seq, range(10))
+...     def testchoice(self):
+...         element = random.choice(self.seq)
+...         error_test = 1/0
+...         self.assert_(element in self.seq)
+...     def testsample(self):
+...         self.assertRaises(ValueError, random.sample, self.seq, 20)
+...         for element in random.sample(self.seq, 5):
+...             self.assert_(element in self.seq)
+...
+&gt;&gt;&gt; suite = unittest.TestLoader().loadTestsFromTestCase(TestSequenceFunctions)
+&gt;&gt;&gt; testResult = unittest.TextTestRunner(verbosity=2).run(suite)
+testchoice (__main__.TestSequenceFunctions) ... ERROR
+testsample (__main__.TestSequenceFunctions) ... ok
+testshuffle (__main__.TestSequenceFunctions) ... FAIL
+
+======================================================================
+ERROR: testchoice (__main__.TestSequenceFunctions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 11, in testchoice
+ZeroDivisionError: integer division or modulo by zero
+
+======================================================================
+FAIL: testshuffle (__main__.TestSequenceFunctions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 8, in testshuffle
+AssertionError: [0, 1, 2, 3, 4] != [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.031s
+
+FAILED (failures=1, errors=1)
+&gt;&gt;&gt;
+&gt;&gt;&gt; testResult.errors
+[(&lt;__main__.TestSequenceFunctions testMethod=testchoice&gt;, 'Traceback (most recent call last):\n  File "&lt;stdin&gt;"
+, line 11, in testchoice\nZeroDivisionError: integer division or modulo by zero\n')]
+&gt;&gt;&gt;
+&gt;&gt;&gt; testResult.failures
+[(&lt;__main__.TestSequenceFunctions testMethod=testshuffle&gt;, 'Traceback (most recent call last):\n  File "&lt;stdin&gt;
+", line 8, in testshuffle\nAssertionError: [0, 1, 2, 3, 4] != [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]\n')]
+&gt;&gt;&gt;
+</code></pre>

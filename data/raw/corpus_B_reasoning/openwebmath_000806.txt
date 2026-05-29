@@ -1,0 +1,211 @@
+# VHDL testbench variable clock/wave generation
+
+A testbench for one sub-entity in my system currently defines a helper process to generate a clock-like waveform at the command of the main stimulus process. A simplified version of it is:
+
+shared variable gen_period : time := 10 us;
+signal gen_all : boolean := false;  -- wavegen enabled
+signal gen_A : boolean := false;    -- run this signal
+signal A_in : std_logic;            -- manual input (wavegen disabled)
+signal A_gen : std_logic;           -- generated output (internal)
+signal A_out : std_logic;           -- final output
+...
+A_generate: process
+if gen_A then
+A_gen <= '1';
+wait for gen_period/2;
+A_gen <= '0';
+wait for gen_period/2;
+else
+A_gen <= '0';
+wait for 1 ns;
+end if;
+end process;
+
+A_out <= A_gen when gen_all else A_in;
+
+
+The full system has a few more signals, but this is the basic idea. gen_all applies to all signals and allows a manual signal pattern to be applied when disabled, while gen_A is basically a clock enable for that specific signal. The other important feature is that the period of the clock is variable.
+
+Putting this all together it means that the main testbench stimulus process can either manually generate edges or can just request a pulse train at a specific interval and then wait for a longer time (typically gen_period * N) to generate multiple pulses. It works quite well.
+
+Now though I'm interested in generalising this a bit, in particular to instantiate several such independent generators in the testbench for a higher-level design that contains multiple of the original component. However I'm having trouble finding the right way to do so.
+
+My first attempt was to wrap the code above into its own entity, declaring all but A_gen as ports of the entity. Doing this required changing gen_period from a variable to a signal, since AFAIK ports must be signals.
+
+Unfortunately, back in the original testbench stimulus process, whenever it tried to assign a new period it had to do this as a signal assignment, which didn't take effect until later. Additionally the wait for gen_period * 5 calls appeared to be using the original value for gen_period rather than one just assigned. (This is not surprising behaviour for signals, but in this case it's undesired.)
+
+Is there a better way to encapsulate this functionality, and retain instant behaviour of the variable? The code is only going to be used in a testbench, so it does not need to be synthesisable. I'm using Xilinx ISim.
+
+(I realise that I can do a for .. generate to instantiate multiple instances in the higher level testbench, but this doesn't allow me to share the code between separate testbenches, which is also desirable to avoid duplication.)
+
+I can live with having only one instance of the gen_period variable shared between all generators in the high level testbench, but I would prefer to have one per generator instance.
+
+Since the answers seem to be focusing on "clock" rather than "waveform", it seems that I need to clarify the usage a bit more. This is inside a testbench:
+
+stim_proc : process
+begin
+-- (reset and other setup instructions here)
+
+-- generate "slow" pulse train
+gen_all <= true;
+gen_period := 250 ns;
+gen_A <= true;
+wait for gen_period * 20;
+gen_A <= false;
+wait for gen_period;
+-- (perform tests on logic for slow pulses here)
+
+-- generate "fast" pulse train
+gen_period := 10 ns;
+gen_A <= true;
+wait for gen_period * 50;
+gen_A <= false;
+wait for gen_period;
+-- (perform tests on logic for fast pulses here)
+
+-- generate asymmetric pulses
+gen_all <= false;
+A_in <= '1';
+wait for 100 ns;
+A_in <= '0';
+wait for 200 ns;
+A_in <= '1';
+wait for 150 ns;
+A_in <= '0';
+wait for 50 ns;
+-- (perform tests on logic for asymmetric pulses here)
+
+-- etc
+end process;
+
+
+These are the simple ones; there are a few more complex ones involving multiple signals happening simultaneously, but that's not really important for this question. The important point is that this is all sequential code and both the pulse generation and the waiting need to act on the most recently set period, not any delayed value.
+
+You could use a procedure with an out parameter. The procedure can be declared in a package and called with different parameters for different 'clock' signals.
+
+Here is an example of a clock_gen procedure from VHDL-extras:
+
+subtype duty_cycle is real range 0.0 to 1.0;
+
+procedure clock_gen( signal Clock : out std_ulogic; signal Stop_clock : in boolean;
+constant Clock_period : in delay_length; constant Duty : duty_cycle := 0.5 ) is
+constant HIGH_TIME : delay_length := Clock_period * Duty;
+constant LOW_TIME  : delay_length := Clock_period - HIGH_TIME;
+begin
+Clock <= '0';
+
+while not Stop_clock loop
+wait for LOW_TIME;
+Clock <= '1';
+wait for HIGH_TIME;
+Clock <= '0';
+end loop;
+end procedure;
+
+
+The constant input period can be exchanged with a variable for simulation environments.
+
+Usage example:
+
+architecture rtl of my_entity is
+signal SimStop      : boolean     := false;
+signal my_clock1    : std_ulogic;
+signal my_clock2    : std_ulogic;
+begin
+
+clock_gen(my_clock1, SimStop, 10.000 ns);
+clock_gen(my_clock2, SimStop,  6.666 ns);
+
+-- ...
+
+process
+begin
+--
+-- some stimuli
+--
+
+wait for 10 ns;
+SimStop := true;
+wait;
+end process;
+end architecture;
+
+
+Example to generate a waveform with an generic waveform:
+
+type T_TIME_VECTOR is array(NATURAL range <>) of TIME;
+
+constant myWaveform : T_TIME_VECTOR  := (
+-- generate "slow" pulse train
+20 * 250 ns,
+250 ns,
+-- generate "fast" pulse train
+50 * 10 ns,
+10 ns
+);
+
+procedure generateWaveform(signal Wave : out BOOLEAN; Waveform: T_TIME_VECTOR; InitialValue : BOOLEAN) is
+variable State : BOOLEAN := InitialValue;
+begin
+Wave <= State;
+for i in Waveform'range loop
+wait for Waveform(i);
+State := not State;
+Wave  <= State;
+end loop;
+end procedure;
+
+signal mySignal : BOOLEAN;
+
+-- begin of architecture
+generateWaveform(mySignal, myWaveform);
+
+• This looks more promising but it still seems too concurrent for the required usage. It's fine for a clock, but I need a controlled waveform. Aug 3 '15 at 0:29
+• @Miral You can produce any signal with this method, it's just a question on how complex your procedure is. A procedure is as powerful as a process - both are sequential. You process example is again evaluated from the beginning, if one run is complete. You can imitate this in a procedure, while framing your code with a endless-loop. See my example: while not Stop_clock loop ... end loop;. Aug 6 '15 at 8:44
+• But I don't see how this improves anything. I would still have to have uniquely-named signals for each separate waveform, and the interval can't be a parameter because it has to be changed inside the stimulus process. See the updated question. Aug 9 '15 at 23:53
+• @Miral As I said, it's just a question of the procedure's complexity. I added an example, that generates a waveform for type boolean. As an input it takes a VCD-like list of delays between toggle events. This example can be extended to every type. You could hand-over a second list of std_logic_vectors, which are assigned to the wave signal at every listed event. Aug 10 '15 at 8:50
+• Ok, I admit that's possible, but it still seems like a considerable departure from the current code, and brittle to changes in the test ordering. I was hoping to keep the tests immediately adjacent to the generation, as in the question. (Also BTW note that your code doesn't do the same thing as mine -- during that 20 * 250 ns period mine is generating multiple pulses.) Aug 11 '15 at 7:45
+
+You can define the clock generator as an entity also. Instead of trying to assign gen_period as a signal, try defining it as a generic in the entity definition as shown below:
+
+entity clock_gen is
+generic (
+gen_period : time := 10 us
+);
+port (
+signal gen_all : boolean := false;  -- wavegen enabled
+signal gen_A : boolean := false;    -- run this signal
+signal A_in : std_logic;            -- manual input (wavegen disabled)
+signal A_gen : std_logic;           -- generated output (internal)
+signal A_out : std_logic            -- final output
+);
+end entity clock_gen;
+
+
+Now, when you try to instantiate the entity in your higher-level module, it will allow you to define the gen_period parameter separately for each instance of clock_gen. The default value of the parameter will be considered as 10 us if it is not mentioned separately during instantiation. Two examples of usage in architecture are shown below:
+
+gen1: clock_gen
+generic map (gen_period => 100 us)
+port map (
+gen_all => <some_port1>;
+gen_A   => <some_port2>;
+A_in    => <some_port3>;
+A_gen   => <some_port4>;
+A_out   => <some_port5>
+);
+gen2: clock_gen
+generic map (gen_period => 1 us)
+port map (
+gen_all => <some_port1>;
+gen_A   => <some_port2>;
+A_in    => <some_port3>;
+A_gen   => <some_port4>;
+A_out   => <some_port5>
+);
+
+
+If you have multiple instances of clock_gen with the same gen_period, you can even call the instantiation inside a for ... generate procedure in your code.
+
+• Generics are not variable at runtime so this does not answer the question. Jul 31 '15 at 13:42
+• @BrianDrummond Sure, however, simply making gen_period a port solves the problem. In addition, an entity allows more efficient forms of clk to be used than a procedure. IE: Clk <= not Clk after tperiod_Clk/2 ; Aug 1 '15 at 6:35
+• As specified, generics are not sufficient because they're not variable, and making it a port didn't work because it introduces delayed-write semantics that are undesirable. And the Clk <= not Clk after` trick is only suitable for infinite run clocks, which this is definitely not. Aug 3 '15 at 0:14

@@ -1,0 +1,165 @@
+Question: <p>I want to create a very simple HTML/AJAX based GUI for a Python program. So the frontend is a HTML page which communicates with the program via AJAX. Can you give me a minimal implementation for the server-side using the python <code>SimpleHTTPServer.SimpleHTTPRequestHandler</code>?</p>
+
+<p>A simple example would be a textfield and a button. When the button is pressed the content of the field is send to the server which then sends back a corresponding answer. I am aware that there are many powerful solutions for this in Python, but I would like to keep this very simple.
+I already found some nice examples for such a server (e.g. <a href="http://msdl.cs.mcgill.ca/people/julien/04Ajax">here</a>), but so far I could not come up with a truly minimal one.</p>
+
+<p>In case you wonder why I want to implement the GUI in such a way: My focus for this application is to display lots of data in a nice layout with only minimal interaction - so using HTML+CSS seems most convenient (and I have been already using it for non-interactive data display).</p>
+
+Answer: <p>O.K., I think I can now answer my own question. Here is an example implementation for calculating the square of a number on the server. Please let me know if there are any improvements or misconceptions.</p>
+
+<p>the python server file:</p>
+
+<pre><code>import threading
+import webbrowser
+import BaseHTTPServer
+import SimpleHTTPServer
+
+FILE = 'frontend.html'
+PORT = 8080
+
+
+class TestHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
+    """The test example handler."""
+
+    def do_POST(self):
+        """Handle a post request by returning the square of the number."""
+        length = int(self.headers.getheader('content-length'))        
+        data_string = self.rfile.read(length)
+        try:
+            result = int(data_string) ** 2
+        except:
+            result = 'error'
+        self.wfile.write(result)
+
+
+def open_browser():
+    """Start a browser after waiting for half a second."""
+    def _open_browser():
+        webbrowser.open('http://localhost:%s/%s' % (PORT, FILE))
+    thread = threading.Timer(0.5, _open_browser)
+    thread.start()
+
+def start_server():
+    """Start the server."""
+    server_address = ("", PORT)
+    server = BaseHTTPServer.HTTPServer(server_address, TestHandler)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    open_browser()
+    start_server()
+</code></pre>
+
+<p>...and the HTML file (I call it 'frontend.html', unfortunately the name has to appear in the JavaScript code as well):</p>
+
+<pre><code>&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;AJAX test&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;script type="text/javascript"&gt;
+
+function xml_http_post(url, data, callback) {
+    var req = false;
+    try {
+        // Firefox, Opera 8.0+, Safari
+        req = new XMLHttpRequest();
+    }
+    catch (e) {
+        // Internet Explorer
+        try {
+            req = new ActiveXObject("Msxml2.XMLHTTP");
+        }
+        catch (e) {
+            try {
+                req = new ActiveXObject("Microsoft.XMLHTTP");
+            }
+            catch (e) {
+                alert("Your browser does not support AJAX!");
+                return false;
+            }
+        }
+    }
+    req.open("POST", url, true);
+    req.onreadystatechange = function() {
+        if (req.readyState == 4) {
+            callback(req);
+        }
+    }
+    req.send(data);
+}
+
+function test_button() {
+    var data = document.test_form.test_text.value;           
+    xml_http_post("frontend.html", data, test_handle)
+}
+
+function test_handle(req) {
+    var elem = document.getElementById('test_result')
+    elem.innerHTML =  req.responseText
+}
+
+&lt;/script&gt;
+
+&lt;form name=test_form&gt;
+sqr(
+&lt;input type="text" name="test_text" value="0" size="4"&gt;
+) =
+&lt;span id="test_result"&gt;0&lt;/span&gt;
+&lt;input type=button onClick="test_button();" value="start" title="start"&gt;
+&lt;/form&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+
+<p>Of course it would be much more convenient to use <a href="http://api.jquery.com/jQuery.ajax/">jQuery</a> for the XML request, but in the interest of simplicity I'll leave it like that.</p>
+
+<p>Finally an alternative implementation using WSGI (unfortunately I didn't see a way to fall back on the standard file-serving handler if the request is not a POST):</p>
+
+<pre><code>import threading
+import webbrowser
+from wsgiref.simple_server import make_server
+
+FILE = 'frontend.html'
+PORT = 8080
+
+def test_app(environ, start_response):
+    if environ['REQUEST_METHOD'] == 'POST':
+        try:
+            request_body_size = int(environ['CONTENT_LENGTH'])
+            request_body = environ['wsgi.input'].read(request_body_size)
+        except (TypeError, ValueError):
+            request_body = "0"
+        try:
+            response_body = str(int(request_body) ** 2)
+        except:
+            response_body = "error"
+        status = '200 OK'
+        headers = [('Content-type', 'text/plain')]
+        start_response(status, headers)
+        return [response_body]
+    else:
+        response_body = open(FILE).read()
+        status = '200 OK'
+        headers = [('Content-type', 'text/html'),
+                   ('Content-Length', str(len(response_body)))]
+        start_response(status, headers)
+        return [response_body]
+
+def open_browser():
+    """Start a browser after waiting for half a second."""
+    def _open_browser():
+        webbrowser.open('http://localhost:%s/%s' % (PORT, FILE))
+    thread = threading.Timer(0.5, _open_browser)
+    thread.start()
+
+def start_server():
+    """Start the server."""
+    httpd = make_server("", PORT, test_app)
+    httpd.serve_forever()
+
+if __name__ == "__main__":
+    open_browser()
+    start_server()
+</code></pre>

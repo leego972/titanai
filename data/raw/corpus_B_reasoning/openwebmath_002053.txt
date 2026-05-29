@@ -1,0 +1,148 @@
+# Hardware Interactions: Part 4 – I2C Temperature and Humidity Sensor
+
+Blog / Rhys Hill / December 3, 2019
+
+This next post in our series on hardware interactions marks a departure from our usual examples. In the previous three posts we’ve focused on the Raspberry Pi but, this time around we’ll be looking at the ESP32 as we diverge from single board computers to explore a system on a chip (SoC). While the ESP32 does lose out to the Pi in raw power, it makes up for this by being smaller, faster, and cheaper.
+
+The strengths of the ESP32 are highlighted when it comes to tasks like the example we have in this post. That is, communicating to other integrated circuits via the Inter-Integrated Circuit protocol (I2C or I squared C). We’ll examine this protocol by developing a simple temperature and humidity sensor. During this post we’ll step through,
+
+1. how to wire up the circuit
+2. how to configure the ESP32 to interact with the I2C bus,
+3. how the I2C bus works more generally,
+4. how these factors impact the software design decisions made when interacting with this kind of hardware
+
+## Hardware Setup
+
+If you would like to attempt this demonstration for yourself you will need,
+
+You will also need to set up the toolchain required for working with ESP IDF.
+
+### Basic Circuit
+
+We’ll be using the 3V3 line from the ESP32 development board to power our sensor and the 0V line as our common ground. GPIO pins 4 and 14 are suitable for use as our clock and data line used for communication, but alternatives for these are available in the datasheet.
+
+It should be noted that even though the above circuit shows two pull up resistors, these are optional in our case. The breakout board available from AdaFruit already incorporates these pull up resistors into its design. These resistors will become important if you are attaching extra devices to the same bus as the bus being free is indicated by both of these lines being high.
+
+## ESP32 Configuration
+
+For our example we’ll be using the freeRTOS kernel from Amazon which has become the defacto standard for embedded real time devices. Including freeRTOS and the I2C driver required is as simple as adding these includes to your our applications main file. We’ll also set up logging by including the esp_log library and defining a log tag.
+
+    #include <stdlib.h>
+#include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <driver/i2c.h>
+#define TAG "i2c_bus"
+
+Now that we have access to our I2C driver we can configure the bus. To do this we create a config object and then change the settings to match our breadboard circuit. In our case we’re using GPIO 4 as the IO for our data line, SDA, and GPIO 14 as the IO for our clock line. As mentioned before, these two lines need to be pulled high to 3.3V which we can also reflect in our setup by enabling GPIO pull ups on these lines. Devices attached to a shared I2C bus can be either a master device, as in our case, or a slave device. Master meaning that they send commands to other devices and read results; slave meaning that they listen for and carry out commands and only write to the bus in response to requests from a master. The clock speed configures how fast the clock line oscillates and dictates the speed at which devices on the bus can exchange information. This will depend on the physical limitations of the particular sensor you are using, but 100kHz will work for the Si7021. With our config set we pass the config object to the I2C driver to load these options into memory.
+
+    i2c_config_t config;
+config.sda_io_num = 4;
+config.sda_pullup_en = GPIO_PULLUP_ENABLE;
+config.scl_io_num = 14;
+config.scl_pullup_en = GPIO_PULLUP_ENABLE;
+config.mode = I2C_MODE_MASTER;
+config.master.clk_speed = 100000;
+
+esp_err_t error = i2c_param_config(I2C_NUM_0, &config);
+if (error != ESP_OK) {
+ESP_LOGI(TAG, "Failed to configure shared i2c bus: %s", esp_err_to_name(error));
+return;
+}
+
+A common issue found when trying to communicate via this protocol is that the driver will not wait long enough for some devices to respond to commands and requests, which will result in a timeout error. To give ourselves a little more leeway we can extend the default timeout to something a bit more forgiving. Since the ESP32s global clock ticks at 80 MHz, the value we’re using in our example, 100k ticks, gives us a 1.25ms buffer.
+
+$$\frac{100,000 \text{ ticks}}{80,000,000 \text{ ticks/s}}= 0.00125\text{s}$$
+
+    error = i2c_set_timeout(I2C_NUM_0, 100000);
+if (error != ESP_OK) {
+ESP_LOGI(TAG, "Failed set timeout for i2c bus: %s", esp_err_to_name(error));
+return;
+}
+
+With our config loaded we can now install the I2C driver. You may have noticed that all of the functions we’ve been using return an esp_error_t. These errors are to let us know about the success or failure of each step. For our example we simply log errors if they occur, but the same method could be used to implement more robust error handling or retry logic.
+
+    error = i2c_driver_install(I2C_NUM_0, config.mode, 512, 512, 0);
+
+if (error != ESP_OK) {
+ESP_LOGI(TAG, "Failed to install driver for i2c bus: %s", esp_err_to_name(error));
+}
+
+Now that we have the bus set up, it’s time to pull out the datasheet for our Si7021 and figure out how to talk to this thing. The first thing we’ll need is the slave address of our device. Each I2C enabled device has a 7 bit address hardwired into its silicon. This specific series of 1s and 0s will be listened for by the device and everything it sees before this address will be ignored. This is how multiple devices are able to share the same bus. Next, we need to find the commands we’re going to use to retrieve values from the sensor. The important two for our example are, ‘Measure Relative Humidity, Hold Master Mode’ and ‘Measure Temperature, Hold Master Mode’. As the names suggest, these commands tell the sensor to take a measurement of either humidity or the temperature and respond with the result. Let’s define these commands so we can use them later.
+
+    // Commands for Si7021
+#define SI_7021_MEASURE_HUMIDITY        0xE5
+#define SI_7021_MEASURE_TEMPERATURE     0xE3
+#define SI_7021_TIMEOUT                 1000 / portTICK_RATE_MS
+
+To take humidity measurement we need to first write the device slave address to let all the devices on the bus know that the following command is meant for our sensor. This is followed by a single bit indicating to the sensor that we are about to write some information to the bus. We can then write our measure humidity command, thereby triggering a measurement.
+
+   // Write measure humidity command
+i2c_master_start(handle);
+
+i2c_master_write_byte(handle,
+I2C_MASTER_ACK);
+i2c_master_write_byte(handle,
+SI_7021_MEASURE_HUMIDITY,
+I2C_MASTER_ACK);
+
+i2c_master_stop(handle);
+esp_err_t error = i2c_master_cmd_begin(I2C_NUM_0, handle, SI_7021_TIMEOUT);
+
+if (error != ESP_OK) {
+ESP_LOGI(TAG, "Failed to write humidity command: %s", esp_err_to_name(error));
+}
+
+Now that our sensor has taken a measurement we can read it from the bus. Again we start by writing the device slave address to give our sensor the all clear to start writing. This time the address is followed by a read bit to let the sensor know that it is expected to transmit data. We can see from our datasheet that the Si7021 produces two byte measurements, so we read in the next two bytes transmitted.
+
+   // Read two bytes from the temperature and humidity sensor
+uint8_t humMSB;
+uint8_t humLSB;
+
+i2c_master_start(handle);
+
+i2c_master_write_byte(handle,
+I2C_MASTER_ACK);
+
+i2c_master_stop(handle);
+esp_err_t error = i2c_master_cmd_begin(I2C_NUM_0, handle, SI_7021_TIMEOUT);
+
+if (error != ESP_OK) {
+ESP_LOGI(TAG, "Failed to read humidity: %s", esp_err_to_name(error));
+}
+
+The final step is to turn these two bytes into something readable. The two bytes we’ve just read in form a 16 bit RH_Code. To translate this code into an actual relative humidity reading we apply the equation described in the datasheet,
+
+$$\text{%RH} = \frac{125 * \text{RHCode}}{65536} – 6$$
+
+   double humidity = ((uint16_t) humMSB << 8) | (uint16_t) humLSB;
+humidity *= 125;
+humidity /= 65536;
+humidity -= 6; 
+
+## Behind the Scenes
+
+As you may have noticed, there’s a bit more going on here than writing a command and reading the response. We haven’t yet discussed the importance of the start and stop functions that are being called in our example, nor the read-write bit and ack and nack options being passed into functions. Let’s quickly get a few of these definitions out of the way before explaining the flow of data that we’ve just implemented.
+
+Start condition – As we discussed early in this post, by default both lines of the I2C bus are pulled high. To indicate that communication is about to start the master device, in our case the ESP32, pulls the data line low while leaving the clock line high. This condition is set by the calls to i2c_master_start in our example.
+
+Transmission – Can now occur until the stop condition is called. This clock line being pulled low triggers the output of 1 bit of data onto the bus. The clock then flips back to high triggering a read on the receiving end of the transmission. Once the clock line returns to low the data line is updated to the next bit and the process repeats until all information has been transmitted.
+
+Stop condition – To indicate the end of a transmission the master device pulls the data line back up to its initial high position while the clock line is high. This frees the bus for other devices to use and is why we call i2c_master_stop.
+
+The key to this protocol working is that the data line is never updated while the clock line is high unless it is to start or end of the transmission. Figure 2 below shows the timing involved in a transmission over the I2C bus for any number of bits.
+
+Now for the flow of information we’re actually sending in our example. Let’s wrap up the last few definitions.
+
+Read bit – The device slave address which starts communication with a device is 7 bits long. The final bit of this byte signifies the direction of communication. When starting a read a 1 is written to this bit.
+
+Write bit – Similarly a 0 is written to this final bit when starting a write to a device.
+
+Ack – After each byte is transmitted to a device the device can respond with an optional acknowledgement bit. In the same way, our master device can elect to write that same acknowledgement bit each time it reads a byte from a slave. In the case of an Ack this bit is a 0.
+
+Nack – Another option after reading a byte is to respond with a Nack, a single bit of 1. This lets the slave device know that the byte just read is the final byte expected by the master.
+
+This gives us our final information flow as shown in Figure 3 below,
+
+## What’s Next
+
+Now that we’ve got our sensor reporting humidity data why not dig through the datasheet a bit further and try to implement taking a temperature measurement for yourself. The data flow will follow the same pattern we’ve worked out here in Figure 3. You just need to write a new command and figure out how to convert the two byte temperature code into a readable temperature. Or better yet, why not try applying what we’ve covered here to implement the interface for other I2C devices.

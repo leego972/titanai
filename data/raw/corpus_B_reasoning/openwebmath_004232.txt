@@ -1,0 +1,82 @@
+# How do global variables and automatic variables with the same name interact?
+
+Suppose I define a global variable and I define an automatic variable within a function definition with the same name as the aforementioned global variable.
+
+What would happen to the global variable if I altered the automatic variable within the function body?
+
+• I don't see how this question can be answered, since it depends on the choices made by the designer of any particular language. A language designer might choose for that to be a syntax error; they might choose for the automatic variable to "hide" the global variable; they might choose something else entirely. – David Richerby Jun 12 '15 at 20:25
+• @DavidRicherby This is certainly true, when designers are very ignorant, or very facetious. But there are nevertheless general answers for that, that happen to fit most languages. One can of course try to be very general, but I am not sure I want to muddle things for a student. There are first order answers that give the more important concepts. Refinement can come in second order answers. – babou Jun 12 '15 at 20:51
+
+In most programming languages, especially imperative languages, a “variable” is actually two things: a name and a storage location. The storage location is a block of memory where a value can be stored and retrieved. The variable's name is often called an identifier. An identifier is a way to refer to some object in the program, in this case a storage location. A variable has a scope, which is the part of the program where the variable's name refers to the variable.
+
+For example, consider the following C snippet.
+
+int foo;
+void myfunction(void) {
+float foo;
+… /* Here the identifier foo refers to the variable that's of type float. */
+}
+/* Here the identifier foo refers to the variable that's of type int. */
+
+
+This snippets declares two variables. The two variables happen to have the same name: both are called foo. They're distinct variables, refering to distinct storage location, same as if they'd been called by different names. The scope of the foo variable that's of type float is the function myfunction: inside the code of myfunction, the identifier foo refers to this variable; outside the code of myfunction, the identifier foo refers to some other variable, or none at all. The scope of the foo variable that's of type int is the file where it's declared; the identifier foo refers to this variable everywhere is the whole file, except for the functions (or more generally blocks¹) which declare another variable that's also called foo. The local variable foo is said to shadow the global variable foo.
+
+A variable whose scope is a whole file is usually said to be global. A variable whose scope is a function, method, block, etc. is usually said to be local. In the example above, the int-typed foo is a global variable and the float-typed foo is a local variable, local to the function myfunction.
+
+The scope of a variable is the part of a program where its name refers to that variable. This is not always the same thing as the part of the program where the storage location exists. There is some correlation between the two, because it's usually undesirable to have a name for a storage location that doesn't exist, and it's often desirable to have a name for storage locations that do exist.
+
+In C, the time during which a storage location exists is called its duration. The duration of a global variable is the whole program execution (“static duration” in C jargon, but that jargon doesn't extend to other languages, unlike most of the terms I used in this answer). (That's in C and some other langauges; in many other languages the duration of a global variable starts when the variable is defined.) The duration of a local automatic variable is the time during which the block containing it is executing. Note that “automatic” refers to the duration, not to the scope; “automatic” is not the opposite of “global”, “local” is. In C, you can't have automatic duration at a global scope, but you can have static duration at a local scope, with a variable that's declared static or extern.
+
+void myfunction(void) {
+static int s;
+extern int e;
+}
+/* Here s and e are not defined */
+
+
+The duration of both s and e is the whole program execution, but their scope is only the function myfunction: the names e and s are not valid outside that function. The difference between static and extern is that the variable s cannot be accessed from another scope, whereas e is the same variable as any other extern e in any scope.
+
+Coming back to the foo example above, since two variables in different scopes have no relation, altering foo in myfunction has no impact on the global foo. They're unrelated variables, they just happen to have the same name.
+
+It would be possible to rename the local variable foo to avoid having a name conflict. If you change all occurrences of foo in the code of myfunction to a different name that isn't used elsewhere in the program, you get an equivalent function.² This renaming process is known as alpha conversion in programming language theory.
+
+The main reason programming languages allow programmers to pick the same name for different variables is that doing otherwise makes it difficult to write large programs and especially to write programs in pieces. If adding a library to your program meant that you had to rename some of your local variables in unrelated parts of your program to avoid conflicts, it would be a nightmare. (As it is, C only has global names for functions, which can be troublesome.)
+
+Basically all languages allow variables in unrelated scopes to have the same name. C also allows shadowing: defining a variable in a scope hides any variable by the same name in a surrounding scope. This is common, but not univeral. For example, in Java, if you define a variable in a block, you can't define another variable by the same name in a nested block. The advantage of this restriction is that it prevents a source of confusion: a programmer might inadvertently use the name to refer to the variable from the outer scope, and not realize it instead refers to the variable in the inner scope. The downside of this restriction is that it makes some program transformations impossible without renaming the variable.
+
+void myfunction(void) {
+int x = 1;
+if (…) {
+int x = 2;  // allowed in C, forbidden in Java
+printf("%d\n", x); // prints 2
+}
+printf("%d\n", x); // prints 1
+}
+
+
+Some languages have a way to refer to a variable that's shadowed, but it's uncommon. C has no such way, but you can refer to the storage location of the outer variable if you have a pointer to it.
+
+¹ More precisely, the scope of a variable defined in a block runs from the variable definition to the end of the block. If there is an outer scope with a variable of the same name, it's that same part which is excluded from that outer scope.
+² This only works in languages where variable names are not significant. Actually, I lied here, because C can make variable names significant via the preprocessor. C is quite a complex language… If that preprocessor feature isn't used, variable names are not significant.
+
+• This seems a very good presentation of the world seen from the C language. I have however two concerns. The first is that it is very much and very explicitly C oriented (which was a matter of polemics when the question was initially asked). The second is that it seems to give a major role to variables, when the issue is essentially a naming issue, variable happening to be what is being named in the example of the question, at least as I perceive it. Some of your examples are however interesting in that they separate allocation, duration and scope more than most languages. – babou Jun 14 '15 at 13:29
+• @babou I used the C language as a centerpiece since this is what the asker knows. I could explain how things work differently in Lisp, ML, the Pi calculus, etc. but that would take a much longer answer. I give a major role to variables because that's what the question is about, and the distinction between names and storage locations is an important and hard-to-understand one. – Gilles Jun 14 '15 at 13:41
+• OK. I know you can cover more. Matter of perception. My feeling is that variable and identifiers are often confused, so I would avoid a presentation that has vriables unopposed by other programming entities. But it is a nice presentation. – babou Jun 14 '15 at 14:39
+
+This is a good question, though extremely elementary. I try to give you a very general answer. There are variations with different programming languages, or other types of languages. The issue is really about the role of names, that we usually call identifiers in programming.
+
+First note that a global variable may also be an automatic variable, but it is then defined in a larger function, in which your function is defined. But that is not very important here.
+
+All languages, not just programming languages, but also mathematical and logical ones, or natural ones, have scoping rules, so that the same name may be used with different meanings in different context. A new function usually defines a new scope for names, and any name (including variable names) that is declared within the function gets a meaning given by the declaration, which hides the meaning it had outside.
+
+This is not so much an issue of automatic allocation of variables (though there are relations) but much more of meaning of names. There are other mechanisms to structure the way names take meaning. When they combine, you need to know all the various rules to determine how a given name takes its meaning, i.e. to what definition (aka declaration) this use of the name refers. And that can be more subtle than your example.
+
+In the case of your example, you have two unrelated variables that happen to have the same name. At any time, the name means only one of them. In your function, the local declaration gives a local meaning to the name, thus hiding the global meaning. So the global variable is untouched, when its name is used to modify another homonymous variable. For example, I expect you were not involved in Spielberg's movie on WW2, and no one came to save you. In the scope of the film Ryan did not mean you.
+
+Actually, the name of your automatic variable could well be used globally to name a function, and locally to name a variable. It does not matter.
+
+To know more on this topic, I suggest you look at "variable binding" and "scoping". It will be time well spent.
+
+• "a global variable may also be an automatic variable, but it is then defined in a larger function" Huh? If a function is defined inside a function, then it's no longer a global variable. I think "global" means "in the top-most scope", not "in any higher scope". – svick Jun 12 '15 at 20:13
+• @svick Well, as I said, terminology is very much context dependent. Indeed, many programming languages take your view of giving an absolute meaning to global variable. But I have encountered other uses. What is important is to state your definitions and agree on them in a given technical discussion. Then another discussion may be another scope for technical names. For example, you and I tend to talk of variables, but the issue is more with identifiers. This comes from lambda-calculus, that uses the word variable, though it has no variables in the programming sense. Scope again. – babou Jun 12 '15 at 20:21
+• Nice example with “Ryan”. Regarding “global variables”, @svick, the definition of the C language doesn't actually use that terminology; a global variable in common parlance is has file scope, which is not the top-most scope: that would be program scope, an expression that the C definition doesn't in fact use, it refers to “external linkage” instead. – Gilles Jun 12 '15 at 23:29

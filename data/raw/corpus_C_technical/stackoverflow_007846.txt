@@ -1,0 +1,79 @@
+Question: <p>I want to write a function that accepts a parameter which can be either a sequence or a single value. The type of value is str, int, etc., but I <strong>don't</strong> want it to be restricted to a hardcoded list. 
+In other words, I want to know if the parameter X is a sequence or something I have to convert to a sequence to avoid special-casing later. I could do</p>
+
+<p><code>type(X) in (list, tuple)</code></p>
+
+<p>but there may be other sequence types I'm not aware of, and no common base class.</p>
+
+<p>-N.</p>
+
+<p><strong>Edit</strong>: See my "answer" below for why most of these answers don't help me. Maybe you have something better to suggest.</p>
+
+Answer: <p>As of 2.6, use <a href="http://docs.python.org/library/abc.html#module-abc">abstract base classes</a>.</p>
+
+<pre class="lang-none prettyprint-override"><code>&gt;&gt;&gt; import collections
+&gt;&gt;&gt; isinstance([], collections.Sequence)
+True
+&gt;&gt;&gt; isinstance(0, collections.Sequence)
+False
+</code></pre>
+
+<p>Furthermore ABC's can be customized to account for exceptions, such as not considering strings to be sequences.  Here an example:</p>
+
+<pre><code>import abc
+import collections
+
+class Atomic(object):
+    __metaclass__ = abc.ABCMeta
+    @classmethod
+    def __subclasshook__(cls, other):
+        return not issubclass(other, collections.Sequence) or NotImplemented
+
+Atomic.register(basestring)
+</code></pre>
+
+<p>After registration the <strong>Atomic</strong> class can be used with <strong>isinstance</strong> and <strong>issubclass</strong>:</p>
+
+<pre><code>assert isinstance("hello", Atomic) == True
+</code></pre>
+
+<p>This is still much better than a hard-coded list, because you only need to register the exceptions to the rule, and external users of the code can register their own.</p>
+
+<p>Note that in <strong>Python 3</strong> the syntax for specifying metaclasses changed and the <code>basestring</code> abstract superclass was removed, which requires something like the following to be used instead:</p>
+
+<pre><code>class Atomic(metaclass=abc.ABCMeta):
+    @classmethod
+    def __subclasshook__(cls, other):
+        return not issubclass(other, collections.Sequence) or NotImplemented
+
+Atomic.register(str)
+</code></pre>
+
+<p>If desired, it's possible to write code which is compatible both both Python 2.6+ <em>and</em> 3.x, but doing so requires using a slightly more complicated technique which dynamically creates the needed abstract base class, thereby avoiding syntax errors due to the metaclass syntax difference. This is essentially the same as what Benjamin Peterson's <a href="http://pythonhosted.org/six/">six</a> module's<a href="http://pythonhosted.org/six/#six.with_metaclass"><code>with_metaclass()</code></a>function does.</p>
+
+<pre><code>class _AtomicBase(object):
+    @classmethod
+    def __subclasshook__(cls, other):
+        return not issubclass(other, collections.Sequence) or NotImplemented
+
+class Atomic(abc.ABCMeta("NewMeta", (_AtomicBase,), {})):
+    pass
+
+try:
+    unicode = unicode
+except NameError:  # 'unicode' is undefined, assume Python &gt;= 3
+    Atomic.register(str)  # str includes unicode in Py3, make both Atomic
+    Atomic.register(bytes)  # bytes will also be considered Atomic (optional)
+else:
+    # basestring is the abstract superclass of both str and unicode types
+    Atomic.register(basestring)  # make both types of strings Atomic
+</code></pre>
+
+<p>In versions before 2.6, there are type checkers in the<code>operator</code>module.</p>
+
+<pre class="lang-none prettyprint-override"><code>&gt;&gt;&gt; import operator
+&gt;&gt;&gt; operator.isSequenceType([])
+True
+&gt;&gt;&gt; operator.isSequenceType(0)
+False
+</code></pre>

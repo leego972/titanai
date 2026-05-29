@@ -1,0 +1,78 @@
+Question: <p>I just got done working through the Django tutorials for the second time, and am understanding things much more clearly now. However, I'm still unclear how apps inside a site interact with one another.</p>
+
+<p>For example, lets say I'm writing a blog application (a rather popular activity, apparently). Blog posts and comments tend to go together, and yet they are distinct enough that they should be built into separate apps, as is the general philosophy of Djano development.</p>
+
+<p>Consider the following example. In reality I would not actually write the comment app myself, as good code for that already exists on the web, but this is for demonstration/practice purposes:</p>
+
+<p><strong>mysite/blog/models.py</strong></p>
+
+<pre><code>from django.db import models
+
+class post(models.Model):
+    title = models.CharField(max_length=200)
+    author = models.CharField(max_length=200)
+    content = models.TextField()
+</code></pre>
+
+<p><strong>mysite/comments/models.py</strong></p>
+
+<pre><code>from django.db import models
+from mysite.blog.models import post
+
+class comment(models.Model):
+    id = models.AutoField()
+    post = models.ForeignKey(post)
+    author = models.CharField(max_length=200)
+    text = models.TextField()
+</code></pre>
+
+<p>Is what I wrote above, importing a model from another app and setting it as a foreign key, how Django apps interact? Or is there a different/better method for the apps that comprise a site to interact?</p>
+
+<p><strong>Update</strong><br>
+Per the recommendation in one response, I'm reading the documentation for contrib.contenttypes. If I'm reading this correctly, I could rewrite my example comment app like this:  </p>
+
+<pre><code>from django.db import models  
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contentypes import generic
+
+class comment(models.Model):  
+    id = models.AutoField()  
+    author = models.CharField(max_length=200)  
+    text = models.TextField()  
+    content_type = models.ForeignKey(ContentType)  
+    content_object = generic.GenericForeignKey(content_type, id)  
+</code></pre>
+
+<p>Would this be correct?</p>
+
+Answer: <p>There's nothing wrong (imho) with making some app dependent on another. After all, apps are just operations on a set of models. you just have to always be aware of which app depends on which app (I guess you could call that a dependency map).</p>
+
+<p>You can achieve loose coupling with the contenttypes framework. It allows an app to be truely portable/pluggable yet still integrated with other applications.</p>
+
+<p>I wrote a comments app (yea, I re-invented the wheel), that can be integrated into any other application, with a few lines in the template of the page where comments should be posted (using custom tags).</p>
+
+<p>Say you want a model "thread" to be pluggable into any other model. The idea is to create e generic foreign key (see django documentation on that), and write a small function that takes any object and returns a "thread" corresponding to it (or creates one if necessary), and write a custom template tag that uses that functionality, e.g. <code>{% get_thread for arbitrary_object as thread %}</code>. All posts are related to a thread, which is related to the object, which can be of any type.</p>
+
+<p>You can think of the "thread" object as a kind of a proxy, so instead of having a post be related to a certain "article" or a "blog post", it's just related to a thread, which is abstract in a sense, what <em>is</em> is a thread? It's just a collection of posts. The thread then allows itself to be related to any object regardless of its type. (although it does more than that, it could hold extra information such as allowing/disallowing anon. posts, closing/opening comments on the page, etc ..)</p>
+
+<p><strong>EDIT</strong></p>
+
+<p>Here's how you can create a generic foreign key with the content types framework:</p>
+
+<pre><code>from django.contrib.contenttypes import generic
+from django.contrib.contenttypes.models import ContentType
+
+class Thread( models.Model ):
+    object_type = models.ForeignKey(ContentType)
+    object_id = models.PositiveIntegerField()
+    object = generic.GenericForeignKey('object_type', 'object_id')
+</code></pre>
+
+<p>You can make it more "transparent" by exploiting the implicit "common" interface that django assumes all objects implement ..</p>
+
+<pre><code>    #inside the Thread class:
+    def __unicode__(self):
+        return unicode(self.object)
+    def get_absolute_url(self):
+        return self.object.get_absolute_url()
+</code></pre>

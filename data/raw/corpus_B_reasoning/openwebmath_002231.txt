@@ -1,0 +1,71 @@
+# How to organise definitions that contain named parameters
+
+I have lots of definitions of (usually numeric) quantities that depend on parameters; they're mostly matrices (in the actual code, there are many more definitions):
+
+model1A = {{1, E^(I phi)}, {E^(-I phi), t}};
+model1B = {b*t, 2};
+
+model2A = {{1, delta E^(I phi)}, {delta E^(-I phi), t}};
+model2B = {b*t, delta};
+
+
+They are truly parameter in a semantic sense: Sometimes they're used generically (unevaluated), sometimes with concrete values, and often I consider certain conditions on these parameter, such as 0<phi<Pi/2. Furthermore, as typical for parameters and as opposed to function arguments, they're identified by their names rather than by their 'slot position' and they appear in some quantities but not in others (as illustrated above).
+
+This makes obvious why it's not sensible to implement them as function arguments. For the given reasons, it wouldn't make much sense to write model1B[b_,t_] = {b*t, 2}.
+
+Instead, I usually use replacement rules if I need to specify certain values of the parameters, and I can still define a function (using Set, not SetDelayed) whenever I deliberately want to consider the parameter dependence of a quantity, as in
+
+normplot[b_] = Norm[model1B];
+Plot[normplot[b], {b, 1, 5}]
+
+
+But this becomes a problem when I want to improve my code:
+
+1. I want to organise my code a bit and not use symbol names for everything. In the example above, I have two models, model 1 and model 2, and it would be better to use something like an association to store the matrices, such that I can just write models["model 1"]["B"].
+2. Included in this is the question of how to treat the left-hand side symbols, that is, whether to use symbols or something else for A and B (above, I just appended "A" and "B" to "model1" and "model2".)
+3. Most importantly, I want to avoid relying on undefined global symbols phi, t, b, delta for the parameters.
+
+How can I avoid the use of undefined global symbols for the quantities and parameters? I'm looking for a solution for how to store and implement
+
+1. "model 1" and "model 2"
+2. "A" and "B"
+3. "phi", "t", "b" and "delta".
+
+There have been several other questions and answers on parts of this topic, but they usually only cover one part of the issue, and many are rather cumbersome (creating a separate package, using Options, etc.). I know that there are several constructs available to solve different parts of this problem — Downvalues, Associations, optional arguments, Contexts, packages (too much here!) and probably more. I think here it's important to consider the situation as a whole: how to best implement parameters on the right-hand side will very much depend on which of these constructs are most useful.
+
+## 1 Answer
+
+There may be some philosophical arguments here, but here's what I would tend toward (there may be more context that I should be considering). First off, for the "model 1/2" and "A/B" stuff, you can just use sub values. As for the comment that
+
+it wouldn't make much sense to write model1B[b_,t_] = {b*t, 2}
+
+I guess I just disagree. I think it's better to be able to specify the actual parameter names as needed rather than rely on keeping global symbols available for these expressions. So, putting that together, you can do something like this:
+
+models["1"]["A"][p1_, p2_] = {{1, E^(I p1)}, {E^(-I p1), p2}}
+
+
+(and similar for the other models). The names p1 and p2 aren't very helpful, but I'm just trying to make the distinction very clear. Anyway, now you can supply your own parameter names as needed, or substitue numeric values if the situation requires it:
+
+models["1"]["A"][phi, t]
+(*{{1, E^(I*phi)}, {E^((-I)*phi), t}}*)
+
+
+and
+
+models["1"]["A"][5, 11]
+(*{{1, E^(5*I)}, {E^(-5*I), 11}}*)
+
+
+You could, of course, use nested Associations, but SubValues is built-in functionality, so I'd leverage it until some good reason imposed itself.
+
+If you really do want to make the parameter names global constants, you can just pull back on the SubValues:
+
+models["1"]["A"] = {{1, E^(I phi)}, {E^(-I phi), t}}
+(*{{1, E^(I*phi)}, {E^((-I)*phi), t}}*)
+
+
+It would probably be a good idea to Protect the parameter symbols you want to reserve for these expressions.
+
+You could also wrap the expressions on the right hand side with Hold. This means you wouldn't have to worry about global name clashes as long as you didn't ReleaseHold until you'd done the replacements.
+
+• These are very useful suggestions in general, but they are useful mostly for problems relatively orthogonal to mine. Parameter names vs function arguments: I also don't want to use undefined global symbols (hence my question), but function arguments don't work well because the dependency of quantities on parameters might vary and the semantic connection really is the name of the parameter. But you've made me realise: The parameters are arguments of the whole specification of the models. Still, is there a way to introduce symbols for the models that avoid collision yet have the given names? Apr 20 at 0:59

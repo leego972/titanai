@@ -1,0 +1,126 @@
+# fighting Gerrymandering
+
+## THE PROBLEM OF Gerrymandering
+
+Politicians have used gerrymandering, the practice of drawing political districts for partisan advantage, to skew elections since the early days of this great country. The term was coined after Governor of Massachusetts Elbridge Gerry, who in 1812 drew an electoral district so long and twisted that the local Boston Gazette mocked it as resembling a salamander and invented the portmanteau, "gerrymander."
+
+The Boston Gazette's political cartoon mocking Governor Gerry's map that invented the term gerrymander.
+
+The key to gerrymandering is that while the law specifies that all districts must be of equal population, it says nothing of their shape. Politicians draw maps to their advantage by what is known as "packing" and "cracking." The majority party will draw pack a few districts with as many voters of the minority party as possible, and then crack apart the rest of the districts as to dilute the minority party's power.
+
+The illustration from Quanta Magazine below demonstrates packing on cracking on an imaginary state that is equally proportioned between pink voters and green voters. While there are 500 of each, all the green voters have been packed into the left most district. The other nine districts have been drawn in erratic shapes such that pink takes the majority in each one.
+
+This illustration also introduces a concept called the Efficiency Gap, a metric invented for fighting gerrymandered maps in court. The Efficiency Gap measures wasted votes. Gerrymandered maps are drawn to maximize the opposition party's wasted votes. Researchers propose a threshold of 7% to measure when a gap is too extreme.
+
+Proponents of legislature controlled district maps often argue that since Democrats are packed into urban centers and Republicans are spread across the countryside, no fair map could be drawn. Opponents of gerrymandering use the Efficiency Gap to counter this argument; this metric was the cornerstone of the recent challenge to Wisconsin's gerrymandered districts.
+
+I had seen a lot of work like this, using data science to prove that an existing map had been egregiously gerrymandered. But I had seen less work using data science to draw an optimally fair map. The challenge with drawing an optimally fair map, however, is that reasonable people disagree about what makes a map fair. Some believe that a map with perfectly rectangular districts is the most common sense approach. Others want maps optimized for electoral competitiveness – gerrymandered for the opposite effect. Many people want maps that take racial diversity into account. For example if a sate is 20% hispanic, 20% of its congressional districts should be majority hispanic.
+
+Instead of trying to settle this debate, my goal was to build a tool that would let anyone optimize a map on whatever they think most important. An independent redistricting committee that only cared about compactness could use this tool to draw perfectly compact districts. If they wanted to ensure competitive elections, they could optimize for a low efficiency gap. Or they could rank the importance of each metric and optimize with weighted preferences.
+
+## Data
+
+A lot of democracy loving data scientists have taken the time to collect and share data for drawing maps. I am especially grateful to Michal Migurski who collected and published data on the voting precincts if North Carolina. Mike published GeoJSON files that contained the shape, demographics, and voting history in 2014 for all 2,725 precincts in North Carolina.
+
+The 2014 voting precincts of North Carolina.
+
+A quick exploration of the voting history shows the effects of gerrymandering. Above are all the voting precincts of North Carolina. Below is how each precinct voted in the 2014 senate election. It may look like the state is majority Republican, but the election was actually pretty close, with Republicans taking home 52% of the statewide vote and Democrats taking home 48%.
+
+The 2014 Senate election. Red precincts were majority Republican, and blue districts were majority Democrat.
+
+However, below are how the congressional districts were drawn that year. The Republican controlled state legislature packed three of the districts so full of Democrats that they easily win those three, but don't stand a chance in the other 10. So even though North Carolina is rather balanced politically, its representation in Congress is not.
+
+## A clustering problem
+
+Graph Partitioning
+
+Simulated Annealing
+
+Constraint-Based Polygonal Spatial Clustering
+
+When I was looking at the green map of all the voting precincts, and thinking about how best to group them into districts, I was reminded of many of the clustering algorithms I have learned. In this case, I knew there should be 13 clusters, but I didn't know how to decide which precincts should go in which clusters. In my research, I came across an experimental clustering algorithm that had been designed specifically for redistricting.
+
+In their paper, Redistricting using Heuristic-Based Polygonal Clustering, researchers from the University of Nebraska describe a method for growing districts using the combination of simple heuristic functions. The team compared their algorithm to two other approaches – graph partitioning and simulated annealing – and demonstrated more visually pleasing results, but what really interested me was how the seemingly powerful algorithm was based on simple, individual metrics. For their map of Nebraska, the researchers only incorporated heuristic functions for population and compactness. It was clear that if I could create a heuristic function modeled off of the Efficiency Gap, I could bolt that on and optimize for electoral competitiveness as well. And I could apply different weights to different metrics. This algorithm appeared flexible enough to let me build the customizable tool that I wanted.
+
+While coding up this algorithm from scratch I found that while the basic premise is straightforward, the details of each step are rather complicated. At each step, I've made changes to what the researches originally proposed. I believe these changes are improvements that help the algorithm generalize to states with more districts, more major cities, and more irregularly shaped precincts.
+
+## HOw it works
+
+The algorithm uses the collection of heuristic functions to determine which district is furthest from its goal and which precinct should be added to bring the district closest to its goal. Each district starts as a single precinct. Overall, the code follows this loop:
+
+1. Examine each district and select the district that is furthest from its goal.
+2. Examine all neighboring precincts of that district, and select the one that brings it closest to its goal.
+3. Add the chosen precinct to the chosen district.
+4. Repeat.
+
+While coding up the algorithm, I would test it on small subsets of the state. Below is a demonstration of growing three districts, optimized only for compactness, on the western edge of North Carolina. Here you can see that districts do not simply gobble up precincts until all have been consumed. Instead the algorithm allows the districts to fight over precincts until it has determined which districts need which precincts the most.
+
+Growing three districts, optimized only for compactness, on the western edge of North Carolina.
+
+### Planting seeds
+
+To start, the algorithm chooses single precincts to act as seed districts. So that districts aren't immediately fighting over the same precincts, the seeds should be reasonably spread out. To insure an even spread, the researchers developed a custom method using the rectangular area between seeds. However, I found their method to be cryptic and overcomplicated. With the stated goal of spreading the initial seeds out evenly, I simply used K++ Initialization.
+
+It follows that the final districts would be heavily influenced by these initial seeds. As I continue to work on this algorithm I intend to further explore the effect of changing the seed locations. I also want to try using population density to influence selection, perhaps first choosing each major city as a seed before spreading the rest out evenly.
+
+### Heuristic Functions
+
+Each function is designed to be normalized between 0 and 1 so that no one function carries too much influence when they are combined. At each step, the district or precinct with the highest score is chosen. Since the algorithm chooses districts that are the "worst performing" and precincts that are the "best performing," the same functions need to yield opposite results at different times. This is achieved by simply calculating a score, s, and either yielding s or 1-s.
+
+### POPULATION HEURISTIC
+
+The population heuristic is simply a district's percent error from its target population. However, while a true percent error calculation takes the absolute value, this function returns a negative value when a district is too large. This will be helpful later.
+
+population_score = (target_pop - current_pop)/target_pop
+
+### Compactness Heuristic
+
+The researchers used a custom method that involved the ratio of a district's border shared with unassigned precincts to the length of the new border if a certain precinct was added. I found this method to be overcomplicated, computationally expensive, and frankly not that effective. Perhaps it worked well on the rectangular precincts of Oklahoma, but it did not generalize to the very irregulary shaped precincts of North Carolina. (Another, deeper level of gerrymandering involves redrawing the electoral precincts themselves, not just the districts. I suspect this is the case in North Carolina.)
+
+Instead I used the combination of two simple and common measures of a shape's compactness. The first is a measure of how circular a shape is, and the second is a measure of a shape's convexity. I experimented with both averaging and summing these two scores.
+
+The circularity score is a ratio of a shape's area to the square of its perimeter. The addition of 4*pi in the numerator normalizes the score so that a circle receives a score of 1.
+
+circular_score = 4*pi*area/perimeter^2
+
+A non-convex shape is one that folds in upon itself, like a crescent moon. The convexity score measures the ratio of a shapes area to that of the shape's convex hull. A shape's convex hull is the smallest convex shape that can fit it. This score returns 1 for any convex shape.
+
+convexity_score = area_shape/area_convex_hull
+
+Attempting to perfect the compactness measure, I would draw districts solely for compactness, ignoring the other metrics. I found that larger districts would necessarily yield worse compactness measures than smaller districts. I experimented with scaling the compactness score by the number of member precincts in a district. This helped but was an imperfect solution. I have concluded that the best way to scale the compactness measure is simply to combine it with the population score.
+
+### Electoral Competiveness Heuristic
+
+Since the Efficiency Gap is a percentage, it is already normalized between 0 and 1. The Brennan Center for Justice has an excellent guide for understanding and calculating the Efficiency Gap.
+
+### Combining the Scores
+
+Many of changes to this algorithm stem from a potential downfall of this algorithm: a district can only help itself by consuming another precinct. Perhaps the best move for a district would be for it to give up a precinct. But the only way a district can lose a precinct is if another district steals it.
+
+If a district is overpopulated it will have a high percent error. The district with the most precincts will likely have the worst compactness measure. This can lead to a self-defeating cycle, where an overpopulated district will have the highest population and compactness heuristic score. As the highest scoring district, the algorithm will select it and try and improve it by adding another precinct. But this will only worsen it's already high population and compactness scores. Thus this district is chosen every cycle until it has consumed the whole state.
+
+In the original algorithm, the researchers sum each metric to yield the heuristic score. Instead, I multiply the population and compactness scores. This simple change, along with allowing the population score to return a negative value once a district is overpopulated, means that overpopulated districts will always have the lowest scores.
+
+While I found the researcher's measure of compactness to be ineffective in North Carolina, it did seem to prioritize unassigned precincts over precincts belonging to another district. I incorporated this thinking by using dynamic weights. While a district is small and exists as an island in a sea of unassigned precincts, the compactness score is doubled. This prioritizes growing compact districts. Once a district touches another neighboring district, the compactness weight is reset. The effect is that early on districts will balloon out in place. Once districts share a border, they can fight over who needs which precincts the most.
+
+Optimized for equal population only
+
+Optimized for equal population and compactness
+
+Optimized for equal population, compactness, and competitive elections
+
+## Results
+
+The western edge of North Carolina was a nice, small subset to test this algorithm on. The western half of this small map is very rural. In the northeast is the city of Asheville. So it's a nice representation of the rest of the state.
+
+The first map on the right shows three districts optimized only for equal population. With no concern for compactness and in need of people, the district in the lower right has reached up to grab part of Asheville.
+
+The second map shows three districts optimized for equal population and compactness. While not perfectly clean, the districts have much nicer shapes than in the first map.
+
+The third map optimizes on all three metrics. To achieve competitive elections, a map must sacrifice some compactness. Drawing maps this way is somewhat another version of gerrymandering.
+
+Here is where I run into the limitations of this algorithm. In hindsight it may make sense for an algorithm developed on Nebraska. It can draw three districts really well, but if you ask for more it breaks down. Drawing 13 congressional districts at once is beyond the capability of this algorithm.
+
+I am currently revising my code to redistrict a state in stages. First, split the state into two or three macro-districts. Then, split each of those into two or three sub-districts. Keep going like as long as necessary. I expect to have a proposed map for North Carolina in the next few weeks.
+
+I admire that the foundation of such a powerful algorithm is this collection of simple functions. While that is no surprise – the most elegant solutions are often the simplest – it is incredibly helpful for this issue in particular. State legislators get away with partisan gerrymandering in part by making the issue seem more complicated than it really is. I hope that my work may help make this complicated issue easier to understand and a less intimidating to fight.

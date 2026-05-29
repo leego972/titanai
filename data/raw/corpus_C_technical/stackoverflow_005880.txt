@@ -1,0 +1,65 @@
+Question: <p>I have a two way foreign relation similar to the following</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True)
+
+class Child(models.Model):
+  name = models.CharField(max_length=255)
+  myparent = models.ForeignKey(Parent)
+</code></pre>
+
+<p>How do I restrict the choices for Parent.favoritechild to only children whose parent is itself?  I tried</p>
+
+<pre><code>class Parent(models.Model):
+  name = models.CharField(max_length=255)
+  favoritechild = models.ForeignKey("Child", blank=True, null=True, limit_choices_to = {"myparent": "self"})
+</code></pre>
+
+<p>but that causes the admin interface to not list any children.</p>
+
+Answer: <pre><code>from django.contrib import admin
+from sopin.menus.models import Restaurant, DishType
+
+class ObjInline(admin.TabularInline):
+    def __init__(self, parent_model, admin_site, obj=None):
+        self.obj = obj
+        super(ObjInline, self).__init__(parent_model, admin_site)
+
+class ObjAdmin(admin.ModelAdmin):
+
+    def get_inline_instances(self, request, obj=None):
+        inline_instances = []
+        for inline_class in self.inlines:
+            inline = inline_class(self.model, self.admin_site, obj)
+            if request:
+                if not (inline.has_add_permission(request) or
+                        inline.has_change_permission(request, obj) or
+                        inline.has_delete_permission(request, obj)):
+                    continue
+                if not inline.has_add_permission(request):
+                    inline.max_num = 0
+            inline_instances.append(inline)
+
+        return inline_instances
+
+
+
+class DishTypeInline(ObjInline):
+    model = DishType
+
+    def formfield_for_foreignkey(self, db_field, request=None, **kwargs):
+        field = super(DishTypeInline, self).formfield_for_foreignkey(db_field, request, **kwargs)
+        if db_field.name == 'dishtype':
+            if self.obj is not None:
+                field.queryset = field.queryset.filter(restaurant__exact = self.obj)  
+            else:
+                field.queryset = field.queryset.none()
+
+        return field
+
+class RestaurantAdmin(ObjAdmin):
+    inlines = [
+        DishTypeInline
+    ]
+</code></pre>

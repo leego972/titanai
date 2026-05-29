@@ -1,0 +1,98 @@
+# Concurrent Pascal
+
+Concurrent Pascal is a programming language designed by Per Brinch Hansen for writing concurrent computing programs such as operating systems and real-time computing monitoring systems on shared memory computers.
+
+A separate language, Sequential Pascal, is used as the language for applications programs run by the operating systems written in Concurrent Pascal. Both languages are extensions of Niklaus Wirth's Pascal, and share a common threaded code interpreter. The following describes how Concurrent Pascal differs from Wirth's Pascal.
+
+Language description
+Several constructs in Pascal were removed from Concurrent Pascal for simplicity and security:
+Variant records
+Goto statement, and labels
+Procedures as parameters
+Packed arrays
+Pointer types
+File types, and associated standard input/output procedures
+
+These omissions make it possible to guarantee, by a combination of compile-time checks and minimal run-time checking in the threaded-code interpreter, that a program can not damage itself or another program by addressing outside its allotted space.
+
+Concurrent Pascal includes class, monitor, and process data types. Instances of these types are declared as variables, and initialized in an init statement.
+
+Classes and monitors are similar: both package private variables and procedures with public procedures (called procedure entries). A class instance can be used by only one process, whereas a monitor instance may be shared by processes. Monitors provide the only mechanism for interprocess communication in a Concurrent Pascal program.
+
+Only one process can execute within a given monitor instance at a time. A built in data type, the queue, together with operations delay and continue, are used for scheduling within monitors. Each variable of type queue can hold one process. If many processes are to be delayed in a monitor, multiple queue variables, usually organized as an array, must be provided. The single process queue variable gives a monitor full control over medium-term scheduling, but the programmer is responsible for unblocking the correct process.
+
+A process, like a class or monitor, has local variables, procedures, and an initial statement, but has no procedure entries. The initial statement ordinarily executes forever, calling local procedures, class procedures, and monitor procedures. Processes communicate through monitor procedures.  Language rules prevent deadlock by imposing a hierarchy on monitors. But nothing can prevent a monitor from erroneously forgetting to unblock a delayed process (by not calling continue) so the system can still effectively hang up through programming errors.
+
+The configuration of processes, monitors, and classes in a Concurrent Pascal program is normally established at the start of execution, and is not changed thereafter. The communication paths between these components are established by variables passed in the init statements, since class and monitor instance variables cannot be used as procedure parameters.
+
+Example
+The following example shows the declaration of a simple monitor, and its use by two communicating processes.
+type
+    "Bounded buffer monitor"
+    buffer = Monitor
+        var
+            saved         : Integer;  "saved item is an integer"
+            fullq, emptyq : Queue;    "used by only two processes"
+            full          : Boolean;  "true if an item is saved:"
+
+        "Puts item in buffer"
+        procedure entry put(item : Integer);
+            begin
+               if full then
+                   delay(fullq);      "block if full"
+               saved := item;         "save the item"
+               full := true;          "mark as full"
+               continue(emptyq)       "unblock consumer"
+            end;
+
+        "Gets item from the buffer"
+        procedure entry get(var item : Integer);
+            begin
+               if not full then
+                   delay(emptyq);     "block if empty"
+               item := saved;         "get the item"
+               full := false;         "mark as not full"
+               continue(fullq)        "unblock producer"
+            end;
+
+        "Initialize the monitor"
+        begin
+            full := false
+        end;
+
+    "Producer uses a buffer"
+    producer = process(pass : Buffer);
+        var item : Integer;
+        begin
+            cycle                     "execute in a loop forever"
+                "produce an item"
+                pass.put(item)        "pass an item to the monitor"
+            end
+        end;
+
+    "Consumer uses a buffer"
+    consumer = process(pass : Buffer);
+        var item : Integer;
+        begin
+            cycle
+                pass.get(item);       "get an item from the monitor"
+                "consume the item"
+            end
+        end;
+
+"declare instances of the monitor, producer, and consumer"
+"give the producer and consumer access to the monitor"
+var
+   pass : Buffer;
+   prod : Producer;
+   cons : Consumer;
+begin
+   init pass,        "initialize the monitor"
+        prod(pass),  "start the producer process"
+        cons(pass)   "start the consumer process"
+end.
+
+References
+
+Pascal programming language family
+Pascal (programming language)

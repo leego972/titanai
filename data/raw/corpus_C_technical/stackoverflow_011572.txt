@@ -1,0 +1,51 @@
+Question: <p>I'm looking for a python library that will help me to create an authentication method for a desktop app I'm writing.
+I have found several method in web framework such as django or turbogears.</p>
+
+<p>I just want a kind of username-password association stored into a local file.
+I can write it by myself, but I'm really it already exists and will be a better solution (I'm not very fluent with encryption).</p>
+
+Answer: <p>dbr said:</p>
+
+<blockquote>
+<pre><code>def hash_password(password):
+    """Returns the hashed version of a string
+    """
+    return hasher.new( str(password) ).hexdigest()
+</code></pre>
+</blockquote>
+
+<p>This is a really insecure way to hash passwords. You <em>don't</em> want to do this. If you want to know why read the <a href="http://www.openbsd.org/papers/bcrypt-paper.pdf">Bycrypt Paper</a> by the guys who did the password hashing system for OpenBSD. Additionally if want a good discussion on how passwords are broken check out <a href="http://www.securityfocus.com/columnists/388">this interview</a> with the author of Jack the Ripper (the popular unix password cracker).</p>
+
+<p>Now B-Crypt is great but I have to admit I don't use this system because I didn't have the EKS-Blowfish algorithm available and did not want to implement it my self. I use a slightly updated version of the FreeBSD system which I will post below. The gist is this. Don't just hash the password. Salt the password then hash the password and repeat 10,000 or so times.</p>
+
+<p>If that didn't make sense here is the code: </p>
+
+<pre><code>#note I am using the Python Cryptography Toolkit
+from Crypto.Hash import SHA256
+
+HASH_REPS = 50000
+
+def __saltedhash(string, salt):
+    sha256 = SHA256.new()
+    sha256.update(string)
+    sha256.update(salt)
+    for x in xrange(HASH_REPS): 
+        sha256.update(sha256.digest())
+        if x % 10: sha256.update(salt)
+    return sha256
+
+def saltedhash_bin(string, salt):
+    """returns the hash in binary format"""
+    return __saltedhash(string, salt).digest()
+
+def saltedhash_hex(string, salt):
+    """returns the hash in hex format"""
+    return __saltedhash(string, salt).hexdigest()
+</code></pre>
+
+<p>For deploying a system like this the key thing to consider is the HASH_REPS constant. This is the scalable cost factor in this system. You will need to do testing to determine what is the exceptable amount of time you want to wait for each hash to be computed versus the  risk of an offline dictionary based attack on your password file. </p>
+
+<p>Security is hard, and the method I present is not the best way to do this, but it is significantly better than a simple hash. Additionally it is dead simple to implement. So even you don't choose a more complex solution this isn't the worst out there.</p>
+
+<p>hope this helps,
+Tim</p>

@@ -1,0 +1,836 @@
+================================================================================
+TITAN AI — EXPANDED PROFESSIONAL TRAINING PACK v3.0
+DEEP DIVE: REASONING PATTERNS, PROFESSIONAL DIALOGUE, ETHICAL ANALYSIS,
+           ADVANCED EXPLANATION, SYSTEM DESIGN INTERVIEWS
+================================================================================
+
+================================================================================
+PART 1: PROFESSIONAL REASONING — HOW AN EXPERT THINKS OUT LOUD
+================================================================================
+
+--- MULTI-STEP TECHNICAL PROBLEM SOLVING WITH NARRATION ---
+
+EXAMPLE 1: Diagnosing High Database CPU
+User: Our PostgreSQL database is at 100% CPU. Production is down. Help.
+
+Expert approach:
+"First, I need to understand if this is a sudden spike or gradual increase —
+that tells us if something changed or if it's a load problem that grew over time.
+
+Let me start with what's running right now:
+  SELECT pid, now() - pg_stat_activity.query_start AS duration, query, state
+  FROM pg_stat_activity
+  WHERE (now() - pg_stat_activity.query_start) > interval '5 seconds'
+  ORDER BY duration DESC;
+
+If I see long-running queries, that points to a specific query problem.
+If I see hundreds of short queries, that's a volume problem.
+If I see locked queries piling up, that's a lock contention problem.
+
+Next, I want to see the overall stat:
+  SELECT * FROM pg_stat_bgwriter;  -- Check checkpoint pressure
+  SELECT * FROM pg_stat_database WHERE datname = 'production';
+
+If I see high blks_read (disk reads) vs blks_hit (cache hits), the buffer
+cache might be insufficient — shared_buffers too small.
+
+If I see high tup_returned but low tup_fetched, queries are doing sequential
+scans instead of index scans — missing indexes.
+
+Let me also check for lock waits:
+  SELECT blocked_locks.pid AS blocked_pid,
+         blocked_activity.usename AS blocked_user,
+         blocking_locks.pid AS blocking_pid,
+         blocking_activity.usename AS blocking_user,
+         blocked_activity.query AS blocked_statement,
+         blocking_activity.query AS current_statement_in_blocking_process
+  FROM pg_catalog.pg_locks blocked_locks
+  JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked_locks.pid
+  JOIN pg_catalog.pg_locks blocking_locks ON blocking_locks.locktype = blocked_locks.locktype
+  JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking_locks.pid
+  WHERE NOT blocked_locks.granted;
+
+Depending on what I find:
+  - Long query: Kill it with pg_terminate_backend(pid), then optimize or add index
+  - Lock contention: Identify blocking transaction, review application for long transactions
+  - Volume spike: Check application logs for traffic anomaly, rate limit or scale horizontally
+  - Missing index: CREATE INDEX CONCURRENTLY (non-blocking) on the offending column
+
+Immediate relief: Kill the worst offenders, restore service.
+Root cause: Identify why it happened, fix permanently.
+Prevention: Set statement_timeout, add slow query logging, monitor query plans."
+
+---
+
+EXAMPLE 2: Security Incident — What Do You Do First?
+User: Our SIEM just fired 50 alerts simultaneously. How do you triage this?
+
+Expert approach:
+"Fifty simultaneous alerts almost always means one of three things:
+  1. A common trigger — one attack hitting many endpoints
+  2. A detection rule storm — one event matching many correlated rules
+  3. A system issue — SIEM ingestion delay causing backlog flush
+
+I'm not going to try to investigate 50 alerts individually. That's the trap.
+I'm going to look for the pattern.
+
+First question: Are these all the same alert type, same source host, or same
+user account? If yes, that's my pivot point — one incident generating noise.
+
+Second question: What's the timeline? All within 1 minute = simultaneous event.
+Spread over hours = separate issues.
+
+In Splunk I'd run:
+  index=alerts earliest=-15m
+  | stats count by rule_name, src_host, dest_host
+  | sort - count
+
+If I see: Lateral_Movement_PsExec: 47 hits, all from src_host=WKSTN-042
+That's my answer. One compromised workstation trying to move laterally.
+Action: Isolate WKSTN-042 immediately, start IR process, investigate other 3 alerts separately.
+
+If I see: 15 different rule types from 15 different hosts —
+That's unusual. Could be a network scan, a policy rollout, or a false positive storm.
+Action: Check if a new software was deployed today; check if IP is internal scanner.
+
+Rule of thumb: Always consolidate before investigating. Treating 50 alerts as
+50 separate problems is how analysts burn out and miss the real incident."
+
+---
+
+EXAMPLE 3: Architecture Decision — Microservices vs Monolith
+User: We're starting a new project. Should we use microservices?
+
+Expert approach:
+"Honest answer: Almost certainly not yet. Here's my reasoning.
+
+Microservices solve specific problems: independent scaling, independent deployment,
+team autonomy at scale, polyglot persistence. They create other problems:
+distributed system complexity, network latency, eventual consistency, operational
+overhead, debugging difficulty.
+
+The question isn't 'are microservices better?' It's 'do your current problems
+justify microservices costs?'
+
+For a new project I'd ask:
+  1. Team size? Under 15 engineers: Monolith. The coordination overhead of
+     microservices doesn't pay off until you have multiple teams who need
+     independent deployment autonomy.
+
+  2. Traffic patterns? Do different parts of the system need to scale
+     independently at 10x different rates? Monolith handles this fine with
+     horizontal scaling until you hit real bottlenecks.
+
+  3. Deployment frequency? Do different modules need to deploy 20x/day
+     independently? Monolith CI/CD can achieve daily deployments.
+
+  4. Failure isolation? Does one component failing need to keep others alive?
+     Circuit breakers in a well-designed monolith handles much of this.
+
+My recommendation: Start with a modular monolith.
+  - Clean module boundaries (no circular dependencies)
+  - Each module has its own database schema (even if shared DB instance)
+  - Well-defined interfaces between modules (future service boundaries)
+  - Single deployment unit, simple operations, easy debugging
+
+When you hit a real bottleneck — specific module needs 10x more resources,
+specific team needs true deployment independence, specific latency requirement
+can't be met monolithically — extract THAT module into a service.
+
+Amazon, Netflix, Twitter: All started monolithic. They extracted microservices
+only when they had specific, measured reasons to do so.
+
+The companies that regret microservices are the ones who adopted them at
+day zero without the problems they solve."
+
+================================================================================
+PART 2: PROFESSIONAL EXPLANATION PATTERNS
+================================================================================
+
+--- EXPLAINING COMPLEX CONCEPTS AT MULTIPLE LEVELS ---
+
+CONCEPT: How Transformers Work
+
+LEVEL 1 (Executive, no tech background):
+"Imagine you're reading a long contract and need to understand what 'it' refers
+to in every sentence. Your brain automatically looks back through the document
+and connects each pronoun to its noun. Transformers do this with every word in
+a text simultaneously — each word looks at every other word and assigns an
+'attention score' (how relevant is this other word to understanding me?).
+This parallel attention across the whole text is what makes transformers powerful
+at language understanding."
+
+LEVEL 2 (Technical but not ML expert):
+"Transformers use a mechanism called self-attention. For each word in a sentence,
+the model computes three vectors: a Query (what am I looking for?), a Key (what
+do I represent?), and a Value (what information should I pass along?).
+Attention scores are computed as dot products between each Query and all Keys,
+then normalized with softmax. The output for each position is a weighted sum
+of all Values, weighted by attention scores. This means every word directly
+attends to every other word regardless of distance — unlike RNNs which had to
+propagate information step by step. Multiple attention 'heads' run in parallel,
+each learning different relationship types (syntax, semantics, coreference).
+This architecture scales beautifully with compute and parallelizes across GPUs."
+
+LEVEL 3 (ML practitioner):
+"Self-attention: Attention(Q,K,V) = softmax(QK^T / sqrt(d_k))V
+where Q=XW_Q, K=XW_K, V=XW_V ∈ R^(n × d_k).
+Scaling by sqrt(d_k) prevents gradient vanishing in softmax at high dimensions.
+Multi-head: Run h heads with d_k = d_model/h, concatenate and project.
+Position encoding: RoPE (LLaMA/Mistral) or learned absolute (GPT) since
+attention is permutation invariant.
+Pre-norm (LLaMA) vs post-norm (original transformer): Pre-norm has better
+training stability at scale.
+Flash Attention: IO-aware exact attention, 2-4x faster with HBM tiling,
+same mathematical result.
+Causal masking for autoregressive generation: Upper triangular -inf mask
+prevents attending to future tokens."
+
+---
+
+CONCEPT: Explaining Zero Trust to Different Audiences
+
+LEVEL 1 (Board of Directors):
+"Traditional security assumed everyone inside our network was trustworthy —
+like a castle with a moat. Once attackers breach the moat, they roam freely.
+Zero Trust eliminates this assumption. Every user, device, and application
+must prove its identity every time it requests access, regardless of location.
+It's the difference between a hotel with one key that opens every door versus
+separate key cards for each room that expire every hour. Our investment in
+Zero Trust directly reduces our breach impact — attackers who get in can no
+longer move freely to our most sensitive data."
+
+LEVEL 2 (IT Management):
+"Zero Trust replaces perimeter-based security with identity-based access control.
+Key components we need to implement: identity provider with MFA for all users,
+device compliance checking (MDM enrollment, patch status, endpoint security),
+microsegmentation to control east-west traffic between systems, just-in-time
+privileged access for admin accounts, and continuous monitoring with
+behavioral analytics. The transition from VPN to ZTNA (Zero Trust Network Access)
+is the most visible change — users connect directly to applications rather than
+joining a flat network. We replace implicit trust from 'being on the network'
+with explicit policy decisions per-request."
+
+LEVEL 3 (Security Engineer):
+"NIST SP 800-207 implementation: Policy Engine evaluates access requests using
+subject signals (identity from IdP, device posture from MDM health attestation,
+behavioral anomaly score from UEBA), resource signals (data classification,
+resource sensitivity tag), and environmental signals (network location, time,
+geolocation). Policy Administrator issues credentials to Policy Enforcement Point.
+PEP proxies all resource access — no direct connectivity. Cryptographic verification:
+SPIFFE/SPIRE for workload identity, mutual TLS for service-to-service. Key
+implementation patterns: BeyondCorp (Google's model), Cloudflare Access,
+Zscaler ZTNA, or open source (Pomerium + cert-manager + OPA). Success metric:
+lateral movement MTTD < 10 minutes; blast radius of compromised credential < 5% of assets."
+
+================================================================================
+PART 3: TECHNICAL PROBLEM — WORKED EXAMPLES WITH FULL REASONING
+================================================================================
+
+--- ALGORITHM AND DATA STRUCTURE PROBLEMS ---
+
+PROBLEM: Design a system to detect anomalous login activity in real time.
+Requirements:
+  - 1 billion users, each logs in 0-50 times per day
+  - Flag logins from: new country, impossible travel, credential stuffing
+  - Response time: <50ms to accept/reject login attempt
+  - 99.99% uptime required
+
+SOLUTION WALKTHROUGH:
+
+Step 1: Break down anomaly types
+  Impossible travel: Login from NYC, then 10 min later from Tokyo
+    → Requires last login location + timestamp per user
+  New country: User has never logged in from this country
+    → Requires per-user set of seen countries
+  Credential stuffing: Many logins to different accounts from same IP
+    → Requires rate limiting per source IP
+
+Step 2: Data structures and storage
+  Per-user state:
+    - Last login: (latitude, longitude, timestamp) → simple key-value store
+    - Country set: Bloom filter (space efficient, allows false positives
+      for 'new country' check, but follow up with exact check)
+    - User risk score: Rolling window counter
+
+  Per-IP state:
+    - Login attempt count per time window: Redis sorted set or HyperLogLog
+    - Distributed rate limiting: Redis cluster with Lua scripts for atomicity
+
+Step 3: Architecture
+  Login request → API Gateway → Auth Service → Risk Engine → Decision
+                                                    ↓
+                                              [Feature extraction]
+                                                 - Lookup last location (Redis, <5ms)
+                                                 - Check IP reputation (local cache of threat feed)
+                                                 - Haversine distance + time delta
+                                                 - Country bloom filter check
+                                                 - IP rate limit check
+                                                    ↓
+                                              [ML Model inference]
+                                                 - Feature vector → XGBoost model
+                                                 - Served via TensorFlow Serving
+                                                 - p99 latency: 10-15ms
+                                                    ↓
+                                              [Policy decision]
+                                                 - score > 0.9: Block
+                                                 - score 0.5-0.9: MFA challenge
+                                                 - score < 0.5: Allow
+
+Step 4: Haversine distance calculation for impossible travel:
+  from math import radians, sin, cos, sqrt, atan2
+  
+  def haversine_km(lat1, lon1, lat2, lon2):
+      R = 6371  # Earth radius in km
+      dlat = radians(lat2 - lat1)
+      dlon = radians(lon2 - lon1)
+      a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+      return 2 * R * atan2(sqrt(a), sqrt(1-a))
+  
+  def is_impossible_travel(last_lat, last_lon, last_time,
+                            curr_lat, curr_lon, curr_time):
+      dist_km = haversine_km(last_lat, last_lon, curr_lat, curr_lon)
+      time_hours = (curr_time - last_time).total_seconds() / 3600
+      max_speed_kmh = 900  # Commercial aircraft speed
+      max_possible_km = max_speed_kmh * time_hours
+      return dist_km > max_possible_km + 100  # 100km tolerance
+
+Step 5: Scaling considerations
+  - Redis cluster: Partition by user_id (consistent hashing)
+  - Hot users (celebrities): Don't shard by popularity; random partition
+  - Geographic distribution: Deploy risk engine in each region (latency)
+  - Async learning: Log all decisions + outcomes, retrain model weekly
+  - Feedback loop: Manual review queue for borderline cases (0.5-0.7)
+
+Step 6: Failure modes and mitigations
+  Redis unavailable: Fail open with basic IP rate limiting only
+  Model serving latency spike: Fall back to rule-based engine
+  VPN/Tor detected: Always MFA-challenge, never block (legitimate users)
+  IP spoofing: Use device fingerprint (browser fingerprint, mobile device ID) as backup
+
+---
+
+PROBLEM: Design a rate limiter for an API with 100K RPS
+Requirements:
+  - Per-user: 1000 req/min, 100 req/sec burst
+  - Per-API-key: Different limits per tier (free/pro/enterprise)
+  - Distributed: Multiple API server instances
+  - Headers: Return X-RateLimit-Remaining, X-RateLimit-Reset
+  - <5ms overhead per request
+
+SOLUTION:
+
+Algorithm choice:
+  Token bucket: Best for burstable APIs
+    - Tokens refill at constant rate (1000/60 ≈ 16.67 tokens/second)
+    - Bucket capacity = burst limit (100 tokens for 100 req/sec burst)
+    - Check: atomic decrement; reject if < 0
+  
+  Sliding window log: Most accurate, memory intensive (stores timestamps)
+  Fixed window counter: Simple, allows 2x burst at window boundary
+  Sliding window counter: Approximation, good balance
+
+Redis-based token bucket implementation:
+  -- Lua script for atomicity
+  local key = KEYS[1]
+  local rate = tonumber(ARGV[1])       -- tokens per second
+  local capacity = tonumber(ARGV[2])   -- max burst
+  local now = tonumber(ARGV[3])        -- current unix timestamp ms
+  local requested = tonumber(ARGV[4])  -- tokens requested (usually 1)
+
+  local last_tokens = tonumber(redis.call("HGET", key, "tokens") or capacity)
+  local last_time = tonumber(redis.call("HGET", key, "time") or now)
+
+  -- Refill tokens based on elapsed time
+  local elapsed = math.max(0, now - last_time)
+  local refill = elapsed * rate / 1000  -- Convert ms to seconds
+  local tokens = math.min(capacity, last_tokens + refill)
+
+  -- Check if request can be served
+  if tokens >= requested then
+      tokens = tokens - requested
+      redis.call("HMSET", key, "tokens", tokens, "time", now)
+      redis.call("EXPIRE", key, 3600)
+      return {1, math.floor(tokens)}  -- {allowed, remaining}
+  else
+      redis.call("HMSET", key, "tokens", tokens, "time", now)
+      redis.call("EXPIRE", key, 3600)
+      local retry_after = math.ceil((requested - tokens) * 1000 / rate)
+      return {0, retry_after}  -- {rejected, retry_after_ms}
+  end
+
+Tiered limits in Python middleware:
+  TIER_LIMITS = {
+      "free":       {"rate": 10,    "burst": 50},     # 10 req/sec, 50 burst
+      "pro":        {"rate": 100,   "burst": 500},    # 100 req/sec, 500 burst
+      "enterprise": {"rate": 1000,  "burst": 5000},   # 1000 req/sec, 5000 burst
+  }
+  
+  def rate_limit_middleware(request):
+      api_key = request.headers.get("X-API-Key")
+      tier = get_tier(api_key)  # Cached lookup
+      limits = TIER_LIMITS[tier]
+      
+      allowed, remaining = redis_rate_limit(
+          key=f"rl:{api_key}",
+          rate=limits["rate"],
+          capacity=limits["burst"]
+      )
+      
+      if not allowed:
+          response.headers["Retry-After"] = str(remaining)
+          return 429, {"error": "Rate limit exceeded"}
+      
+      response.headers["X-RateLimit-Remaining"] = str(remaining)
+      response.headers["X-RateLimit-Limit"] = str(limits["burst"])
+      response.headers["X-RateLimit-Reset"] = str(int(time.time()) + 60)
+      return next_handler(request)
+
+At 100K RPS with 10 Redis nodes: 10K RPS per node, well within Redis's 100K+ RPS capacity.
+Network round-trip to Redis: ~0.5-1ms within same datacenter.
+
+================================================================================
+PART 4: ADVANCED CYBERSECURITY — PROFESSIONAL QA AND DIALOGUE PATTERNS
+================================================================================
+
+--- PROFESSIONAL SECURITY CONSULTATION DIALOGUES ---
+
+DIALOGUE 1: Security Architecture Review
+
+User: We're building a fintech app. What security architecture do you recommend?
+
+TitanAI: Before I recommend architecture, I need to understand your threat model.
+Let me ask a few questions, then I'll give you concrete recommendations.
+
+What's the primary attack surface?
+  Option A: Consumer mobile app (your customers' money)
+  Option B: B2B API (other companies' systems integrating with yours)
+  Option C: Both
+
+What's the most sensitive operation?
+  - Account-to-account transfers?
+  - Card issuance and management?
+  - Investment/trading execution?
+
+And your regulatory requirements?
+  - US: PCI DSS (if handling cards), SOC 2, potentially FinCEN/BSA
+  - EU: PSD2, GDPR, potentially MiCA
+  - UK: FCA authorization
+
+Assuming consumer mobile + transfers + PCI DSS:
+
+AUTHENTICATION LAYER:
+  - FIDO2/WebAuthn for step-up auth on transactions (phishing-resistant)
+  - Biometric + PIN local unlock (Face ID/fingerprint)
+  - Adaptive MFA: Step up for unusual patterns (new device, large transfer)
+  - Session tokens: Short-lived JWTs (15 min), refresh tokens in secure storage
+  - Device binding: APNS/FCM device token + certificate pinning
+
+TRANSACTION SECURITY:
+  - Out-of-band transaction authorization: Push notification confirmation
+  - Amount/recipient verification on separate channel
+  - Velocity controls: Daily limits, new-payee cooling periods
+  - Anomaly scoring: Per-user behavioral model (amount, time, destination)
+  - Maker-checker: For large B2B transfers above threshold
+
+API SECURITY:
+  - mTLS for service-to-service communication
+  - OAuth 2.0 + PKCE for mobile client auth
+  - API gateway with request signing (HMAC-SHA256 of body + timestamp)
+  - Input validation: Strict schemas, reject unexpected fields
+  - Output filtering: Never return more than client needs (no internal IDs, hashes)
+
+DATA SECURITY:
+  - Card data: Never touch it — use Stripe/Adyen/Braintree tokenization
+  - PII: Encrypted at rest (AES-256-GCM), field-level encryption for SSN/DOB
+  - HSM for key management (AWS CloudHSM or Google Cloud HSM)
+  - Tokenization for account numbers in logs/storage
+  - Data residency: Match customer geography to data location
+
+FRAUD AND ABUSE:
+  - Device fingerprinting: Combine hardware IDs, behavior, network
+  - IP intelligence: Tor exit nodes, hosting ASNs, known proxies → higher friction
+  - Graph analysis: Money mule networks, synthetic identity patterns
+  - ML fraud model: Real-time inference <100ms, features from 90-day history
+  - Rules engine: Hard blocks on known fraud patterns
+
+---
+
+DIALOGUE 2: Vulnerability Disclosure
+
+User: I found a SQL injection in a company's login form. What should I do?
+
+TitanAI: Good that you're asking — this is exactly the right question.
+The answer is responsible disclosure, also called coordinated disclosure.
+
+What you should do:
+
+STEP 1: Document what you found without further exploitation
+  - Capture the proof of concept (one clean screenshot or request)
+  - Do NOT attempt to access data, dump tables, or escalate
+  - Even curiosity can cross legal lines under CFAA (US) / Computer Misuse Act (UK)
+  - You've proven the vulnerability exists — that's enough
+
+STEP 2: Find the responsible disclosure channel
+  Check these in order:
+  - security.txt at company.com/.well-known/security.txt
+  - HackerOne or Bugcrowd program (search their name on those platforms)
+  - security@company.com
+  - abuse@company.com
+  - LinkedIn to security team if above fail
+  - CERT/CC as last resort if company is unresponsive
+
+STEP 3: Write a clear, professional disclosure report
+  Subject: Security Vulnerability Report — SQL Injection in Login Form
+  Body should include:
+  - Summary: Type of vulnerability, affected URL
+  - Severity: Your assessment (Critical — unauthenticated SQLi)
+  - Steps to reproduce: Exact, minimal reproduction steps
+  - Proof of concept: Screenshot only (no dumped data)
+  - Impact: What an attacker could do (explain business impact clearly)
+  - Recommended fix: Parameterized queries
+  - Your contact info and PGP key (if the company has one)
+  - Requested response window: 7 days for initial acknowledgment,
+    90 days to fix before you consider public disclosure
+
+STEP 4: Wait and follow up
+  - Give them 7 business days to acknowledge
+  - Give them 90 days to fix (industry standard: Google Project Zero)
+  - If no response after 7 days, follow up once
+  - If no response or fix after 90 days, you may disclose publicly
+    with a note that you attempted to notify them
+
+STEP 5: Keep records
+  - Date and time of discovery
+  - Date of disclosure
+  - All correspondence
+  - This protects you legally if they try to prosecute
+
+What NOT to do:
+  - Do NOT access data beyond proving the vulnerability
+  - Do NOT sell it to brokers or on dark markets (felony)
+  - Do NOT post publicly before giving them chance to fix
+  - Do NOT demand payment as condition of disclosure (extortion)
+  - Do NOT contact them through social media first (looks threatening)
+
+If this is a Bug Bounty program, follow their specific rules — they may
+pay you $500-$50,000+ for this type of finding.
+
+---
+
+DIALOGUE 3: Explaining a Breach to an Executive
+
+TitanAI (Security Lead) briefing CEO:
+
+"I'll give you the full picture in three minutes.
+
+What happened: On Tuesday at 3:14 AM, an attacker used valid credentials
+for a contractor account to log into our VPN. They spent 6 days quietly
+mapping our network before we detected them this morning. Our detection
+systems caught unusual data staging in the finance file server.
+
+What they accessed: We believe they accessed files in the Q3 financial
+reporting folder and potentially the customer contract database. I want to
+be clear — we know they staged 4.2 GB of data but we don't yet know exactly
+what was in it. We'll know within 24 hours.
+
+Are they still in our systems: No. We have isolated the affected segments
+and revoked all contractor credentials as of 90 minutes ago. We have
+forensic experts on site confirming the scope.
+
+What we're doing right now:
+  First, preserving evidence for legal and potential law enforcement referral.
+  Second, determining exactly what data was taken.
+  Third, we have outside counsel reviewing our notification obligations —
+    we may have a 72-hour GDPR clock if customer PII was involved.
+  Fourth, preparing communications for affected customers if needed.
+
+What I need from you: Authorization to engage the breach coach on our
+insurance policy, and your availability for a call with legal at 2 PM.
+I'll have a complete preliminary report for you by noon.
+
+What I can't tell you yet: Exactly what data was taken, the attacker's
+identity or motive, and whether this is a regulatory notification event.
+
+My current confidence: We've contained the breach. The risk of further
+data loss is low. I want to be conservative on the notification question —
+better to notify when not required than to miss a required notification."
+
+================================================================================
+PART 5: SYSTEMS DESIGN INTERVIEW PATTERNS — PROFESSIONAL LEVEL
+================================================================================
+
+--- FRAMEWORK FOR SYSTEM DESIGN ---
+
+FRAMEWORK: RESHADED
+R — Requirements (functional + non-functional)
+E — Estimation (scale calculations)
+S — Schema (data model)
+H — High-level design (component diagram)
+A — API design (endpoints, contracts)
+D — Deep dive (bottlenecks, edge cases)
+E — Extensibility (how would you add X?)
+D — Demonstrate (walk through a complete flow)
+
+---
+
+DESIGN: URL Shortener (bit.ly)
+
+REQUIREMENTS:
+Functional:
+  - Shorten URL: POST /shorten → short code
+  - Redirect: GET /:code → 302 redirect to original
+  - Analytics: click count, geographic distribution
+Non-functional:
+  - 100M URLs created per day
+  - 10B redirects per day (100:1 read:write ratio)
+  - Short codes: 7 characters, URL-safe
+  - Low latency redirects: <10ms p99
+  - Availability: 99.99%
+
+ESTIMATION:
+  Writes: 100M/day = 1,157/sec ≈ 1.2K writes/sec
+  Reads: 10B/day = 115,740/sec ≈ 116K reads/sec
+  Storage per URL: 500 bytes (short code + long URL + metadata)
+  Total storage: 100M/day × 365 × 5 years = 182.5B URLs
+    × 500 bytes = ~91TB over 5 years
+  Cache: Top 20% of URLs serve 80% of traffic
+    20% of 100M = 20M URLs × 500B = 10GB (fits in memory)
+
+SCHEMA:
+  urls table (write DB):
+    id: BIGINT (primary key, auto-increment)
+    short_code: VARCHAR(7) UNIQUE INDEX
+    long_url: TEXT
+    user_id: BIGINT (FK, nullable for anonymous)
+    created_at: TIMESTAMP
+    expires_at: TIMESTAMP (nullable)
+
+  clicks table (analytics — write-heavy, append-only):
+    id: BIGINT
+    short_code: VARCHAR(7) INDEX
+    clicked_at: TIMESTAMP
+    country: CHAR(2)
+    referer: VARCHAR(255)
+
+SHORT CODE GENERATION:
+  Option 1: Base62(auto-increment ID)
+    ID 1 → "1", ID 62 → "Z", ID 3844 → "100" (base62)
+    Problem: Sequential codes are guessable
+    Fix: XOR with random salt before encoding
+  
+  Option 2: MD5/SHA1 of long URL, take first 7 chars
+    Problem: Collision when same URL shortened twice; hot spots in hash space
+  
+  Option 3: Random 7 char base62 with uniqueness check
+    P(collision after N codes) = 1 - e^(-N²/(2×62^7)) ≈ 1% after 480K codes
+    Problem: Distributed uniqueness check at 1.2K writes/sec needs coordination
+  
+  Recommended: Snowflake-like ID (Twitter approach)
+    41 bits timestamp + 10 bits machine ID + 12 bits sequence
+    Globally unique, monotonic, no coordination needed
+    Encode to base62 for URL-safe short code
+
+HIGH-LEVEL DESIGN:
+  Client → CDN (cache redirects for popular URLs) → Load Balancer
+         → Redirect Service (stateless, many instances)
+                ↓
+          Redis Cache (hot URLs, 10GB, <1ms)
+                ↓ (cache miss)
+          Read Replicas (PostgreSQL, geo-distributed)
+
+  Write path:
+  Client → Load Balancer → Write Service → Primary PostgreSQL + Cache invalidation
+                                         → Kafka (async analytics events)
+                                                ↓
+                                         ClickHouse (analytics aggregation)
+
+REDIRECT FLOW (complete walk-through):
+  1. GET bit.ly/aX3pQ7 arrives at CDN
+  2. CDN cache hit (popular URL): Returns 302, done (<5ms)
+  3. CDN cache miss: Forwards to redirect service
+  4. Redirect service: Check Redis → found → 302 redirect, async log click (<5ms)
+  5. Redis miss: Query read replica → found → cache write-back → 302 redirect (<15ms)
+  6. Not found: Return 404
+
+BOTTLENECKS AND MITIGATIONS:
+  Hot short codes (viral URLs getting millions of hits):
+    → Replicate hot URLs to all CDN nodes globally
+    → Local in-memory cache in redirect service (not just Redis)
+    → Prioritize cache promotion for trending codes
+
+  Write throughput ceiling:
+    → Single primary PostgreSQL handles 5K writes/sec easily
+    → If exceeded: Partition by short_code hash, multi-primary setup
+
+  Analytics at scale:
+    → Separate clicks table → Kafka → ClickHouse (optimized for analytics)
+    → Approximate counts with HyperLogLog for real-time dashboards
+    → Exact counts from batch aggregation overnight
+
+---
+
+DESIGN: Design TikTok's Recommendation Feed
+
+REQUIREMENTS:
+Functional:
+  - User opens app → personalized feed of videos
+  - Infinite scroll: Next batch of 10 videos available as user scrolls
+  - Signals: watch time, replays, shares, skips, comments, follows
+
+Non-functional:
+  - 1B daily active users
+  - Feed refresh: <500ms latency p50
+  - Cold start: New users get reasonable recommendations immediately
+  - Freshness: New content from followed creators appears within minutes
+  - Diversity: Mix of familiar and discovery content
+
+TWO-TOWER MODEL ARCHITECTURE:
+  User Tower: Embeddings from user history, demographics, interests
+    Input features:
+      - Interaction history: video IDs, watch %, actions (past 7 days)
+      - Explicit: Followed creators, liked topics
+      - Demographic: Age range, language, location (coarse)
+      - Device: Phone model, time of day, connection type
+
+  Video Tower: Embeddings from video content and performance signals
+    Input features:
+      - Content: Title, captions, audio features, visual features
+      - Performance: CTR, completion rate, share rate by demographic
+      - Creator: Follower count, previous video performance
+      - Freshness: Age of video (recency boost for new content)
+
+  Similarity: Dot product of user embedding and video embeddings
+  → Top-k retrieval from vector database (FAISS, HNSW)
+
+MULTI-STAGE RANKING PIPELINE:
+  Stage 1: Retrieval (candidate generation)
+    - Vector similarity search: Top 500 from user embedding
+    - Collaborative filtering: What similar users watched
+    - Fresh content injection: Recent videos from followed creators
+    - Diversity candidates: Exploration bucket (±20% new topics)
+    Total candidates: ~1000
+
+  Stage 2: Lightweight ranking
+    - Fast model: 1000 → 100 candidates
+    - Features: Engagement rate, content similarity, creator relationship
+    - Latency budget: 20ms
+
+  Stage 3: Heavy ranking
+    - Deep model: 100 → 20 final candidates
+    - Full feature set including expensive content features
+    - Multi-objective: Maximize watch time AND shares AND not skip rate
+    - Latency budget: 100ms
+
+  Stage 4: Re-ranking and business rules
+    - Deduplication: Remove recently seen videos
+    - Diversity enforcement: No more than 3 consecutive videos from same creator
+    - Policy enforcement: Age-appropriate content, safety filters
+    - Sponsored content insertion: 1 per 10 organic (sold slots)
+    Total latency: <200ms (remaining budget for network/rendering)
+
+COLD START PROBLEM:
+  New user (no history):
+    - Onboarding: 3-5 interest selections → immediate personalization
+    - Behavior signals: First session watch patterns → after 5 videos, personalization kicks in
+    - Fallback: Trending in user's geography and language
+
+  New video (no engagement history):
+    - Exploration pool: Show to diverse small sample (1K-10K views)
+    - Bootstrap estimate: Content-based similarity to successful similar videos
+    - Performance threshold: If CTR/completion exceeds baseline → promote to larger pool
+    - Creator reputation: New video from established creator gets larger initial pool
+
+REAL-TIME FEATURE UPDATES:
+  Challenge: Video goes viral — need to promote it within minutes, not next-day batch
+  Solution: Streaming feature pipeline (Apache Flink or Kafka Streams)
+    Video engagement events → Kafka → Flink aggregation (1-minute windows)
+    → Update video feature store (Redis) → Next ranking request uses fresh features
+  For user features: Heavy features batch-updated hourly; light signals (recent watches) real-time
+
+================================================================================
+PART 6: PROFESSIONAL WRITING AND DOCUMENTATION PATTERNS
+================================================================================
+
+--- SECURITY POLICY TEMPLATES ---
+
+INCIDENT RESPONSE POLICY EXAMPLE:
+
+1. PURPOSE AND SCOPE
+This policy establishes procedures for identifying, containing, investigating,
+and recovering from information security incidents. It applies to all systems,
+networks, and data owned or managed by [Organization Name] and all personnel
+who access those resources.
+
+2. CLASSIFICATION
+  P1 — Critical: Active breach, ransomware, data exfiltration in progress
+    Response time: Immediate (< 15 minutes to engage IR team)
+    Escalation: CISO, CEO, Legal, PR within 1 hour
+    Potential notification: Regulators, customers within 24-72 hours
+
+  P2 — High: Compromised credentials, malware confirmed, policy violation
+    Response time: 2 hours
+    Escalation: CISO within 4 hours
+    Notification: Dependent on data involved
+
+  P3 — Medium: Suspicious activity under investigation, policy violation
+    Response time: 8 hours (business hours)
+    Escalation: Security manager
+    Notification: Internal only
+
+  P4 — Low: Compliance event, near miss, security inquiry
+    Response time: 24-48 hours
+    Escalation: Security team lead
+    Notification: None required
+
+3. ROLES AND RESPONSIBILITIES
+  Incident Commander (IC): CISO or delegate
+    - Owns the incident end-to-end
+    - Authorizes containment actions including system isolation
+    - Approves external communications
+    - Reports to CEO/Board
+
+  Technical Lead: Senior security engineer
+    - Leads technical investigation and remediation
+    - Coordinates forensic collection
+    - Interfaces with external IR firm if engaged
+
+  Communications Lead: Legal/PR
+    - Drafts internal and external notifications
+    - Coordinates regulatory notifications
+    - Manages press inquiries
+
+4. EVIDENCE COLLECTION STANDARDS
+  Volatility order (collect most volatile first):
+    1. CPU registers, routing tables, ARP cache, RAM contents
+    2. Temporary file systems
+    3. Network connections, running processes
+    4. Disk (forensic image, bit-for-bit, MD5/SHA-256 verified)
+    5. Logs (SIEM, OS, application)
+    6. Physical evidence (hardware, paper)
+
+  Chain of custody:
+    - Document who collected what, when, how
+    - Two-person integrity for sensitive collections
+    - Hash verification before and after transfer
+    - Secure, access-controlled evidence storage
+
+5. LESSONS LEARNED (required within 30 days of P1/P2 close)
+  Format:
+    - Incident timeline (minute-by-minute for critical)
+    - What worked well
+    - What failed or was delayed
+    - Root cause analysis (5 Whys or fishbone)
+    - Action items with owners and due dates
+    - Metrics: MTTD, MTTR, data impacted, cost estimate
+
+================================================================================
+END OF TITAN EXPANDED PROFESSIONAL PACK v3.0
+SECTIONS COVERED:
+1. Professional Reasoning (multi-step diagnosis, architectural decisions, triage)
+2. Professional Explanation (multi-level concept explanations, Zero Trust)
+3. Worked Technical Problems (anomaly detection system, rate limiter design)
+4. Cybersecurity Dialogues (architecture review, disclosure, breach briefing)
+5. Systems Design (URL shortener, TikTok feed recommendation — complete)
+6. Professional Writing (incident response policy, evidence standards)
+================================================================================

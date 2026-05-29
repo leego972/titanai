@@ -1,0 +1,61 @@
+# Fast multiplication of high dimensional matrix
+
+I am very new to Mathematica. I am dealing with the multiplication of matrix as the following code
+
+c=8;d=64;
+a=RandomReal[{1,2},{c,c,c}];
+b=RandomReal[{1,2},{c,c,c,d,d,d}];
+
+s=0.0;
+Do[s=s+a[[i1,i2,i3]]*b[[i1,i2,i3,;;,;;,;;]],{i1,1,c},{i2,1,c},{i3,1,c}] //AbsoluteTiming
+
+{4.26894, Null}
+
+
+For me, the computation time is too high because there are many such multiplication in the program.
+
+Any suggestions really appreciated.
+
+• Better try s = Total[a b, 3] or s = Flatten[a].ArrayReshape[b, {c^3, d, d, d}];. – Henrik Schumacher Jun 2 at 5:37
+
+The code can be faster if we compile:
+
+cf = Compile[{{a, _Real, 3}, {b, _Real, 6}}, Flatten[a].Flatten[b, 2]];
+
+test = cf[a, b]; // AbsoluteTiming
+
+(* {0.492055, Null} *)
+
+
+and even faster if compile to C and extract the LibraryFunction[…]:
+
+cfc =
+Compile[{{a, _Real, 3}, {b, _Real, 6}}, Flatten[a].Flatten[b, 2],
+CompilationTarget -> C][[-1]];
+
+testc = cfc[a, b]; // AbsoluteTiming
+(* {0.234145, Null} *)
+
+
+Tested on v9.0.1, with TDM-GCC-5.1.0-2 64-bit compiler, "SystemCompileOptions"->"-Ofast".
+
+• Huh? Why does extracting the LibraryFunction speed this up? – Henrik Schumacher Jun 2 at 6:42
+• @Henrik Copying large list is slow. I learned this here. – xzczd Jun 2 at 6:48
+• @xzczd Thanks, very useful answer. – Shi Jun 11 at 9:07
+
+Better try
+
+s = Total[a b, 3];
+
+
+or
+
+s = Flatten[a].ArrayReshape[b, {c^3, d, d, d}];
+
+
+On my machine, the latter is faster. In general, rephrasing summations in terms of Dot (.) should lead to more efficient code as Dot is highly optimized.
+
+• In v9.0.1 Flatten[a].Flatten[b, 2] seems to be faster and more memory-efficient. – xzczd Jun 2 at 5:46
+• Good point. Both lead to the same AbsoluteTiming and MaxMemoryUsed on my machine under version 12.0 for macos. I recall that ArrayReshape used to have some performance degradation when it was introduced. They seem to have been resolved. – Henrik Schumacher Jun 2 at 6:00
+• @HenrikSchumacher Thanks a lot. – Shi Jun 11 at 9:10
+• You're welcome. – Henrik Schumacher Jun 11 at 9:10

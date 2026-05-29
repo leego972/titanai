@@ -1,0 +1,101 @@
+Question: <p>In Django, given excerpts from an application <em>animals</em> likeso:</p>
+
+<p>A <em>animals/models.py</em> with: </p>
+
+<pre><code>from django.db import models
+from django.contrib.contenttypes.models import ContentType
+
+class Animal(models.Model):
+  content_type = models.ForeignKey(ContentType,editable=False,null=True)
+  name = models.CharField()
+
+class Dog(Animal):
+  is_lucky = models.BooleanField()
+
+class Cat(Animal):
+  lives_left = models.IntegerField()
+</code></pre>
+
+<p>And an <em>animals/urls.py</em>:</p>
+
+<pre><code>from django.conf.urls.default import *
+
+from animals.models import Animal, Dog, Cat
+
+dict = { 'model' : Animal }
+
+urlpatterns = (
+  url(r'^edit/(?P&lt;object_id&gt;\d+)$', 'create_update.update_object', dict),
+)
+</code></pre>
+
+<p>How can one use generic views to edit Dog and/or Cat using the same form?</p>
+
+<p>I.e. The <em>form</em> object that is passed to *animals/animal_form.html* will be Animal, and thus won't contain any of the specifics for the derived classes Dog and Cat. How could I have Django automatically pass a form for the child class to *animal/animals_form.html*?</p>
+
+<p>Incidentally, I'm using <a href="http://www.djangosnippets.org/snippets/1031/" rel="nofollow">Djangosnippets #1031</a> for ContentType management, so Animal would have a method named *as_leaf_class* that returns the derived class.</p>
+
+<p>Clearly, one could create forms for each derived class, but that's quite a lot of unnecessary duplication (as the templates will all be generic -- essentially {{ form.as_p }}).</p>
+
+<p>Incidentally, it's best to assume that Animal will probably be one of several unrelated base classes with the same problem, so an ideal solution would be generic.</p>
+
+<p>Thank you in advance for the help.</p>
+
+Answer: <p>Alright, here's what I've done, and it seems to work and be a sensible design (though I stand to be corrected!).</p>
+
+<p>In a core library (e.g. mysite.core.views.create_update), I've written a decorator:</p>
+
+<pre><code>from django.contrib.contenttypes.models import ContentType
+from django.views.generic import create_update
+
+def update_object_as_child(parent_model_class):
+   """
+   Given a base models.Model class, decorate a function to return  
+   create_update.update_object, on the child class.
+
+   e.g.
+   @update_object(Animal)
+   def update_object(request, object_id):
+      pass
+
+  kwargs should have an object_id defined.
+  """
+
+  def decorator(function):
+      def wrapper(request, **kwargs):
+          # may raise KeyError
+          id = kwargs['object_id']
+
+          parent_obj = parent_model_class.objects.get( pk=id )
+
+          # following http://www.djangosnippets.org/snippets/1031/
+          child_class = parent_obj.content_type.model_class()
+
+          kwargs['model'] = child_class
+
+          # rely on the generic code for testing/validation/404
+          return create_update.update_object(request, **kwargs)
+      return wrapper
+
+  return decorator
+</code></pre>
+
+<p>And in animals/views.py, I have:</p>
+
+<pre><code>from mysite.core.views.create_update import update_object_as_child
+
+@update_object_as_child(Animal)
+def edit_animal(request, object_id):
+  pass
+</code></pre>
+
+<p>And in animals/urls.py, I have:</p>
+
+<pre><code>urlpatterns += patterns('animals.views',
+  url(r'^edit/(?P&lt;object_id&gt;\d+)$', 'edit_animal', name="edit_animal"),
+)
+</code></pre>
+
+<p>Now I only need a unique edit function for each base class, which is trivial to create with a decorator.</p>
+
+<p>Hope someone finds that helpful, and I'd be delighted to have feedback.</p>

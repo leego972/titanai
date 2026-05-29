@@ -1,0 +1,40 @@
+Question: <p>The problem: I have a class which contains a template method <code>execute</code> which calls another method <code>_execute</code>. Subclasses are supposed to overwrite <code>_execute</code> to implement some specific functionality. This functionality should be documented in the docstring of <code>_execute</code>. 
+Advanced users can create their own subclasses to extend the library. However, another user dealing with such a subclass should only use <code>execute</code>, so he won't see the correct docstring if he uses <code>help(execute)</code>.</p>
+
+<p>Therefore it would be nice to modify the base class in such a way that in a subclass the docstring of <code>execute</code> is automatically replaced with that of <code>_execute</code>. Any ideas how this might be done?</p>
+
+<p>I was thinking of metaclasses to do this, to make this completely transparent to the user.</p>
+
+Answer: <p>Well, if you don't mind copying the original method in the subclass, you can use the following technique.</p>
+
+<pre><code>import new
+
+def copyfunc(func):
+    return new.function(func.func_code, func.func_globals, func.func_name,
+                        func.func_defaults, func.func_closure)
+
+class Metaclass(type):
+    def __new__(meta, name, bases, attrs):
+        for key in attrs.keys():
+            if key[0] == '_':
+                skey = key[1:]
+                for base in bases:
+                    original = getattr(base, skey, None)
+                    if original is not None:
+                        copy = copyfunc(original)
+                        copy.__doc__ = attrs[key].__doc__
+                        attrs[skey] = copy
+                        break
+        return type.__new__(meta, name, bases, attrs)
+
+class Class(object):
+    __metaclass__ = Metaclass
+    def execute(self):
+        '''original doc-string'''
+        return self._execute()
+
+class Subclass(Class):
+    def _execute(self):
+        '''sub-class doc-string'''
+        pass
+</code></pre>

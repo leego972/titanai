@@ -1,0 +1,42 @@
+Question: <p>I need to send a very specific (non-standard) string to an FTP server:</p>
+
+<pre><code>dir "SYS:\IC.ICAMA."
+</code></pre>
+
+<p>The case is critical, as are the style of quotes and their content.</p>
+
+<p>Unfortunately, ftplib.dir() seems to use the 'LIST' command rather than 'dir' (and it uses the wrong case for this application).</p>
+
+<p>The FTP server is actually a telephone switch and it's a very non-standard implementation.</p>
+
+<p>I tried using ftplib.sendcmd(), but it also sends 'pasv' as part of the command sequence.</p>
+
+<p>Is there an easy way of issuing specific commands to an FTP server?</p>
+
+Answer: <p>Try the following.  It is a modification of the original <code>FTP.dir</code> command which uses "dir" instead of "LIST".  It gives a "DIR not understood" error with the ftp server I tested it on, but it does send the command you're after.  (You will want to remove the print command I used to check that.)</p>
+
+<pre><code>import ftplib
+
+class FTP(ftplib.FTP):
+
+    def shim_dir(self, *args):
+        '''List a directory in long form.
+        By default list current directory to stdout.
+        Optional last argument is callback function; all
+        non-empty arguments before it are concatenated to the
+        LIST command.  (This *should* only be used for a pathname.)'''
+        cmd = 'dir'
+        func = None
+        if args[-1:] and type(args[-1]) != type(''):
+            args, func = args[:-1], args[-1]
+        for arg in args:
+            if arg:
+                cmd = cmd + (' ' + arg)
+        print cmd
+        self.retrlines(cmd, func)
+
+if __name__ == '__main__':
+    f = FTP('ftp.ncbi.nih.gov')
+    f.login()
+    f.shim_dir('"blast"')
+</code></pre>

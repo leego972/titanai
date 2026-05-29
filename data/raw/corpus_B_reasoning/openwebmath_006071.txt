@@ -1,0 +1,131 @@
+# How to use custom colorscheme with \tdplotsphericalsurfaceplot from tikz-3dplot
+
+As the title suggest I am trying to use a different color scheme than is currently the default in the tikz-3dplot package for the \tdplotsphericalsurfaceplot command if one uses the option parametricfill.
+
+Here is a MWE with two colors that I would like to have instead of the once used right now. Why two colors? Because I use a colorfunction that simply devides my parameter space into two regions: colorFunc(\t)=ifthenelse(\t<pi/2,0,1);
+
+\documentclass{article}
+
+\usepackage{tikz,tikz-3dplot}
+
+\definecolor{color1}{RGB}{ 86, 180, 233} % Skyblue
+\definecolor{color2}{RGB}{230, 159,   0} % Orange
+
+\begin{document}
+
+\tdplotsetmaincoords{70}{135}
+\begin{tikzpicture}[scale=1,line join=bevel,tdplot_main_coords,
+fill opacity=1,
+declare function={ colorFunc(\t)=ifthenelse(\t<pi/2,0,1);}]
+\pgfsetlinewidth{.1pt}
+\tdplotsphericalsurfaceplot[parametricfill]{64}{32}%
+{1.3*(1/8*sqrt(5/pi)*(1+3*cos(2*\tdplottheta)))}%
+{black}%
+{colorFunc(\tdplottheta*2)}%
+{\draw[color=black,thick,->] (0,0,0) -- (1,0,0) node[anchor=north east]{$x$};}%
+{\draw[color=black,thick,->] (0,0,0) -- (0,1,0) node[anchor=north west]{$y$};}%
+{\draw[color=black,thick,->] (0,0,0) -- (0,0,1) node[anchor=south]{$z$};}%
+\end{tikzpicture}
+
+\end{document}
+
+
+Note: Maybe it is possible to somehow compute the color-coordinates of my two colors and set them in my colorFunc. However, it seems that the plotrange is rescaled, so no matter which values I enter into my colorFunc the resulting plot is always the same, i.e. colorFunc(\t)=ifthenelse(\t<pi/2,0,pi*2/3); yields the same plot.
+
+• In this case we have the result of the colorFunc is 0 or 1, what's the role of those two numbers, try to change them with 90 and 180 colorFunc(\t)=ifthenelse(\t<pi/2,90,180); – Salim Bou Aug 13 '15 at 21:06
+• In my last paragraph I wrote that changing the values of the colorFunc does not change anything. Unfortunately :/. – NOhs Aug 14 '15 at 14:15
+• In my case with 90 and 180 the colors are reversed – Salim Bou Aug 14 '15 at 14:45
+• Ah. I see. This would be due to the periodicity of the colorfunction. My bad.. But this still does not allow me to choose the colors I want. – NOhs Aug 14 '15 at 14:48
+
+It seems like you are already able to customize the color. I am not quiet sure what is your problem. So I would just explain everything.
+
+# What is the 6th argument of \tdplotsphericalsurfaceplot?
+
+(I am talking about the blank you filled by colorFunc(\tdplottheta*2))
+
+This blank allows you to fill in a math expression which is based on \tdplotr, \tdplottheta, and \tdplotphi, and returns a real number. Intuitively, if your expression returns 60, than the color HSB(60,1,1) is used, which is the pure yellow. Similarly if your expression returns 300, it is HSB(300,1,1) the purple.
+
+Technically, your expression is put into
+
+\pgfmathsetmacro{\colorarg}{#5}
+
+
+(it is #5 but not #6 because of, well, we would see it later)
+
+Therefor you can write everything accepted by PGF-math engine. In the most extreme case, you can pass random(0,360).
+
+# Why do I get two colors even if my expression returns a constant?
+
+Things get weird if the plot contains negative radius. In your case, cos is sometimes as negative as -1, producing the doughnut part of the plot. In the following figure, I wrote 3 as the expression. So normally it should be HSB(3,0,0), a reddish color. But how is the doughnut now cyanish?
+
+The answer is that tikz-3dplot assumes users use \tdplotphi as the expression. Since the point (-r,θ,φ) coincides with the point (r,θ+180,-φ), tikz-3dplot adds 180 to your expression whenever it comes to the case of negative radius.
+
+To get over this, make sure your plot is always of positive radius, or make sure that your expression satisfies
+
+func(-r,θ,φ) = func(r,θ+180,-φ)+180   (mod 360)
+
+For instance func(-r,θ,φ) = 5θ + φ^2/90
+
+# I want full access of color
+
+Redefine \tdplotdosurfaceplot. This command is used to draw single pieces of rectangles. (And its 5th argument is \tdplotsphericalsurfaceplot's 6th argument.) Thus it is a bit long and contains ugly details. So please focus on the \ifthenelse{\equal{#6}{parametricfill}} part
+
+\renewcommand\tdplotdosurfaceplot[6]{
+\pgfmathsetmacro{\nextphi}{\curphi + \tdplotsuperfudge*\viewphistep}
+\begin{scope}[opacity=1]
+\tdplotcheckdiff{\nextphi}{360}{\origviewphistep}{#2}{}
+\tdplotcheckdiff{\nextphi}{0}{\origviewphistep}{#2}{}
+\tdplotcheckdiff{\nextphi}{90}{\origviewphistep}{#3}{}
+\tdplotcheckdiff{\nextphi}{450}{\origviewphistep}{#3}{}
+\end{scope}
+\foreach \curtheta in{\viewthetastart,\viewthetainc,...,\viewthetaend}{
+\pgfmathsetmacro{\curlongitude}{90 - \curphi}
+\pgfmathsetmacro{\curlatitude}{90 - \curtheta}
+\ifthenelse{\equal{\leftright}{-1.0}}{\pgfmathsetmacro{\curphi}{\curphi - \origviewphistep}}{}
+\pgfmathsetmacro{\tdplottheta}{mod(\curtheta,360)}
+\pgfmathsetmacro{\tdplotphi}{mod(\curphi,360)}
+\pgfmathparse{\tdplotphi < 0}
+\ifthenelse{\equal{\pgfmathresult}{1}}{\pgfmathsetmacro{\tdplotphi}{\tdplotphi + 360}}{}
+\pgfmathparse{\tdplottheta > \tdplotuppertheta}
+\pgfmathsetmacro{\logictest}{1 - \pgfmathresult}
+\pgfmathparse{\tdplottheta < \tdplotlowertheta}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathsetmacro{\tdplottheta}{\tdplottheta + \viewthetastep}
+\pgfmathparse{\tdplottheta > \tdplotuppertheta}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathparse{\tdplottheta < \tdplotlowertheta}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathparse{\tdplotphi > \tdplotupperphi}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathparse{\tdplotphi < \tdplotlowerphi}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathsetmacro{\tdplotphi}{\tdplotphi + \viewphistep}
+\pgfmathparse{\tdplotphi < 0}
+\ifthenelse{\equal{\pgfmathresult}{1}}{\pgfmathsetmacro{\tdplotphi}{\tdplotphi + 360}}{}%
+\pgfmathparse{\tdplotphi > \tdplotupperphi}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathparse{\tdplotphi < \tdplotlowerphi}
+\pgfmathsetmacro{\logictest}{\logictest * (1 - \pgfmathresult)}
+\pgfmathsetmacro{\tdplottheta}{\curtheta}
+\pgfmathsetmacro{\tdplotphi}{\curphi}
+
+%%%%%%% not important ↑↑↑↑↑↑
+%%%%%%% yes important ↓↓↓↓↓↓
+
+\ifthenelse{\equal{#6}{parametricfill}}{
+
+\pgfmathsetmacro\r{(\x+.4)}
+\pgfmathsetmacro\g{(\y+.4)}
+\pgfmathsetmacro\b{(\z+.8)/2}
+
+\definecolor{tdplotfillcolor}{rgb}{\r,\g,\b}
+\color{tdplotfillcolor}
+}{}
+\pgfsetstrokeopacity{0}
+
+%%%%%%% yes important ↑↑↑↑↑↑
+%%%%%%% not important ↓↓↓↓↓↓
+
+\ifthenelse{\equal{\leftright}{-1.0}}{\pgfmathsetmacro{\curphi}{\curphi + \origviewphistep}}{}
+\ifthenelse{\equal{\logictest}{1.0}}{%
+\pgfmathsetmacro{\tdplotphi}{\curphi + \viewphistep}

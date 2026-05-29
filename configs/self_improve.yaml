@@ -1,0 +1,72 @@
+# TitanAI Self-Improvement Loop Configuration
+
+# ── Model (must match the trained checkpoint architecture) ────────────────────
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 768
+  n_heads: 12
+  n_layers: 12
+  d_ff: 3072
+  max_seq_len: 2048
+  dropout: 0.1
+  tie_embeddings: true
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  tokenizer_path: "tokenizer/artifacts_v32k/tokenizer.json"
+  val_split: 0.1
+
+# ── Self-Improvement settings ─────────────────────────────────────────────────
+self_improve:
+
+  # Checkpoint used as the live model (updated when a cycle is promoted)
+  production_checkpoint: "checkpoints/self_improve/production.pt"
+
+  # How many of the weakest domains to work on per cycle
+  domains_per_cycle: 3
+
+  # Log directory
+  log_dir: "logs/self_improve"
+
+  # Q&A generation settings
+  generation:
+    pairs_per_domain: 40        # How many candidate pairs to generate per domain
+    max_new_tokens: 350         # Max tokens per answer
+    temperature: 0.85           # Sampling temperature (higher = more diverse)
+    top_p: 0.92                 # Nucleus sampling
+
+  # Quality filter thresholds
+  quality_filter:
+    min_answer_tokens: 40       # Reject answers shorter than this
+    max_answer_tokens: 500      # Reject answers longer than this
+    min_perplexity: 2.0         # Reject if model already knows it perfectly
+    max_perplexity: 180.0       # Reject if model is completely lost on it
+
+  # Short fine-tuning run on accepted examples
+  finetune:
+    max_steps: 800
+    learning_rate: 1.0e-6       # Conservative LR — we don't want to overwrite existing knowledge
+    warmup_steps: 50
+    batch_size: 4
+    gradient_accumulation_steps: 1
+    label_smoothing: 0.1        # Prevents memorisation of generated pairs
+    weight_decay: 0.05
+    clip_grad_norm: 1.0
+
+# ── Tokenizer path (for checkpoint saving) ────────────────────────────────────
+tokenizer:
+  path: "tokenizer/artifacts_v32k/tokenizer.json"
+  vocab_size: 32000
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  log_dir: "logs/self_improve"
+  experiment_name: "titan-self-improve"
+
+# ── Inference defaults (used during generation) ───────────────────────────────
+inference:
+  default_max_new_tokens: 350
+  default_temperature: 0.85
+  default_top_k: 50
+  default_top_p: 0.92

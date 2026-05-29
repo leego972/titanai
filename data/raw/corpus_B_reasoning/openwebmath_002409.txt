@@ -1,0 +1,112 @@
+# Simulating EIS in R
+
+I've been asked on a few occasions about how I go about simulating impedance spectra in the R language. It's essentially based on straightforward maths with some functions defined to make the more complicated calculations simple. This page here gives an example of the approach I normally use, and the approach that underpins the other simulations shown on this website.
+
+First, we can create a function to create a vector of values for the angular frequency, $$\omega$$, based on minimum and maximum values of log frequency and a number of points per decade:
+
+omega_range <- function(low.logf, high.logf, p.per.dec) {
+2 * pi * 10^seq(low.logf, high.logf, length.out = (p.per.dec * (high.logf - low.logf)) + 1)
+}
+
+
+### Equivalent circuit elements
+
+Now we can create functions which calculate the complex impedance for each of the individual circuit elements. If you're unclear on how these are calculated, then I recommend looking at the other pages in this section for the mathematical definitions.
+
+A function for the impedance of a resistor is not strictly necessary but I find it helps for readability later:
+
+Z_R <- function(R) {
+complex(real = R, imaginary = 0)
+}
+
+
+All the following elements are functions of angular frequency. First the capacitor:
+
+Z_C <- function(C, omega) {
+complex(real = 0, imaginary = -1/(omega * C))
+}
+
+
+Constant phase element:
+
+Z_Q <- function(Q, n, omega) {
+1/(Q * (complex(real = 0, imaginary = 1) * omega)^n)
+}
+
+
+Semi-infinite Warburg:
+
+Z_W <- function(sigma, omega) {
+j = complex(real = 0, imaginary = 1)
+(1 - j) * sigma * omega^-0.5
+}
+
+
+Finite length Warburg:
+
+Z_FLW <- function(Z0, tau, omega) {
+j = complex(real = 0, imaginary = 1)
+Z0 * (j * omega * tau)^-0.5 * tanh((j * omega * tau)^0.5)
+}
+
+
+Finite space Warburg (note: you must have the pracma package installed, which contains the required coth() function):
+
+Z_FSW <- function(Z0, tau, omega) {
+require(pracma)
+j = complex(real = 0, imaginary = 1)
+Z0 * (j * omega * tau)^-0.5 * coth((j * omega * tau)^0.5)
+}
+
+
+### Simple simulation
+
+First we need to define which frequencies we will calculate, using the omega_range() function defined earlier. For example:
+
+omega <- omega_range(low.logf = -0.7, high.logf = 5.2, p.per.dec = 8)
+
+
+And to make life easier, we can create a function so we can add the impedances of circuit elements in parallel:
+
+par <- function(a, b) {
+1/((1/a) + (1/b))
+}
+
+
+Then simulating a typical equivalent circuit might look something like this, using the Randles circuit as an example:
+
+z_rand <- Z_R(5) + par((Z_R(45) + Z_W(40, omega)), Z_C(2E-5, omega))
+
+
+The z_rand variable is a vector of complex numbers which we can't plot very easily:
+
+str(z_rand)
+
+##  cplx [1:49] 85.6-35.9i 80.9-31.2i 76.7-27.1i ...
+
+
+So we can create a data frame with the numbers we want using the Re() and Im() functions in R for extracting the real and imaginary parts from the complex numbers.
+
+df <- data.frame(Re = Re(z_rand), Im = -Im(z_rand), f = omega/(2 * pi), omega = omega)
+
+str(df)
+
+##  'data.frame':   49 obs. of  4 variables:
+##   $Re : num 85.6 80.9 76.7 73.2 70.1 ... ##$ Im   : num  35.9 31.2 27.1 23.6 20.6 ...
+##   $f : num 0.2 0.265 0.351 0.466 0.619 ... ##$ omega: num  1.25 1.66 2.21 2.93 3.89 ...
+
+
+And now it's just a question of creating the plot:
+
+library(ggplot2)
+ggplot(df, aes(x = Re, y = Im)) +
+geom_point() + coord_fixed()
+
+
+The coord_fixed() function for ggplot is extremely useful here in ensuring the proportionality of the axes in the Nyquist plot.
+
+Thank you for reading!
+
+These pages will remain open to all and 100% ad-free, now and always. If you like this page and want to see more, please consider buying me a cup of coffee, to keep me motivated and to help with the running costs of this site!
+
+comments powered by Disqus

@@ -1,0 +1,36 @@
+Question: <p>There is a socket related function call in my code, that function is from another module thus out of my control, the problem is that it blocks for hours occasionally, which is totally unacceptable, How can I limit the function execution time from my code? I guess the solution must utilize another thread.</p>
+
+Answer: <p>I prefer a context manager approach because it allows the execution of multiple python statements within a <code>with time_limit</code> statement. Because windows system does not have <code>SIGALARM</code>, a more portable and perhaps more straightforward method could be using a <code>Timer</code></p>
+
+<pre><code>from contextlib import contextmanager
+import threading
+import _thread
+
+class TimeoutException(Exception):
+    def __init__(self, msg=''):
+        self.msg = msg
+
+@contextmanager
+def time_limit(seconds, msg=''):
+    timer = threading.Timer(seconds, lambda: _thread.interrupt_main())
+    timer.start()
+    try:
+        yield
+    except KeyboardInterrupt:
+        raise TimeoutException("Timed out for operation {}".format(msg))
+    finally:
+        # if the action ends in specified time, timer is canceled
+        timer.cancel()
+
+import time
+# ends after 5 seconds
+with time_limit(5, 'sleep'):
+    for i in range(10):
+        time.sleep(1)
+
+# this will actually end after 10 seconds
+with time_limit(5, 'sleep'):
+    time.sleep(10)
+</code></pre>
+
+<p>The key technique here is the use of <code>_thread.interrupt_main</code> to interrupt the main thread from the timer thread. One caveat is that the main thread does not always respond to the <code>KeyboardInterrupt</code> raised by the <code>Timer</code> quickly. For example, <code>time.sleep()</code> calls a system function so a <code>KeyboardInterrupt</code> will be handled after the <code>sleep</code> call.</p>

@@ -1,0 +1,109 @@
+# Why is the character following this macro-defining macro gobbled up?
+
+I have the following plain Tex code:
+
+\def\xx{ABC}
+\def\temp #1 {\def\tempii{#1}}
+\temp\xx a b c
+\tempii\tempii
+
+
+I expect to see the following output: a b c ABCABC
+
+But I actually see this: b c ABCaABCa
+
+Why is the 'a' snatched into the definition of \tempii?
+
+• The reasoning here is not limited to plain so I've retagged: I hope this makes sense. – Joseph Wright Sep 24 '14 at 11:02
+
+I'm still thinking as to why it is, but this revision (embracing \xx) gives you what you want.
+
+I think the answer is that, in the usage \temp\xx a b c, the space after \xx is from the TeX parser's view, not a space at all, but merely signifies the end of the macro name \xx. For example, if you just put \xx A on a line by itself, you will see that it prints out as ABCA without a space. Thus, the parser sucks in the trailing "A" as being connected to \xx. One could also use \temp\xx{} a b c, as a way to tell the parser that the space is a separator, and not just the next character following \xx.
+
+\documentclass{article}
+\begin{document}
+\def\xx{ABC}
+\def\temp #1 {\def\tempii{#1}}
+\temp{\xx} a b c
+\tempii\tempii
+\end{document}
+
+• You're surely right, and I feel like saying "Ah, of course." But now I don't understand why \temp\xx\ a b c doesn't give the desired result. It's like the escaped space is ignored by the pattern matcher. (Also, you converted the code from plain Tex to Latex, but that didn't matter.) – dedded Sep 24 '14 at 3:10
+• @dedded I'm sure one of the erudite ones will chime in with a fully rational answer, but (again speculation because I'm out of my depth) I'm thinking that in an effort to get the argument to \temp, it expands until it comes to something that can't expand. In both cases (what I describe in my answer and what you describe in your comment), that would be the letter "a". – Steven B. Segletes Sep 24 '14 at 3:18
+• @dedded \temp\xx\ a b doesn't have a space token after \xx, it has a control symbol \  (remember: TeX is all about tokens). You could do \def\firstofone#1{#1} then \firstofone{\temp\xx} a b c. – Joseph Wright Sep 24 '14 at 6:03
+• @dedded the \  token isn't ignored it just doesn't match a space just as \a would not delimit an argument delimited by a. – David Carlisle Sep 24 '14 at 8:55
+• Accepting this answer because with D. Carlisle's comment it most completely clears my misunderstanding, but I suspect egreg's detailed explanation is the more generally useful one. – dedded Sep 25 '14 at 19:49
+
+For clarity I'll denote space tokens by •, as they are very important in the discussion; spaces in the following code samples should be ignored.
+
+The parameter text of \temp is
+
+#1•
+
+
+while the replacement text is
+
+\def\tempii{#1}
+
+
+Your call of \temp is
+
+\temp\xx a•b•c•\tempii\tempii
+
+
+Notice that after \xx there's a space just for delimiting the macro; it is not a space token: it's nothing, because TeX always ignores spaces following control words (not control symbols). The space after c comes from the end-of-line in your code.
+
+The tokens following \temp are scanned (without expansion) to find a match with the parameter text, where the argument is delimited by a space, so #1 ends being \xx a and the next state of the input stream is
+
+\def\tempii{\xx a}b•c•\tempii\tempii
+
+
+Now TeX performs the definition and removes it from the input stream:
+
+b•c•\tempii\tempii
+
+
+and the part b•c• is passed to the typesetting stage. After the expansion of the two copies of \tempii, this is equivalent to having typed
+
+b•c•\xx a\xx a
+
+
+or
+
+b•c•ABCaABCa
+
+
+which is exactly what you got.
+
+If you had used \? instead of \xx the last two lines would have been converted into
+
+\temp\?•a•b•c•\tempii\tempii
+
+
+because \? is a control symbol and TeX doesn't ignore spaces after them. In this case the result would be
+
+a•b•c•ABCABC
+
+
+Note that
+
+\expandafter\temp\xx a•b•c
+\tempii\tempii
+
+
+would produce the same result, because after the action of \expandafter TeX would be presented with
+
+\temp ABCa•b•c
+
+
+(same convention for spaces as before, of course). You'd get the same result as with \? instead of \xx with
+
+\expandafter\temp\expandafter\xx\space a•b•c
+
+
+because then TeX would be presented with
+
+\temp\xx•a•b•c
+
+
+Indeed spaces are ignored after control words only during the tokenization process.

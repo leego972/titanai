@@ -1,0 +1,101 @@
+MySQL 学习笔记（五）--mysqldump
+
+mysqldump 与 --set-gtid-purged 设置
+
+(1)  mysqldump
+
+The mysqldump client utility performs logical backups, producing a set of SQL statements that can be executed to reproduce the original database object definitions and table data. It dumps one or more MySQL databases for backup or transfer to another SQL server. The mysqldump command can also generate output in CSV, other delimited text, or XML format.
+
+mysqldump requires at least the SELECT privilege for dumped tables, SHOW VIEW for dumped views, TRIGGER for dumped triggers, LOCK TABLES if the --single-transaction option is not used, and (as of MySQL 5.7.31) PROCESS if the --no-tablespaces option is not used.
+
+mysqldump advantages include the convenience and flexibility of viewing or even editing the output before restoring. You can clone databases for development and DBA work, or produce slight variations of an existing database for testing. It is not intended as a fast or scalable solution for backing up substantial amounts of data. With large data sizes, even if the backup step takes a reasonable time, restoring the data can be very slow because replaying the SQL statements involves disk I/O for insertion, index creation, and so on. For large-scale backup and restore, a physical backup is more appropriate, to copy the data files in their original format that can be restored quickly.
+
+(2)  --set-gtid-purged=value
+
+This option enables control over global transaction ID (GTID) information written to the dump file, by indicating whether to add a SET @@GLOBAL.gtid_purged statement to the output. This option may also cause a statement to be written to the output that disables binary logging while the dump file is being reloaded. The following table shows the permitted option values.
+
+The default value is AUTO.
+
+ Value Meaning OFF Add no SET statement to the output. ON Add a SET statement to the output. An error occurs if GTIDs are not enabled on the server. AUTO Add a SET statement to the output if GTIDs are enabled on the server.
+
+A partial dump from a server that is using GTID-based replication requires the --set-gtidpurged={ON|OFF} option to be specified. Use ON if the intention is to deploy a new replication slave using only some of the data from the dumped server. Use OFF if the intention is to repair a table by copying it within a topology. Use OFF if the intention is to copy a table between replication topologies that are disjoint and will remain so.
+
+(3)  --set-gtid-purged 与 导出文件中SET @@SESSION.SQL_LOG_BIN=0
+
+The --set-gtid-purged option has the following effect on binary logging when the dump file is reloaded:
+
+• --set-gtid-purged=OFF: SET @@SESSION.SQL_LOG_BIN=0; is not added to the output.
+
+• --set-gtid-purged=ON: SET @@SESSION.SQL_LOG_BIN=0; is added to the output.
+
+• --set-gtid-purged=AUTO: SET @@SESSION.SQL_LOG_BIN=0; is added to the output if GTIDs are enabled on the server you are backing up (that is, if AUTO evaluates to ON).
+
+(4)  举例说明
+
+在开启GTID模式的实例上执行mysqldump，假如导出命令如下:
+
+/usr/local/mysql/bin/mysqldump --master-data=2 -u账……号 -p密……码 --databases 数据库1 数据库2 --single-transaction -R --triggers > /data/dbdump/db1_db2_dump.sql
+
+Warning: A partial dump from a server that has GTIDs will by default include the GTIDs of all transactions, even those that changed suppressed parts of the database. If you don't want to restore GTIDs, pass --set-gtid-purged=OFF. To make a complete dump, pass --all-databases --triggers --routines --events.
+
+...................................................................................................。。。。。。。。。。。。。。。
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+SET @MYSQLDUMP_TEMP_LOG_BIN = @@SESSION.SQL_LOG_BIN;
+SET @@SESSION.SQL_LOG_BIN= 0;
+
+--
+-- GTID state at the beginning of the backup
+--
+
+SET @@GLOBAL.GTID_PURGED='66fe6059-18c7-22e6-1d21-000c27cswbda:1908761-14';
+
+--
+-- Position to start replication or point-in-time recovery from
+--
+
+-- CHANGE MASTER TO MASTER_LOG_FILE='1ogbin-003413', MASTER_LOG_POS=999;
+
+--
+...................................................................................................。。。。。。。。。。。。。。。
+
+(5)  场景延申
+
+示意图如下:
+
+（1）导入命令
+
+mysql -u用……户……名 -p密……码 < /data/dumprestore/db1_db2_dump.sql
+
+收到报错信息
+
+ERROR 1840 (HY000) at line 24: @@GLOBAL.GTID_PURGED can only be set when @@GLOBAL.GTID_EXECUTED is empty.
+
+reset master;
+
+(2) 如果执行了 reset master，Server A2 和 Server B2的主从关系就会坏掉。
+
+(3) 如果在导入前，主从都是没有业务数据库的新集群。主从修复，可以都执行了 reset master，重新搭建主从。
+
+change master to
+master_host='IP地址',
+master_port=端口号,
+master_user='用 ……户 ……名',
+master_auto_position=1;
+
+(4)执行时间过长
+
+mysql导入数据耗时远远大于mysqldump导出耗时。测试中，我们将大小都是60G的两个数据库备份还原，mysqldump 执行55分钟，mysql导入执行了5个小时。
+
+(5)灌入数据后，可以通过xtraback备份还原来修复重建ServerA2 和 ServerB2的主从。
+
+(6) 如果导入数据时不想破坏掉ServerA2 和 ServerB2的主从关系，可以考虑，导入前先注释掉SET @@SESSION.SQL_LOG_BIN= 0;，再导入。
+
+(7) 另外，如果场景更复杂，例如新集群321 需要承接、同步来自多个集群（不仅仅是来自集群123）的数据，也可以考虑 通过传统模式搭建主从（指定binlog文件+位点），这个场景下，mysqldump 时，
+
+--set-gtid-purged 设置为off，或者导出后，考虑将SET @@SESSION.SQL_LOG_BIN= 0;和SET @@GLOBAL.GTID_PURGED='？？？？？？？？？？？？？？';注释掉。
+
+head -n 100 dump文件.sql | grep 'CHANGE MASTER TO'
+
+posted @ 2021-10-20 00:26  东山絮柳仔  阅读(126)  评论(0编辑  收藏  举报

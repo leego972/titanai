@@ -1,0 +1,64 @@
+Question: <p>What is the best way to do cross-platform handling of hidden files?
+(preferably in Python, but other solutions still appreciated)</p>
+
+<p>Simply checking for a leading '.' works for *nix/Mac, and file attributes work on Windows. However, this seems a little simplistic, and also doesn't account for alternative methods of hiding things (.hidden files, etc.). Is there a standard way to deal with this?</p>
+
+Answer: <p>Jason R. Coombs's answer is sufficient for Windows. And most POSIX GUI file managers/open dialogs/etc. probably follow the same "dot-prefix-means-hidden" convention as <code>ls</code>. But not Mac OS X.</p>
+
+<p>There are at least four ways a file or directory can be hidden in Finder, file open panels, etc.:</p>
+
+<ul>
+<li>Dot prefix.</li>
+<li>HFS+ invisible attribute.</li>
+<li>Finder Info hidden flag.</li>
+<li>Matches a special blacklist built into CoreFoundation (which is different on each OS versionâe.g., <code>~/Library</code> is hidden in 10.7+, but not in 10.6).</li>
+</ul>
+
+<p>Trying to write your own code to handle all of that is not going to be easy. And you'll have to keep it up-to-date, as I'm willing to bet the blacklist will change with most OS versions, Finder Info will eventually go from deprecated to completely unsupported, extended attributes may be supported more broadly than HFS+, â¦</p>
+
+<p>But if you can require <code>pyobjc</code> (which is already included with recent Apple-supplied Python, and can be installed via <code>pip</code> otherwise), you can just call Apple's code:</p>
+
+<pre><code>import Foundation
+
+def is_hidden(path):
+    url = Foundation.NSURL.fileURLWithPath_(path)
+    return url.getResourceValue_forKey_error_(None, Foundation.NSURLIsHiddenKey, None)[0]
+
+def listdir_skipping_hidden(path):
+    url = Foundation.NSURL.fileURLWithPath_(path)
+    fm = Foundation.NSFileManager.defaultManager()
+    urls = fm.contentsOfDirectoryAtURL_includingPropertiesForKeys_options_error_(
+        url, [], Foundation.NSDirectoryEnumerationSkipsHiddenFiles, None)[0]
+    return [u.path() for u in urls]
+</code></pre>
+
+<p>This should work on any Python that pyobjc supports, on OS X 10.6+. If you want 10.5 or earlier, directory enumeration flags didn't exist yet, so the only option is something like filtering something like <code>contentsOfDirectoryAtPath_error_</code> (or just <code>os.listdir</code>) on <code>is_hidden</code>.</p>
+
+<p>If you have to get by without <code>pyobjc</code>, you can drop down to the <code>CoreFoundation</code> equivalents, and use <code>ctypes</code>. The key functions are <code>CFURLCopyResourcePropertyForKey</code> for <code>is_hidden</code> and <code>CFURLEnumeratorCreateForDirectoryURL</code> for listing a directory.</p>
+
+<p>See <a href="http://pastebin.com/aCUwTumB">http://pastebin.com/aCUwTumB</a> for an implementation.</p>
+
+<p>I've tested with:</p>
+
+<ul>
+<li>OS X 10.6, 32-bit python.org 3.3.0</li>
+<li>OS X 10.8, 32-bit Apple 2.7.2</li>
+<li>OS X 10.8, 64-bit Apple 2.7.2</li>
+<li>OS X 10.8, 64-bit python.org 3.3.0</li>
+</ul>
+
+<p>It works as appropriate on each (e.g., it skips <code>~/Library</code> on 10.8, but shows it on 10.6). </p>
+
+<p>It <em>should</em> work on any OS X 10.6+ and any Python 2.6+. If you need OS X 10.5, you need to use the old APIs (or <code>os.listdir</code>) and filter on <code>is_hidden</code>. If you need Python 2.5, change the <code>bytes</code> checks to <code>str</code> checks (which of course breaks 3.x) and the <code>with</code> to an ugly <code>try</code>/<code>finally</code> or manual releasing.</p>
+
+<p>If anyone plans on putting this code into a library, I would strongly suggest checking for <code>pyobjc</code> first (<code>import Foundation</code> and, if you don't get an <code>ImportError</code> you win), and only using the <code>ctypes</code> code if it's not available.</p>
+
+<hr>
+
+<p>One last note:</p>
+
+<p>Some people looking for this answer are trying to reinvent a wheel they don't need to.</p>
+
+<p>Often, when people are doing something like this, they're building a GUI and want to, e.g., show a file browsers with an option to hide or show hidden files. Many of the popular cross-platform GUI frameworks (Qt, wx, etc.) have this support built in. (Also, many of them are open source, so you can read their code to see how they do it.)</p>
+
+<p>That may not answer your questionâe.g., they may just be passing a "filter hidden files" flag to the platform's native file-browser dialog, but you're trying to build a console-mode file-browser and can't do that. But if it does, just use it.</p>

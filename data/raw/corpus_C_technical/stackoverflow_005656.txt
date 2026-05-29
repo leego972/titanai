@@ -1,0 +1,85 @@
+Question: <p>Hi Guys could you please help me refactor this so that it is sensibly pythonic.</p>
+
+<pre><code>import sys
+import poplib
+import string
+import StringIO, rfc822
+import datetime
+import logging
+
+def _dump_pop_emails(self):
+    self.logger.info("open pop account %s with username: %s" % (self.account[0], self.account[1]))
+    self.popinstance = poplib.POP3(self.account[0])
+    self.logger.info(self.popinstance.getwelcome()) 
+    self.popinstance.user(self.account[1])
+    self.popinstance.pass_(self.account[2])
+    try:
+        (numMsgs, totalSize) = self.popinstance.stat()
+        for thisNum in range(1, numMsgs+1):
+            (server_msg, body, octets) = self.popinstance.retr(thisNum)
+            text = string.join(body, '\n')
+            mesg = StringIO.StringIO(text)                               
+            msg = rfc822.Message(mesg)
+            name, email = msg.getaddr("From")
+            emailpath = str(self._emailpath + self._inboxfolder + "\\" + email + "_" + msg.getheader("Subject") + ".eml")
+            emailpath = self._replace_whitespace(emailpath)
+            file = open(emailpath,"wb")
+            file.write(text)
+            file.close()
+            self.popinstance.dele(thisNum)
+    finally:
+        self.logger.info(self.popinstance.quit())
+
+def _replace_whitespace(self,name):
+    name = str(name)
+    return name.replace(" ", "_")
+</code></pre>
+
+<p>Also in the _replace_whitespace method I would like to have some kind of cleaning routine which takes out all illegal characters which could cause processing.</p>
+
+<p>Basically I want to write the email to the inbox directory in a standard way.</p>
+
+<p>Am i doing something wrong here?</p>
+
+Answer: <p>Further to my comment on John's answer</p>
+
+<p>I found out what the issue was, there were illegal characters in the name field and Subject field, which caused python to get the hiccups, as it tried to write the email as a directory, after seeing ":" and "/".</p>
+
+<p>John point number 4 doesnt work! so I left it as before.
+Also is point no 1 correct, have I implemented your suggestion correctly?</p>
+
+<pre><code>def _dump_pop_emails(self):
+    self.logger.info("open pop account %s with username: %s", self.account[0], self.account[1])
+    self.popinstance = poplib.POP3(self.account[0])
+    self.logger.info(self.popinstance.getwelcome()) 
+    self.popinstance.user(self.account[1])
+    self.popinstance.pass_(self.account[2])
+    try:
+        (numMsgs, totalSize) = self.popinstance.stat()
+        for thisNum in range(1, numMsgs+1):
+            (server_msg, body, octets) = self.popinstance.retr(thisNum)
+            text = '\n'.join(body)
+            mesg = StringIO.StringIO(text)                               
+            msg = rfc822.Message(mesg)
+            name, email = msg.getaddr("From")
+            emailpath = str(self._emailpath + self._inboxfolder + "\\" + self._sanitize_string(email + " " + msg.getheader("Subject") + ".eml"))
+            emailpath = self._replace_whitespace(emailpath)
+            print emailpath
+            file = open(emailpath,"wb")
+            file.write(text)
+            file.close()
+            self.popinstance.dele(thisNum)
+    finally:
+        self.logger.info(self.popinstance.quit())
+
+def _replace_whitespace(self,name):
+    name = str(name)
+    return name.replace(" ", "_")   
+
+def _sanitize_string(self,name):
+    illegal_chars = ":", "/", "\\"
+    name = str(name)
+    for item in illegal_chars:
+        name = name.replace(item, "_")
+    return name
+</code></pre>

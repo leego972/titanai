@@ -1,0 +1,115 @@
+# Mars Circular Intercept Orbit
+
+I've been trying to simulate a spacecraft entering a circular capture orbit about Mars using Mathematica, but am having a little trouble. The simulation starts when the spacecraft enters Mars' sphere of influence. In order to find the correct positions and velocities for a circular orbit, I calculated the point of closest approach between the spacecraft and Mars, and then found their positions and velocities at that point. I also calculated the angle that the spacecraft's velocity vector makes with the positive x-axis at closest approach. Once I had these bits, I used the WhenEvent function to give the spacecraft the same velocity as Mars + the velocity required for a circular orbit about Mars at closest approach (looking at the WhenEvent code will hopefully make things clearer), using the following formulae:
+
+$$v_{sx}=v_{mx}+ \sqrt{\frac{GM_{mars}}{r}} \sin{\theta},$$ $$v_{sy}=v_{my}+\sqrt{\frac{GM_{mars}}{r}} \cos{\theta},$$
+
+where $v_{sx}$ and $v_{sy}$ are the x- and y-components of the spacecraft's velocity, $v_{mx}$ and $v_{my}$ are the x- and y-components of Mars' velocity, $r$ is the radial separation between the spacecraft and Mars and $\theta$ is the angle made between the positive x-axis and the spacecraft's velocity vector (all at closest approach).
+
+The following is the Mathematica code, which should work if you just plonk it into a new notebook:
+
+Remove["Global*"]
+G = 6.672*10^-11; (*Gravitational Constant*)
+m[0] = 1.988544*10^30 ;(*Mass of Sun*)
+m[2] = 6.4185*10^23; (*Mass of Mars*)
+m[3] = 1000; (*Mass of spacecraft*)
+(*Mars' position and velocity at spacecraft's entrance to Mars' SOI*)
+p[2] = {-1.3528201165963936*^11, -1.8675833330580637*^11};
+v[2] = {20533.99477259318, -12116.993615214029} ;
+r[2] = 3.3899*10^6 ;(*Mean planetary radius of Mars*)
+(*Spacecraft's position and velocity at entrance to Mars' SOI*)
+p[3] = {-1.3470234059931529*^11, -1.8670782689951355*^11};
+v[3] = {17250.213610967, -12349.519721984863};
+
+(*Simulation running time*)
+tmax = 86400*5
+
+Soln = NDSolve[{
+
+x[2]''[t] == -((G m[0] x[2][t])/((x[2][t])^2 + (y[2][t])^2)^(3/2)),
+y[2]''[t] == -((G m[0] y[2][t])/((x[2][t])^2 + (y[2][t])^2)^(3/2)),
+x[3]''[t] == -((G m[0] x[3][t])/((x[3][t])^2 + (y[3][t])^2)^(3/2)) - (G m[2] (x[3][t]- x[2][t]))/((x[3][t] - x[2][t])^2 + (y[3][t] - y[2][t])^2)^(3/2),
+y[3]''[t] == -((G m[0] y[3][t])/((x[3][t])^2 + (y[3][t])^2)^(3/2)) - (G m[2] (y[3][t]- y[2][t]))/((x[3][t] - x[2][t])^2 + (y[3][t] - y[2][t])^2)^(3/2),
+x[2][0] == p[2][[1]], y[2][0] == p[2][[2]], x[3][0] == p[3][[1]],
+y[3][0] == p[3][[2]], x[2]'[0] == v[2][[1]], y[2]'[0] == v[2][[2]],
+x[3]'[0] == v[3][[1]], y[3]'[0] == v[3][[2]],
+WhenEvent[
+t == 173379, {x[3]'[t] -> 20785.020973205566 + Sqrt[(G m[2])/6.395400814228174*^6]Sin[-0.7053105626554602],
+y[3]'[t] ->(*v[2][[2]]*)-11763.84750366211 -
+Sqrt[(G m[2])/6.395400814228174*^6]
+Cos[-0.7053105626554602]}]}, {x[2][t], y[2][t], x[3][t],
+y[3][t]}, {t, 0, tmax}, StartingStepSize -> 0.001,
+AccuracyGoal -> 17, PrecisionGoal -> 17,
+Method -> "StiffnessSwitching", MaxSteps -> 10000000]
+
+Show[ParametricPlot[
+Evaluate[{{x[2][t], y[2][t]}, { x[3][t], y[3][t]}} /. Soln], {t, 0,
+tmax}, AxesLabel -> {x, y}, PlotStyle -> Automatic,
+PlotRange -> Full, ImageSize -> Large],
+Graphics[{Red, Disk[{0, 0}, r[2]]}]]
+
+Animate[ParametricPlot[{{x[2][t], y[2][t]}, {x[3][t], y[3][t]}} /.
+Soln /. t -> a, {t, Max[0, a - 20000], a}, AxesLabel -> {x, y},
+Axes -> False, ImageSize -> Large], {a, 0, tmax},
+AnimationRate -> 10000]
+
+
+Also, for those who are interested in calculating the positions and velocities at closest approach, do the following: Comment out the WhenEvent part in NDSolve and then put the following code below the NDSolve ouput:
+
+Spacecraft Minimum Approach Radius at Intercept Point
+dt = 60;
+MarsPosition =
+Table[{x[2][t], y[2][t]} /. Soln, {t, 0, 86400*2.2, dt}] ;
+SpaceCraftPosition =
+Table[{x[3][t], y[3][t]} /. Soln, {t, 0, 86400*2.2, dt}] ;
+dxy = Sqrt[(MarsPosition - SpaceCraftPosition)^2];
+dr = Table[Norm[dxy[[i]]], {i, 1, Length[dxy]}];
+(*Find closest approach of spacecraft to Mars*)
+mindr = Min[dr]  (*Pretty accurate using forward difference for speed!*)
+(*Finds index position of mindr in dr*)
+mindrindex = Position[dr, mindr]
+(*Finds time of closest approach*)
+mindrtime = dt*2891(*mindrindex*)
+
+Heliocentric Velocity and Position of Spacecraft and Mars at Minimum Approach Radius
+xy2f = MarsPosition[[2891]];
+xy2f2 = xy2f[[1]];
+x2f = xy2f2[[1]]
+y2f = xy2f2[[2]]
+
+xy2i = MarsPosition[[2890]];
+xy2i2 = xy2i[[1]];
+x2i = xy2i2[[1]];
+y2i = xy2i2[[2]];
+
+v2x = (x2f - x2i)/dt
+v2y = (y2f - y2i)/dt
+
+xy3f = SpaceCraftPosition[[2891]];
+xy3f2 = xy3f[[1]];
+x3f = xy3f2[[1]]
+y3f = xy3f2[[2]]
+
+xy3i = SpaceCraftPosition[[2890]];
+xy3i2 = xy3i[[1]];
+x3i = xy3i2[[1]];
+y3i = xy3i2[[2]];
+
+v3x = (x3f - x3i)/dt
+v3y = (y3f - y3i)/dt
+theta = ArcTan[v3x, v3y]
+`
+
+This is the intercept orbit I got with the above values:
+
+As can be seen from the output, the spacecraft doesn't go into a circular orbit, but instead goes into a highly eccentric one. Messing around manually with the value of theta and setting it to -1.1 radians seems to get an orbit with quite a low eccentricity, but it is a massive difference from the value of -0.705 radians calculated using the spacecraft's closest approach velocity, so I feel like I must be doing something wrong. At first I thought the error might be because I was using a simple forward difference to calculate velocities, but surely this is adequate for this situation? Any help would be appreciated.
+
+• Would Computational Science be a better home for this question? – Qmechanic Apr 7 '14 at 15:47
+• What coordinate system are you using? What is your x axis? – HopDavid Apr 7 '14 at 20:58
+• I'm using a standard Cartesian coordinate system. – InquisitiveInquirer Apr 7 '14 at 21:46
+• Are you using the barycenter of the solar system for your origin? The ecliptic plane for your xy plane? Is θ the angle between the ship's velocity vector and Mars' velocity vector? I'm not familiar with Mathematica but have modeled orbits in other software. If I could better visualize the geometry of your scenario, I might be able to help. – HopDavid Apr 8 '14 at 1:03
+• Sorry, I should have been more specific. Yes, the Solar System barycentre is the origin and the ecliptic is the xy plane. Though, $\theta$ is the angle that the spacecraft's velocity vector makes with the x-axis, not the angle between Mars and the spacecraft. That is, $\theta = \arctan{v_y/v_x}$, where $v_x$ and $v_y$ are the x and y component velocities of the spacecraft. – InquisitiveInquirer Apr 8 '14 at 6:15
+
+$\theta$ is the angle made between the positive x-axis and the spacecraft's velocity vector (all at closest approach).
+Don't you need $\theta$ to be the angle of the spacecraft's velocity relative to Mars? Try subtracting the Mars velocity vector from the spacecraft's velocity vector, calculating $\theta$ for the resultant vector and using that angle in the WhenEvent subroutine.
+• After some testing it looks like I had to set $\theta$ equal to the angle that the spacecraft's radial vector makes relative to Mars, not its velocity vector. But since you got me thinking on those lines I'll give you the bounty, thank you! – InquisitiveInquirer Apr 10 '14 at 15:43

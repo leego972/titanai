@@ -1,0 +1,66 @@
+Question: <p>What's the best way to go about validating that a document follows some version of HTML (prefereably that I can specify)? I'd like to be able to know where the failures occur, as in a web-based validator, except in a native Python app.</p>
+
+Answer: <p>I think the most elegant way it to invoke the W3C Validation Service at</p>
+
+<pre><code>http://validator.w3.org/
+</code></pre>
+
+<p>programmatically. Few people know that you do not have to screen-scrape the results in order to get the results, because the service returns non-standard HTTP header paramaters </p>
+
+<pre><code>X-W3C-Validator-Recursion: 1
+X-W3C-Validator-Status: Invalid (or Valid)
+X-W3C-Validator-Errors: 6
+X-W3C-Validator-Warnings: 0
+</code></pre>
+
+<p>for indicating the validity and the number of errors and warnings.</p>
+
+<p>For instance, the command line </p>
+
+<pre><code>curl -I "http://validator.w3.org/check?uri=http%3A%2F%2Fwww.stalsoft.com"
+</code></pre>
+
+<p>returns</p>
+
+<pre><code>HTTP/1.1 200 OK
+Date: Wed, 09 May 2012 15:23:58 GMT
+Server: Apache/2.2.9 (Debian) mod_python/3.3.1 Python/2.5.2
+Content-Language: en
+X-W3C-Validator-Recursion: 1
+X-W3C-Validator-Status: Invalid
+X-W3C-Validator-Errors: 6
+X-W3C-Validator-Warnings: 0
+Content-Type: text/html; charset=UTF-8
+Vary: Accept-Encoding
+Connection: close
+</code></pre>
+
+<p>Thus, you can elegantly invoke the W3C Validation Service and extract the results from the HTTP header:</p>
+
+<pre class="lang-python prettyprint-override"><code># Programmatic XHTML Validations in Python
+# Martin Hepp and Alex Stolz
+# mhepp@computer.org / alex.stolz@ebusiness-unibw.org
+
+import urllib
+import urllib2
+
+URL = "http://validator.w3.org/check?uri=%s"
+SITE_URL = "http://www.heppnetz.de"
+
+# pattern for HEAD request taken from 
+# http://stackoverflow.com/questions/4421170/python-head-request-with-urllib2
+
+request = urllib2.Request(URL % urllib.quote(SITE_URL))
+request.get_method = lambda : 'HEAD'
+response = urllib2.urlopen(request)
+
+valid = response.info().getheader('X-W3C-Validator-Status')
+if valid == "Valid":
+    valid = True
+else:
+    valid = False
+errors = int(response.info().getheader('X-W3C-Validator-Errors'))
+warnings = int(response.info().getheader('X-W3C-Validator-Warnings'))
+
+print "Valid markup: %s (Errors: %i, Warnings: %i) " % (valid, errors, warnings)
+</code></pre>

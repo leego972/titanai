@@ -1,0 +1,55 @@
+Question: <p>I've got a couple django models that look like this:</p>
+
+<pre><code>from django.contrib.sites.models import Site
+
+class Photo(models.Model):
+    title = models.CharField(max_length=100)
+    site = models.ForeignKey(Site)
+    file = models.ImageField(upload_to=get_site_profile_path) 
+
+    def __unicode__(self):
+        return self.title
+
+
+class Gallery(models.Model):    
+    name = models.CharField(max_length=40)
+    site = models.ForeignKey(Site)
+    photos = models.ManyToManyField(Photo, limit_choices_to = {'site':name} )    
+
+    def __unicode__(self):
+        return self.name
+</code></pre>
+
+<p>I'm having all kinds of <em>fun</em> trying to get the <code>limit_choices_to</code> working on the Gallery model.  I only want the Admin to show choices for photos that belong to the same site as this gallery.  Is this possible?</p>
+
+Answer: <p>I would delete <code>site</code> field on my <code>Photo</code> model and add a <code>ForeignKey</code> to <code>Gallery</code>. I would remove <code>limit_choices_to</code> from <code>photos</code> fields on <code>Gallery</code> model.</p>
+
+<p>Because you are using <code>ForeignKey</code>s to <code>Site</code>s, that means sites don't share galleries and photos. Therefore having those I mentioned above is already useless.</p>
+
+<pre><code>class Photo(models.Model):
+    title = models.CharField(max_length=100)
+    gallery = models.ForeignKey(Gallery, related_name='photos')
+    file = models.ImageField(upload_to=get_site_profile_path) 
+
+    def __unicode__(self):
+        return self.title
+
+
+class Gallery(models.Model):    
+    name = models.CharField(max_length=40)
+    site = models.ForeignKey(Site)
+
+    def __unicode__(self):
+        return self.name
+</code></pre>
+
+<p>Once you set the <code>site</code> on a gallery all its photos will inherit this property. And the site will be accessible as <code>photo_instance.gallery.site</code>:</p>
+
+<pre><code>@property
+def site(self):
+    return self.gallery.site
+</code></pre>
+
+<p>This should work as if you had a <code>site</code> field. But I haven't tested it.</p>
+
+<p>Things change or course, if you decide that a gallery or a photo can appear in multiple sites.</p>

@@ -1,0 +1,117 @@
+One satellite, two planets and movement
+
+1. Aug 5, 2013
+
+Rapidrain
+
+I am trying to write a program to show the flight of a satellite in the neighbourhood of two large planets. In all of this the mass of the satellite is negligible.
+
+I have the potential energy from planet1 = pe1 and
+the potential energy from planet2 = pe2 and
+the kinetic energy of the satellite = ke
+
+Using the sum of the two planets' acc vectors to create a !! single !! acc vector I can calculate the next position using the current position, the velocity vector and the movement caused by the !! single !! acc vector.
+
+This is good; (it works fine in a single planet and satellite model).
+
+The new velocity vector can also be similarly deduced adding the induced velocity from the acc vector to the original velocity vector.
+
+This is also good; (it also works fine in a single planet and satellite model).
+
+However Total Energy is just a bit off. Using my model with a short sliver of time I have a decrease of total energy by a factor 6.5 * 10**-4. Not a really big number but I want to find how I can reduce it to 0.0.
+
+I have three possibilities of tweaking the model to reach change in TE = 0.0 :
+
+1. only increase the velocity and thereby the kinetic energy
+
+2. only increase the distance from the two planets and thereby the potential energy
+
+3. increase both vel and dist (in a certain proportion) to increase both KE and PE
+
+Does physics, nature, mathematics or logic define which of these three paths to explore?
+
+2. Aug 5, 2013
+
+voko
+
+This is known as Euler's three body problem. I suggest you loop that up and think whether you really need to do what you are doing.
+
+3. Aug 5, 2013
+
+Rapidrain
+
+Sorry voko, but I don't understand what you mean by "loop that up".
+
+And really need to do what I am doing? Please explain.
+
+4. Aug 5, 2013
+
+voko
+
+Find the information on Euler's three body problem. Wikipedia has a page on that. If English is not your native language, you may want to search for the information in your language.
+
+5. Aug 5, 2013
+
+Rapidrain
+
+Again Voko, what do you mean by 'loop that up'? Is this the designation of how one solves Euler's three bodies?
+
+6. Aug 5, 2013
+
+voko
+
+"Look that up" = "find that information". Do not re-invent the wheel.
+
+7. Aug 5, 2013
+
+D H
+
+Staff Emeritus
+Also known as "the problem of two fixed centers".
+
+That, however, is not the cause Rapidrain's problem. The issue is how position and velocity are being updated. What follows is a very brief tutorial in numerical techniques to solve an ordinary differential equation (ODE).
+
+First off, Rapidrain, you are trying to solve what's called a second order initial value problem. Second order means you have first (velocity) and second (acceleration) derivatives, initial value means you know the position and velocity at the start time and want to find them at some end time.
+
+First order ODE techniques
+
+A large number of techniques for solving first order initial value problems exist. You can take advantage of these by converting this second order ODE to a first order ODE. Any second order ODE can be re-expressed as a first order ODE by creating a doubled-up state vector that comprises the zeroth and first derivatives. For example, $\dot x(t) = v(t), \ddot x(t) = a(t)$ becomes $u(t) = (x(t), v(t)), \dot u(t) = (v(t), a(t))$.
+
+The simplest first order ODE solver is Euler's method: $u(t+\Delta t) = u(t) + \Delta t\, \dot u(t)$. You should never use Euler's method. However, it is important to understand how it works because almost every other integration technique can be viewed as making smarter Euler-type steps.
+
+For a second order ODE, Euler's method becomes
+\begin{aligned} \vec x(t+\Delta t) &= \vec x(t) + \Delta t \, \vec v(t) \\ \vec v(t+\Delta t) &= \vec v(t) + \Delta t \, \vec a(t) \end{aligned}
+
+There are a slew of first order ODE solvers that are far better than Euler's method. Runge-Kutta integrators take a number of intermediate steps between t and t+Δt before arriving at an estimate for u(t+Δt). Predictor/corrector methods keep a history of old values so that it can predict u(t+Δt) using one algorithm and the correct it using another. Google Runge-Kutta, multistep method, and predictor-corrector for more info.
+
+Second order ODE techniques
+
+An alternate approach is to take advantage of the fact that this is a second order problem that you are trying to solve. The equivalent of Euler's method for a second order ODE is to take steps via
+\begin{aligned} \vec v(t+\Delta t) &= \vec v(t) + \Delta t \, \vec a(t) \\ \vec x(t+\Delta t) &= \vec x(t) + \Delta t \, \vec v(t+\Delta t) \end{aligned}
+This is called the Euler-Cromer method, the symplectic Euler method, plus a whole bunch of other names. The only difference between this approach and the basic Euler method is the order in which position and velocity are updated. Simply switching to updating velocity first makes a *huge* difference. The basic Euler method doesn't even come close to conserving energy. This approach does.
+
+However, Euler-Cromer is still lousy. A simple mod to this approach is to offset the calculation of position and velocity by half a time step. This is what leapfrog, position verlet, and velocity verlet integration do. Google these names for more info. Even more advanced are the Gauss-Jackson techniques.
+
+I'd suggest trying a variant of position verlet. You'll have to bootstrap this by computing the acceleration vector at t=0.
+\begin{aligned} \vec x(t+\Delta t/2) &= \vec x(t) + \frac 1 2 \Delta t \, \vec v(t) \\ \vec v(t+\Delta t/2) &= \vec v(t) + \frac 1 2 \Delta t \, \vec a \\ & \text{compute and save midpoint acceleration}\,\vec a = f(\vec x(t+\Delta t/2)) \\ \vec v(t+\Delta t) &= \vec v(t+\Delta t/2) + \frac 1 2 \Delta t \, \vec a \\ \vec x(t+\Delta t) &= \vec x(t+\Delta t/2) + \frac 1 2 \Delta t \, \vec v(t+\Delta t) \end{aligned}
+This is no more expensive computationally than Euler-Cromer (the expense is typically in the derivative computations) but it is far more accurate.
+
+8. Aug 5, 2013
+
+voko
+
+As you most certainly know, solving ODEs might be wholly unnecessary in this problem. Which would eliminate the problem entirely. That is the whole point behind my urging Rapidrain to study the classical approach.
+
+9. Aug 5, 2013
+
+Rapidrain
+
+Very good DH. This helps much more than "go look it up".
+
+Question though : your equations show : x(t + del*t) = x(t) + del*t*v(t)
+
+shouldn't the right side also have the distance covered by acceleration :
+
+x(t) + del*t*v(t) + (1/2)*acc(t)*(del*t)**2 ??
+
+I'll give your algorithm a try.

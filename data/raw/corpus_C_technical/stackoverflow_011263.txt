@@ -1,0 +1,48 @@
+Question: <p>I want to write a function in Python that returns different fixed values based on the value of an input index.  </p>
+
+<p>In other languages I would use a <code>switch</code> or <code>case</code> statement, but Python does not appear to have a <code>switch</code> statement.  What are the recommended Python solutions in this scenario?</p>
+
+Answer: <p>There's a pattern that I learned from Twisted Python code.</p>
+
+<pre><code>class SMTP:
+    def lookupMethod(self, command):
+        return getattr(self, 'do_' + command.upper(), None)
+    def do_HELO(self, rest):
+        return 'Howdy ' + rest
+    def do_QUIT(self, rest):
+        return 'Bye'
+
+SMTP().lookupMethod('HELO')('foo.bar.com') # =&gt; 'Howdy foo.bar.com'
+SMTP().lookupMethod('QUIT')('') # =&gt; 'Bye'
+</code></pre>
+
+<p>You can use it any time you need to dispatch on a token and execute extended piece of code. In a state machine you would have <code> state_ </code> methods, and dispatch on <code>self.state</code>. This switch can be cleanly extended by inheriting from base class and defining your own <code> do_ </code> methods. Often times you won't even have <code> do_ </code> methods in the base class.</p>
+
+<p><em>Edit: how exactly is that used</em></p>
+
+<p>In case of SMTP you will receive <code>HELO</code> from the wire. The relevant code (from <code>twisted/mail/smtp.py</code>, modified for our case) looks like this</p>
+
+<pre><code>class SMTP:
+    # ...
+
+    def do_UNKNOWN(self, rest):
+        raise NotImplementedError, 'received unknown command'
+
+    def state_COMMAND(self, line):
+        line = line.strip()
+        parts = line.split(None, 1)
+        if parts:
+            method = self.lookupMethod(parts[0]) or self.do_UNKNOWN
+            if len(parts) == 2:
+                return method(parts[1])
+            else:
+                return method('')
+        else:
+            raise SyntaxError, 'bad syntax'
+
+SMTP().state_COMMAND('   HELO   foo.bar.com  ') # =&gt; Howdy foo.bar.com
+</code></pre>
+
+<p>You'll receive <code>'  HELO   foo.bar.com '</code> (or you might get <code>'QUIT'</code> or <code>'RCPT TO: foo'</code>). This is tokenized into <code>parts</code> as <code>['HELO', 'foo.bar.com']</code>. The actual method lookup name is taken from <code>parts[0]</code>.</p>
+
+<p>(The original method is also called <code>state_COMMAND</code>, because it uses the same pattern to implement a state machine, i.e. <code>getattr(self, 'state_' + self.mode)</code>)</p>

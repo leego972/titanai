@@ -1,0 +1,164 @@
+Jean-Philippe Boucher, Université du Québec À Montréal (🐦 @J_P_Boucher)
+
+Arthur Charpentier, Université du Québec À Montréal (🐦 @freakonometrics)
+
+Ewen Gallic, Aix-Marseille Université (🐦 @3wen)
+
+# 1 Data
+
+As mention in the course, we will use simulated datasets, based on true data from a private Canadian insurance company (The Co-operators General Insurance Company) for this hands-on session on telematics. Each observation corresponds to an insurance policy for a vehicule and a driver (a vehicule may therefore be insured for multiple drivers). The available variables are as follows:
+
+• Falsevin: id of the vehicule
+• RA_GENDER: gender (1 male, 2 female, 3 unknown)
+• RA_MARITALSTATUS: marital status (1 married, 0 other)
+• RA_VEH_USE: vehicule use (1 commute, 2 pleasure, 0 other)
+• RA_EXPOSURE_TIME: exposure time (in years)
+• RA_DISTANCE_DRIVEN: total distance traveled by the driver
+• RA_NBTRIP: number of trips
+• RA_HOURS_DRIVEN: number of hours driven
+• RA_ACCIDENT_IND: number of claims
+
+The dataset is in CSV format (comma-separated values). It has been separated into a training sample (CanadaPanelTrain.csv, with 29,108 observations) and a test sample (CanadaPanelTest.csv, with 19,570 observations).
+
+library(tidyverse)
+nrow(canada_train)
+## [1] 29108
+nrow(canada_test)
+## [1] 19570
+canada_train
+## # A tibble: 29,108 x 9
+##    Falsevin RA_GENDER RA_MARITALSTATUS RA_VEH_USE RA_EXPOSURE_TIME
+##       <dbl>     <dbl>            <dbl>      <dbl>            <dbl>
+##  1        1         2                1          2            0.863
+##  2        1         2                1          2            0.485
+##  3        6         2                1          1            0.329
+##  4        6         2                1          1            0.964
+##  5        6         2                1          1            1.00
+##  6        7         2                0          1            0.573
+##  7        7         2                0          1            0.912
+##  8        8         1                0          2            0.496
+##  9        8         1                0          2            0.501
+## 10        8         1                0          2            0.501
+## # … with 29,098 more rows, and 4 more variables: RA_DISTANCE_DRIVEN <dbl>,
+## #   RA_NBTRIP <dbl>, RA_HOURS_DRIVEN <dbl>, RA_ACCIDENT_IND <dbl>
+canada_test
+## # A tibble: 19,570 x 9
+##    Falsevin RA_GENDER RA_MARITALSTATUS RA_VEH_USE RA_EXPOSURE_TIME
+##       <dbl>     <dbl>            <dbl>      <dbl>            <dbl>
+##  1        2         2                0          1            0.496
+##  2        2         2                0          1            0.778
+##  3        3         1                0          2            1.00
+##  4        3         1                0          2            0.414
+##  5        4         2                1          1            0.479
+##  6        4         2                1          1            0.499
+##  7        4         2                1          1            0.414
+##  8        5         1                1          1            0.666
+##  9        5         1                1          1            0.918
+## 10        9         1                1          2            0.392
+## # … with 19,560 more rows, and 4 more variables: RA_DISTANCE_DRIVEN <dbl>,
+## #   RA_NBTRIP <dbl>, RA_HOURS_DRIVEN <dbl>, RA_ACCIDENT_IND <dbl>
+
+## 1.1 Basic Statistics
+
+### 1.1.1 Numerical Variables
+
+While R offers a convenient function to display summary statistics of a dataset, it lacks some outputs of interest, especially variance. Let us create our own summary function:
+
+my_summary <- function(x){
+results <- tibble(Average = mean(x),
+Variance = var(x),
+Minimum = min(x),
+Maximum = max(x),
+25th percentile = quantile(x, probs = 0.25, names = FALSE),
+50th percentile = quantile(x, probs = 0.50, names = FALSE),
+75th percentile = quantile(x, probs = 0.75, names = FALSE))
+}
+
+We can then apply this function to some desired columns:
+
+summary_var <- c("RA_EXPOSURE_TIME", "RA_NBTRIP", "RA_ACCIDENT_IND")
+
+table <-
+dplyr::select(!!summary_var) %>% # Only keep the desired columns
+dplyr::select_if(is.numeric) %>% # Makes sure to keep only numeric variables
+purrr::map(my_summary) %>% # Apply my_summary() to each selected variables
+dplyr::bind_rows(.id = "variable_name") # bind the rows in a single tibble
+
+This table can be displayed in a markdown format. To obtain a prettier output, we can add a label to the variables instead of leaving the name of the variable. To that end, we can create a tibble where the labels can be defined.
+
+labels_cols <-
+tibble(
+variable_name = c(
+"Falsevin", "RA_GENDER", "RA_MARITALSTATUS",
+"RA_VEH_USE", "RA_EXPOSURE_TIME", "RA_DISTANCE_DRIVEN",
+"RA_NBTRIP", "RA_HOURS_DRIVEN", "RA_ACCIDENT_IND"
+),
+label = c(
+"ID vehicle", "Gender", "Marital Status",
+"Vehicle use", "Exposure Time", "Distance Driven",
+"# Trips", "Hours Driven", "# Claims"
+)
+)
+
+formatted_table <-
+table %>%
+# Add the corresponding label to the variables
+dplyr::left_join(labels_cols) %>%
+# Put the variable label in first position
+dplyr::select(label, everything()) %>%
+# Remove variable_name from the tibble
+dplyr::select(-variable_name) %>%
+dplyr::rename(Variable = label)
+
+formatted_table
+## # A tibble: 3 x 8
+##   Variable Average Variance Minimum Maximum 25th percentil…
+##   <chr>      <dbl>    <dbl>   <dbl>   <dbl>            <dbl>
+## 1 Exposur… 6.52e-1  6.11e-2   0.277    1.08            0.485
+## 2 # Trips  1.07e+3  3.90e+5  15     3283             607
+## 3 # Claims 3.47e-2  3.61e-2   0        3               0
+## # … with 2 more variables: 50th percentile <dbl>, 75th
+## #   percentile <dbl>
+
+The output of the table can be in Markdown:
+
+formatted_table %>%
+knitr::kable(
+format = "pandoc", digits = 3,
+format.args = list(big.mark = " ")
+)
+Variable Average Variance Minimum Maximum 25th percentile 50th percentile 75th percentile
+Exposure Time 0.652 0.061 0.277 1.079 0.485 0.521 0.94
+# Trips 1 074.081 390 413.843 15.000 3 283.000 607.000 937.000 1 415.25
+# Claims 0.035 0.036 0.000 3.000 0.000 0.000 0.00
+
+A $$\LaTeX$$ format can also be obtained:
+
+formatted_table %>%
+knitr::kable(
+format = "latex", digits = 3,
+format.args = list(big.mark = " ")
+) %>%
+cat()
+##
+## \begin{tabular}{l|r|r|r|r|r|r|r}
+## \hline
+## Variable & Average & Variance & Minimum & Maximum & 25th percentile & 50th percentile & 75th percentile\\
+## \hline
+## Exposure Time & 0.652 & 0.061 & 0.277 & 1.079 & 0.485 & 0.521 & 0.94\\
+## \hline
+## \# Trips & 1 074.081 & 390 413.843 & 15.000 & 3 283.000 & 607.000 & 937.000 & 1 415.25\\
+## \hline
+## \# Claims & 0.035 & 0.036 & 0.000 & 3.000 & 0.000 & 0.000 & 0.00\\
+## \hline
+## \end{tabular}
+
+Some scatter plots can be graphes:
+
+ggplot(data = canada_train,
+aes(x = RA_DISTANCE_DRIVEN, y=RA_NBTRIP)) +
+geom_point(aes(colour = as.factor(RA_ACCIDENT_IND)),
+alpha = .5) +
+scale_colour_discrete("# Claims") +
+labs(x = "Distance Driven", y = "# Trips",
+title = "# Trips as a function of Distance Driven")`

@@ -1,0 +1,235 @@
+# Type classes in Scala
+
+Some backstory on this post: I got about halfway through writing it before realising that in fact it didn’t work because of a missing feature. I sent an email to the mailing list about this feature and after some discussion it was concluded that in fact this missing feature was a failure to meet the specification and that it had been fixed in 2.6.1. There’s still one thing lacking, but more on that later. The post now resumes.
+
+I mentioned in a recent post that Scala could emulate Haskell type classes with its implicit defs and first class modules.
+
+In actual fact, the situation is much happier than that. Implicit defs + first class modules give you significantly more than Haskell type classes (although with a tiny loss of type safety). At least, much more than Haskell 98. In particular, multiparameter type classes and associated types come for free. You also gain a number of other advantages, such as type class instantiation scopes lexically, so you can redefine type classes locally.
+
+So, how does all this work? I’ll begin with a general introduction to this style of programming with no real reference to Haskell, and then I’ll tie this back in to encoding Haskell type classes at the end of it.
+
+Here’s a class that’s familiar to anyone who has written non-trivial Java:
+
+trait Comparator[T]{
+def compare(x : T, y : T) : Int;
+}
+
+trait Comparable[T]{
+def compareTo(t : T);
+}
+
+
+Now, let’s define the following method:
+
+def sort[T](array : Array[T])(implicit cmp : Comparator[T]) = stuff
+
+
+So our sort method can either have a comparator passed to it explicitly or it will pull one from the surrounding environment. For example we could do:
+
+object SortArgs{
+implicit val alphabetical = new Comparator[String]{
+def compare(x : String, y : String) = x.compareTo(y);
+}
+
+def main(args : Array[String]){
+println(sort(args));
+}
+}
+
+
+Will pick up the alphabetical instance.
+
+It would be nice if we could also have defined the more general version:
+
+object SortArgs{
+implicit def naturalOrder[T <: Comparable] = new Comparator[T]{
+def compare(x : T, y : T) = x.compareTo(y);
+}
+
+def main(args : Array[String]){
+println(sort(args));
+}
+}
+
+
+But this doesn't seem to work. :-/ Hopefully this will be fixed - it seems like wrong behaviour. Matt Hellige came up with the following workaround, but it's not very nice:
+
+object Sorting{
+trait Comparator[T]{
+def compare(x : T, y : T) : Int;
+}
+
+def sort[T](arr : Array[T])()(implicit cmp : () => Comparator[T]) = null;
+implicit def naturalOrder[T <: Comparable]() : Comparator[T] = null;
+implicit def lexicographical[T]() (implicit cmp : () => Comparator[T]) :
+Comparator[List[T]] = null;
+
+def main(args : Array[String]){
+sort(args);
+sort(args.map(List(_)))
+sort(args.map(List(_)).map(List(_)))
+}
+}
+
+
+Moreover I haven't the faintest notion of why it works. :-)
+
+However we can also chain implicit defs:
+
+   implicit def lexicographicalOrder[T] (implicit cmp : Comparator[T]) : Comparator[List[T]] = stuff;
+
+
+So now the following code *does* work:
+
+  def main(args : Array[String]){
+sort(args);
+sort(args.map(List(_)))
+sort(args.map(List(_)).map(List(_)))
+}
+}
+
+
+An amazingly nice feature of this which some encodings of type classes miss is that you don't need an instance of a type to select on that type. Take for example the following:
+
+object BinaryDemo{
+import java.io._;
+trait Binary[T]{
+def put(t : T, stream : OutputStream);
+def get(stream : InputStream) : T;
+}
+
+implicit val utf8 : Binary[String] = null;
+implicit def binaryOption[T] (implicit bin : Binary[T]) : Binary[Option[T]] = null;
+
+val myStream : InputStream = null;
+
+def readText(implicit bin : Binary[Option[String]]) : Option[String] = bin.get(myStream);
+
+case None => println("I found nothing. :(");
+case Some(x) => println("I found" + x);
+}
+}
+
+
+Unfortunately this example betrays a weakness in our encoding. I can't just randomly call "get" like in Haskell's Data.Binary - because I need to invoke it on an instance of Binary[T] I need to ensure at the method level that one is available. There doesn't appear to be a good way of getting access to implicits from the enclosing scope directly.
+
+However, here's a silly hack:
+
+   def fromScope[T] (implicit t : T) = t;
+
+
+And we get:
+
+  fromScope[Binary[Option[String]].get(myStream) match{
+case None => println("I found nothing. :(");
+case Some(x) => println("I found" + x);
+}
+}
+
+
+This works just as well with multiple type parameters. For example, if we wanted to port Java's AtomicArray classes without wrapping everything (although admittedly wrapping everything would be more idiomatic Scala) we could do the following:
+
+object ArrayDemo{
+import java.util.concurrent.atomic._;
+trait AtomicArray[S, T]{
+def get(s : S, i : Int) : T;
+def set(s : S, i : Int, t : T);
+def compareAndSet(s : S, i : Int, expected : T, update : T);
+}
+
+implicit val long = new AtomicArray[AtomicLongArray, Long]{
+def get(s : AtomicLongArray, i : Int) = s.get(i);
+def set(s : AtomicLongArray, i : Int, t : Long) = s.set(i, t);
+def compareAndSet(s : AtomicLongArray, i : Int, expected : Long, update : Long) = s.compareAndSet(i, expected, update);
+}
+}
+
+
+So, that's multi-parameter type classes. But one thing you'll notice about the above encoding is that it's a bloody nuisance to invoke - you need to know the type of the array class you're using, which is annoying. Far better would be if the trait took care of that. In Haskell terms this would be an associated type.
+
+No problem.
+
+object ArrayDemo{
+import java.util.concurrent.atomic._;
+trait AtomicArray[T]{
+type S;
+def get(s : S, i : Int) : T;
+def set(s : S, i : Int, t : T);
+def compareAndSet(s : S, i : Int, expected : T, update : T);
+}
+
+implicit val long = new AtomicArray[Long]{
+type S = AtomicLongArray;
+def get(s : AtomicLongArray, i : Int) = s.get(i);
+def set(s : AtomicLongArray, i : Int, t : Long) = s.set(i, t);
+def compareAndSet(s : AtomicLongArray, i : Int, expected : Long, update : Long) = s.compareAndSet(i, expected, update);
+}
+}
+
+
+Scala's classes can have abstract types. So we just encode associated types as those.
+
+So, to recap on our encoding:
+
+  class Foo a where
+bar :: a
+baz :: a -> a
+
+
+
+becomes
+
+  trait Foo[A]{
+def bar : A;
+def baz(a : A) : A;
+}
+
+instance Foo Bar where
+stuff
+
+
+
+becomes
+
+  implicit Foo[Bar] bar = new Foo[A]{
+stuff
+}
+
+instance (Foo a) => Foo [a]
+
+
+
+becomes
+
+  implicit def[T] (implicit foo : Foo[A]) : Foo[List[A]];
+
+And for invoking:
+
+foo = bar
+
+
+
+becomes
+
+  val yuck = fromScope[Foo[A]].bar
+
+
+So it's a more verbose encoding, but not a terrible one. And it has some abstraction advantages too. For example:
+
+   sortBy :: (a -> a -> Ord) -> [a] -> [a]
+sortBy = stuff;
+
+sort :: (Ord a) => [a] -> [a]
+
+becomes
+
+def sort[A](xs : List[A])(implicit cmp : Comparator[A]);
+
+
+Because our type classes are a form of implicit object passing, we can also use them with *explicit* object passing. Thus we can redefine behaviour much more nicely to behave equally well with an ordered type and explicitly provided comparison functions.
+
+This has disadvantages too - you need to be more careful to ensure that you can't accidentally use two instances of the type class. This isn't a major burden though. The general solution is that when you have something which needs to maintain type class consistency between invocations you pass it an instance at construction type. Take for example Haskell's Data.Set. In Haskell getting a new Set (Set.empty) works for any type but almost all the functions for building sets have a constraint that the type belongs to Ord. In Scala you would require an Ord instance to be passed for Set construction but after that would not need one (analagous to Java's TreeSet providing a constructor that takes a Comparator).
+
+One thing I haven't covered is type classes which abstract over type constructors rather than types. The reason I haven't covered them is that I've yet to peek into that corner of Scala's type system. However, I assume they work as Tony Morris has done some stuff with monads in Scala. Also, see this paper (which I've not read yet)
+
+This entry was posted in programming and tagged , on by .

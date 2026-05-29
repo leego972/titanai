@@ -1,0 +1,158 @@
+Question: <p>I am trying to learn Python and WxPython.  I have been a SAS programmer for years.  This OOP stuff is slowly coming together but I am still fuzzy on a lot of the concepts.  Below is a section of code.  I am trying to use a button click to create an instance of another class.  Specifically-I have my main panel in one class and I wanted to instance a secondary panel when a user clicked on one of the menu items on the main panel.  I made all of this work when the secondary panel was just a function.  I can't seem to get ti to work as a class.  </p>
+
+<p>Here is the code</p>
+
+<pre><code>import wx
+
+class mainPanel(wx.Frame):
+    def __init__(self, parent, id, title):
+    wx.Frame.__init__(self, parent, id, 'directEDGAR Supplemental Tools', size=(450, 450))
+    wx.Panel(self,-1)
+    wx.StaticText(self,-1, "This is where I will describe\n the purpose of these tools",(100,10))
+
+
+    menubar = wx.MenuBar()
+    parser = wx.Menu()
+    one =wx.MenuItem(parser,1,'&amp;Extract Tables  with One Heading or Label')
+    two =wx.MenuItem(parser,1,'&amp;Extract Tables  with Two Headings or Labels')
+    three =wx.MenuItem(parser,1,'&amp;Extract Tables  with Three Headings or Labels')
+    four =wx.MenuItem(parser,1,'&amp;Extract Tables  with Four Headings or Labels')
+    quit = wx.MenuItem(parser, 2, '&amp;Quit\tCtrl+Q')
+    parser.AppendItem(one)
+    parser.AppendItem(two)
+    parser.AppendItem(three)
+    parser.AppendItem(four)
+    parser.AppendItem(quit)
+    menubar.Append(parser, '&amp;Table Parsers')
+
+    textRip = wx.Menu()
+    section =wx.MenuItem(parser,1,'&amp;Extract Text With Section Headings')
+    textRip.AppendItem(section)
+    menubar.Append(textRip, '&amp;Text Rippers')
+
+    dataHandling = wx.Menu()
+    deHydrate =wx.MenuItem(dataHandling,1,'&amp;Extract Data from Tables')
+    dataHandling.AppendItem(deHydrate)
+    menubar.Append(dataHandling, '&amp;Data Extraction')        
+
+
+    self.Bind(wx.EVT_MENU, self.OnQuit, id=2)
+</code></pre>
+
+<h1>this is where I think I am being clever by using a button click to create an instance</h1>
+
+<h1>of subPanel.</h1>
+
+<pre><code>    self.Bind(wx.EVT_MENU, self.subPanel(None, -1, 'TEST'),id=1)
+
+    self.SetMenuBar(menubar)
+
+    self.Centre()
+    self.Show(True)
+
+   def OnQuit(self, event):
+    self.Close()
+
+class subPanel(wx.Frame):
+    def __init__(self, parent, id, title):
+    wx.Frame.__init__(self, parent, id, 'directEDGAR Supplemental Tools', size=(450, 450))
+    wx.Panel(self,-1)
+    wx.StaticText(self,-1, "This is where I will describe\n the purpose of these tools",(100,10))
+
+
+    getDirectory = wx.Button(panel, -1, "Get Directory Path", pos=(20,350))
+    getDirectory.SetDefault()
+
+    getTerm1 = wx.Button(panel, -1, "Get Search Term", pos=(20,400))
+    getTerm1.SetDefault()
+
+    #getDirectory.Bind(wx.EVT_BUTTON, getDirectory.OnClick, getDirectory.button)
+
+
+    self.Centre()
+    self.Show(True)
+
+
+
+
+app = wx.App()
+mainPanel(None, -1, '')
+app.MainLoop()
+</code></pre>
+
+Answer: <p>You need an event handler in your bind expression</p>
+
+<pre><code>self.bind(wx.EVT_MENU, subPanel(None, -1, 'TEST'),id=1)
+</code></pre>
+
+<p>needs to be changed to:</p>
+
+<pre><code>self.bind(wx.EVT_MENU, &lt;event handler&gt;, &lt;id of menu item&gt;)
+</code></pre>
+
+<p>where your event handler responds to the event and instantiates the subpanel:</p>
+
+<pre><code>def OnMenuItem(self, evt): #don't forget the evt
+    sp = SubPanel(self, wx.ID_ANY, 'TEST')
+    #I assume you will add it to a sizer
+    #if you aren't... you should
+    test_sizer.Add(sp, 1, wx.EXPAND)
+    #force the frame to refresh the sizers:
+    self.Layout()
+</code></pre>
+
+<p>Alternatively, you can instantiate the subpanel in your frame's <code>__init__</code> and call a <code>subpanel.Hide()</code> after instantiation, and then your menuitem event handler and call a show on the panel <code>subpanel.Show()</code></p>
+
+<p>Edit: Here is some code that will do what I think that you are asking:</p>
+
+<pre><code>#!usr/bin/env python
+
+import wx
+
+class TestFrame(wx.Frame):
+    def __init__(self, parent, *args, **kwargs):
+        wx.Frame.__init__(self, parent, *args, **kwargs)
+        framesizer = wx.BoxSizer(wx.VERTICAL)
+        mainpanel = MainPanel(self, wx.ID_ANY)
+        self.subpanel = SubPanel(self, wx.ID_ANY)
+        self.subpanel.Hide()
+        framesizer.Add(mainpanel, 1, wx.EXPAND)
+        framesizer.Add(self.subpanel, 1, wx.EXPAND)
+        self.SetSizerAndFit(framesizer)
+
+class MainPanel(wx.Panel):
+    def __init__(self, parent, *args, **kwargs):
+        wx.Panel.__init__(self, parent, *args, **kwargs)
+        panelsizer = wx.BoxSizer(wx.VERTICAL)
+        but = wx.Button(self, wx.ID_ANY, "Add")
+        self.Bind(wx.EVT_BUTTON, self.OnAdd, but)
+        self.panel_shown = False
+        panelsizer.Add(but, 0)
+        self.SetSizer(panelsizer)
+
+    def OnAdd(self, evt):
+        if not self.panel_shown:
+            self.GetParent().subpanel.Show()
+            self.GetParent().Fit()
+            self.GetParent().Layout()
+            self.panel_shown = True
+        else:
+            self.GetParent().subpanel.Hide()
+            self.GetParent().Fit()
+            self.GetParent().Layout()
+            self.panel_shown = False
+
+class SubPanel(wx.Panel):
+    def __init__(self, parent, *args, **kwargs):
+        wx.Panel.__init__(self, parent, *args, **kwargs)
+        spsizer = wx.BoxSizer(wx.VERTICAL)
+        text = wx.StaticText(self, wx.ID_ANY, label='I am a subpanel')
+        spsizer.Add(text, 1, wx.EXPAND)
+        self.SetSizer(spsizer)
+
+if __name__ == '__main__':
+    app = wx.App()
+    frame = TestFrame(None, wx.ID_ANY, "Test Frame")
+    frame.Show()
+    app.MainLoop()
+</code></pre>

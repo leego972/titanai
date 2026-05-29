@@ -1,0 +1,62 @@
+# Assembly Jump Question (PC Offsets) - MSP430
+
+So im still trying to understand basic computer architecture, and have been writing a little bit of assembly for the MSP430 (basic LED/Switches stuff).
+
+I've been browsing the instruction set, and things are starting to make more sense.
+
+However for example a JNE/JNZ (Jump if Not Equal/Jump is Not Zero). I understand these are checking the status bits (that were maybe set from a CMP function).
+
+However the operation looks like this(Grabbed from the instruction set):
+
+if Z = 0: PC + 2*offset -> PC
+if Z = 1: execute following instruction
+
+
+So if Z is 0, go to the next instruction...makes sense. But I don't understand the PC + 2*offset -> PC, I think im maybe confused on the PC itself. The user guide doesn't go into a HUGE detail about it. The PC presumably points to the NEXT instruction to be executed?
+
+When it says it points to im guessing it's holding whatever is next? (Like maybe it's holding a MOV #020h,R9 or something? which would convert to some binary opcode + source and destination binary bits (thats a total of 16 bits? (I could be wrong here)
+
+However I do not understand the PC + 2*offset part, offset of what? I think that's the part that gets me. But I think the whole "process" of whats happening is still confusing, I understand WHAT is being written and where but maybe not "how". (im getting there though!)
+
+Edit: I think perhaps Im forgetting also that something like MOV @020h,R9 is actually 3 separate 16 bit words (I Think.....which would be 3 different PC counts) (since the registers are 16 bits large).
+
+Edit2: Here is an Example from the MSP430 book: (Keep in mind I do understand "What" it's doing, but not why? and I don't understand the offset part
+
+DelayLoop: ;
+inc.w R4 ; Increment loop counter
+cmp.w #DELAYLOOPS ,R4 ; Compare with maximum value
+jne DelayLoop ; Repeat loop if not equal
+
+• It seems like a "switch case" with the "offset" being the case to jump to. Where does the program get "offset" from? – Rafael Nov 9 '15 at 17:36
+• forget my last comment... now I see. "offset" is the parameter you pass to JNE, right? so offset must be, like Peter said, the distance from the current instruction where you want to jump to. – Rafael Nov 9 '15 at 17:43
+• i am confused too. why two offsets? i believe the 'offset' value is predefined for JNE on MSP assembler. Thats the first thing comes to my mind. When macros are defining, ide must be pushing comparison blocks in program stack with a pre defined 'offsets'. But this is only a guess of course. – Alper91 Nov 9 '15 at 17:54
+
+In the assembler source, the JNE instruction (called BNE - branch if not equal in some instruction sets) will include the destination of the Jump, usually as a lable.
+
+If the comparison before the JNE was equal, the instruction immediately following the JNE will be executed. If it was Not Equal, the distance (offet) to the destination lable will be added to the Program Counter, so the code immediately following the JNE instruction will be skipped, and program execution will continue from the destination address of the instruction.
+
+Edit: In the code sample in the OP's Edit 2, DelayLoop is the destination of the jump in the JNE instruction, so the offset is the difference between the address of the DelayLoop lable, and the address following the JNE Delayloop instruction - in this case, the offset will be subtracted from the PC, rather than being added to it, since we want to jump back, and execute that loop several times, until the result of cmp.w #DELAYLOOPS ,R4 is "equal". When the result of the comparison is equal, program execution will continue with the instruction following the JNE.
+
+I'm not familiar with the MPS430 architecture, so can't explain the "2*Offset" calculation, but it must have something to do with how memory is addressed.
+
+• I guess it's the offset part thats confusing to me. I added a code section I was talking about to my edit. So lets pretend it's NOT equal in this case, what gets added to PC? – msmith1114 Nov 9 '15 at 17:58
+
+Jump instructions on the MSP430 are relative jumps. That means that the opcode for the jump instruction holds the distance of the target from the current instruction. This distance is called the "offset", and it's the number of words to adjust the execution point by. Multiplying by 2 gives the number of bytes (because the processor uses 16-bit, i.e., 2-byte instructions). When the assembler sees JNE FOO it figures out how far the address named FOO is from the jump instruction and sticks that distance (measured in words) into the offset portion of the opcode. Jump instructions for the MSP430 have 001 in the high three bits, the condition code for the jump in the next three bits, and the offset in the remaining ten bits.
+
+The PC register contains the address of the next instruction to be fetched.
+
+Most instructions that are larger than one word internally use the indirect autoincrement addressing mode to load one or two values from the address pointed to by PC. Your code is actually implemented like this:
+
+DelayLoop:
+add.w #1, R4       ; 0x5314  Increment loop counter
+cmp.w @PC+, R4     ; 0x9034  Compare with maximum value
+.word #DELAYLOOPS  ; 0xXXXX
+jne DelayLoop      ; 0x23FC  Repeat loop if not equal
+
+
+When the JNE is executing, the PC register points directly after the JNE instruction. In this example, the instructions occupy four words in memory, so to jump to the beginning of the loop, eight bytes (four words) must be subtracted from the PC, so the offset is -4. This offset is encoded into the lowest 10 bits of the JNE instruction word.
+
+• When you say the instructions occupy 4 words, are you talking about the entire code snippet i posted, or just a certain piece of it? A Word is 16 bits in MSP430, so each instruction is more than one word however right? like cmp.w @PC+, R4 is like...3 words correct? – msmith1114 Nov 9 '15 at 18:38
+• The entire loop occupies 4 words. – CL. Nov 10 '15 at 0:15
+• Isn't an instruction like cmp.w @PC+, R4 more than 16 bits though? I may have read it wrong. – msmith1114 Nov 10 '15 at 3:03
+• The following word can be said to belong to the same instruction. – CL. Nov 10 '15 at 8:18

@@ -1,0 +1,73 @@
+# How can I tell the player that a key or other item can be discarded?
+
+We're working on a survival horror classical Resident evil (1, 2, 3, 0, REmake) type of game - link.
+
+I'm using Unity3D with C#.
+
+There's something that's kinda puzzling me - more a game design question than a technical one.
+
+Item usage - In Resident Evil - You could use a key to open more than one door - when it's not needed anymore you'd get a "XXX key is not deeded anymore, discard?" YES|NO. I was curious as to how would one implement this in an elegant manner...
+
+1. First, we should discuss who knows about the other, is it the key that knows what doors it opens? or is it the door that knows which key fits in its keyhole? - Well, it's kinda both if you think about it. For example, a diamond shaped key, opens doors with diamond shaped keyholes - Looking at the key you know which doors it could open - Same said about the door - you look at it and know what type of key you need...
+2. If we went with the first approach in that a key knows what doors it unlocks, we should have to assign those doors to the key - handle them to it in some way - What if you had a key, that will remain with you for a very long period - let's say it opens so many doors that some of those doors are in the middle of the game - Why would a key you pickup in the beginning of the game, carry information about something that would occur in the middle of the game? Seems redudant to me... So I wouldn't go with this approach.
+3. OK, so you tell doors which key fits in them - Get in a scene with 3 doors, information about what keys to use for those 3 doors are loaded, and nothing else! - So I guess, we got that out of the way...
+4. Now, how would you tell, that a key is not needed anymore? I thought of two approaches - both have downsides:
+
+1. Have a nUsages counter - that you preset (via inspector for ex) - This way you have to know exactly how many times it will be used in the game - Add another door and forget to increment the counter, you get screwed. Each time you open a door/use the key, you decrement the counter by one, reach zero -> "You don't need this key anymore, discard>" YES|NO.
+
+2. Detect the doors a key gets used in dynamically (When you pick up the key?) - So maybe you'd have like a database of DoorTriggers - Pickup key -> Look up the key's entries and increment the counter that way - This is slow relatively to the previous method. It's also kinda foggy a bit - You know, a key could open doors in scenes other than the one it's picked in - how would I go about searching for its doors in this case? (Getting a bit Unity3D-specific here...) - I guess, to answer this we must answer: How do doors register themselves in our db? Upon scene load? If that's the case, then a key picked up a scene A - can't detect a door it opens in Scene B where B > A...
+
+Note that a key is just an example - There are Usable items that I don't need to do this - Like health items - The items that I must perform this operation on, are "Other" items, like keys, a crank, a wrench, a pipe, a holeopener, etc.
+
+Again, this is what's off the surface of my head.
+
+What do you think of my assessment? How would you implement this feature? (maybe in a better way?) (General ideas)
+
+And if you'd go with my 2nd method in adding the stuff dynamically upon item pickup, how would you do it in Unity3D - More accurately, how would you look up the key's doors that resides in other scenes? and how where would you let the doors register themselves in teh db? (General approaches again)
+
+Thanks for any help.
+
+• to be honest if you think about it why would you ever throw a key away? In terms of realism if you find yourself in this kind of environment there is no way to know if a there are more doors that use this key or not. Personally I would just create a separate keyring area in your inventory and have the keys stay there forever. If the key is single use (for example if you need to put an stone symbol into a door or something) then you can just keep a boolean flag so you know to remove it after you use it. – Benjamin Danger Johnson Nov 21 '13 at 18:10
+• Related question - why tell the player the item can safely be discarded? Either automatically throw it away, or force them to guess. – Bobson Nov 21 '13 at 21:15
+• @BenjaminDangerJohnson - Thanks a lot for your comment. I didn't wanna mention that we're already using the keyring idea - because I wanted to talk about item usage in general by giving an example about keys to illustrate the purpose cause it's simple. – vexe Nov 22 '13 at 4:46
+• You are right, in real life you never really know if it's 'safe' to discard something. But the reason I would allow the player to discard something, is to free some memory since the item is not needed anymore - why keep it? let's talk about a wrench for example that you only use twice or so, it does make sense realistically to keep it with you forever but it's not something very friendly memory-wise. – vexe Nov 22 '13 at 4:49
+• Be careful not to over optimize. I honestly doubt an extra 20 objects will really slow you down too much but if you are that tight on space you can always just tell the player that the key "broke" after being used. The big thing is you want to give the players a situation they can understand. If the key just warps to another dimension they might interpret it as a bug, if it breaks they know 1) they can no longer use it and 2) it might be possible to fix it later if the pieces stay in their inventory. – Benjamin Danger Johnson Nov 22 '13 at 17:09
+
+I don't see an easy way to meet all requirements in a general case.
+
+# To Make a Key Auto-Discard
+
+Two ideas:
+
+1. If your game is linear, and one scene follows another with no backtracking, then you can store with the key a number and a string. The string is the latest scene that the key can be used in, the number is the number of matching doors in that scene. Discard when the number is zero, or when leaving that scene. (the latter catches the case when you don't open all doors for some reason).
+
+2. If your game is more complex, you'll have to store a list of scenes reachable from the current scene, and -- for each key -- a number of unopened doors that match the key in each scene. After each key use on a new door, decrement the count for that scene. If it goes to zero, check the counts for all reachable scenes. If they are all zero, discard. Compiling the 'reachable' scene automatically, is basically impossible in Unity, since it would require some kind of knowledge of the behavior of your scripts. So you'd need to hard-code that. You can automatically iterate through a list of scenes, open them, try the keys on each door, and store the counts.
+
+# Who Decides which Key Fits
+
+You've covered key-has-a-list-of-doors and doors-have-a-list-of-keys. Both of which can easily be exposed by a method on a door that takes a key and returns a boolean.
+
+Another approach is to make the key and door more like a real key and lock. Have each key be an integer representing a bit pattern. Have each door be the same. Then in your CanOpen function, AND them together and the door opens if the result is zero.
+
+So a key with 'prongs' 00000000 is a skeleton key, it opens anything. A key with 11011001 would fit a lock of 00100110, or 00100010. With this you can build patterns of opening that mean keys and doors don't need complete lists of one another beforehand. Figuring out the patterns is more difficult. A real lock effectively has two masks, and does key AND door1 == door2, which might be worth doing if you get stuck making the bitmasks.
+
+• Sorry for the late response I was involved in doing other parts of my game. But now I'm back to Usable items. I thought of a really easy way to do it, but it ran short. What I had in mind is: store all my items as prefabs (keys, health items, etc) - then, go for the key-has-a-list-of-doors approach, since my keys are prefabs, I thought I could travel between scenes and assign the doors I want to the key, but to my horror I can't assign something from the scene, to a prefab! – vexe Dec 25 '13 at 15:27
+• I have never thought of using bit masks here - it is pretty neat actually! - I think I'll explore it and let you know the results. One thing I didn't quite get though: "Figuring out the patterns is more difficult. A real lock effectively has two masks, and does key AND door1 == door2, which might be worth doing if you get stuck making the bitmasks." What you mean figuring out the patterns? how is a real lock has two masks? why key AND door1 == door2 - If I'm gonna be doing this, I think I want to make the creation of the mask, visible in the inspector somehow, maybe make a custom inspector – vexe Dec 25 '13 at 15:28
+• Thinking more about it, a key could open many doors. So, to make Key 'k' fit in door 'd1' and 'd2', I would have to tell 'k', to generate a patter that works for d1 and d2. Or the opposite (go to the doors, and tell them to use a pattern that works for 'k') - In either cases, the key and the doors, know about each other in a way, so... we're kinda back to the old idea of having the key know which doors to use, or vise versa. Unless you have other ideas in mind of how to tell 'k' to generate a pattern that works for 'd1' and 'd2' – vexe Dec 25 '13 at 17:09
+• @vexe - you have to distinguish between the code and the game design. Using bitmasks the code is not coupled. You don't need some list belonging to a key of does it can open (or vice versa). So you don't need to keep editing scenes to get those lists right. But you do need to know what keys fit what doors. You still effectively need that 'list' somewhere, in your game design. But the bitmasks stops you having to encode it explicitly. Which it turn makes it more flexible. It isn't a panacea, it just solves a problem of tightly coupled code. – Ian Dec 28 '13 at 10:55
+• @vexe - so one approach would be to think of 'sets' of doors, as you would in a real building. An office block might be designed with different suites having their own keys (so each company can have a master key), but the janitor has a full-access key. Then each office in a company might have its own key, which also opens the front door, so employees can get to their desk, but nobody else's. – Ian Dec 28 '13 at 10:58
+
+As long as items are used only on the same level, the matter is fairly simple. Upon loading, count the number of doors requiring a certain key. This determines the number of times a key is usable on a level, and every time it is used on a door the key usage counter is decreased. If the counter is 0 the key is no longer needed.
+
+If there can be multiple keys of the same time, the counter needs to be global.
+
+On a global game world level the same principle applies, but this time you have to know the number of uses for all "levels". If the level format is simple or split into different files the number of doors requiring a specific key can be determined when the game launches. Otherwise a preprocessing task could determine that number when the game is compiled or the levels exported.
+
+You certainly don't want designers to have to give the key a specific number of uses, because that is prone to human error.
+
+To make lookup easier, there needs to be some form of database. You'll also need this to link doors with a key. Let's say all items in the game world have a unique (database) ID (an integer number) or a unique name "RedSkeletonKey" then the red skeleton doors would set that they require "RedSkeletonKey" to be unlocked. You will want to edit this in the door template, so that every instantiated door placed in the world automatically has this requirement. Again this is to avoid human error.
+
+At runtime when the player approaches a locked door and tries to unlock it, the "RedSkeletonKey" reference is looked up in the item database. When found, the item of the same type is looked up in the player inventory. If player has that key, the door is unlocked and the runtime database usage counter for that key is decreased (or a separate counter increased and compared to be equal, whichever you prefer).
+
+• +1 Thanks for your answer - appreciate your effort. But to be honest, the first half of your answer is kinda repeating what I said so it's not adding something new to the table. You also didn't address the problem of how does keys know about doors in scenes ahead of them, if doors register dynamically to the db. – vexe Nov 22 '13 at 5:02
+• "when the player approaches a locked door and tries to unlock it, the "RedSkeletonKey" reference is looked up in the item database" - I don't actually need to lookup keys - When I create a door, it will have the name of the key it opens it. So: Player tries to open door with key X -> door.getKey() == X? door.Unlock : nothing; - The only db lookup happens when the player picks up a key to know the number of doors its used in. – vexe Nov 22 '13 at 5:04

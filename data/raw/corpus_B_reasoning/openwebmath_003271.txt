@@ -1,0 +1,293 @@
+# External MFDs for Orbiter
+
+#### kamaz
+
+##### Unicorn hunter
+2 cheap Android tablets: 100 EUR
+2 Thrustmaster Cougar MFDs: 80 EUR
+2 weeks programming the add-on: 0 EUR
+2 working Orbiter MFDs: priceless
+
+(Details will be posted during the weekend. I must get some sleep now.)
+
+#### Attachments
+
+• cougar.jpg
+127.6 KB · Views: 1,163
+• cougar2.jpg
+111.2 KB · Views: 1,243
+Last edited:
+
+#### yagni01
+
+Donator
+Look forward to seeing your approach. :thumbup:
+
+#### Mojave
+
+##### Doug Uses Light Theme...
+Moderator
+whoa, those looks absolutely neat. Good luck on your venture.
+
+#### kamaz
+
+##### Unicorn hunter
+I will post the display code first, and discuss intefacing the Cougars in the next part in a few days. This is because the Cougar-related code requires a major cleanup. (Hey, I hacked it in one evening on the day I got the Cougars!) But, first of all, I will document how I came to the solution I currently use.
+
+So, let's discuss the grand question of simpit building: how to make a dedicated MFD display?
+
+One step in the right direction is using ExtMFD. ExtMFD allows you to open your MFD in an external window. Unfortunately, ExtMFD suffers from a focus problem, meaning that if you click mouse on the MFD button, the window focus will switch from the main Orbiter window, so your keyboard input will go to the MFD window, instead of the main window. So you loose control of the ship until you click your mouse on the main window. Fortunately there are some ways to solve that and so you can use a second monitor to display MFDs like that (and even glue the Cougars to the screen for added realism). But, that approach requires fitting a second extra monitor in your setup -- and, a PC monitor is too large for me. So, not good.
+
+At that point, I must mention ExternalMFD/Orb::Connect. ExternalMFD is a program running on a separate computer, which queries the Orb::Connect server running in Orbiter, and displays the parameters it reads. A very cool idea, but it requires reimplementing each and every MFD on the client side. So, no TransX or IMFD for you. So, not good.
+
+So, I went back to the idea of adding an extra small screen to my PC to just display the MFDs. I looked at using the MIMO USB touch screens together with ExtMFD. That would work, but MIMOs are a bit expensive (140 EUR + 19% VAT each at minipc.de). So, I went looking for a cheaper 7" or 8" display...
+
+...and I didn't find any. I mean, yes, you can buy 7-8" automotive VGA display, but these babies cost around 300 EUR. Each. (Unless you can get them in China yourself.) So not only this is more expensive than MIMOs, you also have two add extra VGA outputs to your PC, which is a major headache. So, still no good.
+
+Then I realized that my local MediaMarkt is well-stocked in cheap 7" displays -- in the form of low-end Android tablets (Lark FreeMe 70.0 at 50 EUR each)! So, I thought that I will export the MFD over network and use a cheap tablet as a display device. The first idea was to use WebMFD. However, as aptly documented in the WebMFD thread WebMFD has its own issues -- notably, it's very picky about which browser is used. Some work, others don't. And of course, the browser included in my Lark would not work. Oh well.
+
+But, WebMFD served as important inspiration. I realized that a similar solution exists: instead of using HTTP, export the MFD screen using the VNC remote desktop protocol. Then, you can use any client device which can run a VNC client -- and there is a multitude of these (including mobile phones). Next, since the tablet has a touchscreen, and VNC can obviously send mouse clicks, then I have the button input problem solved as well! Simply draw buttons around the actual MFD screen area, export the whole thing over VNC and check where the user clicks. In other words, ExtMFD over the network.
+
+And so, VNCMFD was born.
+
+#### Hielor
+
+##### Defender of Truth
+Donator
+Beta Tester
+Very cool. What do you end up doing with the extra buttons on the Cougar units, and the fact that they only have 5 buttons on each side?
+
+I agree that the RemoteMFD requiring re-implementing all MFDs was kind of what killed the project in the end. There's definitely tons of room for improvement in some of the default MFDs, but rewriting things like IMFD is kind of infeasible.
+
+One thing I considered was some kind of host process that can load MFD dlls on a second computer and provide the right functions via Orb::Connect, but that's also kind of difficult and basically forces you into using Windows computers, which aren't very cheap. The presence of modern super-cheap tablets makes those tempting, and it's good that you've found a way to do that.
+
+Is there a list of browsers supported by WebMFD somewhere? Seems like the best solution might be to find a cheap tablet that supports that...
+
+#### kamaz
+
+##### Unicorn hunter
+VNCMFD - export MFD over the network using the VNC protocol
+
+VNC is a widely used remote desktop protocol.
+
+This addon creates starts a separate VNC server for each MFD. The first server is created on port 5900, the second on 5901, and so on. Additional servers can be started by invoking the add-on via Ctrl-F4 (or setting MAX_DISPLAYS in VNCMFD.cpp). Once the server is started, you can use any VNC client to display the MFD panel (screen and surrounding, clickable buttons).
+
+The add-on is covered by the GPL license. The VNC server implementation uses GPL'd LibVNCserver library. The code has actually been sourced from vnccast, which included a version of linvncserver hacked to compile on windows and conveniently packaged as a Visual Studio project.
+
+A logfile named VNCMFD.log is created in Orbiter's main directory.
+
+The panel size and layout is currently hard-coded (see VNCMFD.cpp and MFDPanel.cpp). The panel size is 480x480, with a 400x400 MFD display area to match an 800x480 tablet screen.
+
+An extra button is provided which sets the refresh rate of the screen. This allows you to balance each MFD's responsivity vs. Orbiter framerate. The MFD image is sent using progressive scan. Meaning, at 1Hz refresh rate, 1/10th of the screen is sent every 100ms. (If progressive scan is not used, and the MFD screen is copied all at once, main window animation is not smooth. This is because doing BitBlt() on the MFD screen globally locks the renderer until the image copy (BitBlt()) is done. The problem is particularly visible with the inline graphic client. This is the same issue that ExtMFD and WebMFD run into.)
+
+Developed and tested on Orbiter 2010P1 (clean install).
+
+Tested graphic clients: both inline and D3C9Client work.
+
+Tested VNC clients: UltraVNC on PC and android-vnc-client on Android. In principle, any VNC client should work.
+
+Important notice: the add-on creates a network server with no security of any kind. There is no authentication or encryption of VNC session. And old VNC code is used, which can have remotely exploitable bugs. Please use a suitably configured firewall!
+
+Both source and compiled DLL are included. Built with VC++ 2010 Express.
+
+#### Attachments
+
+• ultravnc.jpg
+302.5 KB · Views: 379
+• nocougar.jpg
+160.8 KB · Views: 279
+• VNCMFD-rev15-noCougar.zip
+2.1 MB · Views: 116
+
+#### kamaz
+
+##### Unicorn hunter
+Very cool. What do you end up doing with the extra buttons on the Cougar units, and the fact that they only have 5 buttons on each side?
+
+Remember that the basic code is VNCMFD. Input from Cougars is handled by an extra layer which is hacked atop VNCMFD. (Actually, the real reason I have Cougars is that the tablets I used have abysmal touchscreen... )
+
+Since VNCMFD draws the buttons by itself (and decodes button presses), there is no problem with rearranging them so they match the button layout of the Cougar. So I have buttons 1-5 on the left, buttons 7-11 on the right, and the bottom row is 6, Hz, SEL, MNU, 12 (I do not need the PWR button ) The standard layout is on screenshots in post #6, whereas the Cougar layout is in post #1.
+
+One reason I want to rewrite the Cougar code before releasing it is that all that is hardcoded now, and I'd rather put that in a config file. So the panel layout can be user-configurable.
+
+This approach works when the MFD screen is displayed. It runs into a problem when selection screen or help screen is displayed (i.e. when you press "SEL" or "MNU") because then the button location does not match the descriptions. From the documentation, the button layout should be configurable via the MFDSPEC structure. So I plan to investigate that in detail.
+
+I currently have 5 unused top buttons on each MFD (plus 4 rockers). When I get to reworking the Cougar code, I think I will make them configurable. One idea is to use them to send Orb::Connect commands, so they could be used to control autopilots and such... Ideas on what to do with these unused buttons are welcome.
+
+Is there a list of browsers supported by WebMFD somewhere? Seems like the best solution might be to find a cheap tablet that supports that...
+
+Also, to make this clear. I actually did two projects: (1) make VNCMFD which converts a cheap Android tablet into a touchscreen MFD and (2) modify VNCMFD to use Cougar buttons instead of touchsreen.
+
+So, if touchscreen MFD is enough for you and you can get a tablet with a half-decent touchscreen, then you don't need Cougars -- just install VNCMFD from post #6 and you're set.
+
+#### csanders
+
+An extra button is provided which sets the refresh rate of the screen. This allows you to balance each MFD's responsivity vs. Orbiter framerate. The MFD image is sent using progressive scan. Meaning, at 1Hz refresh rate, 1/10th of the screen is sent every 100ms. (If progressive scan is not used, and the MFD screen is copied all at once, main window animation is not smooth. This is because doing BitBlt() on the MFD screen globally locks the renderer until the image copy (BitBlt()) is done. The problem is particularly visible with the inline graphic client. This is the same issue that ExtMFD and WebMFD run into.)
+
+Did you try that code I posted in the WebMFD thread? Just curious if it blew up or anything...
+
+#### kamaz
+
+##### Unicorn hunter
+Did you try that code I posted in the WebMFD thread? Just curious if it blew up or anything...
+
+Not yet I was going to look into that, but then the shipment with the Cougars arrived and my attention shifted
+
+#### yagni01
+
+Donator
+Tested VNC clients: UltraVNC on PC and android-vnc-client on Android. In principle, any VNC client should work.
+
+I noticed TightVNC has a Java-based client, which could help for any difficult non-windows client devices.
+
+#### Quick_Nick
+
+##### Passed the Turing Test
+Donator
+I noticed TightVNC has a Java-based client, which could help for any difficult non-windows client devices.
+
+TightVNC has been a bit buggy for me trying to use android-vnc-client.
+I use RealVNC reliably. Generally I'm over wifi for speed and full quality. However, I don't believe Orbiter shows up this way. (don't want to give the wrong impression)
+
+I noticed this has little to do with this situation, since we're only talking about clients.
+
+Last edited:
+
+#### yagni01
+
+Donator
+Very cool. What do you end up doing with the extra buttons on the Cougar units, and the fact that they only have 5 buttons on each side?
+
+I agree that the RemoteMFD requiring re-implementing all MFDs was kind of what killed the project in the end. There's definitely tons of room for improvement in some of the default MFDs, but rewriting things like IMFD is kind of infeasible.
+
+One thing I considered was some kind of host process that can load MFD dlls on a second computer and provide the right functions via Orb::Connect, but that's also kind of difficult and basically forces you into using Windows computers, which aren't very cheap. The presence of modern super-cheap tablets makes those tempting, and it's good that you've found a way to do that.
+Is there a list of browsers supported by WebMFD somewhere? Seems like the best solution might be to find a cheap tablet that supports that...
+We have the same concerns about driving a remote Orbiter facade to host MFDs, either with O:C or something new and more efficient (OMP-ish, perhaps). As much as our work on RemoteMFD was limited, it fulfilled a goal of my own simpit, which was customize the look of displays to more closely resemble modern avionics displays as much as possible and eliminate the 2D panels. Even the STS MEDS are so 80's looking.
+
+So I have a couple questions about the VNC version. Since it appears the buttons can be independently drawn, can multiple MFDs be 'stacked' so that the sel and mnu buttons of the top one can be place below alongside the bottom ones (I also don't need the PWR buttons)? Could this stacking accomodate combinations in different sizes/resolutions? MYgoal has changed from airliner (e.g. B737/A320) style to more like a regional carrier/bizjet (Bombardier Challenger 305) style. Picture the PFD/MFD from here http://wallpaper.goodfon.com/image/177658-3600x2400.jpg with edge buttons. Can the VNC client stitch together 'standard' mfds in this type of format?
+
+---------- Post added at 09:49 PM ---------- Previous post was at 09:40 PM ----------
+
+I currently have 5 unused top buttons on each MFD (plus 4 rockers). When I get to reworking the Cougar code, I think I will make them configurable. One idea is to use them to send Orb::Connect commands, so they could be used to control autopilots and such... Ideas on what to do with these unused buttons are welcome.
+I'm working on a version 2 of Orb:Connect for O2010p1; Is that something that would help you? Hadn't heard anyone was really using it, so posting it hasn't been on my list
+
+---------- Post added 07-29-12 at 01:22 PM ---------- Previous post was 07-28-12 at 09:49 PM ----------
+
+Copied the folders into my O2010p1 dir and when I tried to enable modules I now get popup with "The procedure entry point GetThreadId could not be located in the dynamic link library KERNEL32.dll
+
+The other modules it contains is DX9 client, Orb:Connect and XR2. Same problem in a clean instal and I see "Error loading module Modules\Plugin|VNCMFD.dll (code 127)" in the orbiter.log
+
+Last edited:
+
+#### kamaz
+
+##### Unicorn hunter
+Copied the folders into my O2010p1 dir and when I tried to enable modules I now get popup with "The procedure entry point GetThreadId could not be located in the dynamic link library KERNEL32.dll
+
+The other modules it contains is DX9 client, Orb:Connect and XR2. Same problem in a clean instal and I see "Error loading module Modules\Plugin|VNCMFD.dll (code 127)" in the orbiter.log
+
+Ooops... GetThreadId() was introduced in Vista. You're on XP I guess?
+
+Okay, will try to hack around that tomorrow...
+
+ETA: Well, turned out to be easier than I thought. Please try the attached version.
+
+#### Attachments
+
+• VNCMFD-rev16-noCougar.zip
+2.1 MB · Views: 44
+Last edited:
+
+#### yagni01
+
+Donator
+Ooops... GetThreadId() was introduced in Vista. You're on XP I guess?
+Indeed.
+
+#### kamaz
+
+##### Unicorn hunter
+So I have a couple questions about the VNC version. Since it appears the buttons can be independently drawn, can multiple MFDs be 'stacked' so that the sel and mnu buttons of the top one can be place below alongside the bottom ones (I also don't need the PWR buttons)?
+
+Uh... can you draw the panel layout you want?
+
+Could this stacking accomodate combinations in different sizes/resolutions?
+
+In principle, yes. However, at the moment, panel/button geometry is hardcoded. Which is why I want to redo the panel layout logic.
+
+Can the VNC client stitch together 'standard' mfds in this type of format?
+
+The VNC client does not stitch anything. Actually, the VNC client is very dumb: it just displays the image sent from server.
+
+What I'm actually doing is that I make a bitmap, which has an MFD screen in the center surrounded by buttons and send all that to the client. When the user clicks mouse (touches) the panel, the client sends me back xy coordinates of the click. Then I look up which button these coordinates correspond to, and send the appropriate event to the Orbiter.
+
+The actual MFD code does not care where the buttons are; it just reads the events. So as far as MFD operation is concerned, button placement is completely arbitrary. I.e. you can make a layout which has 3 buttons above the screen and 12 buttons below the screen or whatever. The only problem is that Orbiter makes certain assumptions about button placement when in the "SEL" or "MNU" mode...
+
+#### yagni01
+
+Donator
+You can look at this image of my flight deck using 2 instances of RemoteMFD each holding 2 displays http://imageshack.us/photo/my-images/291/remobemfdops2.jpg/, but essentially it means sending 2 mfds in one vnc window to make it "appear" to be a single display. Picture a surfaceMFD above and orbitMFD aligned vertically below, with the orbitMFD moved up to cover the upper PWR/SEL/MNU buttons, and without the second window bar. The "hidden" SEL button(s) for the surfaceMFD would be painted alongside the ones for the lower orbitMFD. Hope this was clearer than mud.
+
+#### kamaz
+
+##### Unicorn hunter
+This can be done client-side.
+
+1. Configure the server to send just the MFD screen image without rendering buttons. This functionality will be provided soon.
+
+2. Write a client rendering two VNC framebuffers in one window producing the geometry you want (i.e. a client which instantiates a VNC viewer class twice in one window). There is a multitude of embeddable VNC client classes:
+- Java applet for web pages;
+- Java class;
+- SDL: http://www.ferzkopp.net/Software/SDL_vnc/
+- MFC: http://www.pjtec.com/Products/GovVNC/index.htm
+- .NET: http://dotnetvnc.sourceforge.net/
+
+3. Then we just need some socket interface to transmit button presses and labels between the server and client.
+
+In principle, the server could render two or more MFDs into the same VNC server, but the code handling button presses is currently built on assumption that each MFD has its own VNC server.
+
+Last edited:
+
+#### kamaz
+
+##### Unicorn hunter
+New version with Cougar support
+
+Attached is a new version of the plug-in (rev 25), with Cougar support included.
+
+Changes:
+
+- VNC servers keep running between simulations. No need to reconnect the client.
+
+- Panel layout and buttons are fully configurable via the VNCMFD.ini file. This file must be placed in Orbiter's root directory. See comments in the file for details.
+
+- Number of MFDs is set using the config file. There is no hard limit.
+
+- Thrustmaster Cougar MFD support is added. If you don't have Cougars, please use VNCMFD-noCougars.ini file instead (i.e. rename it to VNCMFD.ini).
+
+Have fun
+
+#### Attachments
+
+• VNCMFD-rev25.zip
+2.1 MB · Views: 47
+• transx_1280.jpg
+123.1 KB · Views: 100
+• iss_docking_1280.jpg
+137.6 KB · Views: 104
+
+#### SolarLiner
+
+##### It's necessary, TARS.
+There is a way to put the input box into the VNC client ? Because, for example I'm on IMFD, setting target, and I must go on my computer to enter the target. In the case of a "Mission Central Command" addon witch takes your VNC support, this couldn't be a realistic way.
+
+#### kamaz
+
+##### Unicorn hunter
+Note on API access and Orb::Connect support
+
+MFDs running under VNCMFD can be accessed using Orbiter's API calls, e.g. oapiOpenMFD() and remotely via Orb::Connect. Orb::Connect access to MFDs running under VNCMFD has been tested by me and it works, subject to one caveat below.
+
+Orbiter API requires MFD identifier to be passed to the function call. In case of MFDs embedded on spacecraft panels, these identifiers are known (0 for the left MFD, 1 for the right MFD). In case of MFD displays derived from ExternMFD class (including VNCMFD), these MFD identifiers are unpredictable 32-bit numbers (it is simply an object pointer cast to UINT, if you are really interested in such details). To my knowledge, there is no API function which can be used to obtain the list of identifiers of all MFDs currently running.
+
+For debugging and testing purposes, the MFD identifier can be obtained from the VNCMFD.log file, where a line li

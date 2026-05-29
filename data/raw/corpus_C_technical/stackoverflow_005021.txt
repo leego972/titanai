@@ -1,0 +1,51 @@
+Question: <p>I'm not exactly sure how to ask this question really, and I'm no where close to finding an answer, so I hope someone can help me. </p>
+
+<p>I'm writing a Python app that connects to a remote host and receives back byte data, which I unpack using Python's built-in struct module. My problem is with the strings, as they include multiple character encodings. Here is an example of such a string:</p>
+
+<p>"^LThis is an example ^Gstring with multiple ^Jcharacter encodings"</p>
+
+<p>Where the different encoding starts and ends is marked using special escape chars:</p>
+
+<ul>
+<li>^L - Latin1</li>
+<li>^E - Central Europe</li>
+<li>^T - Turkish</li>
+<li>^B - Baltic</li>
+<li>^J - Japanese</li>
+<li>^C - Cyrillic</li>
+<li>^G - Greek</li>
+</ul>
+
+<p>And so on... I need a way to convert this sort of string into Unicode, but I'm really not sure how to do it. I've read up on Python's codecs and string.encode/decode, but I'm none the wiser really. I should mention as well, that I have no control over how the strings are outputted by the host.</p>
+
+<p>I hope someone can help me with how to get started on this.</p>
+
+Answer: <p>Here's a relatively simple example of how do it...</p>
+
+<pre><code># -*- coding: utf-8 -*-
+import re
+
+# Test Data
+ENCODING_RAW_DATA = (
+    ('latin_1',    'L', u'Hello'),        # Latin 1
+    ('iso8859_2',  'E', u'dobrÃ½ veÄer'),  # Central Europe
+    ('iso8859_9',  'T', u'Ä°yi akÅamlar'), # Turkish
+    ('iso8859_13', 'B', u'Ä® sveikatÄ!'),  # Baltic
+    ('shift_jis',  'J', u'ä»æ¥ã¯'),        # Japanese
+    ('iso8859_5',  'C', u'ÐÐ´ÑÐ°Ð²ÑÑÐ²ÑÐ¹ÑÐµ'), # Cyrillic
+    ('iso8859_7',  'G', u'ÎÎµÎ¹Î¬ ÏÎ¿Ï'),   # Greek
+)
+
+CODE_TO_ENCODING = dict([(chr(ord(code)-64), encoding) for encoding, code, text in ENCODING_RAW_DATA])
+EXPECTED_RESULT = u''.join([line[2] for line in ENCODING_RAW_DATA])
+ENCODED_DATA = ''.join([chr(ord(code)-64) + text.encode(encoding) for encoding, code, text in ENCODING_RAW_DATA])
+
+FIND_RE = re.compile('[\x00-\x1A][^\x00-\x1A]*')
+
+def decode_single(bytes):
+    return bytes[1:].decode(CODE_TO_ENCODING[bytes[0]])
+
+result = u''.join([decode_single(bytes) for bytes in FIND_RE.findall(ENCODED_DATA)])
+
+assert result==EXPECTED_RESULT, u"Expected %s, but got %s" % (EXPECTED_RESULT, result)
+</code></pre>

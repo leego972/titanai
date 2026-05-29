@@ -1,0 +1,66 @@
+Closed form for the variance of a sum of two estimates in logistic regression?
+
+In logistic regression with an intercept term and with at least one dependent variable which is categorical, is there a closed form for the variance of the sum of the intercept and the coefficient of the categorical variable, or do you have to sample from a multivariate distribution with the means and variances of the intercept and the coefficient to get a reliable measure of the variance of this sum?
+
+$P(y) = \frac{exp(y)}{1 + exp(y)}$
+
+$y = \beta_{0} + \beta_{1}x + \epsilon$
+
+where x is categorical.
+
+Would the formula for the variance of a sum (of two random variables) be applicable here?
+
+$Var(\beta_{0} + \beta_{1}) = Var(\beta_{0}) + Var(\beta_{1}) + 2Cov(\beta_{0}, \beta_{1})$
+
+The reason I ask, is that in this comment I got the impression that no closed form existed for the variance in question, and the advice was to sample from a multivariate distribution with the means and variances of $\beta_{0}$ and $\beta_{1}$
+
+set.seed(1)
+dependent.var <- sample(c(TRUE, FALSE), 100, replace = TRUE, prob = c(0.3, 0.7))
+independent.var <- ifelse(dependent.var, sample(c("Red", "Blue"), replace = TRUE,
+size = 10, prob = c(0.8, 0.2)), sample(c("Red", "Blue"), size = 10,
+replace = TRUE, prob = c(0.4, 0.6)))
+table(dependent.var, independent.var)
+##               independent.var
+## dependent.var Blue Red
+##         FALSE   42  26
+##         TRUE     7  25
+my.fit <- glm(dependent.var ~ 1 + independent.var, family = binomial(logit))
+coef(summary(my.fit))
+Estimate Std. Error   z value     Pr(>|z|)
+(Intercept)        -1.791759  0.4082482 -4.388897 0.0000113927
+independent.varRed  1.752539  0.4951042  3.539737 0.0004005255
+> vcov(my.fit)
+(Intercept) independent.varRed
+(Intercept)          0.1666666         -0.1666666
+independent.varRed  -0.1666666          0.2451282
+
+
+The logit of TRUE for a "Red" case is $\beta_{0}+\beta_{1} \approx -0.039$. Is the variance for this estimate exactly
+
+vcov(my.fit)[1,1] + vcov(my.fit)[2,2] + 2 * vcov(my.fit)[1,2]
+[1] 0.07846154 ?
+
+
+Or is this only an approximation, and a more accurate measure is to be found by sampling, e.g.
+
+library(MASS)
+var(rowSums(mvrnorm(n = 1E7, mu = coef(my.fit), Sigma = vcov(my.fit))))
+[1] 0.07842985 ?
+
+
+In this simple example, the sampling method does not seem to provide more accurate estimates of the variance (using 1E7 samples).
+
+Here it is stated that "There is a correspondance between the covariance matrix of the fit parameters and Δχ2 confidence regions only for the case of Gaussian uncertainties on the input measurements.". Is that a reason against relying on the closed form above, or is there perhaps another reason for the advice to sample instead of deriving the variance analytically in cases like this?
+
+EDIT: (In response to the answer given by StasK). The advice I originally got was to simulate from the full model, not from the vcov(), so here is the code to simulate from the full model:
+
+library(arm)
+sim.i <- sim(my.fit, 100000)
+logit.for.TRUE.red <- sim.i@coef[,1] + sim.i@coef[,2]
+var(logit.for.TRUE.red)
+[1] 0.07781206
+
+• You should avoid conflating population parameters ($\beta$, fixed but unknown quantities with variance 0) with their estimates ($\hat \beta$, which are random variables). – Glen_b -Reinstate Monica Nov 10 '14 at 17:36
+
+Adding simulation on top of that estimate is relatively pointless. Bayesians out there might argue that you get better approximation for the distribution of the estimates if you sample from the posterior, but I don't think that's your question, and that's not what you are doing. But other than that, you won't in any way be better off simulating if all you use is vcov(). (And if you are simulating from the multivariate normal, the mean and the variance are independent, so if you are only interested in the variance, it does not matter what mean you use; since you are interested in variance, the vcov() is the only relevant part.)
+• Thanks for your answer. As I read your last two sentences I realised that the advice I originally got was not simulating with vcov(), but simulating from the full model using sim() from the package arm. I think I must have "invented" simulating from vcov() by mistake :-) Is simulating from the full model better than deriving the standard error analytically? – Hans Ekbrand Nov 10 '14 at 8:55

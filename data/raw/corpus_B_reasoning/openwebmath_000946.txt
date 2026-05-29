@@ -1,0 +1,331 @@
+# A simple function that removes empty or tags containing just '&nbsp;'
+
+I've written a function that should get rid of empty p, span, etc tags and those with just ' ' and am looking for ways to improve it. My original solution was very 'wet', but I've managed to come up with a drier solution.
+
+The Original HTML:
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<div id='test'>
+<p>text</p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span>text</span></p>
+<p><span></span></p>
+<p>text</p>
+<p><strong>text</strong></p>
+<p></p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span><strong>&nbsp;</strong></span></p>
+<p><span><strong>text</strong></span></p>
+<p>&nbsp;</p>
+<p><span>text</span></p>
+<p></p>
+<p><span></span></p>
+<p><span>&nbsp;</span></p>
+<p><span><strong></strong></span></p>
+<p>text</p>
+</div>
+
+
+My Original Solution:
+
+/*
+How to make this drier?
+ORIGINAL UNCLEAN SOLUTION
+*/
+var ps = document.getElementsByTagName('p'),
+spans = document.getElementsByTagName('span'),
+strongs = document.getElementsByTagName('strong');
+
+for (let el of ps) {
+if (el.innerHTML == '&nbsp;') { // can't also include if '' at this stage
+el.parentNode.removeChild(el);
+}
+}
+for (let el of spans) {
+if (el.innerHTML == '&nbsp;' || el.innerHTML == '') {
+el.parentNode.removeChild(el);
+}
+}
+for (let el of strongs) {
+if (el.innerHTML == '&nbsp;' || el.innerHTML == '') {
+el.parentNode.removeChild(el);
+}
+}
+for (let el of ps) {
+if (el.innerHTML == '') {
+el.parentNode.removeChild(el);
+}
+}
+
+
+My 'drier' solution:
+
+/*
+MY CLEANER SOLUTION
+*/
+var ps = document.getElementsByTagName('p'),
+spans = document.getElementsByTagName('span'),
+strongs = document.getElementsByTagName('strong');
+
+for (let el of ps) {
+cleaner(el);
+}
+for (let el of spans) {
+cleaner(el);
+}
+for (let el of strongs) {
+cleaner(el);
+}
+
+function cleaner(el) {
+if (el.innerHTML == '&nbsp;' || el.innerHTML == '') {
+el.parentNode.removeChild(el);
+}
+}
+
+
+Would someone mind quickly running over both solutions and verifying that my 2nd solution is best? Also, I wonder whether that could be improved, or whether anyone has any better ideas for a solution? Thanks for the help here - for brevity, I'm looking at writing concise but also clear code.
+
+• Does the code at the question produce the expected result? Should <p></p> be a child element of #test following execution of the code? Can you include the expected resulting HTML at the question? – guest271314 Jan 5 at 0:12
+
+# There is a bug
+
+You need to run the script several times to remove all empty elements.
+
+## Two points
+
+1. You say remove empty tags that contain "" or a single space "&nbsp;". Does that include " " or " " two or more spaces. What about other white space characters?
+
+2. Your element removal is order dependent because you use getElementsByTagName which returns a live list.
+
+Consider the html <p><span></span></p> You first check all the p tags which fail the empty test, then you test the span tags which passes and you get <p></p> which is, by your definition, empty and should have been removed.
+
+On the other hand the html <span><p></p></span> will first remove the p then remove the span.
+
+The removal process is order dependent. Not what your question indicates.
+
+## Changes
+
+For the first point you could use element.textContent to check for empty elements. It will ignore the HTML and convert the &nbsp; to a space for you. You could even use element.textContent.trim() and thus get all blank elements (like the pseudo-class :blank (Which has very limited support FF only))
+
+This also covers the second point.
+
+### Example Mark and remove
+
+To reduce the DOM calls you can mark and remove deleting the marked elements only.
+
+const isNotMarked = el => {
+while (el && el.parentNode && !el.parentNode.marked) {
+el = el.parentNode;
+if (el.marked) { return false }
+}
+return true;
+}
+[...document.querySelectorAll("span, p, strong")]
+.filter(el => el.textContent.trim() === "" && isNotMarked(el) ? el.marked = true : false)
+.forEach(el => el.parentNode.removeChild(el));
+
+
+### Example simple brute force
+
+Mark and remove saves you attempting to delete already deleted elements but you may not care, as the shorter form, is a two liner, and thus could be argued to be the better solution.
+
+document.querySelectorAll("span, p, strong")
+.forEach(el => el.textContent.trim() === "" && el.parentNode.removeChild(el))
+
+
+The following snippet shows the HTML after using your function and then the two example functions
+
+   /*=================================================================================
+OP ver modified for example
+=================================================================================*/
+
+var ps = cleaned.getElementsByTagName('p'),
+spans = cleaned.getElementsByTagName('span'),
+strongs = cleaned.getElementsByTagName('strong');
+
+for (let el of ps) { cleaner(el); }
+for (let el of spans) {  cleaner(el); }
+for (let el of strongs) { cleaner(el);  }
+
+function cleaner(el) {
+if (el.innerHTML == '&nbsp;' || el.innerHTML == '') {
+el.parentNode.removeChild(el);
+}
+}
+content.textContent = cleaned.innerHTML;
+
+/*=================================================================================
+Mark and remove
+=================================================================================*/
+const isNotMarked = el => {
+while (el && el.parentNode && !el.parentNode.marked) {
+el = el.parentNode;
+if (el.marked) { return false }
+}
+return true;
+}
+[...cleanerClean.querySelectorAll("span, p, strong")]
+.filter(el =>  el.textContent.trim() === "" && isNotMarked(el) ? el.marked = true : false)
+.forEach(el => el.parentNode.removeChild(el));
+
+contentA.textContent = cleanerClean.innerHTML;
+
+/*=================================================================================
+Brute force remove
+=================================================================================*/
+simplerClean.querySelectorAll("span, p, strong")
+.forEach(el => el.textContent.trim() === "" && el.parentNode.removeChild(el))
+
+contentB.textContent = simplerClean.innerHTML;
+#content {
+display: block;
+}
+<div id="cleaned" style="display:none;">
+<p>text</p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span>text</span></p>
+<p><span></span></p>
+<p>text</p>
+<p><strong>text</strong></p>
+<p></p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span><strong>&nbsp;</strong></span></p>
+<p><span><strong>text</strong></span></p>
+<p>&nbsp;</p>
+<p><span>text</span></p>
+<p></p>
+<p><span></span></p>
+<p><span>&nbsp;</span></p>
+<p><span><strong></strong></span></p>
+<p>text</p>
+</div>
+<fieldset>
+<legend>Original OPs script & Resulting HTML</legend>
+<code id = "content"></code>
+</fieldset>
+
+<div id="cleanerClean"  style="display:none;">
+<p>text</p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span>text</span></p>
+<p><span></span></p>
+<p>text</p>
+<p><strong>text</strong></p>
+<p></p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span><strong>&nbsp;</strong></span></p>
+<p><span><strong>text</strong></span></p>
+<p>&nbsp;</p>
+<p><span>text</span></p>
+<p></p>
+<p><span></span></p>
+<p><span>&nbsp;</span></p>
+<p><span><strong></strong></span></p>
+<p>text</p>
+</div>
+
+<fieldset>
+<legend>Mark and remove</legend>
+<code id = "contentA"></code>
+</fieldset>
+
+<div id="simplerClean"  style="display:none;">
+<p>text</p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span>text</span></p>
+<p><span></span></p>
+<p>text</p>
+<p><strong>text</strong></p>
+<p></p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span><strong>&nbsp;</strong></span></p>
+<p><span><strong>text</strong></span></p>
+<p>&nbsp;</p>
+<p><span>text</span></p>
+<p></p>
+<p><span></span></p>
+<p><span>&nbsp;</span></p>
+<p><span><strong></strong></span></p>
+<p>text</p>
+</div>
+
+<fieldset>
+<legend>Brute force remove</legend>
+<code id = "contentB"></code>
+</fieldset>
+
+You can use querySelectorAll to simplify your code further:
+
+var elements = document.querySelectorAll('p, span, strong'),
+
+for (let el of elements) {
+cleaner(el);
+}
+
+
+Beside suggested improvements:
+
+1. If <p> </p> is an empty element to you, then change your cleaner():
+
+function cleaner(el) {
+if (el.innerHTML.match(/^\s+\$/) !== null) {
+el.parentNode.removeChild(el);
+}
+}
+
+2. You might need to consider going recursive towards elements that have been emptied because of your cleaning procedure.
+
+3.  I'm used to verbal function names (a best practice to follow), so I would suggest using clean or remove instead of cleaner.
+
+I support the main aspect of Carra's answer (i.e. using querySelectorAll()). In addition, a functional approach can be used, since the function cleaner is applied to each element. For that, utilize Array.prototype.forEach().
+
+elements.forEach(cleaner);
+
+
+That way, there is no need to set up an iterator variable (e.g. el in the for...of loop just to pass it to the function. The function will receive the element as the first parameter each time it is called - once for each element in the collection.
+
+Additionally, since features like for...of and let are used, others like const can be used (e.g. for any variable that doesn't need to be re-assigned). One could also use arrow functions if desired.
+
+And it would be a good habit to use the strict equality comparison (i.e. ===) when comparing the innerHTML properties with the strings.
+
+function cleaner(el) {
+if (el.innerHTML === '&nbsp;' || el.innerHTML === '') {
+el.parentNode.removeChild(el);
+}
+}
+
+const elements = document.querySelectorAll('p, span, strong');
+elements.forEach(cleaner);
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<div id='test'>
+<p>text</p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span>text</span></p>
+<p><span></span></p>
+<p>text</p>
+<p><strong>text</strong></p>
+<p></p>
+<p>&nbsp;</p>
+<p>text</p>
+<p><span><strong>&nbsp;</strong></span></p>
+<p><span><strong>text</strong></span></p>
+<p>&nbsp;</p>
+<p><span>text</span></p>
+<p></p>
+<p><span></span></p>
+<p><span>&nbsp;</span></p>
+<p><span><strong></strong></span></p>
+<p>text</p>
+</div>
+
+• thanks, some interesting points to take home :) – user8758206 Jan 7 at 8:59

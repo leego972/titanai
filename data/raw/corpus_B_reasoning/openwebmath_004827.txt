@@ -1,0 +1,132 @@
+I've managed to get my new programming language to a state where I can release a demo that is vaguely interesting. Here is a video of the demo running on the CSpect emulator:
+
+Yes, it's a bouncy snake thing. Here is the Elena source code:
+
+using System;
+using System.Maths;
+using System.Spectrum;
+using System.Spectrum.Next;
+
+namespace Elena.Test
+{
+static type Program
+{
+private static UnsignedByte BorderColour = 1b;
+private static Array[Particle] Particles = Array[Particle](12b);
+
+entrypoint void Main()
+{
+Screen.Cls(0b);
+Screen.SetBorder(BorderColour);
+
+InitializeParticles();
+InitializeSprites();
+
+while (true)
+{
+UpdateParticles();
+}
+}
+
+private static void InitializeParticles()
+{
+UnsignedWord position = 32w;
+for (Particle particle in Particles)
+{
+particle.Position = UnsignedWordVector(position, position);
+particle.Velocity = SignedByteVector(1sb, 1sb);
+
+position = position + 12w;
+}
+}
+
+private static void InitializeSprites()
+{
+Sprites.SetAreVisible(true);
+
+Sprites.SetPattern(0b, Patterns.Particle);
+}
+
+private static void UpdateParticles()
+{
+UnsignedByte index = 0b;
+
+for (Particle particle in Particles)
+{
+UpdatePosition(particle);
+UpdateVelocity(particle, index);
+
+Sprites.SetAttributes(index, particle.Position.X, particle.Position.Y, 0b, true);
+index++;
+}
+}
+
+private static void UpdatePosition(Particle particle)
+{
+particle.Position += particle.Velocity;
+}
+
+private static void UpdateVelocity(Particle particle, UnsignedByte particleIndex)
+{
+if ((particle.Position.X == 32w) || (particle.Position.X == 270w))
+{
+particle.Velocity.X = -particle.Velocity.X;
+if (particleIndex == (Particles.Length - 1b))
+{
+CycleBorder();
+}
+}
+
+if ((particle.Position.Y == 32b) || (particle.Position.Y == 208b))
+{
+particle.Velocity.Y = -particle.Velocity.Y;
+if (particleIndex == (Particles.Length - 1b))
+{
+CycleBorder();
+}
+}
+}
+
+private static void CycleBorder()
+{
+if (BorderColour == 7b)
+{
+BorderColour = 1b;
+}
+else
+{
+BorderColour++;
+}
+
+Screen.SetBorder(BorderColour);
+}
+}
+
+type Particle
+{
+public UnsignedWordVector Position;
+public SignedByteVector Velocity;
+}
+
+static type Patterns
+{
+public static Array[UnsignedByte] Particle = 0xE3E3E3E3E3242424242424E3E3E3E3E3E3E3E324252549494949252524E3E3E3E3E3242549496D6D6D6D49492524E3E3E32425496D6D6D92926D6D6D492524E3E325496D6D9292B6B692926D6D4925E32425496D92B6B6B6B6B6B6926D49252424496D6D92B6DBDBDBDBB6926D6D492424496D92B6B6DBFFFFDBB6B6926D492424496D92B6B6DBFFFFDBB6B6926D492424496D6D92B6DBDBDBDBB6926D6D49242425496D92B6B6B6B6B6B6926D492524E325496D6D9292B6B692926D6D4925E3E32425496D6D6D92926D6D6D492524E3E3E3242549496D6D6D6D49492524E3E3E3E3E324252549494949252524E3E3E3E3E3E3E3E3242424242424E3E3E3E3E3_a;
+}
+}
+
+
+You can see some of the language features in play:
+
+• Complex types. Types can be defined with constructors, fields, methods and operators. Types are organised via namespaces.
+• Generics. Arrays are defined as a generic type, Array[T]. There are two instances on display here, Array[Particle] and Array[UnsignedByte].
+• for...in loops. Very much like foreach loops in C# these will loop over all items in an array.
+• Hex literals. Because sometimes you just need a blob of bytes.
+
+There are a few features still to implement that will make the above code simpler:
+
+• Type classes. I intend to add type classes as a way to get polymorphism into the language, inspired by Haskell's type classes and Scala's traits. Sort of like C# interfaces that can have an implementation I guess... (Which might be the shape of things to come for C#) For example there will be a Numeric type class that represents numerical types, which bytes, words and floats will be a member of, and will define operations such as addition and subtraction.
+• Generic constraints. Once we have type classes it makes sense to have constraints on generic types. In the example above I have had to define different vector types for each underlying number type. (UnsignedWordVector and SignedByte) When constraints are in place I'll have a Vector[T] where T has to be a member of the Numeric type class, meaning I can then have Vector[UnsignedWord] and Vector[SignedByte] instead.
+• Return types. Notice how every function has a return type of void? The only functions that currently return are constructors. I'm still not sure on the model for handling allocation and release of memory and as such return types are not yet implemented correctly. I suspect this will take several iterations to get right. I have several ideas in mind but I think I'll need to code up some programs with the language to see which works best.
+• Currently every numeric literal has to have a suffix which specifies it's type - the compiler should be able to infer the type in most cases.
+
+However before that I need to get the compiler into a state where it can be released for people to use. Currently it will definitely work if the Elena program is correct, but if there are errors in the program then the compiler might give you a vaguely helpful message, or it might just crash. So next step is to get the error handling and reporting up to scratch. That will make subsequent development a lot easier for myself as well as getting the compiler towards a state where I can release it to the public.

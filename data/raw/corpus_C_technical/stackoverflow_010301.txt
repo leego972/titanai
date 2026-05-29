@@ -1,0 +1,47 @@
+Question: <p>How do I go about specifying and using an ENUM in a Django model?</p>
+
+Answer: <p>Setting <code>choices</code> on the field will allow some validation on the Django end, but it <em>won't</em> define any form of an enumerated type on the database end.</p>
+
+<p>As others have mentioned, the solution is to specify <a href="https://docs.djangoproject.com/en/dev/howto/custom-model-fields/#django.db.models.Field.db_type"><code>db_type</code></a> on a custom field.</p>
+
+<p>If you're using a SQL backend (e.g. MySQL), you can do this like so:</p>
+
+<pre class="lang-py prettyprint-override"><code>from django.db import models
+
+
+class EnumField(models.Field):
+    def __init__(self, *args, **kwargs):
+        super(EnumField, self).__init__(*args, **kwargs)
+        assert self.choices, "Need choices for enumeration"
+
+    def db_type(self, connection):
+        if not all(isinstance(col, basestring) for col, _ in self.choices):
+            raise ValueError("MySQL ENUM values should be strings")
+        return "ENUM({})".format(','.join("'{}'".format(col) 
+                                          for col, _ in self.choices))
+
+
+class IceCreamFlavor(EnumField, models.CharField):
+    def __init__(self, *args, **kwargs):
+        flavors = [('chocolate', 'Chocolate'),
+                   ('vanilla', 'Vanilla'),
+                  ]
+        super(IceCreamFlavor, self).__init__(*args, choices=flavors, **kwargs)
+
+
+class IceCream(models.Model):
+    price = models.DecimalField(max_digits=4, decimal_places=2)
+    flavor = IceCreamFlavor(max_length=20)
+</code></pre>
+
+<p>Run <code>syncdb</code>, and inspect your table to see that the <code>ENUM</code> was created properly.</p>
+
+<pre class="lang-sql prettyprint-override"><code>mysql&gt; SHOW COLUMNS IN icecream;
++--------+-----------------------------+------+-----+---------+----------------+
+| Field  | Type                        | Null | Key | Default | Extra          |
++--------+-----------------------------+------+-----+---------+----------------+
+| id     | int(11)                     | NO   | PRI | NULL    | auto_increment |
+| price  | decimal(4,2)                | NO   |     | NULL    |                |
+| flavor | enum('chocolate','vanilla') | NO   |     | NULL    |                |
++--------+-----------------------------+------+-----+---------+----------------+
+</code></pre>

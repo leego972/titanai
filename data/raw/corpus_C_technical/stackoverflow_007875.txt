@@ -1,0 +1,52 @@
+Question: <p>I am trying to write a decorator to do logging:</p>
+
+<pre><code>def logger(myFunc):
+    def new(*args, **keyargs):
+        print 'Entering %s.%s' % (myFunc.im_class.__name__, myFunc.__name__)
+        return myFunc(*args, **keyargs)
+
+    return new
+
+class C(object):
+    @logger
+    def f():
+        pass
+
+C().f()
+</code></pre>
+
+<p>I would like this to print:</p>
+
+<pre><code>Entering C.f
+</code></pre>
+
+<p>but instead I get this error message:</p>
+
+<pre><code>AttributeError: 'function' object has no attribute 'im_class'
+</code></pre>
+
+<p>Presumably this is something to do with the scope of 'myFunc' inside 'logger', but I've no idea what.</p>
+
+Answer: <p>Functions only become methods at runtime.  That is, when you get <code>C.f</code> you get a bound function (and <code>C.f.im_class is C</code>).  At the time your function is defined it is just a plain function, it is not bound to any class.  This unbound and disassociated function is what is decorated by logger.</p>
+
+<p><code>self.__class__.__name__</code> will give you the name of the class, but you can also use descriptors to accomplish this in a somewhat more general way.  This pattern is described <a href="http://blog.ianbicking.org/2008/10/24/decorators-and-descriptors/">in a blog post on Decorators and Descriptors</a>, and an implementation of your logger decorator in particular would look like:</p>
+
+<pre><code>class logger(object):
+    def __init__(self, func):
+        self.func = func
+    def __get__(self, obj, type=None):
+        return self.__class__(self.func.__get__(obj, type))
+    def __call__(self, *args, **kw):
+        print 'Entering %s' % self.func
+        return self.func(*args, **kw)
+
+class C(object):
+    @logger
+    def f(self, x, y):
+        return x+y
+
+C().f(1, 2)
+# =&gt; Entering &lt;bound method C.f of &lt;__main__.C object at 0x...&gt;&gt;
+</code></pre>
+
+<p>Obviously the output can be improved (by using, for example, <code>getattr(self.func, 'im_class', None)</code>), but this general pattern will work for both methods and functions.  However it will <em>not</em> work for old-style classes (but just don't use those ;)</p>

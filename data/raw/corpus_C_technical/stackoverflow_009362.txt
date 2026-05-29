@@ -1,0 +1,46 @@
+Question: <p>I have a class called myClass which defines post() and get() methods. </p>
+
+<p>From <em>index.html</em>, I have a form with an action that calls myClass.post() which grabs some data from the data base, sets a couple variables and sends the user to <em>new.html</em>. </p>
+
+<p>now, <em>new.html</em> has a form which calls myClass.get(). </p>
+
+<p><strong>I want the get() method to know the value of the variables I got in post().</strong> That is is main point here.</p>
+
+<p>I figure the submit from new.html creates a separate instance of myClass created by the submit from index.html. </p>
+
+<p>Is there a way to access the "post instance" somehow? </p>
+
+<p>Is there a workaround for this? If I have to, is there an established way to send the value from post to "new.html" and send it back with the get-submit? </p>
+
+<p>more generally, I guess I don't understand the life of my instances when web-programming. In a normal interactive environment, I know when the instance is created and destroyed, but I don't get that when I'm only using the class through calls to its methods. Are those classes even instantiated unless their methods are called? </p>
+
+Answer: <p>It is not a problem of how the instances are managed. Because HTTP is stateless, your program is, virtually, stateless too. (For long running processes, like GAE, it is possible to make it otherwise, but I am not sure you would need this complexity here)</p>
+
+<p>You haven't supplied any code, but I am assuming you get a POST and then you <a href="http://en.wikipedia.org/wiki/Post/Redirect/Get" rel="nofollow">redirect</a> to results (which is a GET). So it should be easy to preserve the parameter:</p>
+
+<pre><code>def save_foo(request):
+    if request.method == 'POST':
+        save(request.POST)
+        return HttpRedirect(reverse(
+            'Some_Target',
+            {'bar': 'baz', 'foo': request.POST['foo']}))
+    else:
+        # do something else
+</code></pre>
+
+<p>This view, in case of a POST, casues the client to issue a GET request to whatever URL is aliased <code>Some_Target</code>. And this GET will include <code>foo</code> parameter from the POST.</p>
+
+<p>This solution is for a single view. If you need this behaviour project-wise you can use a middleware for it. And this time caching the variable makes sense.</p>
+
+<p>There are two things that make me a little uncomfortable with this approach:</p>
+
+<ol>
+<li>Mixing GET and POST parameters. GET parameters should be used for instructions with no side effects, like filtering. POST parameter should be used for insructions with side effects, ie modifying the data. Moving a parameter from POST to get should be avoided IMHO.</li>
+<li>If we need persistence, using object instances (or function scopes as in my example) is usually not a good idea.
+<ol>
+<li>If it is non sensitive information with with lower retention needs <code>cookies</code> are the way to go. They are a mechanism of persistence on the client side, so you can just grab them form the request and unless you change them they are retained (until expiration of course.)</li>
+<li>If you need more control over retention you should use local persistence mechanisms. Server cache (of any kind), filesystem, database... Then of course you will need to filter per user manually.</li>
+</ol></li>
+</ol>
+
+<p>In any case I would avoid caching on instances.</p>

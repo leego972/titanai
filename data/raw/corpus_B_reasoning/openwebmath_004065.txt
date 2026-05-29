@@ -1,0 +1,161 @@
+# Interpreting random forests
+
+## Why model interpretation?
+
+Imagine a situation where a credit card company has built a fraud detection model using a random forest. The model can classify every transaction as either valid or fraudulent, based on a large number of features. What if, after a transaction is classified as fraudulent, the analyst would like to know why the model made this decision, i.e. how much each feature contributed to the final outcome?
+
+Or what if a random forest model that worked as expected on an old data set, is producing unexpected results on a new data set. How would one check which features contribute most to the change in the expected behaviour.
+
+## Random forest as a black box
+
+Most literature on random forests and interpretable models would lead you to believe this is nigh impossible, since random forests are typically treated as a black box. Indeed, a forest consists of a large number of deep trees, where each tree is trained on bagged data using random selection of features, so gaining a full understanding of the decision process by examining each individual tree is infeasible. Furthermore, even if we are to examine just a single tree, it is only feasible in the case where it has a small depth and low number of features. A tree of depth 10 can already have thousands of nodes, meaning that using it as an explanatory model is almost impossible.
+
+One way of getting an insight into a random forest is to compute feature importances, either by permuting the values of each feature one by one and checking how it changes the model performance or computing the amount of “impurity” (typically variance in case of regression trees and gini coefficient or entropy in case of classification trees) each feature removes when it is used in node. Both approaches are useful, but crude and static in the sense that they give little insight in understanding individual decisions on actual data.
+
+## Turning a black box into a white box: decision paths
+
+When considering a decision tree, it is intuitively clear that for each decision that a tree (or a forest) makes there is a path (or paths) from the root of the tree to the leaf, consisting of a series of decisions, guarded by a particular feature, each of which contribute to the final predictions.
+A decision tree with $$M$$ leaves divides the feature space into $$M$$ regions $$R_m, 1\leq m \leq M$$. In the classical definition (see e.g. Elements of Statistical Learning), the prediction function of a tree is then defined as $$f(x) = \sum\limits_{m=1}^M c_m I(x, R_m)$$ where $$M$$ is the number of leaves in the tree(i.e. regions in the feature space), $$R_m$$ is a region in the feature space (corresponding to leaf $$m$$), $$c_m$$ is a constants corresponding to region $$m$$ and finally $$I$$ is the indicator function (returning 1 if $$x \in R_m$$, 0 otherwise). The value of $$c_m$$ is determined in the training phase of the tree, which in case of regression trees corresponds to the mean of the response variables of samples that belong to region $$R_m$$ (or ratio(s) in case of a classification tree). The definition is concise and captures the meaning of tree: the decision function returns the value at the correct leaf of the tree. But it ignores the “operational” side of the decision tree, namely the path through the decision nodes and the information that is available there.
+
+## Example: Boston housing data
+
+Let’s take the Boston housing price data set, which includes housing prices in suburbs of Boston together with a number of key attributes such as air quality (NOX variable below), distance from the city center (DIST) and a number of others – check the page for the full description of the dataset and the features. We’ll build a regression decision tree (of depth 3 to keep things readable) to predict housing prices. As usual, the tree has conditions on each internal node and a value associated with each leaf (i.e. the value to be predicted). But additionally we’ve plotted out the value at each internal node i.e. the mean of the response variables in that region.
+
+RM LSTAT NOX DIST
+3.14.50.542.6Predict
+6.516.10.122.2Predict
+7.110.50.311.8Predict
+
+You can hover on the leaves of the tree or click “predict” in the table (which includes sample values from the data set) to see the decision paths that lead to each prediction.
+What’s novel here is that you can see the breakdown of the prediction, written down in terms of value changes along the prediction path, together with feature names that “caused” every value change due to being in the guard (the numbers are approximate due to rounding).
+
+What this example should make apparent is that there is another, a more “operational” way to define the prediction, namely through the sequence of regions that correspond to each node/decision in the tree. Since each decision is guarded by a feature, and the decision either adds or subtracts from the value given in the parent node, the prediction can be defined as the sum of the feature contributions + the “bias” (i.e. the mean given by the topmost region that covers the entire training set).
+Without writing out the full derivation, the prediction function can be written down as $$f(x) = c_{full} + \sum\limits_{k=1}^K contrib(x, k)$$ where $$K$$ is the number of features, $$c_{full}$$ is the value at the root of the node and $$contrib(x, k)$$ is the contribution from the k-th feature in the feature vector $$x$$. This is superficially similar to linear regression ($$f(x) = a + bx$$). For linear regression the coefficients $$b$$ are fixed, with a single constant for every feature that determines the contribution. For the decision tree, the contribution of each feature is not a single predetermined value, but depends on the rest of the feature vector which determines the decision path that traverses the tree and thus the guards/contributions that are passed along the way.
+
+## From decision trees to forest
+
+We started the discussion with random forests, so how do we move from a decision tree to a forest? This is straightforward, since the prediction of a forest is the average of the predictions of its trees: $$F(x) = \frac{1}{J} \sum\limits_{j=1}^J f_j(x)$$, where $$J$$ is the number of trees in the forest. From this, it is easy to see that for a forest, the prediction is simply the average of the bias terms plus the average contribution of each feature: $$F(x) = \frac{1}{J}{\sum\limits_{j=1}^J {c_{j}}_{full}} + \sum\limits_{k=1}^K (\frac{1}{J}\sum\limits_{j=1}^J contrib_j(x, k))$$.
+
+### Running the interpreter
+
+Update (Aug 12, 2015)
+Running the interpretation algorithm with actual random forest model and data is straightforward via using the treeinterpreter (pip install treeinterpreter) library that can decompose scikit-learn‘s decision tree and random forest model predictions. More information and examples available in this blog post.
+
+## Summary
+
+There is a very straightforward way to make random forest predictions more interpretable, leading to a similar level of interpretability as linear models — not in the static but dynamic sense. Every prediction can be trivially presented as a sum of feature contributions, showing how the features lead to a particular prediction. This opens up a lot of opportunities in practical machine learning and data science tasks:
+
+• Explain to an analyst why a particular prediction is made
+• Debug models when results are unexpected
+• Explain the differences of two datasets (for example, behavior before and after treatment), by comparing their average predictions and corresponding average feature contributions.
+
+## 52 comments on “Interpreting random forests”
+
+1. Thank you sir for such a informative description.
+
+2. How did you create the great interactive visualization figure? Would you say your techniques are scalable to a large tree?
+
+3. I created it using D3 (http://d3js.org/), a great Javascript visualization library.
+You can see a lot of examples of tree visualizations at https://github.com/mbostock/d3/wiki/Gallery
+
+As for large trees, the number of nodes grows exponentially in the depth of the tree. So a tree of depth 10 can already have ~2000 nodes. A tree of this size will be very difficult for a human to read, since there is simply too much too fine grained information there. But that’s where the usefulness of the described approach comes in, since it is agnostic to the size of the tree (or the number of trees in case of a forest).
+
+• I am working on similar project , thanks for the wonderful explanation. Could you please share the code for designing the graph which highlights the path. Thanks in advance.
+
+4. I’m thinking this approach could also be adapted to gradient boosted trees, which are also (at least as I understand their implementation in SAS EM) an ensemble of a number of trees from bootstrapped samples of the data (but using all features vs. a sample of features) ? I’ve also seen examples of using trees to visualize neural nets.
+
+5. Yes, it would indeed also work for gradient boosted trees in a similar way. Basically, any time the prediction is made via trees, the prediction can be broken down into a sum of feature contributions.
+
+• @Basically, any time the prediction is made via trees, the prediction can be broken down into a sum of feature contributions
+
+The definition of feature contributions should be modified for gradient boosting. The sum of decision paths (aka. local increments) should no longer be divided with number of trees, in order to maintain “prediction = bias + sum of feature contributions”. Each bagged tree maps from bias (aka. base rate +stratification or grand mean) to target and the ensemble prediction is the average vote and therefore division by number of trees. Each boosted tree only maps from residual to target, and the boosted ensemble maps only once from bias to target, therefore division by 1.
+
+I appended a short proof-of-concept for computing and visualizing feature contributions for gradient boosting with R in ancillary files for this paper, http://arxiv.org/abs/1605.09196
+
+6. There is a typ0.
+
+line 5 up from the last sentence. “anlyst” should be “analyst”.
+
+7. Thanks to this post, I understood the ‘theorical equation’ behind Random Forest running.
+Do you have a source where the equation came?
+Thanks Again for everything,
+
+Bobbie
+
+• Hi Ando, any luck with this? I was wondering if we could maybe make a standalone module, should it not be merged.
+
+• In current 0.17dev, my commit to keep values in all nodes was merged. Additionally, a method to get the leaf labels when predicting was added. Combining these, the interpretation can be done on the 0.17dev version. Planning to write a blog post on this in the near future.
+
+8. This is great stuff Ando. I was thinking about how to apply this to ‘understand’ a whole dataset/model combination. You could, e.g., pick a few top features and cluster the entire population according to the feature contributions, for these features, from a RF model. On the Boston housing data, this leads to 8-10 clusters with clear descriptions like “Neighborhoods that are expensive because they are right near the city center”, or “Neighborhoods that are expensive because the houses are huge”. You could even then compare two data sets by fitting the clusters and seeing how the proportions change.
+
+Thanks for the contribution – looking forward to seeing decision_paths in sklearn.
+
+9. Pingback: 使用scikit-learn解释随机森林算法 - IT大道
+
+10. This is great! Do you know if this is available with the R random forest package?
+
+11. What would it be the interpretation of a negative value, for a specific variable, in a classification problem? Does it mean that higher values of this variable decrease the predicted probability? I.e. Given Predicted_prob(x) = Bias + 0.01*A – 0.02*B, is it correct to assume that probability to belong to class X is inversely proportional to the value assumed by B?
+
+• Remember, all of these breakdowns are exact contribution from features per datapoint/instance.
+So in your example, it means that for datapoint x, B reduces the probability. It doesnt mean that B always (or on average) reduces the probability. For some other datapoint, B could be positive.
+
+• If for some datapoints B could be positive for some it could be negative; how do we interpret the contribution. I was under the impression that we will learn more about the features and how do they contribute to the respective classes from this exercise but that does not seem to be the case!
+Thanks much,
+
+12. Great post! 🙂
+Question though… Quoting this:
+
+” For the decision tree, the contribution of each feature is not a single predetermined value, but depends on the rest of the feature vector which determines the decision path that traverses the tree and thus the guards/contributions that are passed along the way”
+
+If in case I get the mean of the contributions of each feature for all the training data in my decision tree model, and then just use the linear regression f(x) = a + bx (where a is the mean bias and b is now the mean contributions) to do predictions for incoming data, do you think this will work?
+
+13. Hi – I would like to use the figure above in an O’Reilly media article about interpretable machine learning. This article would feature treeinterpreter among many other techniques. Please let me know ASAP. Thanks!
+
+• We will link to this blog. I followed you on twitter recently. Please let me know here or there if you would like any other specific citation.
+
+14. can we get black box rules in random forest(code) so I can use that in my new dataset also?
+
+15. Thank you for this package, it is really great that it allows to open the random forest “blackbox”.
+
+I have a quick question: I tested the package with some housing data to predict prices and I have a case where all the features are the same except the AreaLiving. Looking at the feature contributions however, they are different for all the features. I would have expected to get them the same, is that reasoning wrong?
+
+For most cases the feature contributions are close together, but not the same. However, some are quite apart, like the rooms (- 96 vs. -44), even though they have the same number of rooms. Another case is the latitude (-452 vs -289).
+
+Maybe the interpretation is: The small house with 5 rooms gets more substracted (-96) than the big house (-44) as you expect these rooms to be smaller? And for the latitude the small house gets a more negative contribution (-452) than the big house (-289) as in this latitude you can better sell a big house?
+
+Many thanks in advanced for any help!
+
+Best regards,
+Andreas
+
+• Think of it this way: depending on the value of the root node in the decision tree, you can end up in the left or right branch. The left and right branch can use completely different features. Thus, simply by changing the value of the feature that’s in the root node, you might see contributions shift completely.
+
+For example the root node might be location (say city vs countryside). In the first case, the important features might be number of rooms and tax zone. In the second case, important features might be land lot size and number of floors. So simply switching up one feature (location), you would get completely different contributions.
+
+16. Hello Ando,
+
+Thank you for your reply. That makes sense. I figured out as well that I had included some features with low importance that often triggered some bigger changes, removing them should help the model to return more stable contributions.
+
+17. Hi, can you say something about how this applies to classification trees, as the examples you have given all relate to regression trees. Can you break down how the bias and contribution affect the chosen purity measure, say Gini index?
+
+• Thanks. I see the example. Can you tell me if this method can be applied to categorical/nominal features? I built an example but I realised that after encoding all my categories as integer, the model must be treating them as ordinal or continuous. I am trying to set this up with all the features one-hot encoded, to get around this but it’s then rather difficult to extract any meaning from the contributions. Is this something you’ve explored already?
+
+18. Hello Ando,
+
+Are you aware of any research paper on this computation of “contribution by averaging decision paths over trees” ? All similar implementations in R or python I have found, trace back to this blog post.
+Were you (in)directly inspired by some paper, or is it an original “contribution” from yourself?
+
+Many thanks,
+
+• Thanks for the link and congrats for this idea!
+
+I have seen a similar implementation in R (xgboostExplainer, on CRAN). The main difference is that contributions are expressed in log-odds of probability.
+I’m curious about your thoughts of using log-odds, which has the advantage to bring a “bayesian interpretation” of contributions. However, it seems that it is not possible to maintain all additivity properties [1] and [2] ([1] a contribution of feature F is equal to the mean of the contributions of feature F for all decision trees ; [2] the prediction score is equal to the sum of all feature contributions and equal to the mean of prediction score for all decision trees.).
+Any thoughts on using log-odds for contributions?
+
+19. Pingback: 使用 Scikit-learn 理解随机森林滕州巴巴
+
+20. From what I understand, in the binary classification case, if I get a contribution = [x,-x] of a feature it means that using this feature I gain x in probability to be of class0.
+However this doesn’t give us any information of what the feature value is? Is there a way to extract what values of the feature are making it of class0?
+
+21. I don’t understand why do we need this concept of “contributions” here that makes random forests “white box”. e.g., a random forest with entropy loss itself does an optimization with respect to conditional uncertainty that provides a measure of contribution of the added features in its decision trees. The contribution defined here is an interesting concept. However, I believe it doesn’t add much understanding to the random forests and doesn’t make them “white box”.

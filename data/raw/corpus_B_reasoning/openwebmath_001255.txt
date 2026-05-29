@@ -1,0 +1,258 @@
+How to read a character one by one from an external file, modify it, and save it back to another external file?
+
+The purpose of this question is to learn how to read character by character of a fetched line of characters, modify it and save back to another file.
+
+For the sake of simplicity, let's take a simple application which is encrypting an external text file with a well-known simple algorithm, "shift cipher". I can only give you a skeleton as follows, the remaining is beyond my knowledge.
+
+\documentclass{article}
+\usepackage{filecontents}
+\begin{filecontents*}{plain.txt}
+Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+\end{filecontents*}
+
+% shift parameter,
+% positive value moves forward (for example, 1 makes A get shifted to B),
+% negative value moves backward (for example, -1 makes B get shifted to A).
+\def\offset{13}
+
+\newwrite\writer
+
+\begin{document}
+\immediate\openout\writer=encrypted.txt
+\loop
+\immediate\write\writer{Do something here}
+\repeat
+\immediate\closeout\writer
+\end{document}
+
+The interesting parts I want to learn:
+
+• How to read a character one by one from a single line fetched from an external file.
+• How to modify the single character.
+• How to know the number of characters in a single line fetched from an external file.
+
+Please use the most simple method that newbies (like me) can easily digest the code.
+
+-
+Can we assume only A-Za-z? Digits? Spaces? Punctuation? – Qrrbrbirlbel Mar 21 '13 at 0:33
+Would the cipher apply only to text? – Scott H. Mar 21 '13 at 0:34
+@Qrrbrbirlbel: Just shift according the ASCII table mapping. – kiss my armpit Mar 21 '13 at 0:35
+@ScottH.: Yes. For the sake of simplicity and I think it is more than enough to learn what I want. – kiss my armpit Mar 21 '13 at 0:35
+For one letter #1 the sequence \char\numexpr#1+\offset\relax can give you the offset letter (I have defined \offset as a count). Problems I encountered: Spaces, text encoding, braces in the output (decoding fails for all special characters), writing out. – Qrrbrbirlbel Mar 21 '13 at 1:00
+
+Easiest way is to set up the uppercase table to do the translation.
+
+This file does the encoding twice to confirm you get back to where you started (apart from white space normalisation)
+
+\documentclass{article}
+\usepackage{filecontents}
+\begin{filecontents*}{plain.txt}
+Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+\end{filecontents*}
+
+% shift parameter,
+% positive value moves forward (for example, 1 makes A get shifted to B),
+% negative value moves backward (for example, -1 makes B get shifted to A).
+\def\offset{13}
+
+\newwrite\writer
+
+\def\wrot#1{%
+\uppercase{\immediate\write\writer{#1}}}
+
+\begin{document}
+\makeatletter
+
+{
+\count@a
+\loop
+\uccode\count@=\numexpr\count@+\offset\relax
+\uccode\numexpr\count@+\offset\relax=\count@
+\ifnum\count@<n
+\repeat
+
+\count@A
+\loop
+\uccode\count@=\numexpr\count@+\offset\relax
+\uccode\numexpr\count@+\offset\relax=\count@
+\ifnum\count@<N
+\repeat
+
+\immediate\openout\writer=encrypted.txt
+\loop
+\expandafter\wrot\expandafter{\data}
+\repeat
+\immediate\closeout\writer
+
+\immediate\openout\writer=reencrypted.txt
+\loop
+\expandafter\wrot\expandafter{\data}
+\repeat
+\immediate\closeout\writer
+
+}
+
+\section{plain.txt}
+\input{plain.txt}
+
+\section{encrypted.txt}
+\input{encrypted.txt}
+
+\section{reencrypted.txt}
+\input{reencrypted.txt}
+
+\end{document}
+
+-
+
+This should allow all ASCII printable characters.
+
+\begin{filecontents*}{plain.txt}
+u&9@@^{=!{{}
+Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+\end{filecontents*}
+
+\documentclass{article}
+\usepackage{xparse}
+
+\ExplSyntaxOn
+\int_gzero_new:N \g_karl_offset_int
+\ior_new:N \l_karl_input_stream
+\iow_new:N \l_karl_output_stream
+\seq_new:N \l__karl_input_seq
+\tl_new:N \l__karl_input_tl
+\tl_new:N \l__karl_temp_tl
+\tl_const:Nn \c_karl_space_tl { ~ }
+
+\NewDocumentCommand{\cypher}{omm}
+{% #1 = shift #2 = input file, #3 = output file
+\IfValueT{#1}{ \int_gset:Nn \g_karl_offset_int { #1 } }
+\ior_open:Nn \l_karl_input_stream { #2 }
+\iow_open:Nn \l_karl_output_stream { #3 }
+\ior_str_map_inline:Nn \l_karl_input_stream
+{
+\tl_set:Nn \l__karl_input_tl { ##1 }
+\tl_replace_all:Nnn \l__karl_input_tl { ~ } { \c_karl_space_tl }
+\karl_write:V \l__karl_input_tl
+}
+\ior_close:N \l_karl_input_stream
+\iow_close:N \l_karl_output_stream
+}
+
+\cs_new_protected:Npn \karl_write:n #1
+{
+\tl_clear:N \l__karl_temp_tl
+\tl_map_inline:nn { #1 } { \karl_shift:n { ##1 } }
+\iow_now:NV \l_karl_output_stream \l__karl_temp_tl
+}
+
+\cs_generate_variant:Nn \karl_write:n { V }
+\cs_generate_variant:Nn \iow_now:Nn { NV }
+
+\cs_new_protected:Npn \karl_shift:n #1
+{
+\group_begin:
+\token_if_eq_meaning:NNTF #1 \c_karl_space_tl
+{
+\char_set_lccode:nn { ~ } { \g_karl_offset_int + 32 }
+\tl_to_lowercase:n { \group_end: \tl_put_right:Nn \l__karl_temp_tl { ~ } }
+}
+{
+\int_compare:nTF { #1 + \g_karl_offset_int > 126 }
+{ \char_set_lccode:nn { #1 } { #1 + \g_karl_offset_int - 126 + 32 } }
+{
+\int_compare:nTF { #1 + \g_karl_offset_int < 32 }
+{ \char_set_lccode:nn { #1 } { #1 + \g_karl_offset_int + 126 - 32 } }
+{ \char_set_lccode:nn { #1 } { #1 + \g_karl_offset_int } }
+}
+\tl_to_lowercase:n { \group_end: \tl_put_right:Nn \l__karl_temp_tl { #1 } }
+}
+}
+\ExplSyntaxOff
+
+\cypher[13]{plain.txt}{thirteen.txt}
+
+\cypher[-13]{thirteen.txt}{plain13.txt}
+
+\cypher[15]{plain.txt}{fifteen.txt}
+
+\cypher[-15]{fifteen.txt}{plain15.txt}
+
+\stop
+
+plain.txt
+
+u&9@@^{=!{{}
+Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+
+thirteen.txt
+
+$3FMMk*J.**, Xn!y4"-"#$qr{#"-q|-{|#-pn!r-no|$#-qn"uv{t-}n##r!{"; Xn!y4"-"#$qr{#"-q|-{|#-pn!r-no|$#-n!!|&-#v}"; Xn!y4"-"#$qr{#"9-o(-#ur-&n(9-q|-{|#-x{|&-&un#-n-#!n{"s|!zn#v|{-zn#!v'-v";
+
+plain13.txt
+
+u&9@@^{=!{{}
+Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+
+fifteen.txt
+
+&5HOOm,L0,,.
+Zp#{6$/$%&st}%$/s~/}~%/rp#t/pq~&%/sp$wx}v/!p%%t#}$= Zp#{6$/$%&st}%$/s~/}~%/rp#t/pq~&%/p##~(/%x!$= Zp#{6$/$%&st}%$;/q*/%wt/(p*;/s~/}~%/z}~(/(wp%/p/%#p}$u~#|p%x~}/|p%#x)/x$=
+
+plain15.txt
+
+u&9@@^{=!{{}
+Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+-
+
+While I am all for LaTeX as a tool to produce beautiful books and documents this question just asks for an answer in a programming language that is much more suited for the problem.
+
+This is an implementation in python. It is pretty verbose but I think that almost everybody with any programming knowledge who has never seen a single line of python will understand and to some degree be able to modify the following code:
+
+import string
+
+filecontents = """Karl's students do not care about dashing patterns.
+Karl's students do not care about arrow tips.
+Karl's students, by the way, do not know what a transformation matrix is.
+"""
+
+f = open('plain.txt', 'w')
+f.write(filecontents)
+f.close()
+
+def shift(char, offset):
+if char in string.lowercase:
+shifted_index = string.lowercase.index(char) + offset
+shifted_char = string.lowercase[shifted_index % len(string.lowercase)]
+elif char in string.uppercase:
+shifted_index = string.uppercase.index(char) + offset
+shifted_char = string.uppercase[shifted_index % len(string.uppercase)]
+else:
+# do nothing for special characters, otherwise we end up with non-printable
+shifted_char = char
+return shifted_char
+
+input = open('plain.txt', 'r')
+output = open('plain_shift.txt','w')
+while True:
+if char:
+shifted = shift(char, offset)
+output.write(shifted)
+else:
+break
+input.close()
+output.close()
+
+offset = 13

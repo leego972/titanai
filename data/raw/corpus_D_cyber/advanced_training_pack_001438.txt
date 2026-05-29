@@ -1,0 +1,583 @@
+================================================================================
+TITAN AI — TRAINING PACK 013: DISTRIBUTED SYSTEMS THEORY AND PRACTICE
+CAP THEOREM, CONSISTENCY MODELS, CONSENSUS, FAILURE MODES, REAL SYSTEMS
+================================================================================
+
+================================================================================
+PART 1: THE FUNDAMENTAL PROBLEMS OF DISTRIBUTION
+================================================================================
+
+--- WHAT MAKES DISTRIBUTED SYSTEMS HARD ---
+
+A single-machine system fails in predictable ways: crashes, memory errors, disk full.
+Recovery is simple: restart, restore from backup, fix the hardware.
+
+Distributed systems fail in unpredictable, partial ways:
+  - Node A thinks it's the leader. Node B also thinks it's the leader.
+  - Message sent. Not sure if received. Not sure if processed. Don't know.
+  - Clock on Node A says 10:00:00.000. Clock on Node B says 9:59:59.997.
+    Which event happened first? Genuinely ambiguous.
+  - Network partition: A and B can't talk. Both are functioning. Both serving requests.
+    Are they serving consistent data?
+  - "The network is down" is too simple. The network may be delivering messages
+    slowly, selectively, out of order, or to some nodes but not others.
+
+THE TWO GENERALS PROBLEM (impossibility proof for consensus):
+  Two generals must coordinate an attack over an unreliable messenger.
+  General A sends: "Attack at dawn." Is message received? Unknown.
+  General A sends confirmation request: Did you get my message?
+  General B sends confirmation. Did confirmation arrive? Unknown.
+  Every message requires confirmation. Every confirmation requires confirmation.
+  
+  Proof: No finite number of messages can guarantee both generals act.
+  If ANY message can be lost, coordination is impossible with certainty.
+  
+  IMPLICATION: Distributed systems cannot achieve perfect certainty.
+  Engineering is about choosing which guarantees to sacrifice, and when.
+
+--- THE CAP THEOREM (Brewer's Theorem, 2000) ---
+
+In the presence of a network partition, a distributed system must choose between:
+
+C — CONSISTENCY: Every read returns the most recent write (or an error)
+A — AVAILABILITY: Every request receives a non-error response
+P — Partition tolerance: System continues operating when network partitions occur
+
+THE CRUCIAL INSIGHT: P is not optional.
+Network partitions will happen. In any real distributed system across multiple machines,
+network failure is a given — not a theoretical edge case.
+THEREFORE: The real choice is C or A during a partition. You get one.
+
+CA system (no partition tolerance): Single node, no distribution.
+  Gives up: Scalability, fault tolerance
+  Use when: You don't need distribution (but then why are we here?)
+
+CP system (consistency, partition tolerance): Refuses to answer when uncertain.
+  Gives up: Availability
+  Example: HBase, Zookeeper, etcd
+  Behavior during partition: Returns error rather than possibly stale data
+  Use when: Correctness matters more than availability (banking, config management)
+
+AP system (availability, partition tolerance): Answers even when uncertain.
+  Gives up: Consistency (may return stale data)
+  Example: DynamoDB (default), Cassandra, CouchDB
+  Behavior during partition: Returns best available answer, may be stale
+  Use when: Being available matters more than perfect accuracy (DNS, shopping cart)
+
+REAL EXAMPLE — AMAZON DYNAMO:
+  During a partition, two DynamoDB replicas accept writes independently.
+  When partition heals: Conflict resolution (last-write-wins or vector clocks)
+  Why Amazon chose AP: "A shopping cart that shows slightly wrong contents
+  is better than a checkout page that's down."
+  
+  Downtime costs $100M+/hour for Amazon. Stale cart data costs almost nothing.
+  The business case dictated the CP/AP tradeoff.
+
+REAL EXAMPLE — AIRLINE SEAT BOOKING:
+  Booking system must not double-sell seats.
+  Uses CP: Refuse to book if cannot confirm with all replicas.
+  A user might see "booking service unavailable" during a partition.
+  Acceptable cost: Some lost bookings during rare outages.
+  Unacceptable cost: Two passengers with same seat (lawsuit, brand damage).
+  Business case dictated CP.
+
+--- PACELC THEOREM (extends CAP) ---
+
+CAP only considers behavior during partitions.
+PACELC adds: What about when there's no partition?
+
+PACELC: If Partition → (A vs C) | Else → (Latency vs Consistency)
+
+During normal operation (no partition):
+  High Consistency = More coordination = More latency
+  Low Latency = Less coordination = Weaker consistency
+
+PACELC classifications:
+  DynamoDB: PA/EL — Partition: Available. Else: Low Latency (weak consistency)
+  Cassandra: PA/EL — Same as DynamoDB
+  MongoDB: PC/EC — Partition: Consistent. Else: Consistent (with latency cost)
+  Zookeeper: PC/EC — Strong consistency, accepts latency
+  PostgreSQL (single-primary): PC/EC
+
+PRACTICAL IMPLICATION:
+  You pay for consistency in latency even when there's no partition.
+  Every strong consistency check requires round-trips between replicas.
+  If global replication: Round-trip = 100ms+ (speed of light limits)
+  This is NOT fixable with better engineering. Physics is the ceiling.
+
+================================================================================
+PART 2: CONSISTENCY MODELS — THE SPECTRUM
+================================================================================
+
+--- FROM STRONGEST TO WEAKEST ---
+
+LINEARIZABILITY (strongest):
+  Appears as if there's a single copy of data, all operations instantaneous.
+  Once a write completes, all subsequent reads see it.
+  Concurrent operations appear to execute in some single total order.
+  
+  Cost: Coordination overhead on every operation. Practical only for small datasets.
+  Examples: Zookeeper, single-node databases, etcd
+  Use case: Distributed locks, leader election, exactly-once semantics
+
+SEQUENTIAL CONSISTENCY:
+  All operations appear in some sequential order.
+  Each process's operations appear in that process's order.
+  But: Different processes' operations can be interleaved differently.
+  Weaker than linearizability (no real-time ordering guarantee).
+  Example: Cache coherency in CPUs
+
+CAUSAL CONSISTENCY:
+  Causally related operations seen in causal order by all nodes.
+  Unrelated operations can be seen in any order.
+  
+  Example: A comment reply must be seen after the original comment.
+  Non-related comments can appear in any order.
+  
+  Implementation: Vector clocks track causal dependencies.
+  
+  class VectorClock:
+      def __init__(self, node_id, nodes):
+          self.node_id = node_id
+          self.clock = {node: 0 for node in nodes}
+      
+      def tick(self):
+          self.clock[self.node_id] += 1
+          return self.clock.copy()
+      
+      def update(self, received_clock):
+          for node, time in received_clock.items():
+              self.clock[node] = max(self.clock[node], time)
+          self.clock[self.node_id] += 1
+      
+      def is_causally_after(self, other_clock):
+          return all(self.clock[n] >= other_clock[n] for n in self.clock)
+
+EVENTUAL CONSISTENCY:
+  Given no new updates, all replicas will eventually converge to the same state.
+  No guarantee on when. No guarantee about ordering between updates.
+  Provides: Availability, partition tolerance
+  Sacrifices: Any strong ordering guarantee
+  
+  Base rate: Most distributed databases default to eventual consistency.
+  DNS is eventually consistent: Changes propagate over minutes to hours globally.
+  
+  DANGER ZONE with eventual consistency:
+  User updates profile email.
+  User immediately queries profile.
+  Read might hit replica that hasn't received the write yet.
+  User sees old email. Confusing.
+  
+  SOLUTION: Read-your-own-writes consistency
+  After a write, route reads for that session to the same replica that received the write.
+  OR: Include write version in session, route reads to replica with version >= write version.
+
+--- CONFLICT RESOLUTION IN EVENTUALLY CONSISTENT SYSTEMS ---
+
+LAST-WRITE-WINS (LWW):
+  Simplest: Highest timestamp wins.
+  Problem: Clock skew. Server A timestamp 10:00:00, Server B timestamp 10:00:00 - 3ms.
+  Server A's write at 10:00:00 wins even if it happened before Server B's write in real time.
+  Use when: Occasional data loss acceptable, simplicity valued.
+
+MULTI-VALUE (VERSION VECTORS):
+  Store ALL conflicting versions. Let application decide.
+  Amazon Dynamo: Shopping carts that diverge return both versions.
+  Application reconciles: Merge by union (keep all items from both carts).
+  Use when: Loss of any write is unacceptable, application has merge logic.
+
+CRDTs (Conflict-free Replicated Data Types):
+  Mathematical structures that can be merged without conflict.
+  Operations commutative (A+B = B+A) and idempotent (A+A = A).
+  
+  G-Counter (grow-only counter):
+  Each node maintains its own count.
+  Merge = take max of each node's count.
+  Total = sum of all node counts.
+  
+  No conflict possible: Adding 1 on A and adding 1 on B both survive merge.
+  
+  class GCounter:
+      def __init__(self, node_id):
+          self.node_id = node_id
+          self.counts = {}  # node_id -> count
+      
+      def increment(self):
+          self.counts[self.node_id] = self.counts.get(self.node_id, 0) + 1
+      
+      def merge(self, other):
+          for node, count in other.counts.items():
+              self.counts[node] = max(self.counts.get(node, 0), count)
+      
+      def value(self):
+          return sum(self.counts.values())
+  
+  CRDTs used in: Riak, Redis (certain types), collaborative editors (Google Docs)
+
+================================================================================
+PART 3: CONSENSUS ALGORITHMS
+================================================================================
+
+--- PAXOS (the foundational algorithm, 1998) ---
+
+WHAT IT SOLVES: Multiple nodes must agree on a single value, even with failures.
+Application: Distributed database agrees on which write to commit.
+             Leader election: All nodes agree on who is leader.
+             Log replication: All nodes agree on log entry order.
+
+PAXOS ROLES:
+  Proposers: Propose values
+  Acceptors: Vote on proposals
+  Learners: Learn the decided value
+
+PAXOS PROTOCOL (simplified):
+
+Phase 1 — Prepare:
+  Proposer picks proposal number N (must be unique and higher than any seen).
+  Sends Prepare(N) to majority of acceptors.
+  
+  Acceptor responds:
+    - Promise: "I won't accept proposals < N"
+    - If previously accepted a proposal: "I accepted value V with proposal number M"
+  
+Phase 2 — Accept:
+  Proposer receives majority of promises.
+  If any acceptors reported prior accepted values: Must propose THAT value (highest M wins).
+  If no prior values: Proposer can use its own value.
+  Sends Accept(N, V) to majority of acceptors.
+  
+  Acceptor accepts if N >= any promised N.
+  Once majority accepts: Value is decided.
+
+WHY MAJORITY? A majority of N nodes always overlaps with any other majority.
+  So the next round will always find at least one node that knows the prior decision.
+  Information is never lost between rounds.
+
+--- RAFT (practical consensus, 2014) ---
+
+Raft was designed to be MORE UNDERSTANDABLE than Paxos.
+Used in: etcd (Kubernetes control plane), CockroachDB, TiKV, Consul
+
+RAFT CONCEPTS:
+  Leader: ONE leader at a time. All writes go through leader.
+  Term: Sequential number. Each election attempt = new term.
+  Log: Ordered list of commands. Same log on all nodes = correct.
+  Commit index: Highest log entry that's been replicated to majority.
+
+RAFT LEADER ELECTION:
+  All nodes start as Followers.
+  If no heartbeat from leader for election timeout (150-300ms):
+    Follower becomes Candidate, increments term, votes for itself.
+    Sends RequestVote to all nodes.
+    Each node votes for first candidate it hears from in a term.
+    First candidate with majority votes becomes leader.
+  
+  SPLIT VOTE: Two candidates start simultaneously, split votes.
+  Resolution: Random election timeout. One will start a new election first.
+  Elegant: No central coordinator needed for tie-breaking.
+
+RAFT LOG REPLICATION:
+  Leader receives write from client.
+  Appends to its own log.
+  Sends AppendEntries to all followers.
+  Waits for majority to acknowledge.
+  Commits: Apply to state machine, respond to client.
+  Next AppendEntries includes commit index, followers also apply.
+  
+  Safety guarantee: An entry is never lost once committed to a majority.
+
+RAFT NETWORK PARTITION BEHAVIOR:
+  Partition: 5-node cluster split into 3 and 2.
+  
+  3-node partition: Has majority → Can elect leader → Makes progress → Serves writes
+  2-node partition: No majority → Cannot elect leader → Refuses writes → Stale reads only
+  
+  If old leader is in 2-node partition: It steps down (can't get majority acknowledgments).
+  When partition heals: Old leader adopts new leader's log (higher term wins).
+  Client writes during partition: Only 3-node partition's writes are durable.
+  Writes that went to isolated 2-node leader: Lost (never committed to majority).
+  
+  This is CP behavior: The 2-node partition is unavailable rather than inconsistently available.
+
+--- GOSSIP PROTOCOL (eventual consistency without coordination) ---
+
+How does Cassandra know which nodes are alive? Gossip.
+How does Consul spread health information? Gossip.
+
+PROTOCOL:
+  Every second, each node picks a random set of peers.
+  Exchanges state information (who is alive, what are their states).
+  Merge received state with own state (most recent timestamp wins).
+  
+  Convergence time: O(log N) rounds for all N nodes to know about any change.
+  100 nodes: ~7 rounds → ~7 seconds for global propagation.
+  1,000 nodes: ~10 rounds → ~10 seconds.
+  Scales extremely well.
+
+IMPLEMENTATION SKETCH:
+  class GossipNode:
+      def __init__(self, node_id, peers):
+          self.node_id = node_id
+          self.peers = peers
+          self.state = {node_id: {"status": "alive", "version": 0}}
+      
+      def gossip_round(self):
+          # Pick 3 random peers
+          targets = random.sample(self.peers, min(3, len(self.peers)))
+          for target in targets:
+              received_state = target.exchange(self.state.copy())
+              self.merge(received_state)
+      
+      def merge(self, received_state):
+          for node_id, state in received_state.items():
+              if (node_id not in self.state or 
+                  state['version'] > self.state[node_id]['version']):
+                  self.state[node_id] = state
+      
+      def exchange(self, received_state):
+          self.merge(received_state)
+          return self.state.copy()
+      
+      def mark_failed(self, failed_node_id):
+          self.state[failed_node_id] = {"status": "failed", "version": 
+              self.state.get(failed_node_id, {}).get('version', 0) + 1}
+
+================================================================================
+PART 4: DESIGNING FOR FAILURE
+================================================================================
+
+--- CHAOS ENGINEERING ---
+
+PRINCIPLE: Deliberately introduce failures in production (or production-like environment)
+to test system resilience before failures happen accidentally.
+
+CHAOS MONKEY (Netflix, original):
+  Randomly terminates EC2 instances in production.
+  If you can't handle random instance failures: Your system is brittle.
+  By killing instances regularly: Teams are forced to build resilient systems.
+  The pain of Chaos Monkey is less than the pain of an actual outage.
+
+CHAOS ENGINEERING EXPERIMENTS:
+
+Level 1: Instance failure
+  Tool: Chaos Monkey, AWS FIS (Fault Injection Simulator)
+  Test: Kill random instance. System continues serving? Recovery time?
+
+Level 2: Network degradation
+  Tool: tc (traffic control) on Linux, Toxiproxy
+  Test: Add 200ms latency to service-to-service calls. Timeouts still work?
+  
+  # Add 200ms delay to all traffic on interface eth0
+  tc qdisc add dev eth0 root netem delay 200ms
+  
+  # Add 10% packet loss
+  tc qdisc add dev eth0 root netem loss 10%
+  
+  # Add jitter: 200ms delay ±50ms
+  tc qdisc add dev eth0 root netem delay 200ms 50ms
+
+Level 3: Resource pressure
+  Tool: stress-ng, Gremlin
+  # CPU pressure
+  stress-ng --cpu 4 --timeout 60s
+  # Memory pressure
+  stress-ng --vm 2 --vm-bytes 1G --timeout 60s
+  # Disk I/O pressure
+  stress-ng --io 4 --timeout 60s
+
+Level 4: Application-level failures
+  Kill specific service (payment service down).
+  Return error responses (payment service returning 500 for 20% of requests).
+  Corrupt data (return malformed JSON).
+  
+  Test: Does circuit breaker activate? Does fallback work?
+  Does degraded response (without payment) make more sense than full outage?
+
+HYPOTHESIS-DRIVEN CHAOS:
+  WRONG: "Let's see what happens when we kill things."
+  RIGHT:
+    Hypothesis: "Killing payment service will cause checkout failures with graceful error message.
+                 All other functionality will continue unaffected."
+    Steady state metric: 99.9% successful checkout rate, 100ms P99 response time
+    Experiment: Kill payment service
+    Result: Checkout failure rate 100% (expected). Landing page/search/cart: Unaffected (expected).
+    Rollback: Restart payment service. Metrics return to steady state in <30s.
+    Learning: Circuit breaker for payment service working correctly.
+
+--- SRE RELIABILITY PATTERNS ---
+
+ERROR BUDGET:
+  SLO: 99.9% availability = 43.8 minutes/month downtime allowed = error budget
+  Team can deploy freely while error budget remains.
+  When budget exhausted: Freeze deployments, focus on reliability.
+  This makes "is it safe to deploy?" a mathematical question, not a political one.
+
+SLO DEFINITION PROCESS:
+  1. Identify the system's SLIs (what can we measure?)
+     - Request success rate
+     - Latency P99
+     - Error rate by category
+     - Queue consumer lag (for async systems)
+  
+  2. Set SLOs that matter to users (not just technical metrics)
+     - "Users want checkout to succeed" → SLO: 99.9% checkout success
+     - "Users want fast response" → SLO: P99 < 500ms
+     NOT: "CPUs under 80% utilization" (internal metric users don't care about)
+  
+  3. Track error budget consumption weekly
+     Budget consumed at 50% of month? Normal.
+     Budget consumed at 80%? Slow down deployments.
+     Budget consumed at 100%? No new deployments. Reliability sprint.
+
+TOIL REDUCTION:
+  Toil: Repetitive, manual, automatable operational work.
+  SRE target: <50% of time on toil. >50% on engineering/automation.
+  
+  Identifying toil: Tasks you do more than once → automate.
+  Runbooks that require human execution → automate or eliminate.
+  On-call pages that require same response every time → automate the response.
+
+RUNBOOK QUALITY STANDARD:
+  Every alert must have a runbook. Every runbook must:
+  1. State: What is this alert? What does it mean?
+  2. Impact: What is the user-facing impact right now?
+  3. Investigation: Step-by-step diagnostic commands (with expected output)
+  4. Mitigation: Actions that reduce impact NOW (not permanent fix)
+  5. Escalation: Who to call if runbook steps don't work, with their contact
+  6. Related alerts: What other alerts often fire alongside this one?
+  
+  Good test: A junior engineer on their first on-call should be able to
+  execute the runbook and mitigate an alert without senior help.
+  If they can't: The runbook needs improvement.
+
+================================================================================
+PART 5: DISTRIBUTED SYSTEM DESIGN CASE STUDIES
+================================================================================
+
+--- DESIGN: GLOBALLY DISTRIBUTED RATE LIMITER ---
+
+REQUIREMENTS:
+  - Limit each API key to 1000 requests per minute
+  - Global: Requests from London and New York count against same limit
+  - P99 latency: <5ms overhead per request
+  - Availability: 99.99%
+
+APPROACH 1 — Centralized Redis:
+  Pros: Consistent counts, simple
+  Cons: Single point of failure, network round-trip from every region (~50-150ms)
+  Verdict: Unacceptable latency
+
+APPROACH 2 — Local Redis per region, sync periodically:
+  Each region maintains local counter.
+  Sync with other regions every second.
+  Allow limit = total_limit / num_regions locally.
+  
+  Problem: A key can make 1000 requests in NY and 1000 in London in the same second.
+  Rate limit: 2000 when limit is 1000. Soft limit, not hard.
+  
+  For most APIs: Soft limit is acceptable. Occasional burst over limit not harmful.
+  For billing APIs: Hard limit required.
+
+APPROACH 3 — Token Bucket with Redis and Lua script:
+  local key = KEYS[1]
+  local rate = tonumber(ARGV[1])   -- tokens per second
+  local capacity = tonumber(ARGV[2]) -- max burst
+  local now = tonumber(ARGV[3])
+  local tokens_requested = tonumber(ARGV[4])
+  
+  local bucket = redis.call('HMGET', key, 'tokens', 'last_time')
+  local tokens = tonumber(bucket[1]) or capacity
+  local last_time = tonumber(bucket[2]) or now
+  
+  -- Refill based on time elapsed
+  local elapsed = now - last_time
+  local tokens = math.min(capacity, tokens + elapsed * rate)
+  
+  if tokens >= tokens_requested then
+      tokens = tokens - tokens_requested
+      redis.call('HMSET', key, 'tokens', tokens, 'last_time', now)
+      redis.call('EXPIRE', key, 3600)
+      return {1, tokens}  -- Allowed, remaining tokens
+  else
+      return {0, tokens}  -- Rejected, current tokens
+  end
+  
+  Lua scripts in Redis are atomic — no race conditions.
+  Single round-trip to Redis (Lua runs in Redis, not in app).
+  Deployed across regions: Use Redis Cluster with regional read replicas.
+
+--- DESIGN: DISTRIBUTED JOB SCHEDULER ---
+
+REQUIREMENTS:
+  - Execute jobs at scheduled times (cron-like)
+  - Exactly-once execution (never skip, never duplicate)
+  - 10 million jobs scheduled, 100K executing concurrently
+  - Jobs can take up to 24 hours
+
+KEY CHALLENGES:
+  1. Leader election: Who decides which jobs to execute?
+  2. Job assignment: Distribute jobs to workers without duplication
+  3. Fault tolerance: If worker dies mid-job, job must be retried
+  4. Exactly-once: Database transaction + idempotent job design
+
+ARCHITECTURE:
+
+Scheduler (high availability):
+  3 scheduler nodes, one active (leader), others standby.
+  Leader election via Zookeeper/etcd ephemeral node.
+  Active scheduler: Scans job table every second, dispatches due jobs.
+  
+  Scan query:
+  SELECT * FROM jobs 
+  WHERE next_run_at <= NOW() 
+  AND status = 'scheduled'
+  AND locked_by IS NULL
+  LIMIT 1000
+  FOR UPDATE SKIP LOCKED;  -- Critical: Other instances skip these rows
+  
+  SKIP LOCKED: If another scheduler has locked row, skip it (don't wait).
+  Result: Multiple schedulers can safely scan same table, no duplicates.
+
+Worker (horizontal scale):
+  Workers pull from job queue (Kafka or Redis).
+  Before executing: Claim the job (set claimed_by, claimed_at in DB).
+  Execute job, update status on completion.
+  
+  Fault recovery:
+  Watchdog queries: Jobs claimed but not updated for > (job_timeout + 5 min).
+  These jobs' workers are likely dead. Reset to 'scheduled'. Re-queue.
+
+Exactly-once design:
+  Job function must be idempotent. Given same inputs: Always produces same result.
+  Store job result with job_id key. If job_id seen before: Return cached result.
+  Idempotency key = job_id. Database UNIQUE constraint enforces it.
+
+DATABASE SCHEMA:
+  CREATE TABLE jobs (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    payload JSONB,
+    status VARCHAR(50) DEFAULT 'scheduled',  -- scheduled, running, completed, failed
+    next_run_at TIMESTAMP WITH TIME ZONE,
+    cron_expression VARCHAR(100),
+    claimed_by VARCHAR(255),
+    claimed_at TIMESTAMP WITH TIME ZONE,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    attempt_count INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3,
+    last_error TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+  
+  CREATE INDEX idx_jobs_next_run ON jobs (next_run_at, status) 
+    WHERE status IN ('scheduled', 'failed');
+
+================================================================================
+END OF PACK 013: DISTRIBUTED SYSTEMS THEORY AND PRACTICE
+Total: Two Generals problem, CAP theorem with business case analysis, PACELC,
+full consistency model spectrum (linearizability to eventual), vector clocks,
+CRDTs, Paxos protocol, Raft (election + replication + partition behavior),
+gossip protocol, chaos engineering (all levels), SRE error budget, runbook standards,
+distributed rate limiter design, distributed job scheduler design.
+================================================================================

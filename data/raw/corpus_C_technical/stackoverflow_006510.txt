@@ -1,0 +1,40 @@
+Question: <p>I have been bitten by something unexpected recently. I wanted to make something like that:</p>
+
+<pre><code>try :
+     thing.merge(iterable) # this is an iterable so I add it to the list
+except TypeError :
+     thing.append(iterable) # this is not iterable, so I add it
+</code></pre>
+
+<p>Well, It was working fine until I passed an object inheriting from Exception which was supposed to be added.</p>
+
+<p>Unfortunetly, an Exception is iterable. The following code does not raise any <code>TypeError</code>:</p>
+
+<pre><code>for x in Exception() :
+    print 1
+</code></pre>
+
+<p>Does anybody know why?</p>
+
+Answer: <p>Note that what is happening is not related to any kind of implicit string conversion etc, but because the Exception class implements __getitem__(), and uses it to return the values in the args tuple (ex.args).  You can see this by the fact that you get the whole string as your first and only item in the iteration, rather than the character-by-character result you'd get if you iterate over the string.</p>
+
+<p>This surprised me too, but thinking about it, I'm guessing it is for backwards compatability reasons.  Python used to (<a href="http://www.python.org/doc/essays/stdexceptions.html">pre-1.5</a>) lack the current class hierarchy of exceptions.  Instead, strings were thrown, with (usually) a tuple argument for any details that should be passed to the handling block.  ie:</p>
+
+<pre><code>try:
+    raise "something failed", (42, "some other details")
+except "something failed", args:
+    errCode, msg = args
+    print "something failed.  error code %d: %s" % (errCode, msg)
+</code></pre>
+
+<p>It looks like this behavior was put in to avoid breaking pre-1.5 code expecting a tuple of arguments, rather than a non-iterable exception object.  There are a couple of examples of this with IOError in the Fatal Breakage section of the above <a href="http://www.python.org/doc/essays/stdexceptions.html">link</a></p>
+
+<p>String exceptions have been depecated for a while, and are going away in Python 3.  I've now checked how Python 3 handles exception objects, and it looks like they are no longer iterable there:</p>
+
+<pre><code>&gt;&gt;&gt; list(Exception("test"))
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: 'Exception' object is not iterable
+</code></pre>
+
+<p>[Edit] Checked python3's behaviour</p>

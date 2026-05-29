@@ -1,0 +1,71 @@
+# How do I define a \ifcommand only if it is not already defined?
+
+To deal with a mess of compilation alternatives with multiple files, I use some \ifSomething switches. But I stumble when I need to check if a switch is defined, and define it if it is not. Minimal example:
+
+% This may or may not be present:
+\newif\ifSomething
+\Somethingfalse
+
+% Later, (usually) in a different file:
+\ifdefined \ifSomething
+\else
+\newif\ifSomething
+\Somethingtrue
+\fi
+
+\documentclass{article}
+\begin{document}
+Everything ok?
+\end{document}
+
+
+I believe I understand the problem: Because \ifSomething is already defined, its appearance in the\else clause is interpreted as starting a conditional-- the fact that it's the argument of \newif notwithstanding. I even remember reading about this in the TeXbook... but how should I do this?
+
+• \expandafter\ifx\csname ifSomething\endcsname\relax \newif\ifSomething \Somethingtrue \fi should work too – user31729 Apr 16 '16 at 13:03
+• @Christian, I think the use after \ifdefined does not need protecting, just the one after \newif. Am I missing something? – alexis Apr 16 '16 at 13:07
+• Protecting??? I don't understand what you mean. I just compare whether \ifSomething is defined with \ifx or is \relax – user31729 Apr 16 '16 at 13:08
+• I was using the term loosely, sorry. I meant with \csname... not with \protect. – alexis Apr 16 '16 at 13:11
+• \expandafter\ifx\csname foo\endcsname\relax tests whether \foo is defined or is equal to \relax – user31729 Apr 16 '16 at 13:13
+
+For example:
+
+\makeatletter
+\@ifundefined{ifSomething}{%
+\newif\ifSomething
+\Somethingtrue
+}{}
+\makeatother
+
+
+\@ifundefined generates the macro name from the argument string and tests, whether the command is undefined (or \relax). This removes the \if... token from the test. Also the branching is syntactically realized via arguments and not by \if...\else...\fi. Therefore an defined or undefined \ifSomething does not cause trouble for \@ifundefined.
+
+However, there is a case, where \ifSomething after \newif in the argument can cause trouble, when the whole construct is inside a \if/\else branch. Then the trick is \csname:
+
+\makeatletter
+\@ifundefined{ifSomething}{%
+\expandafter\newif\csname ifSomething\endcsname
+\Somethingtrue
+}{}
+\makeatother
+
+• Thanks! It seems that I can also just use the \csname approach with a TeX-style if: \ifdefined\ifSomething \else \expandafter\newif\csname ifSomething\endcsname \fi. Is this going to cause problems in some uses? – alexis Apr 16 '16 at 13:04
+• @alexis The number if \if... tokens do not match with one \else and \fi. Thus this causes trouble, when the whole construct is inside another \if... construct. A solution would be e-TeX's \ifcsname: \ifcsname ifSomething\endcsname...\else...\fi. – Heiko Oberdiek Apr 16 '16 at 13:09
+• That rings a bell now (from the TeXbook), thanks! – alexis Apr 16 '16 at 13:12
+
+The etoolbox package has \providebool:
+
+\documentclass{article}
+\usepackage{etoolbox}
+
+\newif\ifSomething
+
+\providebool{Something}
+\providebool{SomethingElse}
+
+\begin{document}
+
+\texttt{\meaning\Somethingtrue}
+
+\texttt{\meaning\SomethingElsetrue}
+
+\end{document}

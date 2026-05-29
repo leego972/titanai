@@ -1,0 +1,37 @@
+# Recover NLFSR description from given output
+
+Given Fibonacci's Nonlinear Feedback Shift Register output, how can I recover the description (nonlinear feedback function and current seed)?
+
+The clean output of consecutive and unmodified is large and the generator is available to ask for next values. The source code of PRNG is not available, the seed is unknown.
+
+For the linear case there is already known Berlekamp-Massey (or Reed-Sloane) algorithm yielding the shortest polynomial. Is there a similar method for nonlinear case?
+
+• I read it here, no the internals are unknown, it seems a bit complicated... But with all internals present recovering the seed is not a problem.
+– Evil
+Jan 22 '17 at 18:02
+
+Normally we evaluate PRNGs under the model where the source code is available and fully known, and where the output is a deterministic function of the seed. This leaves multiple possibilities for how to build a NLFSR: we can have a fixed feedback function (hardcoded in the source code), and use the seed to specify the initial state; or we can use part of the seed to generate a feedback function and use the remainder of the seed to specify the initial state.
+
+If the feedback function $f$ is known, it is trivial to predict the next outputs of the NLFSR from the past $n$ bits, where $n$ denotes the width of the state. Also, it is often possible to predict past output, but this depends on the feedback function and on $n$.
+
+If $f$ is not known but derived from part of the seed, then the procedure depends on the details of how it is derived. There are $2^{2^n}$ possible feedback functions $f:\{0,1\}^n \to \{0,1\}$. If we use $2^n$ bits from the seed so we can sample uniformly at random from the set of all functions (i.e., all $2^{2^n}$ functions are possible and equally likely), then the PRNG is not very useful in practice. After seeing about $O(2^{n/2})$ bits of output, you can usually distinguish the output of the PRNG from true-randomness and predict future outputs, because (by the birthday paradox) it is likely that the internal state will repeat at some point in there and the generator will enter a cycle (of length at most $O(2^{n/2})$). Of course this design requires more than $2^n$ bits of true randomness as input, and can only produce $O(2^{n/2})$ bits of output before its output is recognizable, so this is a fairly crummy PRNG; you've basically wasted the randomness, and you might as well have just used the true-randomness directly without a PRNG.
+
+Alternatively, perhaps you had in mind that part of the seed is used to select a feedback function $f$, via some algorithmic process -- but not all feedback functions are possible or equally likely. Then the ability to distinguish, predict future outputs, or recover the seed is dependent upon the details of that algorithmic process. However, we can say this much. The output of the PRNG can be distinguished from truly-random after $O(2^{n/2})$ outputs, for reasons sketched above (due to the birthday paradox).
+
+The period of a NLFSR is determined by the function $F:\{0,1\}^n \to \{0,1\}^n$, defined by
+
+$$F(x_1,\dots,x_n) = (x_2,\dots,x_n,f(x_1,\dots,x_n)).$$
+
+Let me mention some typical cases.
+
+First, if $f$ satisfies $f(0,x_2,\dots,x_n)=f(1,x_2,\dots,x_n) \oplus 1$ for all $x_2,\dots,x_n$, then $F$ will be bijective, the period of the NLFSR will typically be about $2^n$ (if $f$ has no other regularities), and given about $2^n$ bits of output you'll be able to predict all future outputs (since it cycles) or recover the original seed. Also, you'll be able to distinguish the output of the NLFSR from truly random with about $O(2^{n/2})$ bits of output (by the birthday paradox, a true random stream will have some $n$-bit value repeat twice within that range, but that'll never happen in the output from this type of NLFSR).
+
+Second, if $f$ has no regularities or patterns and is basically random, then $F$ will fail to be bijective, and the period will typically be about $2^{n/2}$. So, after $O(2^{n/2})$ bits of output you'll be able to predict all future outputs (since it cycles), and you'll be able to distinguish the output of the NLFSR from truly random with about $O(2^{n/2})$ bits of output (a true-random stream won't cycle but this NLFSR will).
+
+If the feedback function $f$ is chosen randomly from a small list of possibilities (e.g., the ones listed in the paper you cited), then it is easy to recognize output from such a PRNG: just try each possibility in turn, and use the method described for the case where $f$ is known. If there are $m$ possibilities for $f$, then $n+\lg m+O(1)$ bits of output suffice to infer which possibility is correct and verify that the output is consistent with such a NLFSR with high probability.
+
+What this fails to account for is other attacks, which try to take advantage of structure in $f$. For instance, suppose $f$ is chosen to have small circuit size. Then it may be possible to recover $f$ with many fewer than $2^n$ bits of input: each consecutive $n+1$ bits of output gives us a known input-output pair $(x,y)$ for $f$ (namely, $x =$ the first $n$ bits, and $y =$ the $n+1$st bit), and given many such pairs, we can try to find a function $f$ that is consistent with all the pairs and has low circuit complexity. That might be enough to uniquely determine the function $f$; if so, it may or may not be possible to recover it explicitly within a reasonable amount of computation (e.g., with BDDs, Karnaugh maps, or other methods).
+
+Since the question is rather vague, that makes it rather hard to assess the possibilities for the latter kind of method. So, I'll just end with a disclaimer that the analysis above might overestimate the number of bits of output needed to recognize/detect this kind of LFSR.
+
+NLFSRs are intentionally designed/ used for cryptography to be highly "secure" and resistant to "weakness" aka finding their generating parameters except through brute force. this is essentially the process of "cryptoanalysis/ decryption of a PRNG" which is studied extensively in cryptography. but there is at least one case study for consideration. the KeeLoq code is based on a NLFSR and is used in a lot of automotive keylock systems, and therefore has been subject to heavy academic analysis/ experimental attacks. while some weaknesses have been found nevertheless it looks like most of the attacks are basically brute force, although there is some use of FPGAs to streamline the hardware attack. wikipedia notes Nicolas Courtois attacked KeeLoq using sliding and algebraic methods. see also [1]

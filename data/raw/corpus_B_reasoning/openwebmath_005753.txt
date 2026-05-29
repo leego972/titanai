@@ -1,0 +1,148 @@
+# Linear Regression with CNTK and C#
+
+CNTK is Microsoft’s deep learning tool for training very large and complex neural network models. However, you can use CNTK for various other purposes. In some of the previous posts we have seen how to use CNTK to perform matrix multiplication, in order to calculate descriptive statistics parameters on data set.
+In this blog post we are going to implement simple linear regression model, LR. The model contains only one neuron. The model also contains bias parameters, so in total the linear regression has only two parameters: w and b.
+The image below shows LR model:
+
+The reason why we use the CNTK to solve such a simple task is very straightforward. Learning on simple models like this one, we can see how the CNTK library works, and see some of not-so-trivial actions in CNTK.
+The model shown above can be easily extend to logistic regression model, by adding activation function. Besides the linear regression which represent the neural network configuration without activation function, the Logistic Regression is the simplest neural network configuration which includes activation function.
+
+The following image shows logistic regression model:
+In case you want to see more info about how to create Logistic Regression with CNTK, you can see this official demo example.
+Now that we made some introduction to the neural network models, we can start by defining the data set. Assume we have simple data set which represent the simple linear function $y=2x+1$. The generated data set is shown in the following table:
+
+We already know that the linear regression parameters for presented data set are: $b_0=1$ and $b_1=2$, so we want to engage the CNTK library in order to get those values, or at least parameter values which are very close to them.
+
+All task about how the develop LR model by using CNTK can be described in several steps:
+
+Step 1: Create C# Console application in Visual Studio, change the current architecture to $x64$, and add the latest “CNTK.GPU “ NuGet package in the solution. The following image shows those action performed in Visual Studio.
+
+Step 2: Start writing code by adding two variables: $X$ – feature, and label $Y$. Once the variables are defined, start with defining the training data set by creating batch. The following code snippet shows how to create variables and batch, as well as how to start writing CNTK based C# code.
+
+First we need to add some using statements, and define the device where computation will be happen. Usually, we can defined CPU or GPU in case the machine contains NVIDIA compatible graphics card. So the demo starts with the following cod snippet:
+
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using CNTK;
+namespace LR_CNTK_Demo
+{
+class Program
+{
+static void Main(string[] args)
+{
+//Step 1: Create some Demo helpers
+Console.Title = "Linear Regression with CNTK!";
+Console.WriteLine("#### Linear Regression with CNTK! ####");
+Console.WriteLine("");
+//define device
+var device = DeviceDescriptor.UseDefaultDevice();
+
+Now define two variables, and data set presented in the previous table:
+
+//Step 2: define values, and variables
+Variable x = Variable.InputVariable(new int[] { 1 }, DataType.Float, "input");
+Variable y = Variable.InputVariable(new int[] { 1 }, DataType.Float, "output");
+
+//Step 2: define training data set from table above
+var xValues = Value.CreateBatch(new NDShape(1, 1), new float[] { 1f, 2f, 3f, 4f, 5f }, device);
+var yValues = Value.CreateBatch(new NDShape(1, 1), new float[] { 3f, 5f, 7f, 9f, 11f }, device);
+
+Step 3: Create linear regression network model, by passing input variable and device for computation. As we already discussed, the model consists of one neuron and one bias parameter. The following method implements LR network model:
+
+private static Function createLRModel(Variable x, DeviceDescriptor device)
+{
+//initializer for parameters
+var initV = CNTKLib.GlorotUniformInitializer(1.0, 1, 0, 1);
+
+//bias
+var b = new Parameter(new NDShape(1,1), DataType.Float, initV, device, "b"); ;
+
+//weights
+var W = new Parameter(new NDShape(2, 1), DataType.Float, initV, device, "w");
+
+//matrix product
+var Wx = CNTKLib.Times(W, x, "wx");
+
+//layer
+var l = CNTKLib.Plus(b, Wx, "wx_b");
+
+return l;
+}
+
+First, we create initializer, which will initialize startup values of network parameters. Then we defined bias and weight parameters, and join them in form of linear model “$wx+b$”, and returned as Function type. The createModel function is called in the main method. Once the model is created, we can exam it, and prove there are only two parameters in the model. The following code create the Linear Regression model, and print model parameters:
+
+//Step 3: create linear regression model
+var lr = createLRModel(x, device);
+//Network model contains only two parameters b and w, so we query
+//the model in order to get parameter values
+var paramValues = lr.Inputs.Where(z => z.IsParameter).ToList();
+var totalParameters = paramValues.Sum(c => c.Shape.TotalSize);
+Console.WriteLine(\$"LRM has {totalParameters} params, {paramValues[0].Name} and {paramValues[1].Name}.");
+
+In the previous code, we have seen how to extract parameters from the model. Once we have parameters, we can change its values, or just print those values for the further analysis.
+
+Step 4: Create Trainer, which will be used to train network parameters w and b. The following code snippet shows implementation of Trainer method.
+
+public Trainer createTrainer(Function network, Variable target)
+{
+//learning rate
+var lrate = 0.082;
+var lr = new TrainingParameterScheduleDouble(lrate);
+//network parameters
+var zParams = new ParameterVector(network.Parameters().ToList());
+
+//create loss and eval
+Function loss = CNTKLib.SquaredError(network, target);
+Function eval = CNTKLib.SquaredError(network, target);
+
+//learners
+//
+var llr = new List();
+var msgd = Learner.SGDLearner(network.Parameters(), lr);
+
+//trainer
+var trainer = Trainer.CreateTrainer(network, loss, eval, llr);
+//
+return trainer;
+}
+
+First we defined learning rate the main neural network parameter. Then we create Loss and Evaluation functions. With those parameters we can create SGD learner. Once the SGD learner object is instantiated, the trainer is created by calling CreateTrainer static CNTK method, and passed it further as function return. The method createTrainer is called in the main method:
+
+//Step 4: create trainer
+var trainer = createTrainer(lr, y);
+
+Step 5: Training process: Once the variables, data set, network model and trainer are defined, the training process can be started.
+
+//Ştep 5: training
+for (int i = 1; i <= 200; i++)
+{
+var d = new Dictionary();
+//
+trainer.TrainMinibatch(d, true, device);
+//
+var loss = trainer.PreviousMinibatchLossAverage();
+var eval = trainer.PreviousMinibatchEvaluationAverage();
+//
+if (i % 20 == 0)
+Console.WriteLine(\$"It={i}, Loss={loss}, Eval={eval}");
+
+if(i==200)
+{
+//print weights
+var b0_name = paramValues[0].Name;
+var b0 = new Value(paramValues[0].GetValue()).GetDenseData(paramValues[0]);
+var b1_name = paramValues[1].Name;
+var b1 = new Value(paramValues[1].GetValue()).GetDenseData(paramValues[1]);
+Console.WriteLine(\$" ");
+Console.WriteLine(\$"Training process finished with the following regression parameters:");
+Console.WriteLine(\$"b={b0[0][0]}, w={b1[0][0]}");
+Console.WriteLine(\$" ");
+}
+}
+}
+
+As can be seen, in just 200 iterations, regression parameters got the values we almost expected $b_0=0.995$, and $w=2.005$. Since the training process is different than classic regression parameter determination, we cannot get exact values. In order to estimate regression parameters, the neural network uses iteration methods called Stochastic Gradient Decadent, SGD. On the other hand, classic regression uses regression analysis procedures by minimizing the least square error, and solve system equations where unknowns are b and w.
+Once we implement all code above, we can start LR demo by pressing F5. Similar output window should be shown:
+
+Hope this blog post can provide enough information to start with CNTK C# and Machine Learning. Source code for this blog post can be downloaded here.

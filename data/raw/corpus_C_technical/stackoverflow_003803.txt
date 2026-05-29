@@ -1,0 +1,117 @@
+Question: <p>I have a small web server application I've written in Python that goes and gets some data from a database system and returns it to the user as XML. That part works fine - I can run the Python web server application from the command line and I can have clients connect to it and get data back. At the moment, to run the web server I have to be logged in to our server as the administrator user and I have to manually start the web server. I want to have the web server automatically start on system start as a service and run in the background.</p>
+
+<p>Using code from <a href="http://code.activestate.com/recipes/576451/" rel="nofollow">ActiveState</a>'s site and <a href="http://stackoverflow.com/questions/32404/can-i-run-a-python-script-as-a-service-in-windows-how">StackOverflow</a>, I have a pretty good idea of how to go about creating a service, and I think I've got that bit sorted - I can install and start my web server as a Windows service. I can't, however, figure out how to stop the service again. My web server is created from a BaseHTTPServer:</p>
+
+<pre><code>server = BaseHTTPServer.HTTPServer(('', 8081), SIMSAPIServerHandler)
+server.serve_forever()
+</code></pre>
+
+<p>The serve_forever() call, naturally enough, makes the web server sit in an infinite loop and wait for HTTP connections (or a ctrl-break keypress, not useful for a service). I get the idea from the example code above that your main() function is supposed to sit in an infinite loop and only break out of it when it comes accross a "stop" condition. My main calls serve_forever(). I have a SvcStop function:</p>
+
+<pre><code>def SvcStop(self):
+    self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+    exit(0)
+</code></pre>
+
+<p>Which seems to get called when I do "python myservice stop" from the command line (I can put a debug line in there that produces output to a file) but doesn't actually exit the whole service - subsequent calls to "python myservice start" gives me an error:</p>
+
+<blockquote>
+  <p>Error starting service: An instance of
+  the service is already running.</p>
+</blockquote>
+
+<p>and subsequent calls to stop gives me:</p>
+
+<blockquote>
+  <p>Error stopping service: The service
+  cannot accept control messages at this
+  time. (1061)</p>
+</blockquote>
+
+<p>I think I need either some replacement for serve_forever (serve_until_stop_received, or whatever) or I need some way of modifying SvcStop so it stops the whole service.</p>
+
+<p>Here's a full listing (I've trimmed includes/comments to save space):</p>
+
+<pre><code>class SIMSAPIServerHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            reportTuple = self.path.partition("/")
+            if len(reportTuple) &lt; 3:
+                return
+            if reportTuple[2] == "":
+                return
+            os.system("C:\\Programs\\SIMSAPI\\runCommandReporter.bat " + reportTuple[2])
+            f = open("C:\\Programs\\SIMSAPI\\out.xml", "rb")
+            self.send_response(200)
+            self.send_header('Content-type', "application/xml")
+            self.end_headers()
+            self.wfile.write(f.read())
+            f.close()
+            # The output from CommandReporter is simply dumped to out.xml, which we read, write to the user, then remove.
+            os.unlink("C:\\Programs\\SIMSAPI\\out.xml")
+            return
+        except IOError:
+            self.send_error(404,'File Not Found: %s' % self.path)
+
+
+
+class SIMSAPI(win32serviceutil.ServiceFramework):
+    _svc_name_ = "SIMSAPI"
+    _svc_display_name_ = "A simple web server"
+    _svc_description_ = "Serves XML data produced by SIMS CommandReporter"
+
+    def __init__(self, args):
+        win32serviceutil.ServiceFramework.__init__(self, args)
+        self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)           
+
+    def SvcStop(self):
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            exit(0)
+
+    def SvcDoRun(self):
+        import servicemanager
+        servicemanager.LogMsg(servicemanager.EVENTLOG_INFORMATION_TYPE,servicemanager.PYS_SERVICE_STARTED,(self._svc_name_, '')) 
+
+        self.timeout = 3000
+
+        while 1:
+            server = BaseHTTPServer.HTTPServer(('', 8081), SIMSAPIServerHandler)
+            server.serve_forever()
+
+def ctrlHandler(ctrlType):
+    return True
+
+if __name__ == '__main__':
+    win32api.SetConsoleCtrlHandler(ctrlHandler, True)
+    win32serviceutil.HandleCommandLine(SIMSAPI)
+</code></pre>
+
+Answer: <p>This is what I do:</p>
+
+<p>Instead of instancing directly the class BaseHTTPServer.HTTPServer, I write a new descendant from it that publishes an "stop" method:</p>
+
+<pre><code>class AppHTTPServer (SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
+    def serve_forever(self):
+        self.stop_serving = False
+        while not self.stop_serving:
+            self.handle_request()
+
+    def stop (self):
+        self.stop_serving = True
+</code></pre>
+
+<p>And then, in the method SvcStop that you already have, I call that method to break the serve_forever() loop:</p>
+
+<pre><code>def SvcStop(self):
+    self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+    self.httpd.stop()
+</code></pre>
+
+<p>(self.httpd is the instance of AppHTTPServer() that implements the webserver)</p>
+
+<p>If you use setDaemon() correctly on the background threads, and interrupt correctly all the loops in the service, then the instruction </p>
+
+<pre><code>exit(0)
+</code></pre>
+
+<p>in SvcStop() should not be necessary </p>

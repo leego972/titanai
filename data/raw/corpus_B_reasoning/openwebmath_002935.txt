@@ -1,0 +1,96 @@
+Writing a LaTeX macro that takes a variable number of arguments
+
+LaTeX is the document preparation system of choice for middle-aged computer scientists. Despite its dense, esoteric and downright old-fashioned syntax and general workings, it’s probably still the best way to prepare and typeset complex documents, provided you’re prepared to learn and struggle a lot up front to get your tools and templates set up correctly (and then have everything work forever).1
+
+One of the nifty things LaTeX provides is the ability to define custom macros. This allows you to do neat, effort-saving things like this:
+
+\newcommand{\longestmovietitle}{Night Of The Day Of The Dawn Of The Son Of The Bride Of The Return Of The Revenge Of The Terror Of The Attack Of The Evil, Mutant, Hellbound, Flesh-Eating, Crawling, Alien, Zombified, Subhumanoid Living Dead — Part 5}
+
+%[...]
+
+And so, in summary, \longestmovietitle{} is not actually the longest movie. \longestmovietitle{} actually only has a running time of 96 minutes, making it a very slightly more credible contender for the title of shortest movie (which it also isn't).
+
+Basically, the idea is to allow you to use a short command as a placeholder for something longer and more complicated.
+
+You can also define macros with arguments, like this:
+
+\newcommand{\ofthe}[3]{#1 of the #2 of the #3}
+
+%[...]
+
+My movie is called \ofthe{Revenge}{Return}{Retribution}. It will be a prequel to the critically acclaimed \ofthe{Venge}{Turn}{Tribution}.
+
+…which will produce the output:
+
+My movie is called Revenge of the Return of the Retribution. It will be a prequel to the critically acclaimed Venge of the Turn of the Tribution.
+
+As you may have deduced, the [3] in that \newcommand invocation specifies the number of arguments expected by the macro. Change it to a [2] or a [4] without making corresponding changes to the macro itself, and everything breaks. Good job.
+
+This is all well and good, but what if you want to make a macro that takes any number of arguments? Let’s say you have a favourite list format that goes like this:
+
+Shopping list: eggs and also bread and also milk and that’s all!
+
+You’d want to be able to display that list by writing some LaTeX like this:
+
+\shoppinglist{eggs}{bread}{milk}
+
+But tomorrow your needs would be different, so you’d like to be able to also do this:
+
+\shoppinglist{milk}{bread}
+
+Or this:
+
+\shoppinglist{milk}{bread}{cheese}{the Sacred Tome of all Knowledge}
+
+Or anything, really!
+
+This is possible in LaTeX, but the complexity of the code required takes a jump from what you’ve seen before. To get it working, we’ll need to dive into the depths of TeX, the typesetting system to which LaTeX is a mere front-end.
+
+At a high level, we’re going to need to write a macro that does two things: (1) displays the first list item and (2) manually moves the parser head to the next character in the text so that it can consume the next argument (stuff like this reminds you that TeX was initially released in the 70s). Simple enough!
+
+The operative command here is going to be the TeX built-in \@ifnextchar, which checks what the next character in the text is and does something accordingly. An example:
+
+\@ifnextchar[{It was an open square bracket!}{It wasn't an open square bracket!}
+
+Because \@ifnextchar contains an @ symbol, which normally isn’t allowed in LaTeX macro names, the first thing we need to do is enclose our macro definition code between two special commands which temporary lift this restriction.
+
+\makeatletter
+
+% This code can use @ in macro names.
+
+\makeatother
+
+Now we need to make our macro. This first version will only display one list item.
+
+\makeatletter
+
+\newcommand{\shoppinglist}[1]{%
+Shopping list: #1 and that's all!}
+\makeatother
+
+That’s pretty lame, so let’s add the rest of the items. As a first step towards doing this, we’ll need to define \checknextarg, a macro which will make sure there actually is more than one argument.
+
+\newcommand{\checknextarg}{\@ifnextchar\bgroup{\gobblenextarg}{ and that's all!}}
+
+We can’t use { as a literal character for \@ifnextchar to check, so we say \bgroup, which means literal {. This code checks if there is a { character after the } character closing off the macro’s first (and last official) argument. If there is, it calls \gobblenextarg to consume it, else it ends the list.
+
+Our definition of \gobblenextarg looks like this:
+
+\newcommand{\gobblenextarg}[1]{ and also #1\@ifnextchar\bgroup{\gobblenextarg}{ and that's all!}}
+
+It takes one argument (a single list item), and then does \checknextarg’s job again. If another { is found, it recursively calls itself. Otherwise it ends the list.
+
+Finally, we replace the end of the list in \shoppinglist with a call to \checknextarg. Here’s our complete code, with some examples underneath:
+
+\documentclass{article}
+
+\makeatletter
+\newcommand{\shoppinglist}[1]{%
+Shopping list: #1\checknextarg}
+\newcommand{\checknextarg}{\@ifnextchar\bgroup{\gobblenextarg}{ and that's all!}}
+\newcommand{\gobblenextarg}[1]{ and also #1\@ifnextchar\bgroup{\gobblenextarg}{ and that's all!}}
+
+\begin{document}
+
+\shoppinglist{eggs}\par
+\end{document}

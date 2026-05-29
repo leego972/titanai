@@ -1,0 +1,45 @@
+Question: <p>I'm using ctypes to load a DLL in Python.  This works great.</p>
+
+<p>Now we'd like to be able to reload that DLL at runtime.  </p>
+
+<p>The straightforward approach would seem to be:
+1. Unload DLL
+2. Load DLL</p>
+
+<p>Unfortunately I'm not sure what the correct way to unload the DLL is.</p>
+
+<p>_ctypes.FreeLibrary is available, but private.</p>
+
+<p>Is there some other way to unload the DLL?</p>
+
+Answer: <p>you should be able to do it by disposing the object</p>
+
+<pre><code>mydll = ctypes.CDLL('...')
+del mydll
+mydll = ctypes.CDLL('...')
+</code></pre>
+
+<p><strong>EDIT:</strong> Hop's comment is right, this unbinds the name, but garbage collection doesn't happen that quickly, in fact I even doubt it even releases the loaded library. </p>
+
+<p>Ctypes doesn't seem to provide a clean way to release resources, it does only provide a <code>_handle</code> field to the dlopen handle...</p>
+
+<p>So the only way I see, a really, <strong>really non-clean way</strong>, is to system dependently dlclose the handle, but it is very very unclean, as moreover ctypes keeps internally references to this handle. So unloading takes something of the form:</p>
+
+<pre><code>mydll = ctypes.CDLL('./mylib.so')
+handle = mydll._handle
+del mydll
+while isLoaded('./mylib.so'):
+    dlclose(handle)
+</code></pre>
+
+<p>It's so unclean that I only checked it works using:</p>
+
+<pre><code>def isLoaded(lib):
+   libp = os.path.abspath(lib)
+   ret = os.system("lsof -p %d | grep %s &gt; /dev/null" % (os.getpid(), libp))
+   return (ret == 0)
+
+def dlclose(handle)
+   libdl = ctypes.CDLL("libdl.so")
+   libdl.dlclose(handle)
+</code></pre>

@@ -1,0 +1,70 @@
+Question: <p>I have a class with two class methods (using the classmethod() function) for getting and setting what is essentially a static variable.  I tried to use the property() function with these, but it results in an error.  I was able to reproduce the error with the following in the interpreter:</p>
+
+<pre><code>&gt;&gt;&gt; class foo(object):
+...     _var=5
+...     def getvar(cls):
+...             return cls._var
+...     getvar=classmethod(getvar)
+...     def setvar(cls,value):
+...             cls._var=value
+...     setvar=classmethod(setvar)
+...     var=property(getvar,setvar)
+...
+&gt;&gt;&gt; f.getvar()
+5
+&gt;&gt;&gt; f.setvar(4)
+&gt;&gt;&gt; f.getvar()
+4
+&gt;&gt;&gt; f.var
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in ?
+TypeError: 'classmethod' object is not callable
+&gt;&gt;&gt; f.var=5
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in ?
+TypeError: 'classmethod' object is not callable
+</code></pre>
+
+<p>Is it possible to use the property() function with classmethod decorated functions?</p>
+
+Answer: <p>A property is created on a class but affects an instance.  So if you want a classmethod property, create the property on the metaclass.</p>
+
+<pre><code>&gt;&gt;&gt; class foo(object):
+    _var = 5
+    class __metaclass__(type):
+    	pass
+    @classmethod
+    def getvar(cls):
+    	return cls._var
+    @classmethod
+    def setvar(cls, value):
+    	cls._var = value
+
+
+&gt;&gt;&gt; foo.__metaclass__.var = property(foo.getvar.im_func, foo.setvar.im_func)
+&gt;&gt;&gt; foo.var
+5
+&gt;&gt;&gt; foo.var = 3
+&gt;&gt;&gt; foo.var
+3
+</code></pre>
+
+<p>But since you're using a metaclass anyway, it will read better if you just move the classmethods in there.</p>
+
+<pre><code>&gt;&gt;&gt; class foo(object):
+    _var = 5
+    class __metaclass__(type):
+    	@property
+    	def var(cls):
+    		return cls._var
+    	@var.setter
+    	def var(cls, value):
+    		cls._var = value
+
+
+&gt;&gt;&gt; foo.var
+5
+&gt;&gt;&gt; foo.var = 3
+&gt;&gt;&gt; foo.var
+3
+</code></pre>

@@ -1,0 +1,47 @@
+Question: <p>If you are relying on an implementation of Python that has a Global Interpreter Lock (i.e. CPython) and writing multithreaded code, do you really need locks at all?</p>
+
+<p>If the GIL doesn't allow multiple instructions to be executed in parallel, wouldn't shared data be unnecessary to protect?</p>
+
+<p>sorry if this is a dumb question, but it is something I have always wondered about Python on multi-processor/core machines.  </p>
+
+<p>same thing would apply to any other language implementation that has a GIL.</p>
+
+Answer: <p>You will still need locks if you share state between threads. The GIL only protects the interpreter internally. You can still have inconsistent updates in your own code.</p>
+
+<p>For example:</p>
+
+<pre><code>#!/usr/bin/env python
+import threading
+
+shared_balance = 0
+
+class Deposit(threading.Thread):
+    def run(self):
+        for _ in xrange(1000000):
+            global shared_balance
+            balance = shared_balance
+            balance += 100
+            shared_balance = balance
+
+class Withdraw(threading.Thread):
+    def run(self):
+        for _ in xrange(1000000):
+            global shared_balance
+            balance = shared_balance
+            balance -= 100
+            shared_balance = balance
+
+threads = [Deposit(), Withdraw()]
+
+for thread in threads:
+    thread.start()
+
+for thread in threads:
+    thread.join()
+
+print shared_balance
+</code></pre>
+
+<p>Here, your code can be interrupted between reading the shared state (<code>balance = shared_balance</code>) and writing the changed result back (<code>shared_balance = balance</code>), causing a lost update. The result is a random value for the shared state.</p>
+
+<p>To make the updates consistent, run methods would need to lock the shared state around the read-modify-write sections (inside the loops) or have <a href="http://en.wikipedia.org/wiki/Software_transactional_memory">some way to detect when the shared state had changed since it was read</a>.</p>

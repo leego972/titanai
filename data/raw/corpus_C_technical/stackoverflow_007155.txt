@@ -1,0 +1,60 @@
+Question: <p>What is the idiomatic Python equivalent of this C/C++ code?</p>
+
+<pre><code>void foo()
+{
+    static int counter = 0;
+    counter++;
+    printf("counter is %d\n", counter);
+}
+</code></pre>
+
+<p>specifically, how does one implement the static member at the function level, as opposed to the class level? And does placing the function into a class change anything?</p>
+
+Answer: <p>I personally prefer the following to decorators. To each their own.</p>
+
+<pre><code>def staticize(name, factory):
+    """Makes a pseudo-static variable in calling function.
+
+    If name `name` exists in calling function, return it. 
+    Otherwise, saves return value of `factory()` in 
+    name `name` of calling function and return it.
+
+    :param name: name to use to store static object 
+    in calling function
+    :type name: String
+    :param factory: used to initialize name `name` 
+    in calling function
+    :type factory: function
+    :rtype: `type(factory())`
+
+    &gt;&gt;&gt; def steveholt(z):
+    ...     a = staticize('a', list)
+    ...     a.append(z)
+    &gt;&gt;&gt; steveholt.a
+    Traceback (most recent call last):
+    ...
+    AttributeError: 'function' object has no attribute 'a'
+    &gt;&gt;&gt; steveholt(1)
+    &gt;&gt;&gt; steveholt.a
+    [1]
+    &gt;&gt;&gt; steveholt('a')
+    &gt;&gt;&gt; steveholt.a
+    [1, 'a']
+    &gt;&gt;&gt; steveholt.a = []
+    &gt;&gt;&gt; steveholt.a
+    []
+    &gt;&gt;&gt; steveholt('zzz')
+    &gt;&gt;&gt; steveholt.a
+    ['zzz']
+
+    """
+    from inspect import stack
+    # get scope enclosing calling function
+    calling_fn_scope = stack()[2][0]
+    # get calling function
+    calling_fn_name = stack()[1][3]
+    calling_fn = calling_fn_scope.f_locals[calling_fn_name]
+    if not hasattr(calling_fn, name):
+        setattr(calling_fn, name, factory())
+    return getattr(calling_fn, name)
+</code></pre>

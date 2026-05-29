@@ -1,0 +1,141 @@
+Question: <p>Okay, this bugged me for several years, now. If you sucked in statistics and higher math at school, turn away, <em>now</em>. Too late.</p>
+
+<p>Okay. Take a deep breath. Here are the rules. Take <em>two</em> thirty sided dice (yes, <a href="http://paizo.com/store/byCompany/k/koplow/dice/d30" rel="nofollow">they do exist</a>) and roll them simultaneously.</p>
+
+<ul>
+<li>Add the two numbers</li>
+<li>If both dice show &lt;= 5 or >= 26, throw again and <em>add</em> the result to what you have</li>
+<li>If one is &lt;= 5 and the other >= 26, throw again and <em>subtract</em> the result from what 
+you have</li>
+<li>Repeat until either is > 5 and &lt; 26!</li>
+</ul>
+
+<p>If you write some code (see below), roll those dice a few million times and you count how often you receive each number as the final result, you get a curve that is pretty flat left of 1, around 45Â° degrees between 1 and 60 and flat above 60. The chance to roll 30.5 or better is greater than 50%, to roll better than 18 is 80% and to roll better than 0 is 97%.</p>
+
+<p>Now the question: Is it possible to write a program to <em>calculate</em> the <em>exact</em> value f(x), i.e. the probability to roll a certain value?</p>
+
+<p>Background: For our role playing game "Jungle of Stars" we looked for a way to keep random events in check. The rules above guarantee a much more stable outcome for something you try :)</p>
+
+<p>For the geeks around, the code in Python:</p>
+
+<pre><code>import random
+import sys
+
+def OW60 ():
+    """Do an open throw with a "60" sided dice"""
+    val = 0
+    sign = 1
+
+    while 1:
+        r1 = random.randint (1, 30)
+        r2 = random.randint (1, 30)
+
+        #print r1,r2
+        val = val + sign * (r1 + r2)
+        islow = 0
+        ishigh = 0
+        if r1 &lt;= 5:
+            islow += 1
+        elif r1 &gt;= 26:
+            ishigh += 1
+        if r2 &lt;= 5:
+            islow += 1
+        elif r2 &gt;= 26:
+            ishigh += 1
+
+        if islow == 2 or ishigh == 2:
+            sign = 1
+        elif islow == 1 and ishigh == 1:
+            sign = -1
+        else:
+            break
+
+        #print sign
+
+    #print val
+    return val
+
+result = [0] * 2000
+N = 100000
+for i in range(N):
+    r = OW60()
+    x = r+1000
+    if x &lt; 0:
+        print "Too low:",r
+    if i % 1000 == 0:
+        sys.stderr.write('%d\n' % i)
+    result[x] += 1
+
+i = 0
+while result[i] == 0:
+    i += 1
+
+j = len(result) - 1
+while result[j] == 0:
+    j -= 1
+
+pSum = 0
+# Lower Probability: The probability to throw this or less
+# Higher Probability: The probability to throw this or higher
+print "Result;Absolut Count;Probability;Lower Probability;Rel. Lower Probability;Higher Probability;Rel. Higher Probability;"
+while i &lt;= j:
+    pSum += result[i]
+    print '%d;%d;%.10f;%d;%.10f;%d;%.10f' % (i-1000, result[i], (float(result[i])/N), pSum, (float(pSum)/N), N-pSum, (float(N-pSum)/N))
+    i += 1
+</code></pre>
+
+Answer: <p>I had to first rewrite your code before I could understand it:</p>
+
+<pre><code>def OW60(sign=1):
+    r1 = random.randint (1, 30)
+    r2 = random.randint (1, 30)
+    val = sign * (r1 + r2)
+
+    islow  = (r1&lt;=5)  + (r2&lt;=5)
+    ishigh = (r1&gt;=26) + (r2&gt;=26)
+
+    if islow == 2 or ishigh == 2:
+        return val + OW60(1)
+    elif islow == 1 and ishigh == 1:
+        return val + OW60(-1)
+    else:
+        return val
+</code></pre>
+
+<p>Maybe you might find this less readable; I don't know. (Do check if it is equivalent to what you had in mind.) Also, regarding the way you use "result" in your code -- do you know of Python's <a href="http://www.diveintopython.org/getting_to_know_python/dictionaries.html" rel="nofollow">dict</a>s?</p>
+
+<p>Anyway, matters of programming style aside: Suppose F(x) is the <a href="http://en.wikipedia.org/wiki/Cumulative_distribution_function" rel="nofollow">CDF</a> of OW60(1), i.e. </p>
+
+<pre><code>F(x) = the probability that OW60(1) returns a value â¤ x.
+</code></pre>
+
+<p>Similarly let </p>
+
+<pre><code>G(x) = the probability that OW60(-1) returns a value â¤ x.
+</code></pre>
+
+<p>Then you can calculate F(x) from the definition, by summing over all (30&times;30) possible values of the result of the first throw. For instance, if the first throw is (2,3) then you'll roll again, so this term contributes (1/30)(1/30)(5+F(x-5)) to the expression for F(x). So you'll get some obscenely long expression like</p>
+
+<pre><code>F(x) = (1/900)(2+F(x-2) + 3+F(x-3) + ... + 59+F(x-59) + 60+F(x-60))
+</code></pre>
+
+<p>which is a sum over 900 terms, one for each pair (a,b) in [30]&times;[30]. The pairs (a,b) with both â¤ 5 or both â¥26 have a term a+b+F(x-a-b), the pairs with one â¤5 and one â¥26 have a term a+b+G(x-a-b), and the rest have a term like (a+b), because you don't throw again.</p>
+
+<p>Similarly you have </p>
+
+<pre><code>G(x) = (1/900)(-2+F(x-2) + (-3)+F(x-3) + ... + (-59)+F(x-59) + (-60)+F(x-60))
+</code></pre>
+
+<p>Of course, you can collect coefficients; the only F terms that occur are from F(x-60) to F(x-52) and from F(x-10) to F(x-2) (for a,bâ¥26 or bothâ¤5), and the only G terms that occur are from G(x-35) to G(x-27) (for one of a,bâ¥26 and the other â¤5), so there are fewer terms than 30 terms. In any case, defining the vector V(x) as </p>
+
+<pre><code>V(x) = [F(x-60) G(x-60) ... F(x-2) G(x-2) F(x-1) G(x-1) F(x) G(x)]
+</code></pre>
+
+<p>(say), you have (from those expressions for F and G) a relation of the form </p>
+
+<pre><code>V(x) = A*V(x-1) + B
+</code></pre>
+
+<p>for an appropriate matrix A and an appropriate vector B (which you can calculate), so starting from initial values of the form V(x) = [0 0] for x sufficiently small, you can find F(x) and G(x) for x in the range you want to arbitrarily close precision. (And your f(x), the probability of throwing x, is just F(x)-F(x-1), so that comes out as well.)</p>
+
+<p>There might be a better way. All said and done, though, why are you doing this? Whatever kind of distribution you want, there are nice and simple probability distributions, with the appropriate parameters, that have good properties (e.g. small variance, one-sided errors, whatever). There is no reason to make up your own ad-hoc procedure to generate random numbers.</p>

@@ -1,0 +1,74 @@
+Question: <p>I have unevenly distributed data(wrt date) for a few years (2003-2008). I want to query data for a given set of start and end date, grouping the data by any of the supported intervals (day, week, month, quarter, year) in PostgreSQL 8.3 (<a href="http://www.postgresql.org/docs/8.3/static/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC">http://www.postgresql.org/docs/8.3/static/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC</a>).</p>
+
+<p>The problem is that some of the queries give results continuous over the required period, 
+as this one:</p>
+
+<pre><code>select to_char(date_trunc('month',date), 'YYYY-MM-DD'),count(distinct post_id) 
+from some_table where category_id=1 and entity_id = 77  and entity2_id = 115 
+and date &lt;= '2008-12-06' and date &gt;= '2007-12-01' group by 
+date_trunc('month',date) order by date_trunc('month',date);
+          to_char   | count 
+        ------------+-------
+         2007-12-01 |    64
+         2008-01-01 |    31
+         2008-02-01 |    14
+         2008-03-01 |    21
+         2008-04-01 |    28
+         2008-05-01 |    44
+         2008-06-01 |   100
+         2008-07-01 |    72
+         2008-08-01 |    91
+         2008-09-01 |    92
+         2008-10-01 |    79
+         2008-11-01 |    65
+        (12 rows)
+</code></pre>
+
+<p>but some of them miss some intervals because there is no data present, as this one:</p>
+
+<pre><code>select to_char(date_trunc('month',date), 'YYYY-MM-DD'),count(distinct post_id) 
+from some_table where category_id=1 and entity_id = 75  and entity2_id = 115 
+and date &lt;= '2008-12-06' and date &gt;= '2007-12-01' group by 
+date_trunc('month',date) order by date_trunc('month',date);
+
+        to_char   | count 
+    ------------+-------
+
+     2007-12-01 |     2
+     2008-01-01 |     2
+     2008-03-01 |     1
+     2008-04-01 |     2
+     2008-06-01 |     1
+     2008-08-01 |     3
+     2008-10-01 |     2
+    (7 rows)
+</code></pre>
+
+<p>where the required resultset is:</p>
+
+<pre><code>  to_char   | count 
+------------+-------
+ 2007-12-01 |     2
+ 2008-01-01 |     2
+ 2008-02-01 |     0
+ 2008-03-01 |     1
+ 2008-04-01 |     2
+ 2008-05-01 |     0
+ 2008-06-01 |     1
+ 2008-07-01 |     0
+ 2008-08-01 |     3
+ 2008-09-01 |     0
+ 2008-10-01 |     2
+ 2008-11-01 |     0
+(12 rows)
+</code></pre>
+
+<p>A count of 0 for missing entries.</p>
+
+<p>I have seen earlier discussions on Stack Overflow but they don't solve my problem it seems, since my grouping period is one of (day, week, month, quarter, year) and decided on runtime by the application. So an approach like left join with a calendar table or sequence table will not help I guess.</p>
+
+<p>My current solution to this is to fill in these gaps in Python (in a Turbogears App) using the calendar module.</p>
+
+<p>Is there a better way to do this.</p>
+
+Answer: <p>You could create a temporary table at runtime and left join on that.  That seems to make the most sense.</p>

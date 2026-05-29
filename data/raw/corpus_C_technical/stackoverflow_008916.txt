@@ -1,0 +1,57 @@
+Question: <p>I am experimenting with the new multiprocessing module in Python 2.6.  I am creating several processes each with its own multiprocessor.JoinableQueue instance.  Each process spawns one or more worker threads (subclasses of threading.Thread) which share the JoinableQueue instance (passed in through each Thread's <code>__init__</code> method).  It seems to generally work but occasionally and unpredictably fails with the following error:</p>
+
+<pre><code>  File "C:\Documents and Settings\Brian\Desktop\testscript.py", line 49, in run
+    self.queue.task_done()
+  File "C:\Python26\lib\multiprocessing\queues.py", line 293, in task_done
+    raise ValueError('task_done() called too many times')
+ValueError: task_done() called too many times
+</code></pre>
+
+<p>My Queue get() and task_done() calls are right after each other so they should be equal.  Anecdotally this seems to occur only when the work done between the get() and the task_done() is VERY quick.  Inserting a small <code>time.sleep(0.01)</code> seems to alleviate the problem.</p>
+
+<p>Any ideas what is going on?  Can I use a multiprocessor Queue with threads instead of the more traditional (Queue.Queue)?</p>
+
+<p>Thanks!</p>
+
+<p>-brian</p>
+
+Answer: <p>I didn't experiment with multi-processing in 2.6 yet, but I played a lot with pyprocessing (as it was called in 2.5).</p>
+
+<p>I can see that you are looking for a number of processes with each spawning a set of threads respectively.</p>
+
+<p>Since you are using the multiprocessing module, I will suggest use multi process and not multi thread approach, you will hit less problems like deadlocks, etc.</p>
+
+<p>Create a queue object. <a href="http://pyprocessing.berlios.de/doc/queue-objects.html" rel="nofollow">http://pyprocessing.berlios.de/doc/queue-objects.html</a></p>
+
+<p>For creating a multi process environment use a pool: <a href="http://pyprocessing.berlios.de/doc/pool-objects.html" rel="nofollow">http://pyprocessing.berlios.de/doc/pool-objects.html</a> which will manage the worker processes for you. You can then apply asynchronous/synchronous to the workers and can also add a callback for each worker if required. But remember call back is a common code block and it should return immediately (as mentioned in documentation)</p>
+
+<p>Some additional info:
+If required create a manager <a href="http://pyprocessing.berlios.de/doc/manager-objects.html" rel="nofollow">http://pyprocessing.berlios.de/doc/manager-objects.html</a> to manage the the access to the queue object. You will have to make the queue object shared for this. But the advantage is that, once shared and managed you can access this shared queue all over the network by creating proxy objects. This will enable you to call methods of a centralized shared queue object as (apparently) native  methods on any network node.</p>
+
+<p><strong>here is a code example from the documentation</strong></p>
+
+<p><em>It is possible to run a manager server on one machine and have clients use it from other machines (assuming that the firewalls involved allow it).
+Running the following commands creates a server for a shared queue which remote clients can use:</em></p>
+
+<pre><code>&gt;&gt;&gt; from processing.managers import BaseManager, CreatorMethod
+&gt;&gt;&gt; import Queue
+&gt;&gt;&gt; queue = Queue.Queue()
+&gt;&gt;&gt; class QueueManager(BaseManager):
+...     get_proxy = CreatorMethod(callable=lambda:queue, typeid='get_proxy')
+...
+&gt;&gt;&gt; m = QueueManager(address=('foo.bar.org', 50000), authkey='none')
+&gt;&gt;&gt; m.serve_forever()
+</code></pre>
+
+<p><em>One client can access the server as follows:</em></p>
+
+<pre><code>&gt;&gt;&gt; from processing.managers import BaseManager, CreatorMethod
+&gt;&gt;&gt; class QueueManager(BaseManager):
+...     get_proxy = CreatorMethod(typeid='get_proxy')
+...
+&gt;&gt;&gt; m = QueueManager.from_address(address=('foo.bar.org', 50000), authkey='none')
+&gt;&gt;&gt; queue = m.get_proxy()
+&gt;&gt;&gt; queue.put('hello')
+</code></pre>
+
+<p>If you insist on safe threaded stuff, PEP371 (multiprocessing) references this <a href="http://code.google.com/p/python-safethread/" rel="nofollow">http://code.google.com/p/python-safethread/</a></p>

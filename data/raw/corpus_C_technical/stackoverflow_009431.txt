@@ -1,0 +1,111 @@
+Question: <p>What is the "cleanest" way to implement an command-line UI, similar to git's, for example:</p>
+
+<pre><code>git push origin/master
+git remote add origin git://example.com master
+</code></pre>
+
+<p>Ideally also allowing the more flexible parsing, for example,</p>
+
+<pre><code>jump_to_folder app theappname v2
+jump_to_folder app theappname source
+jump_to_folder app theappname source v2
+jump_to_folder app theappname build v1
+jump_to_folder app theappname build 1
+jump_to_folder app theappname v2 build
+</code></pre>
+
+<p><code>jump_to_folder</code> is the scripts name, <code>app</code> is the command, <code>theappname</code> is a "fixed-location" parameter, "build" and "v2" etc are arguments (For example, possible arguments would be any number/any number prefixed with a v, or build/source/tmp/config)</p>
+
+<p>I could just manually parse the arguments with a series of <code>if</code>/<code>else</code>/<code>elifs</code>, but there must be a more elegant way to do this?</p>
+
+<p>As an entirely theoretically example, I could describe the UI schema..</p>
+
+<pre><code>app:
+    fixed: application_name
+
+    optional params:
+        arg subsection:
+            "build"
+            "source"
+            "tmp"
+            "config"
+
+        arg version:
+            integer
+            "v" + integer
+</code></pre>
+
+<p>Then parse the supplied arguments though the above schema, and get a dictionary:</p>
+
+<pre><code>&gt;&gt;&gt; print schema.parse(["app", "theappname", "v1", "source"])
+{
+    "application_name": "theappname",
+    "params":{
+        "subsection": "source",
+        "version":"v1"
+    }
+}
+</code></pre>
+
+<p>Does such a system exist? If not, how would I go about implementing something along these lines?</p>
+
+Answer: <p><a href="http://docs.python.org/library/argparse.html#sub-commands">argparse</a> is perfect for this, specifically <a href="http://docs.python.org/library/argparse.html#sub-commands">"sub-commands"</a> and positional args</p>
+
+<pre><code>import argparse
+
+
+def main():
+    arger = argparse.ArgumentParser()
+
+    # Arguments for top-level, e.g "subcmds.py -v"
+    arger.add_argument("-v", "--verbose", action="count", default=0)
+
+    subparsers = arger.add_subparsers(dest="command")
+
+    # Make parser for "subcmds.py info ..."
+    info_parser = subparsers.add_parser("info")
+    info_parser.add_argument("-m", "--moo", dest="moo")
+
+    # Make parser for "subcmds.py create ..."
+    create_parser = subparsers.add_parser("create")
+    create_parser.add_argument("name")
+    create_parser.add_argument("additional", nargs="*")
+
+    # Parse
+    opts = arger.parse_args()
+
+    # Print option object for debug
+    print opts
+
+    if opts.command == "info":
+        print "Info command"
+        print "--moo was %s" % opts.moo
+
+    elif opts.command == "create":
+        print "Creating %s" % opts.name
+        print "Additional: %s" % opts.additional
+
+    else:
+        # argparse will error on unexpected commands, but
+        # in case we mistype one of the elif statements...
+        raise ValueError("Unhandled command %s" % opts.command)
+
+
+if __name__ == '__main__':
+    main()
+</code></pre>
+
+<p>This can be used like so:</p>
+
+<pre><code>$ python subcmds.py create myapp v1 blah
+Namespace(additional=['v1', 'blah'], command='create', name='myapp', verbose=0)
+Creating myapp
+Additional: ['v1', 'blah']
+$ python subcmds.py info --moo
+usage: subcmds.py info [-h] [-m MOO]
+subcmds.py info: error: argument -m/--moo: expected one argument
+$ python subcmds.py info --moo 1
+Namespace(command='info', moo='1', verbose=0)
+Info command
+--moo was 1
+</code></pre>

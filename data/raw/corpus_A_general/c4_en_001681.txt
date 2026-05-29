@@ -1,0 +1,15 @@
+yaxunl marked 4 inline comments as done.
++/// \brief Defines the synch scope ABI for OpenCL.
+> > > Please correct me if I'm wrong, but I believe you don't get to define the "ABI for OpenCL" any more than I get to define the "ABI for C".  You're defining the ABI for your specific OpenCL implementation, but Clang might reasonably support other implementations with their own ABIs.  So this name is inappropriate.
+> > > Now, if I understand how SPIR works, SPIR does require some sort of stable lowering of these atomic operations in order to ensure that the resulting LLVM IR can be ingested into an arbitrary implementation.  (Ot at least that was true prior to SPIR V?)  Therefore, SPIR needs to specify a lowering for these atomic operations, and that probably includes ABI values for specific sync-scopes.  But the appropriate name for that would be the "SPIR ABI", not the "OpenCL ABI".  And, of course, you would need to be sure that you're implementing the lowering that SPIR actually wants.
+> > The ABI is not intended for a specific OpenCL implementation, but for extending to other languages. For example, we have a downstream C++ based language called HCC, which may support atomic scope with an ABI different than OpenCL atomic scope ABI.
+> By "ABI" you mean that it might present a different model of synchronization scopes to the source language?  Okay, that's great, and it explains a lot of things that were very murky about some of our previous conversations.
+>   - They don't need to be in the __builtin_opencl namespace.
+>   - They *do* need to be enabled only in language modes with well-defined sync-scope models, which for now just means OpenCL.
+>   - The language mode's sync-scope model should determine everything about the scope argument, including its type.  Sema-level validation requires first determining the language's sync-scope model.
+>   - There is no meaningful way to "default" the scope argument on the non-scoped builtins the way that we are now.  Instead, the scope argument should only exist for the scoped builtins.
+> Alternatively, if you potentially want the opencl-model builtins to be usable from non-opencl languages, the right design is for HCC to use its own set of builtins with their own type-checking rules.
+> In either case, I don't think it's a good idea to call this "ABI", which is associated too strongly with target-lowering concepts.  You're really talking about a source-language concept.
+We could introduce __builtin_hcc_atomic_* in downstream HCC.
+We need a generic approach to represent atomic scope values for different languages and associated semantic/codegen needs, and AtomicScopeABI seems generic enough to serve the purpose. It has interface for semantic checking (isValid), and the interface to map to LLVM sync scope for both constant and variable arguments. If the name is not proper, we could rename it to just `AtomicScope`.
+I can remove the default atomic scope for atomic expressions without scope originally. For them I just emit LLVM atomic instructions with default LLVM synch scope.

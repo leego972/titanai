@@ -1,0 +1,28 @@
+Question: <p>I'm interested in compressing data using Python's <code>gzip</code> module.  It happens that I want the compressed output to be deterministic, because that's often a really convenient property for things to have in general -- if some non-gzip-aware process is going to be looking for changes in the output, say, or if the output is going to be cryptographically signed.</p>
+
+<p>Unfortunately, the output is different every time.  As far as I can tell, the only reason for this is the timestamp field in the gzip header, which the Python module always populates with the current time.  I don't think you're actually allowed to have a gzip stream without a timestamp in it, which is too bad.</p>
+
+<p>In any case, there doesn't seem to be a way for the caller of Python's <code>gzip</code> module to supply the correct modification time of the underlying data.  (The actual <code>gzip</code> program seems to use the timestamp of the input file when possible.)  I imagine this is because basically the only thing that ever cares about the timestamp is the <code>gunzip</code> command when writing to a file -- and, now, me, because I want deterministic output.  Is that so much to ask?</p>
+
+<p>Has anyone else encountered this problem?</p>
+
+<p>What's the least terrible way to <code>gzip</code> some data with an arbitrary timestamp from Python?</p>
+
+Answer: <p>In lib/gzip.py, we find the method that builds the header, including the part that does indeed contain a timestamp. In Python 2.5, this begins on line 143:</p>
+
+<pre><code>def _write_gzip_header(self):
+    self.fileobj.write('\037\213')             # magic header
+    self.fileobj.write('\010')                 # compression method
+    fname = self.filename[:-3]
+    flags = 0
+    if fname:
+        flags = FNAME
+    self.fileobj.write(chr(flags))
+    write32u(self.fileobj, long(time.time())) # The current time!
+    self.fileobj.write('\002')
+    self.fileobj.write('\377')
+    if fname:
+        self.fileobj.write(fname + '\000')
+</code></pre>
+
+<p>As you can see, it uses time.time() to fetch the current time. According to the online module docs, time.time will "return the time as a floating point number expressed in seconds since the epoch, in UTC." So, if you change this to a floating-point constant of your choosing, you can always have the same headers written out. I can't see a better way to do this unless you want to hack the library some more to accept an optional time param that you use while defaulting to time.time() when it's not specified, in which case, I'm sure they'd love it if you submitted a patch!</p>

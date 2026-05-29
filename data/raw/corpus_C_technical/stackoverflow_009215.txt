@@ -1,0 +1,67 @@
+Question: <p>I just got done working through the Django tutorials for the second time, and am understanding things much more clearly now. However, I'm still unclear how apps inside a site interact with one another.</p>
+
+<p>For example, lets say I'm writing a blog application (a rather popular activity, apparently). Blog posts and comments tend to go together, and yet they are distinct enough that they should be built into separate apps, as is the general philosophy of Djano development.</p>
+
+<p>Consider the following example. In reality I would not actually write the comment app myself, as good code for that already exists on the web, but this is for demonstration/practice purposes:</p>
+
+<p><strong>mysite/blog/models.py</strong></p>
+
+<pre><code>from django.db import models
+
+class post(models.Model):
+    title = models.CharField(max_length=200)
+    author = models.CharField(max_length=200)
+    content = models.TextField()
+</code></pre>
+
+<p><strong>mysite/comments/models.py</strong></p>
+
+<pre><code>from django.db import models
+from mysite.blog.models import post
+
+class comment(models.Model):
+    id = models.AutoField()
+    post = models.ForeignKey(post)
+    author = models.CharField(max_length=200)
+    text = models.TextField()
+</code></pre>
+
+<p>Is what I wrote above, importing a model from another app and setting it as a foreign key, how Django apps interact? Or is there a different/better method for the apps that comprise a site to interact?</p>
+
+<p><strong>Update</strong><br>
+Per the recommendation in one response, I'm reading the documentation for contrib.contenttypes. If I'm reading this correctly, I could rewrite my example comment app like this:  </p>
+
+<pre><code>from django.db import models  
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contentypes import generic
+
+class comment(models.Model):  
+    id = models.AutoField()  
+    author = models.CharField(max_length=200)  
+    text = models.TextField()  
+    content_type = models.ForeignKey(ContentType)  
+    content_object = generic.GenericForeignKey(content_type, id)  
+</code></pre>
+
+<p>Would this be correct?</p>
+
+Answer: <p>"Is what I wrote above, importing a model from another app and setting it as a foreign key, how Django apps interact?"</p>
+
+<p>Yep.  Works for me.</p>
+
+<p>We have about 10 applications that borrow back and forth among themselves.</p>
+
+<p>This leads to a kind of dependency in our unit test script.</p>
+
+<p>It looks like this.</p>
+
+<ul>
+<li><p>"ownership". We have a simple data ownership application that defines some core ownership concepts that other applications depend on.  There are a few simple tables here.</p></li>
+<li><p>"thing". [Not the real name].  Our thing application has data elements owned by different user groups.  There are actually several complex tables the model for this app.  It depends on "ownership".</p></li>
+<li><p>"tables". [Not the real name].  Some of our users create fairly complex off-line models (probably with spreadsheets) and upload the results of that modeling in "tables".  This has a cluster of fairly complex tables.  It depends on "ownership".</p></li>
+<li><p>"result".  [Not the real name].  Our results are based on things which have owners.  The results are based on things and tables, and are responses to customer requests.  This isn't too complex, perhaps only two or three core tables.  It depends on "things" and "table".  No, it doesn't completely stand-alone.  However, it is subject to more change than the other things on which it depends.  That's why it's separate.</p></li>
+<li><p>"processing".  We schedule and monitor big batch jobs.  This is in this application.  It's really generic, and can be used in a variety of ways.  It completely stands alone.</p></li>
+<li><p>"welcome".  We have a "welcome" app that presents a bunch of mostly static pages.  This doesn't have too many tables.  But it's on it's second incarnation because the first was too complex.  It completely stands alone.</p></li>
+</ul>
+
+<p>The only relationship among the dependent apps is some table names.  As long as we preserve those tables (and their keys) we can rearrange other apps as we see fit.</p>

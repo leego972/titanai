@@ -1,0 +1,131 @@
+# Expectation-Maximization Algorithm for Bernoulli Mixture Models (Tutorial)
+
+Even though the title is quite a mouthful, this post is about two really cool ideas:
+
+1. A solution to the "chicken-and-egg" problem (known as the Expectation-Maximization method, described by A. Dempster, N. Laird and D. Rubin in 1977), and
+2. An application of this solution to automatic image clustering by similarity, using Bernoulli Mixture Models.
+
+For the curious, an implementation of the automatic image clustering is shown in the video below. The source code (C#, Windows x86/x64) is also available for download!
+
+Automatic clustering of handwritten digits from MNIST database using Expectation-Maximization algorithm
+
+While automatic image clustering nicely illustrates the E-M algorithm, E-M has been successfully applied in a number of other areas: I have seen it being used for word alignment in automated machine translation, valuation of derivatives in financial models, and gene expression clustering/motif finding in bioinformatics.
+
+As a side note, the notation used in this tutorial closely matches the one used in Christopher M. Bishop's "Pattern Recognition and Machine Learning". This should hopefully encourage you to check out his great book for a broader understanding of E-M, mixture models or machine learning in general.
+
+Alright, let's dive in!
+
+#### 1. Expectation-Maximization Algorithm
+
+Imagine the following situation. You observe some data set $\mathbf{X}$ (e.g. a bunch of images). You hypothesize that these images are of $K$ different objects... but you don't know which images represent which objects.
+
+Let $\mathbf{Z}$ be a set of latent (hidden) variables, which tell precisely that: which images represent which objects.
+
+Clearly, if you knew $\mathbf{Z}$, you could group images into the clusters (where each cluster represents an object), and vice versa, if you knew the groupings you could deduce $\mathbf{Z}$. A classical "chicken-and-egg" problem, and a perfect target for an Expectation-Maximization algorithm.
+
+Here's a general idea of how E-M algorithm tackles it. First of all, all images are assigned to clusters arbitrarily. Then we use this assignment to modify the parameters of the clusters (e.g. we change what object is represented by that cluster) to maximize the clusters' ability to explain the data; after which we re-assign all images to the expected most-likely clusters. Wash, rinse, repeat, until the assignment explains the data well-enough (i.e. images from the same clusters are similar enough).
+
+(Notice the words in bold in the previous paragraph: this is where the expectation and maximization stages in the E-M algorithm come from.)
+
+To formalize (and generalize) this a bit further, say that you have a set of model parameters $\mathbf{\theta}$ (in the example above, some sort of cluster descriptions).
+
+To solve the problem of cluster assignments we effectively need to find model parameters $\mathbf{\theta'}$ that maximize the likelihood of the observed data $\mathbf{X}$, or, equivalently, the model parameters that maximize the log likelihod
+
+Using some simple algebra we can show that for any latent variable distribution $q(\mathbf{Z})$, the log likelihood of the data can be decomposed as
+\begin{align}
+\ln \,\text{Pr}(\mathbf{X} | \theta) = \mathcal{L}(q, \theta) + \text{KL}(q || p), \label{eq:logLikelihoodDecomp}
+\end{align}
+where $\text{KL}(q || p)$ is the Kullback-Leibler divergence between $q(\mathbf{Z})$ and the posterior distribution $\,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta)$, and
+\begin{align}
+\mathcal{L}(q, \theta) := \sum_{\mathbf{Z}} q(\mathbf{Z}) \left( \mathcal{L}(\theta) - \ln q(\mathbf{Z}) \right)
+\end{align}
+with $\mathcal{L}(\theta) := \ln \,\text{Pr}(\mathbf{X}, \mathbf{Z}| \mathbf{\theta})$ being the "complete-data" log likelihood (i.e. log likelihood of both observed and latent data).
+
+To understand what the E-M algorithm does in the expectation (E) step, observe that $\text{KL}(q || p) \geq 0$ for any $q(\mathbf{Z})$ and hence $\mathcal{L}(q, \theta)$ is a lower bound on $\ln \,\text{Pr}(\mathbf{X} | \theta)$.
+
+Then, in the E step, the gap between the $\mathcal{L}(q, \theta)$ and $\ln \,\text{Pr}(\mathbf{X} | \theta)$ is minimized by minimizing the Kullback-Leibler divergence $\text{KL}(q || p)$ with respect to $q(\mathbf{Z})$ (while keeping the parameters $\theta$ fixed).
+
+Since $\text{KL}(q || p)$ is minimized at $\text{KL}(q || p) = 0$ when $q(\mathbf{Z}) = \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta)$, at the E step $q(\mathbf{Z})$ is set to the conditional distribution $\,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta)$.
+
+To maximize the model parameters in the M step, the lower bound $\mathcal{L}(q, \theta)$ is maximized with respect to the parameters $\theta$ (while keeping $q(\mathbf{Z}) = \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta)$ fixed; notice that $\theta$ in this equation corresponds to the old set of parameters, hence to avoid confusion let $q(\mathbf{Z}) = \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old})$).
+
+The function $\mathcal{L}(q, \theta)$ that is being maximized w.r.t. $\theta$ at the M step can be re-written as
+\begin{align*}
+\theta^\text{new} &= \underset{\mathbf{\theta}}{\text{arg max }} \left. \mathcal{L}(q, \theta) \right|_{q(\mathbf{Z}) = \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old})} \\
+&= \underset{\mathbf{\theta}}{\text{arg max }} \left. \sum_{\mathbf{Z}} q(\mathbf{Z}) \left( \mathcal{L}(\theta) - \ln q(\mathbf{Z}) \right) \right|_{q(\mathbf{Z}) = \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old})} \\
+&= \underset{\mathbf{\theta}}{\text{arg max }} \sum_{\mathbf{Z}} \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old}) \left( \mathcal{L}(\theta) - \ln \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old}) \right) \\
+&= \underset{\mathbf{\theta}}{\text{arg max }} \mathbb{E}_{\mathbf{Z} | \mathbf{X}, \theta^\text{old}} \left[ \mathcal{L}(\theta) \right] - \sum_{\mathbf{Z}} \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old}) \ln \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \theta^\text{old}) \\
+&= \underset{\mathbf{\theta}}{\text{arg max }} \mathbb{E}_{\mathbf{Z} | \mathbf{X}, \theta^\text{old}} \left[ \mathcal{L}(\theta) \right] - (C \in \mathbb{R}) \\
+&= \underset{\mathbf{\theta}}{\text{arg max }} \mathbb{E}_{\mathbf{Z} | \mathbf{X}, \theta^\text{old}} \left[ \mathcal{L}(\theta) \right],
+\end{align*}
+
+i.e. in the M step the expectation of the joint log likelihood of the complete data is maximized with respect to the parameters $\theta$.
+
+So, just to summarize,
+
+• Expectation step: $q^{t + 1}(\mathbf{Z}) \leftarrow \,\text{Pr}(\mathbf{Z} | \mathbf{X}, \mathbf{\theta}^t)$
+• Maximization step: $\mathbf{\theta}^{t + 1} \leftarrow \underset{\mathbf{\theta}}{\text{arg max }} \mathbb{E}_{\mathbf{Z} | \mathbf{X}, \theta^\text{t}} \left[ \mathcal{L}(\theta) \right]$ (where superscript $\mathbf{\theta}^t$ indicates the value of parameter $\mathbf{\theta}$ at time $t$).
+
+Phew. Let's go to the image clustering example, and see how all of this actually works. Continue reading
+
+# Backpropagation Tutorial
+
+The PhD thesis of Paul J. Werbos at Harvard in 1974 described backpropagation as a method of teaching feed-forward artificial neural networks (ANNs). In the words of Wikipedia, it lead to a "rennaisance" in the ANN research in 1980s.
+
+As we will see later, it is an extremely straightforward technique, yet most of the tutorials online seem to skip a fair amount of details. Here's a simple (yet still thorough and mathematical) tutorial of how backpropagation works from the ground-up; together with a couple of example applets. Feel free to play with them (and watch the videos) to get a better understanding of the methods described below!
+
+Training a single perceptron
+
+Training a multilayer neural network
+
+##### 1. Background
+
+To start with, imagine that you have gathered some empirical data relevant to the situation that you are trying to predict - be it fluctuations in the stock market, chances that a tumour is benign, likelihood that the picture that you are seeing is a face or (like in the applets above) the coordinates of red and blue points.
+
+We will call this data training examples and we will describe $i$th training example as a tuple $(\vec{x_i}, y_i)$, where $\vec{x_i} \in \mathbb{R}^n$ is a vector of inputs and $y_i \in \mathbb{R}$ is the observed output.
+
+Ideally, our neural network should output $y_i$ when given $\vec{x_i}$ as an input. In case that does not always happen, let's define the error measure as a simple squared distance between the actual observed output and the prediction of the neural network: $E := \sum_i (h(\vec{x_i}) - y_i)^2$, where $h(\vec{x_i})$ is the output of the network.
+
+#### 2. Perceptrons (building-blocks)
+
+The simplest classifiers out of which we will build our neural network are perceptrons (fancy name thanks to Frank Rosenblatt). In reality, a perceptron is a plain-vanilla linear classifier which takes a number of inputs $a_1, ..., a_n$, scales them using some weights $w_1, ..., w_n$, adds them all up (together with some bias $b$) and feeds everything through an activation function $\sigma \in \mathbb{R} \rightarrow \mathbb{R}$.
+
+A picture is worth a thousand equations:
+
+Perceptron (linear classifier)
+
+To slightly simplify the equations, define $w_0 := b$ and $a_0 := 1$. Then the behaviour of the perceptron can be described as $\sigma(\vec{a} \cdot \vec{w})$, where $\vec{a} := (a_0, a_1, ..., a_n)$ and $\vec{w} := (w_0, w_1, ..., w_n)$.
+
+To complete our definition, here are a few examples of typical activation functions:
+
+• sigmoid: $\sigma(x) = \frac{1}{1 + \exp(-x)}$,
+• hyperbolic tangent: $\sigma(x) = \tanh(x)$,
+• plain linear $\sigma(x) = x$ and so on.
+
+Now we can finally start building neural networks. Continue reading
+
+# Eigenfaces Tutorial
+
+The main purpose behind writing this tutorial was to provide a more detailed set of instructions for someone who is trying to implement an eigenface based face detection or recognition systems. It is assumed that the reader is familiar (at least to some extent) with the eigenface technique as described in the original M. Turk and A. Pentland papers (see "References" for more details).
+
+#### 1. Introduction
+
+The idea behind eigenfaces is similar (to a certain extent) to the one behind the periodic signal representation as a sum of simple oscillating functions in a Fourier decomposition. The technique described in this tutorial, as well as in the original papers, also aims to represent a face as a linear composition of the base images (called the eigenfaces).
+
+The recognition/detection process consists of initialization, during which the eigenface basis is established and face classification, during which a new image is projected onto the "face space" and the resulting image is categorized by the weight patterns as a known-face, an unknown-face or a non-face image.
+
+#### 2. Demonstration
+
+To download the software shown in video for 32-bit x86 platform, click here. It was compiled using Microsoft Visual C++ 2008 and uses GSL for Windows.
+
+#### 3. Establishing the Eigenface Basis
+
+First of all, we have to obtain a training set of $M$ grayscale face images $I_1, I_2, ..., I_M$. They should be:
+
+1. face-wise aligned, with eyes in the same level and faces of the same scale,
+2. normalized so that every pixel has a value between 0 and 255 (i.e. one byte per pixel encoding), and
+3. of the same $N \times N$ size.
+
+So just capturing everything formally, we want to obtain a set $\{ I_1, I_2, ..., I_M \}$, where \begin{align} I_k = \begin{bmatrix} p_{1,1}^k & p_{1,2}^k & ... & p_{1,N}^k \\ p_{2,1}^k & p_{2,2}^k & ... & p_{2,N}^k \\ \vdots \\ p_{N,1}^k & p_{N,2}^k & ... & p_{N,N}^k \end{bmatrix}_{N \times N} \end{align} and $0 \leq p_{i,j}^k \leq 255.$
+
+Once we have that, we should change the representation of a face image $I_k$ from a $N \times N$ matrix, to a $\Gamma_k$ point in $N^2$-dimensional space. Now here is how we do it: we concatenate all the rows of the matrix $I_k$ into one big vector of dimension $N^2$. Can it get any more simpler than that? Continue reading

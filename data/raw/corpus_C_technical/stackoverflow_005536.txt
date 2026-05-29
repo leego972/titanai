@@ -1,0 +1,36 @@
+Question: <p>I have a <a href="http://en.wikipedia.org/wiki/Bluehost">Bluehost</a> account where I can run Python scripts as CGI. I guess it's the simplest CGI, because to run I have to define the following in <code>.htaccess</code>:</p>
+
+<pre><code>Options +ExecCGI
+AddType text/html py
+AddHandler cgi-script .py
+</code></pre>
+
+<p>Now, whenever I look up web programming with Python, I hear a lot about WSGI and how most frameworks use it. But I just don't understand how it all fits together, especially when my web server is given (Apache running at a host's machine) and not something I can really play with (except defining <code>.htaccess</code> commands).</p>
+
+<p>How are <a href="http://en.wikipedia.org/wiki/Web_Server_Gateway_Interface">WSGI</a>, CGI, and the frameworks all connected? What do I need to know, install, and do if I want to run a web framework (say <a href="http://webpy.org/">web.py</a> or <a href="http://en.wikipedia.org/wiki/CherryPy">CherryPy</a>) on my basic CGI configuration? How to install WSGI support?</p>
+
+Answer: <p>I think <a href="http://stackoverflow.com/questions/219110/how-python-web-frameworks-wsgi-and-cgi-fit-together/219124#219124">Florian's answer</a> answers the part of your question about "what is WSGI", especially if you read <a href="http://www.python.org/dev/peps/pep-0333">the PEP</a>.</p>
+
+<p>As for the questions you pose towards the end:</p>
+
+<p>WSGI, CGI, FastCGI etc. are all protocols for a web server to <em>run code</em>, and deliver the dynamic content that is produced. Compare this to static web serving, where a plain HTML file is basically delivered as is to the client.</p>
+
+<p><strong>CGI, FastCGI and SCGI are language agnostic.</strong> You can write CGI scripts in Perl, Python, C, bash, whatever. CGI defines <em>which</em> executable will be called, based on the URL, and <em>how</em> it will be called: the arguments and environment. It also defines how the return value should be passed back to the web server once your executable is finished. The variations are basically optimisations to be able to handle more requests, reduce latency and so on; the basic concept is the same.</p>
+
+<p><strong>WSGI is Python only.</strong> Rather than a language agnostic protocol, a standard function signature is defined:</p>
+
+<pre><code>def simple_app(environ, start_response):
+    """Simplest possible application object"""
+    status = '200 OK'
+    response_headers = [('Content-type','text/plain')]
+    start_response(status, response_headers)
+    return ['Hello world!\n']
+</code></pre>
+
+<p>That is a complete (if limited) WSGI application. A web server with WSGI support (such as Apache with mod_wsgi) can invoke this function whenever a request arrives.</p>
+
+<p>The reason this is so great is that we can avoid the messy step of converting from a HTTP GET/POST to CGI to Python, and back again on the way out. It's a much more direct, clean and efficient linkage.</p>
+
+<p>It also makes it much easier to have long-running frameworks running behind web servers, if all that needs to be done for a request is a function call. With plain CGI, you'd have to <a href="http://tools.cherrypy.org/wiki/RunAsCGI">start your whole framework up</a> for each individual request.</p>
+
+<p>To have WSGI support, you'll need to have installed a WSGI module (like <a href="http://code.google.com/p/modwsgi/">mod_wsgi</a>), or use a web server with WSGI baked in (like <a href="http://tools.cherrypy.org/">CherryPy</a>). If neither of those are possible, you <em>could</em> use the CGI-WSGI bridge given in the PEP.</p>

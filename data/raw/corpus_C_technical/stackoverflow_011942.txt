@@ -1,0 +1,91 @@
+Question: <p>If I have this string:</p>
+
+<blockquote>
+  <p>2+24*48/32</p>
+</blockquote>
+
+<p>what is the most efficient approach for creating this list:</p>
+
+<blockquote>
+  <p>['2', '+', '24', '*', '48', '/', '32']</p>
+</blockquote>
+
+Answer: <p>This looks like a parsing problem, and thus I am compelled to present a solution based on parsing techniques.</p>
+
+<p>While it may seem that you want to 'split' this string, I think what you actually want to do is 'tokenize' it. Tokenization or lexxing is the compilation step before parsing. I have amended my original example in an edit to implement a proper recursive decent parser here. This is the easiest way to implement a parser by hand.</p>
+
+<pre><code>import re
+
+patterns = [
+    ('number', re.compile('\d+')),
+    ('*', re.compile(r'\*')),
+    ('/', re.compile(r'\/')),
+    ('+', re.compile(r'\+')),
+    ('-', re.compile(r'\-')),
+]
+whitespace = re.compile('\W+')
+
+def tokenize(string):
+    while string:
+
+        # strip off whitespace
+        m = whitespace.match(string)
+        if m:
+            string = string[m.end():]
+
+        for tokentype, pattern in patterns:
+            m = pattern.match(string)
+            if m:
+                yield tokentype, m.group(0)
+                string = string[m.end():]
+
+def parseNumber(tokens):
+    tokentype, literal = tokens.pop(0)
+    assert tokentype == 'number'
+    return int(literal)
+
+def parseMultiplication(tokens):
+    product = parseNumber(tokens)
+    while tokens and tokens[0][0] in ('*', '/'):
+        tokentype, literal = tokens.pop(0)
+        if tokentype == '*':
+            product *= parseNumber(tokens)
+        elif tokentype == '/':
+            product /= parseNumber(tokens)
+        else:
+            raise ValueError("Parse Error, unexpected %s %s" % (tokentype, literal))
+
+    return product
+
+def parseAddition(tokens):
+    total = parseMultiplication(tokens)
+    while tokens and tokens[0][0] in ('+', '-'):
+        tokentype, literal = tokens.pop(0)
+        if tokentype == '+':
+            total += parseMultiplication(tokens)
+        elif tokentype == '-':
+            total -= parseMultiplication(tokens)
+        else:
+            raise ValueError("Parse Error, unexpected %s %s" % (tokentype, literal))
+
+    return total
+
+def parse(tokens):
+    tokenlist = list(tokens)
+    returnvalue = parseAddition(tokenlist)
+    if tokenlist:
+        print 'Unconsumed data', tokenlist
+    return returnvalue
+
+def main():
+    string = '2+24*48/32'
+    for tokentype, literal in tokenize(string):
+        print tokentype, literal
+
+    print parse(tokenize(string))
+
+if __name__ == '__main__':
+    main()
+</code></pre>
+
+<p>Implementation of handling of brackets is left as an exercise for the reader. This example will correctly do multiplication before addition.</p>

@@ -1,0 +1,111 @@
+# Connecting to an FTPS Server with SSL Session Reuse in Java 7 and 8
+
+“Good programmers write good code… Great programmers reuse great code.”  Or so I told myself as I snagged an Apache Commons class to connect to a new vendor’s FTPS server.  Several hours of debugging later, however, I realized to my dismay that the omnipotent Apache Commons did not support a major security feature required by most modern FTPS servers.  This post outlines my process for discovering the flaw and the steps I took to engineer a reliable patch; if, however, you’ve been desperately Googling for solutions to “SSL session reuse required” and are on your last straw, you can jump ahead to the solution here.
+
+Although we may not always like to admit it, no tech company is an island: we often find ourselves reliant on third party vendors for applications from marketing to compliance, and we need secure methods for transferring data between ourselves and these vendors. Here at Wealthfront, we like to automate this process as much as possible, so we set up periodic jobs that scrape, push and pull our data as needed (see 3 Ways to Integrate Third-Party Metrics into Your Data Platform).
+
+One vendor we began working with only supports data transfer over FTPS (no, not SFTP), a method we had not used in our data platform previously; so I set about building some simple infrastructure to programmatically connect to an FTPS server and upload or download files. With the Apache Commons class straight out of the box, I tried the following (where client is an FTPSClient, and 21 is the default FTPS server’s command port):
+
+client.connect(host, 21);
+client.listFiles(DATA_FOLDER);
+
+Upon listing files in the DATA_FOLDER, I received the following from the server:
+
+PORT xxx,…,xxx
+500 Illegal PORT command.
+
+(you can print the server’s response with FTPSClient.addProtocolCommandListener(new PrintCommandListener(System.out)))
+
+I quickly found that the above response is indicative of an active FTP session, in which the client specifies a data port for the server to initiate a data connection to. Our vendor’s FTPS server, however, was configured for passive mode, in which the server specifies a data port for the client to connect to (in order to avoid a client’s firewall rejecting the server’s attempt to connect; see this post for further discussion on active vs. passive FTP). One can specify passive mode with FTPSClient.enterLocalPassiveMode().
+
+In my next attempt to list files, I then received the following from the server:
+
+522 Data connections must be encrypted.
+
+This simply indicates that I needed to specify a private session with the PROT P (for “private”) command; however, from the original spec on FTP over TLS (p. 9-10): “the PROT command MUST be preceded by a PBSZ command… For FTP-TLS… the PBSZ command MUST still be issued, but must have a parameter of ‘0’ to indicate that no buffering is taking place and the data connection should not be encapsulated.”
+
+So at this point my code contained the following series of commands:
+
+client.connect(host, 21);
+client.execPBSZ(0);
+client.execPROT("P");
+client.enterLocalPassiveMode();
+client.listFiles(DATA_FOLDER);
+
+Here’s where I hit my first non-trivial issue:
+
+522 SSL connection failed; session reuse required: see require_ssl_reuse option in vsftpd.conf man page
+
+So it appears the vendor uses vsftpd to run their server, and after some research I discovered vsftpd (and most other FTPS servers) requires SSL session reuse between the control and data connections as a security measure: essentially, the server requires that the SSL session used for data transfer is the same as that used for the connection to the command port (port 21). This ensures that the party that initially authenticated is the same as the party sending or retrieving data, thereby preventing someone from hijacking a data connection after authentication in a classic man-in-the-middle attack. You can find the original blog post on the vsftpd patch here.
+
+Unfortunately the Apache Commons FTPSClient does not support this SSL session reuse behavior; in fact, there’s an open Apache NET Jira ticket to fix this exact issue. While that ticket remains open as of this writing, in the meantime, some folks went ahead and refactored the code to allow one to override a _prepareDataSocket_ method to hack the session reuse oneself (resolved Jira here). It appears that’s exactly what David Kocher over at Cyberduck has done in this revision to the open-source FTPS client. The Java Secure Socket Extension (JSSE) code is smart enough to reuse SSL sessions for the same host and port, but since the data port is different from the control port, one needs to artificially store the control session into the JSSE cache that is checked before generating a new SSL session. I simplified the Cyberduck code to remove any references to their context and created my own SSLSessionReuseFTPSClient:
+
+Briefly walking through the code:
+
+1. _prepareDataSocket_ is called in FTPSClient._openDataConnection_ after calling the superclass’s method (FTPClient._openDataConnection_):
+protected Socket _openDataConnection_(String command, String arg) throws IOException {
+Socket socket = super._openDataConnection_(command, arg);
+this._prepareDataSocket_(socket);
+...
+}
+2. On line 21 (in v1_SSLSessionReuseFTPSClient.java) I retrieve the session associated with the socket passed in to _prepareDataSocket_; this is still the control session.
+3. Next I retrieve the SSLSessionContext associated with this control session (line 22). This context contains the session cache that will be checked before generating a new SSL session; however the cache is a private field in SSLSessionContextImpl, so I need to use reflection to access it (note: this is bad practice and should only be used as a last resort hack)
+4. After retrieving the session cache’s put method (line 27), I can finally store our control session into the cache using the data socket’s host name and port as the key (lines 29-30 generate this “name:port” key; line 31 stores the control session into the cache with this key).
+
+Using this v1_SSLSessionReuseFTPSClient, and the same connection code above, I was able to successfully retrieve and upload files to our vendor’s FTPS server… in Java 7. Unfortunately for me, the very next day we upgraded our data platform to Java 8 and to my dismay I once again saw:
+
+522 SSL connection failed; session reuse required: see require_ssl_reuse option in vsftpd.conf man page
+
+To determine the discrepancy between the two JREs (1.7.0 and 1.8.0), I used a debugger on my connection code with each JRE to see differences in how the session cache is handled. From the  getKickstartMessage() method in the ClientHandshaker class (sun.security.ssl):
+
+//
+// Try to resume an existing session.  This might be mandatory,
+// given certain API options.
+//
+session = ((SSLSessionContextImpl)sslContext
+.engineGetClientSessionContext())
+.get(getHostSE(), getPortSE());
+
+The method engineGetClientSessionContext() returns an SSLSessionContext containing the private session cache; SSLSessionContextImpl.get concatenates its first and second arguments with a colon, then calls get on its private session cache with this concatenated key. The method getHostSE() is defined in the Handshaker class and calls getHost() in SSLSocketImpl. Here is where one can easily see the discrepancy between the two JREs:
+
+JRE 1.7.0
+
+synchronized String getHost() {
+// Note that the host may be null or empty for localhost.
+if (host == null || host.length() == 0) {
+}
+return host;
+}
+
+JRE 1.8.0
+
+synchronized String getHost() {
+// Note that the host may be null or empty for localhost.
+if (host == null || host.length() == 0) {
+if (!trustNameService) {
+// If the local name service is not trustworthy, reverse host
+// name resolution should not be performed for endpoint
+// identification.  Use the application original specified
+} else {
+}
+}
+return host;
+}
+
+The boolean trustNameService is defined statically and defaults to false:
+
+* Is the local name service trustworthy?
+*
+* If the local name service is not trustworthy, reverse host name
+* resolution should not be performed for endpoint identification.
+*/
+static final boolean trustNameService = Debug.getBooleanProperty("jdk.tls.trustNameService", false);
+
+So in 1.7.0, the String returned by getHost() was the host name, something like “ec2-…compute.amazonaws.com”. In 1.8.0, however, the reverse host name resolution is prevented by default (beginning with Update 51), and getOriginalHostname returned the host ip, something like “123.45.67.89”. The problem with my code adapted from Cyberduck is that I always stored into the cache using host name as the first part of the key:
+
+final String key = String.format("%s:%s", socket.getInetAddress().getHostName(),
+String.valueOf(socket.getPort())).toLowerCase(Locale.ROOT);
+
+Solution
+
+One can make the code version-independent by calling the same getHost() method when storing into the session cache. Unfortunately this method is package-private, so I once again needed to use reflection to access it.  The final code for my SSLSessionReuseFTPSClient is below:

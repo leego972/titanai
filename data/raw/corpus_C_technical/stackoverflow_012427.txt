@@ -1,0 +1,44 @@
+Question: <p>In my app i need to save changed values (old and new) when model gets saved. Any examples or working code?</p>
+
+<p>I need this for premoderation of content. For example, if user changes something in model, then administrator can see all changes in separate table and then decide to apply them or not.</p>
+
+Answer: <p>An updated solution with m2m support (using updated <a href="https://github.com/romgar/django-dirtyfields" rel="nofollow">dirtyfields</a> and new <a href="https://docs.djangoproject.com/en/1.9/ref/models/meta/" rel="nofollow">_meta API</a> and some bug fixes), based on @Trey and @Tony's above. This has passed some basic light testing for me.</p>
+
+<pre><code>from dirtyfields import DirtyFieldsMixin
+class M2MDirtyFieldsMixin(DirtyFieldsMixin):
+    def __init__(self, *args, **kwargs):
+        super(M2MDirtyFieldsMixin, self).__init__(*args, **kwargs)
+        post_save.connect(
+            reset_state, sender=self.__class__,
+            dispatch_uid='{name}-DirtyFieldsMixin-sweeper'.format(
+                name=self.__class__.__name__))
+        reset_state(sender=self.__class__, instance=self)
+
+    def _as_dict_m2m(self):
+        if self.pk:
+            m2m_fields = dict([
+                (f.attname, set([
+                    obj.id for obj in getattr(self, f.attname).all()
+                ]))
+                for f,model in self._meta.get_m2m_with_model()
+            ])
+            return m2m_fields
+        return {}
+
+    def get_dirty_fields(self, check_relationship=False):
+        changed_fields = super(M2MDirtyFieldsMixin, self).get_dirty_fields(check_relationship)
+        new_m2m_state = self._as_dict_m2m()
+        changed_m2m_fields = dict([
+            (key, value)
+            for key, value in self._original_m2m_state.iteritems()
+            if sorted(value) != sorted(new_m2m_state[key])
+        ])
+        changed_fields.update(changed_m2m_fields)
+        return changed_fields
+
+def reset_state(sender, instance, **kwargs):
+    # original state should hold all possible dirty fields to avoid
+    # getting a `KeyError` when checking if a field is dirty or not
+    instance._original_state = instance._as_dict(check_relationship=True)
+    instance._original_m2m_state = instance._as_dict_m2m()
+</code></pre>

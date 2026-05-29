@@ -1,0 +1,269 @@
+# Graph Algorithms (Draft)
+
+## 1. Introduction
+
+A graph $G = (V,E)$ consists of a set $V$ of vertices (also known as nodes) and a set $E$ of edges between vertices, represented as sets $\{u,v\}$ of vertices $u$ and $v$. Graphs are of paramount importance in the study of algorithms, as many computational problems can be interpretated as problems on graphs.
+
+Often, it is useful to consider a directed variant. A directed graph $G = (V,E)$ consists of a set $V$ of vertices and a set $E$ of directed edges between vertices, represented as ordered pairs $(u,v)$ of vertices $u$ and $v$. Here $u$ is called the start-vertex of $(u,v)$, and $v$ is called the end-vertex of $(u,v)$. In light of directed graphs, we sometimes call graphs undirected graphs.
+
+If we are to allow multiple edges with the same endpoints, having a set of edges is inadequate, as sets do not allow duplicate elements. The multiset formalism is often used as a remedy. The details of the formalism are of no importance for the discussion at hand. It suffices to think of a multiset as a set that keeps track of the multiplicity of each element.
+
+A natural way to represent a graph or a directed graph is via an adjacency matrix, which is constructed as follows:
+
+1. Enumerate all vertices: $V = \{v_0,v_1,\ldots,v_{n-1}\}$.
+2. Entry $a_{ij}$ is the number of edges from $v_i$ to $v_j$. In case of an undirected graph, $a_{ij} = a_{ji}$ for all choices of $i$ and $j$.
+
+The adjacency matrix of a graph with $n$ vertices has space complexity of $O(n^2)$. This is often too much, as many graphs that arise in real-life problems are sparse, i.e., $\vert E \vert \ll \vert V \vert^2$.
+
+A memory-efficient alternative is the incidence lists representation of a graph, which is constructed as follows:
+
+1. For each vertex $v$, construct its incidence list, a list of edges with $v$ as an endpoint. In case of a directed graph, we only include edges with $v$ as their start-vertex.
+2. Construct a list of pairs $(v,p)$ of vertices $v$ and pointers $p$ pointing to the incidence list of $v$.
+
+The above construction is similar in form to hash tables with chaining. Indeed, incidence lists representation admits a simple hash-table implementation, where the keys are vertices and the corresponding values are their incidence lists. For example, $G = (V,E)$ with $V = \{1, 2, 3\}$ and $E = \{\{1,2\}, \{1, 3\}, \{2,3\}\}$ can be implemented in Python as follows:
+
+G = {
+1: [2, 3],
+2: [3]
+}
+
+
+Albeit simple, the hash-tables-with-lists representation of graphs is versatile:
+
+These functions are about as simple as they get. Yet, they are nearly optimal (for code written in Python).
+
+Guido van Rossum, the creator of the Python programming language
+
+In fact, implementations of graphs in oft-used graph theory libraries are often simple variations of the hash-tables-with-lists model:
+
+The Graph class uses a dict-of-dict-of-dict data structure. The outer dict (node_dict) holds adjacency information keyed by node. The next dict (adjlist_dict) represents the adjacency information and holds edge data keyed by neighbor. The inner dict (edge_attr_dict) represents the edge data and holds edge attribute values keyed by attribute names.
+
+networkx, a popular graph theory package for the Python programming language
+
+In what follows, we shall make use of the following minimal implementation of graphs, inspired by the networkx Python package.
+
+class Graph():
+def __init__(self):
+self.node = {}  # empty hash table
+self.edge = {}  # empty hash table
+
+# **kwargs means "keyword arguments", which are then converted to
+# a hash table of key-argument pairs
+# The node hash table takes node_index as key and
+# hash tables of node attributes obtained from **kwargs as
+# values.
+self.node[node] = kwargs
+self._initialize_edge_container(node)
+
+def _initialize_edge_container(self, node_index):
+# add node_index as a key of the edge hash table,
+# so attributes can be stored.
+self.edge[node_index]
+
+# allow adding multiple nodes with syntax
+for node in node_list:
+
+# add a weighted edge from start_node to end_node.
+# by default, weight is set to be 1.
+# undirected graphs, so edges in both directions must be added.
+if 'weight' not in kwargs:
+kwargs['weight'] = 1
+self.edge[start_node][end_node] = kwargs
+self.edge[end_node][start_node] = kwargs
+
+# allow adding multiple weighted edges with syntax
+# G.add_edges_from([index1, index2, ...], [weight1, weight2, ...]).
+# If no weight_list is given, all edges are assumed to be of weight 1.
+n = len(edge_list)
+if weight_list is None:
+weight_list = [1 for _ in range(n)]
+for index in range(n):
+start_node, end_node = edge_list[index]
+weight = weight_list[index]
+
+def nodes(self):
+# Return the list of all node indices
+return list(self.node)
+
+def edges(self, node=None):
+# Return the list of all edges, represented as ordered pairs.
+# If node argument is specified, return all edges starting at
+# the specified node.
+if node is None:
+nodes = self.nodes()
+else:
+nodes = [node]
+edge_list = []
+for start_node in nodes:
+edge_list += [(start_node, end_node) for end_node
+in self.edge[start_node]]
+
+return edge_list
+
+def __iter__(self):
+# Allow iterating over all nodes with syntax
+# "for node in G:"
+for node in self.node:
+yield node
+
+class DirectedGraph(Graph):
+# directed graphs are exactly the same as graphs,
+# to start_node.
+if 'weight' not in kwargs:
+kwargs['weight'] = 1
+self.edge[start_node][end_node] = kwargs
+
+
+## 2. Shortest Paths
+
+A path between two nodes $u,v \in V$ in a graph $G = (V,E)$ is a sequence
+
+of edges in $G$ that connects $u$ and $v$. The length of the path is the total number $p$ of edges in the sequence $e_0,\ldots,e_{p-1}{}_{}$. The distance between two nodes is defined to be the minimum of the lengths of all paths between $u$ and $v$. If no path exists, then the distance is defined to be $\infty$.
+
+The shortest-path problem in graph theory asks for an algorithm that computes the distance between two arbitrary nodes in a graph, and, if the distance is finite, a path between the two nodes with minimal length.
+
+It is not difficult to imagine the utility of such an algorithm.
+
+Modeling an office space as a discrete two-dimensional grid, we can represent each cell in the grid as a node and each walkable path between two cells as an edge to determine optimal office arrangements. For example, given a finite number of desks in an office, we could determine the optimal location of, say, a water dispenser or a coffee machine—closest, on average, to all desks—by computing the distance between all pairs of nodes in the office.
+
+Modeling cities as nodes and roads as edges, we can compute the most efficient travel route from one city to another by computing the shortest paths between the cities.
+
+Note, however, that roads between cities can be of different lengths.
+
+In this case, it is sensible to consider a generalization of a graph in which the lengths of edges may differ. Here, we define a weighted graph to be an ordered triple $(V,E,\mathfrak{w})$ of a set $V$ of vertices, a set $E$ of edges, and a weight function $\mathfrak{w}:E \to \mathbb{R}$ that assigns a weight to each edge. A weighted directed graph is defined analogously.
+
+The shortest-path problem admits a straightforward generalization to the weighted case, so long as the weights are nonnegative. If, however, we allow negative weights, then the distance between two nodes may be $-\infty$, rendering the shortest-path problem nonsensical.
+
+To see this, we first define a circuit in a graph $G$ to be a path
+
+such that $v_0 = v_n$. Such a path with $n = 1$ is called a cycle at $v_0$.
+
+If a path contains a node that is part of a circuit, then the total length of the path can be decreased without bound by traversing the circuit as many times as needed. It follows that a shortest-path algorithm for weighted graphs must either be specialized for graphs without negative circuits or be able to detect negative circuits in a graph.
+
+We generally consider a shortest-path problem on a connected graph, vi.z, a graph on which every pair of nodes are finite distance apart from each other. In other words, given a pair of nodes, there is always a path from one to the other. If the graph in question fails to be connected, then a shortest-path algorithm works only within a connected component of a node $v$, the collection of all nodes of $G$ that are finite distance away from $v$, along with edges among them.
+
+[TODO: introductory blurb]
+
+The simplest solution to the shortest-path problem is the breadth-first search (BFS) algorithm (Moore, 1959), which works for unweighted graphs, graphs with equal, positive weights, and their directed counterparts.
+
+2.1.1. The Algorithm. Given a fixed source node $s$ in a connected graph $G$, the BFS algorithm computes the distance from $s$ to each node in $G$, as well as a path whose length is the distance. At each iteration, the algorithm picks out a node from the search queue and examines its adjacent node. If an adjacent node has not been visited, then the node is assigned a distance measure and is put into the search queue. The procedure continues until the search queue is empty; tracking the visited nodes ensures that no node is visited more than once.
+
+from collections import deque
+
+"""Return a pair of dicts, one for distances and another for paths.
+G is an Graph object or a DirectedGraph object.
+source is a node in G.
+"""
+distance, path = {source: 0}, {source: [source]}
+search_queue = deque([source])  # deque, because a queue is needed
+searched = {source}  # set, because only element-testing is needed
+while search_queue:
+node = search_queue.pop(0)
+for edge in G.edges(node):
+_, endpoint = edge
+if endpoint not in searched:
+distance[endpoint] = distance[node] + 1
+path[endpoint] = path[node] + [endpoint]
+search_queue.append(endpoint)
+return (distance, path)
+
+>>> G = Graph()
+>>> G.add_nodes_from([1, 2, 3, 4, 5])
+...     (1, 2), (1, 3), (2, 4), (3, 5), (4, 5)])
+>>> breadth_first_search(G, 1)[0]  # distances from 1
+{1: 0, 2: 1, 3: 1, 4: 2, 5: 2}
+>>> breadth_first_search(G, 1)[1]  # paths from 1
+{1: [1], 2: [1, 2], 3: [1, 3], 4: [1, 2, 4], 5: [1, 3, 5]}
+
+>>> G = DirectedGraph()
+>>> G.add_nodes_from([1, 2, 3, 4, 5])
+...     (1, 2), (1, 3), (2, 4), (3, 5), (4, 5)])
+>>> breadth_first_search(G, 1)[0]  # distances from 1
+{1: 0, 2: 1, 3: 1, 4: 3, 5: 2}
+>>> breadth_first_search(G, 1)[1]  # paths from 1
+{1: [1], 2: [1, 2], 3: [1, 3], 4: [1, 3, 5, 4], 5: [1, 3, 5]}
+
+
+2.1.2. A Counterexample. BFS admits a straightforward generalization to weighted graphs with equal positive weights. Note, however, that BFS fails on weighted graphs with unequal weights. Indeed, if
+
+the shortest path from 1 to 5 in the above example would be $1 \to 2 \to 4 \to 5$, not $1 \to 3 \to 5$. Nevertheless, BFS would return the latter, a contradiction.
+
+Introducing the necessary modifications leads us to Dijkstra’s algorithm, presented in the next section.
+
+2.1.3. Complexity Analysis. Running BFS on a graph $G = (V,E)$ requires $O(\vert V \vert + \vert E \vert)$ time and $O(\vert V \vert^2)$ space.
+
+Indeed, we observe that BFS goes through each node precisely once. This, then, implies that each edge is examined precisely once as well. Therefore, the scanning operations contributes $O(\vert V \vert + \vert E \vert)$ time to the overall complexity. Read and write on the distance hash table can take at most $O( \vert V \vert)$ time, which is dominated by $O(\vert V \vert + \vert E \vert)$ The element-testing operation on a set takes constant time, and so do enqueue and dequeue operations on a deque. It follows that the time complexity of BFS is $O(\vert V \vert + \vert E \vert)$.
+
+To compute space complexity, we note that BFS keeps track of distances paths, elements to be searched, and elements already searched. Distances, paths, and elements already searched all take up $O(\vert V \vert)$ space. As for the paths, the worst-case scenario is $n$ nodes connected in a linear fashion:
+
+In this case, the length of the unique path from $1$ to $k$ is $k-1$, and so BFS requires
+
+space to store all the paths.
+
+We remark that BFS requires only $O(\vert V \vert)$ space if we choose not to keep track of the paths themselves.
+
+2.1.4. Correctness. Given a graph $G = (V, E)$, we fix a source node $s \in V$. For each $v \in V$, we denote by $d(v)$ and $b(v)$ the distance to $v$ and the output of BFS for $v$, respectively. Note that BFS assigns the $b$-values in waves, from smaller values to larger values.
+
+We establish correctness by mathematical induction on $d$. If $d(v) = 0$, then $v = s$, and BFS is trivially correct.
+
+We now fix $n \in \mathbb{N}$ and assume that BFS is correct for all $v \in V$ such that $% $. Suppose that $w$ is a node of $G$ with $b(w) = n$, so that $d(w) \leq n$.
+
+We suppose for a contradiction that $% $. This means that $% $ for at least one node $x$ adjacent to $w$. By the inductive hypothesis, $% $.
+
+Since BFS assigns the $b$-values in waves, we see that
+
+where the minimum runs over all adjacent nodes of $w$. This, in particular, implies that
+
+which contradicts the assumption that $b(w) = n$. We conclude that $d(w) = n$, and the proof is now complete.
+
+2.1.5. Application: Diameter of a Tree. Recall that a circuit on a graph is a path
+
+such that $v_{0} = v_{n-1}$. An acyclic graph is a directed graph without circuits.
+
+A connected, acyclic graph is commonly referred to as a tree. We remark that a graph is a tree if and only if there is precisely one path between every pair of nodes.
+
+The diameter of a finite tree $T = (V, E)$ is the maximal distance between nodes, viz., the quantity
+
+where $d$ denotes the minimal length of all paths between $u$ and $v$. Since there is precisely one path between any pair of nodes, the diameter of a finite tree is merely the maximal length of paths between nodes. Given $v,w \in V$, we shall write $d(v,w)$ to denote the length of the unique path between $v$ and $w$.
+
+We can compute the diameter of $T$ using BFS. To see this, let us fix a node $r \in V$, and compute, via BFS, the distance $d(r, v)$ for all $v \in V$. There exists a node $s \in V$ such that
+
+Another application of BFS yields the distance $d(s, v)$ for all $v \in V$. Let us find $t \in V$ such that
+
+We claim that $d(s, t)$ is the diameter of $T$. To see this, we pick arbitrary nodes $v,w \in V \setminus \{s, t\}$. Since there exists a path between each pair of nodes, there is a path from $s$ to $t$ that goes through $v$ and $w$:
+
+There is only one path from $s$ to $t$, and so the length of the above path must be $d(s,t)$. It follows that
+
+The above inequality holds for any choice of $v,w \in V$, whence we conclude that $d(s,t)$ is the diameter of $T$.
+
+2.1.6. Application: Flood Fill Many graphics editors are equipped with the flood fill feature, which fills the interior of a simple closed curve with a predetermined color. To make the problem precise, we consider a two-dimensional grid, with each cell representing a pixel. The goal is to start at one pixel, search for all neighboring pixels with the same color, and replace those pixels with a different color.
+
+We model the flood fill problem with a graph by considering each pixel as a node and connecting pixels of the same color with edges. With this model, the problem of implementing a flood-fill algorithm reduces to computing the connected component of a pixel and replacing all pixels in the connected component with a different color.
+
+This is easily achieved via BFS, which examines every node in the connected component and terminates afterwards. In lieu of assigning a distance metric to each node, we can modify the BFS algorithm to replace the color information at each node.
+
+See, for example, the implementation of the “bucket fill” tool in GNOME’s GNU Image Manipulation Program.
+
+### 2.2. Weighted Graphs with Nonnegative Weight: Dijkstra’s Algorithm
+
+Breadth-first search (BFS, Section 2.1) is a simple, effective algorithm for finding a shortest path between two nodes in a connected graph, but it fails on weighted graphs. The failure stems from the incremental nature of BFS, which assigns larger distances to nodes examined in later “waves”. Indeed, on a weighted graph, it is possible for a path containing a larger number of edges to be shorter.
+
+Dijkstra’s algorithm (1959) circumvents this problem by keeping a running record of a minimum path to a given node up to each stage, replacing it with a newly-discovered path if necessary. Although Dijkstra’s algorithm is best understood as a generalization of BFS, Dijkstra discovered the algorithm independently of Moore’s research on shortest-path algorithms; see Further Results.
+
+2.2.1. The Algorithm. Similarly to BFS, Dijkstra’s algorithm maintains a queue of nodes to be examined. At each step, the algorithm picks out the node in the queue closest to the source node and scans its adjacent nodes. In case a path to an adjacent node has already been found, the algorithm chooses the shortest of the two. In this manner, Dijkstra’s algorithm is a greedy algorithm, in the sense that the algorithm always declares the shortest path it has discovered up to each step to be the solution to the shortest-path problem.
+
+Because Dijkstra’s algorithm extracts the minimum from the queue, it is advantageous to use a priority queue to speed up the process. Below, we
+
+## Additional Remarks and Further Results
+
+1. An interview with Dijkstra on Communications of the ACM, Vol. 53, No. 8 (2010) does not make any mention of Moore or breadth-first search:
+
+In 1956 I did two important things, I got my degree and we had the festive opening of the ARMAC. We had to have a demonstration. Now the ARRA, a few years earlier, had been so unreliable that the only safe demonstration we dared to give was the generation of random numbers, but for the more reliable ARMAC I could try something more ambitious. For a demonstration for noncomputing people you have to have a problem statement that non-mathematicians can understand; they even have to understand the answer. So I designed a program that would find the shortest route between two cities in the Netherlands, using a somewhat reduced road-map of the Netherlands, on which I had selected 64 cities (so that in the coding six bits would suffice to identify a city).
+
+What’s the shortest way to travel from Rotterdam to Groningen? It is the algorithm for the shortest path, which I designed in about 20 minutes. One morning I was shopping in Amsterdam with my young fiancée, and tired, we sat down on the café terrace to drink a cup of coffee and I was just thinking about whether I could do this, and I then designed the algorithm for the shortest path. As I said, it was a 20-minute invention. In fact, it was published in 1959, three years later. The publication is still quite nice. One of the reasons that it is so nice was that I designed it without pencil and paper. Without pencil and paper you are almost forced to avoid all avoidable complexities. Eventually that algorithm became, to my great amazement, one of the cornerstones of my fame. I found it in the early 1960s in a German book on management science—”Das Dijkstra’sche Verfahren” [“Dijkstra’s procedure”]. Suddenly, there was a method named after me. And it jumped again recently because it is extensively used in all travel planners. If, these days, you want to go from here to there and you have a car with a GPS and a screen, it can give you the shortest way.
+
+See also Alexander Schrijver, “On The History of the Shortest Path Problem”, Documenta Mathematica, Extra Volume: Optimization Stories (2012).
+
+2. A priority queue is an abstract data type optimized for extracting the minimal element in a collection. It supports fast insertion of elements, as well as fast extraction of the minimal element.
+
+The most common implementation of a priority queue makes use of a min-heap (Williams, 1964), a nearly complete binary tree in which the value carried by a parent node is no larger than those carried by the child nodes. This

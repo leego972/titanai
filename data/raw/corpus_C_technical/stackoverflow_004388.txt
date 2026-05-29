@@ -1,0 +1,95 @@
+Question: <p>I've discovered that cElementTree is about 30 times faster than <code>xml.dom.minidom</code> and I'm rewriting my XML encoding/decoding code. However, I need to output XML that contains CDATA sections and there doesn't seem to be a way to do that with ElementTree.</p>
+
+<p>Can it be done?</p>
+
+Answer: <p>I don't know whether previous versions of proposed code worked very well and whether ElementTree module has been updated but I have faced problems with using this trick:</p>
+
+<pre><code>etree._original_serialize_xml = etree._serialize_xml
+def _serialize_xml(write, elem, qnames, namespaces):
+    if elem.tag == '![CDATA[':
+        write("\n&lt;%s%s]]&gt;\n" % (
+                elem.tag, elem.text))
+        return
+    return etree._original_serialize_xml(
+        write, elem, qnames, namespaces)
+etree._serialize_xml = etree._serialize['xml'] = _serialize_xml
+</code></pre>
+
+<p>The problem with this approach is that after passing this exception, serializer is again treating it as normal tag afterwards. I was getting something like:</p>
+
+<pre><code>&lt;textContent&gt;
+&lt;![CDATA[this was the code I wanted to put inside of CDATA]]&gt;
+&lt;![CDATA[&gt;this was the code I wanted to put inside of CDATA&lt;/![CDATA[&gt;
+&lt;/textContent&gt;
+</code></pre>
+
+<p>And of course we know that will cause only plenty of errors. 
+Why that was happening though?</p>
+
+<p>The answer is in this little guy:</p>
+
+<pre><code>return etree._original_serialize_xml(write, elem, qnames, namespaces)
+</code></pre>
+
+<p>We don't want to examine code once again through original serialise function if we have trapped our CDATA and successfully passed it through.
+Therefore in the "if" block we have to return original serialize function only when CDATA was not there. We were missing "else" before returning original function.</p>
+
+<p>Moreover in my version ElementTree module, serialize function was desperately asking for "short_empty_element" argument. So the most recent version I would recommend looks like this(also with "tail"):</p>
+
+<pre><code>from xml.etree import ElementTree
+from xml import etree
+
+#in order to test it you have to create testing.xml file in the folder with the script
+xmlParsedWithET = ElementTree.parse("testing.xml")
+root = xmlParsedWithET.getroot()
+
+def CDATA(text=None):
+    element = ElementTree.Element('![CDATA[')
+    element.text = text
+    return element
+
+ElementTree._original_serialize_xml = ElementTree._serialize_xml
+
+def _serialize_xml(write, elem, qnames, namespaces,short_empty_elements, **kwargs):
+
+    if elem.tag == '![CDATA[':
+        write("\n&lt;{}{}]]&gt;\n".format(elem.tag, elem.text))
+        if elem.tail:
+            write(_escape_cdata(elem.tail))
+    else:
+        return ElementTree._original_serialize_xml(write, elem, qnames, namespaces,short_empty_elements, **kwargs)
+
+ElementTree._serialize_xml = ElementTree._serialize['xml'] = _serialize_xml
+
+
+text = """
+&lt;?xml version='1.0' encoding='utf-8'?&gt;
+&lt;text&gt;
+This is just some sample text.
+&lt;/text&gt;
+"""
+e = ElementTree.Element("data")
+cdata = CDATA(text)
+root.append(cdata)
+
+#tests
+print(root)
+print(root.getchildren()[0])
+print(root.getchildren()[0].text + "\n\nyay!")
+</code></pre>
+
+<p>The output I got was:</p>
+
+<pre><code>&lt;Element 'Database' at 0x10062e228&gt;
+&lt;Element '![CDATA[' at 0x1021cc9a8&gt;
+
+&lt;?xml version='1.0' encoding='utf-8'?&gt;
+&lt;text&gt;
+This is just some sample text.
+&lt;/text&gt;
+
+
+yay!
+</code></pre>
+
+<p>I wish you the same result!</p>

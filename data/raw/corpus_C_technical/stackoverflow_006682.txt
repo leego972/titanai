@@ -1,0 +1,66 @@
+Question: <p>I am trying to export a Ruby framework via XML-RPC. However I am having some problems when trying to call a method from a class not directly added as a handler to the XML-RPC server. Please see my example below:</p>
+
+<p>I have a test Ruby XML-RPC server as follows:</p>
+
+<pre><code>require "xmlrpc/server"
+
+class ExampleBar
+  def bar()
+    return "hello world!"
+  end
+end
+
+class ExampleFoo
+  def foo()
+    return ExampleBar.new
+  end
+
+  def test()
+    return "test!"
+  end
+end
+
+s = XMLRPC::Server.new( 9090 )
+
+s.add_introspection
+
+s.add_handler( "example", ExampleFoo.new )
+
+s.serve
+</code></pre>
+
+<p>And I have a test Python XML-RPC Client as follows:</p>
+
+<pre><code>import xmlrpclib
+
+s = xmlrpclib.Server( "http://127.0.0.1:9090/" )
+
+print s.example.foo().bar()
+</code></pre>
+
+<p>I would expect the python client to print "hello world!" as it is the equivalent of the following ruby code:</p>
+
+<pre><code>example = ExampleFoo.new
+puts example.foo().bar()
+</code></pre>
+
+<p>However it generates an error: "xmlrpclib.ProtocolError: &lt;ProtocolError for 127.0.0.1:9090/: 500 Internal Server Error&gt;".</p>
+
+<p>print s.example.test() works fine.</p>
+
+<p>I dont expect the new ExampleBar object to go over the wire but I would expect it to be 'cached' server side and the subsequent call to bar() to be honoured.</p>
+
+<p>Can XML-RPC support this kind of usage or is it too basic?</p>
+
+<p>So I guess my question really is; how can I get this working, if not with XML-RPC what with?</p>
+
+Answer: <p>Your client (s in you Python code) is a ServerProxy object. It only accepts return values of type boolean, integers, floats, arrays, structures, dates or binary data.</p>
+
+<p>However, without you doing the wiring, there is no way for it to return another ServerProxy, which you would need for accessing another class. You could probably implement an object cache on the Ruby side, but it would involve keeping track of active session and deciding when to remove objects, how to handle missing objects, etc.</p>
+
+<p>Instead I would suggest exposing a thin wrapper on the ruby side that does atomic operations like:</p>
+
+<pre><code>def foobar()
+  return ExampleFoo.new().foo().bar()
+end
+</code></pre>

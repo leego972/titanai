@@ -1,0 +1,134 @@
+# String find and replace method optimization
+
+I am trying to find a specific header string from different Maps (LEDES1998Bheaders, LEDES98BIheaders and LEDES98BI_V2headers) in an errorMessage depends on the parcel type and if the errorMessage has the specific header string I need to replace it with the corresponding value.
+
+public class ErrorMessageConverter {
+
+private static Map<String, String> LEDES1998Bheaders = new HashMap<>();
+private static Map<String, String> LEDES98BIheaders = new HashMap<>();
+private static Map<String, String> LEDES98BI_V2headers = new HashMap<>();
+
+static {
+LEDES1998Bheaders.put("\\bUNITS\\b", "LINE ITEM NUMBER OF UNITS");
+
+}
+
+public static String toUserFriendlyErrorMessage(String parcelType, String message) {
+
+if (parcelType.equals("LEDES1998B")) {
+}
+else if (parcelType.equals("LEDES98BI")) {
+}
+else if (parcelType.equals("LEDES98BI V2")) {
+}
+return message;
+
+}
+
+private static String updateErrorMessage(String msg, Map<String, String> invHeaders) {
+Pattern pattern;
+for (String key : invHeaders.keySet()) {
+pattern = Pattern.compile(key);
+if (pattern.matcher(msg).find()) {
+}
+}
+return msg;
+}
+}
+
+
+Below are couple of sample error messages:
+
+String errorMesage1 = "Line 3 : Could not parse inv_date value"
+String errorMesage2 = "Line : 1 BaseRate is a required field"
+
+
+Can this method simplified further in java 8 using filters/lambda expressions?
+
+Your code looks fairly effective, but it could be a bunch more efficient if you rearrange the code a bit, do some pre-processing, and reduce your run-time checks. Let's go through that in order....
+
+I recommend a 'set up' stage to your code. Consider an ideal situation at runtime, the code would look something like:
+
+public static String toUserFriendlyErrorMessage(String parcelType, String message) {
+
+for (Rule rule : getRules(parcelType)) {
+message = rule.process(message);
+}
+return message;
+}
+
+
+That would be a neat solution, where you have a bunch of rules that you know apply to the messages of a particular type, and that you can then just apply whichever ones are appropriate. That would be the most efficient at use-time too.
+
+How would you implement that? Using some pre-processing, of course, and a new Rule class.
+
+This preprocessing is key, and the features you should look for here are:
+
+1. the rules are sorted at pre-process time.
+2. some rules are in multiple sets of operations.
+3. Pattern instances are compiled just once, not at use-time.
+
+Your rules are convenient in the sense that the parcelType values seems to have an 'extension' type system:
+
+• LEDES1998B is rules LEDES1998Bheaders
+• LEDES98BI is the same as LEDES1998B plus the rules in LEDES98BIheaders
+• LEDES98BI V2 is the same as LEDES98BI (and thus LEDES1998B) but also includes LEDES98BI_V2headers
+
+How would I recommend preprocessing things?
+
+private static final class Rule {
+private final Pattern key;
+private final String replacement;
+
+Rule(String search, String rep) {
+key = Pattern.compile(search);
+replacement = Matcher.quoteReplacement(rep);
+}
+
+String process(String msg) {
+return key.matcher(msg).replaceAll(replacement);
+}
+}
+
+
+So, that rule class is simple enough... how to add them together?
+
+private static final Map<String, Rule[]> RULE_MAP = buildMap();
+
+private static final Map<String, Rule[]> buildMap() {
+Map<String, Rule[]> result = new HashMap<>();
+List<Rule> rules = new ArrayList<>();
+
+result.put("LEDES1998B", rules.toArray(new Rule[rules.size()]));
+
+result.put("LEDES98BI", rules.toArray(new Rule[rules.size()]));
+
+result.put("LEDES98BI V2", rules.toArray(new Rule[rules.size()]));
+
+return result;
+}
+
+private static final void addRules(List<Rule> target, Map<String,String> sources) {
+for (Map.Entry<String,String> me : sources.entrySet()) {
+}
+}
+
+
+Now, your last part is the getRules method:
+
+private static final Rule[] getRules(String parcelType) {
+Rule[] rules = RULE_MAP.get(parcelType);
+if (rules == null) {
+throw new IllegalStateException("No rules set for type " + parcelType);
+}
+return rules;
+}
+
+
+Now your code should go smoothly.
+
+• Thanks for the detailed solution, I really appreciate it. But if the parceltype is LEDES98BI I need to check both LEDES1998Bheaders and LEDES98BIheaders, and if the parceltype is LEDES98BI V2 I need to check all the three maps LEDES1998Bheaders, LEDES98BIheaders and LEDES98BI_V2headers I think your solution checks only the specific Rules from specific map as per the parcelType – RanPaul Apr 15 '15 at 15:09
+• @RanPaul - I think you will find that it does not clear the rules array after loading the LEDES1998Bheaders rules, so they are also in the rules that are added to when the LEDES98BIheaders are processed – rolfl Apr 15 '15 at 15:12
+• The order-of-processing is significant so that each time you addRules(...) you are really adding more rules, so you are doing the same rules as the previous rule set, plus the new rules. Thus when you call result.put("LEDES98BI V2", rules.toArray(new Rule[rules.size()]); you will be adding all the rules for all rulesets when you process parcelType LEDES98BI_V2headers – rolfl Apr 15 '15 at 15:14
+• I just tried your solution and its not updating error messages in getRules method am getting rules value as org.eclipse.debug.core.DebugException: com.sun.jdi.ClassNotLoadedException: Type has not been loaded occurred while retrieving component type of array – RanPaul Apr 15 '15 at 15:24
+• I have been known to break things before, but my code could not have caused eclipse exceptions like that. Consider doing a 'clean' on your eclipse project.... you can compile everything successfully, right? – rolfl Apr 15 '15 at 15:26

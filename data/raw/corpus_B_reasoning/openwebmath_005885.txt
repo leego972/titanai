@@ -1,0 +1,240 @@
+# Display random colored pixels
+
+I've always liked screens full of randomly colored pixels. They're interesting to look at and the programs that draw them are fun to watch.
+
+# The challenge
+
+Fill your screen, or a graphical window, with colored pixels.
+
+# The rules
+
+• Your program must have an even chance of picking all colors (i.e in the range #000000 to #FFFFFF), or all colors that can be displayed on your system.
+• Your program must continue to display random pixels until manually stopped (it cannot terminate on its own).
+• Pixels can be any size, as long as your output has at least 40x40 "pixels".
+• Your program must run at such a speed that it can replace every pixel on the screen/window at least once after running for three minutes.
+• Your program must choose truly random colors and points to replace, i.e. random with all points/colors equally likely. It cannot just look random. It must use a pRNG or better, and the output cannot be the same every time.
+• Your program must have an equal chance of picking all colors each iteration.
+• Your program must replace only one pixel at once.
+• Your program cannot use the internet nor your filesystem (/dev/random and /dev/urandom excepted).
+
+# Example
+
+Your output could look like this if stopped at a random time:
+
+# The winner
+
+The shortest answer in each language wins. Have fun!
+
+• By "truly random", I assume pseudorandom is OK (like Math.random() or similar) – OldBunny2800 Jun 2 '17 at 1:29
+• @OldBunny2800 It must use a pRNG or better – TheLethalCoder Jun 2 '17 at 13:07
+• Since the program can't use the internet, I'll just leave this in a comment: babelia.libraryofbabel.info/slideshow.html – KSmarts Jun 2 '17 at 13:28
+• So does the "3 minute limit" apply to setup time, too? Or just once the "program" begins? Asking because I have a Minecraft redstone solution, which runs very quickly once it is going, but takes a while to set up initially (it has to "place" each "pixel" in the 40x40 grid) before it can start changing colors. – BradC Jun 4 '17 at 2:34
+• Truly random by definition exclude pseudo-random, yet doesn't define a distribution. I assume you mean a uniform PRNG, where all events are equiprobable and independent of each other. – Dennis Jun 4 '17 at 4:44
+
+# Minecraft 1.12 Redstone Command Blocks, 4,355 2,872 bytes
+
+(Size determined by saved structure block file size.)
+
+Here is a full YouTube overview, but I'll try to outline the code below.
+
+Setup Routine:
+
+This sets up the 40x40 grid of Minecraft armor stands. Armor stands are necessary because Minecraft has no way to substitute variables into world coordinates. So the workaround is to refer to the location of these armor stand entities.
+
+(impulse) summon armor_stand 2 ~ 1 {CustomName:"A"} /create named armor stand
+(chain) fill -2 ~ -2 43 ~ 43 stone                  /create big stone square
+(chain) fill -1 ~ -1 42 ~ 42 air                    /leave just a ring of stone
+(chain) setblock -4 ~ -12 redstone_block            /kicks off next sequence
+
+
+This named armor stand is basically our "cursor" to place all the armor stands that we will need. The redstone block in the last step "powers" nearby blocks (including our command blocks), so kicks off the next loop:
+
+(repeat) execute @e[name=A] ~ ~ ~ summon armor_stand ~-1 ~ ~   /create new armor stand
+(chain) tp @e[name=A] ~1 ~ ~                                   /move "cursor" one block
+(chain) execute @e[name=A] ~ ~ ~ testforblock ~1 ~ ~ stone     /if at end of row,
+(conditional) tp @e[name=A] ~-40 ~ ~1                          /go to start of next row
+(chain) execute @e[name=A] ~ ~ ~ testforblock ~ ~ ~2 stone     /If at last row
+(conditional) setblock ~6 ~ ~ air                              /stop looping
+(conditional) kill @e[name=A]                                  /kill cursor
+
+
+At this point our grid is complete:
+
+Random Color Selector
+
+The purple repeaters in the center of this picture choose a random color via the following command:
+
+(repeat) execute @r[type=armor_stand,r=9] ~ ~ ~ setblock ~ ~-2 ~ redstone_block
+
+
+That "@r[]" is the magic sauce, it selects a random entity in the world that matches the given conditions. In this case, it finds an armor stand inside a radius of 9 blocks, and we've set up 16 armor stands, one for each wool color. Under the selected color, it places a redstone block (which powers the two command blocks on either side).
+
+Random Pixel Selector
+
+Placing the redstone block under the selected wool color triggers two more command blocks:
+
+(impulse) execute @r[type=armor_stand] ~ ~ ~ setblock ~ ~3 ~ wool X
+(impulse) setblock ~ ~ ~1 air
+
+
+This first line uses our same magic @r command to choose any armor stand on the entire map (no radius restriction, so that includes the 40x40 grid), and places a wool of the selected color above its head. The X determines the color, and ranges from 0 to 15. The second command removes the redstone block so it is ready to go again.
+
+I have 5 purple repeater blocks, and redstone works in "ticks" 20 times a second, so I'm placing 100 pixels per second (minus some color overlaps). I've timed it, and I usually get the entire grid covered in about 3 minutes.
+
+This was fun, I'll try to look for other challenges that might also work in Minecraft. Huge thanks to lorgon111 for his YouTube Command Block tutorial series.
+
+EDIT: Made some serious reductions in the size of the saved structure, now at 2,872 saved bytes:
+
+1. Scooted things in a bit (in all 3 dimensions) so I could reduce the overall size of the saved area.
+2. Changed the different colored wools to stone, they were just decorative anyway.
+3. Removed the glowstone lamp.
+4. Changed all air blocks to void blocks (the red squares).
+
+Tested by pulling the saved structure into a new world, everything still works as designed.
+
+Walk through is in my YouTube video, but here are the steps:
+
+1. In Minecraft 1.12, create a new creative superflat world using the "Redstone Ready" preset. Make it peaceful mode.
+2. Once the world exists, copy the NBT file into a new \structures folder you create under the current world save.
+3. Back in the game, do /give @p structure_block, and /tp @p -12, 56, -22 to jump to the right spot to get started.
+4. Dig a hole and place the structure block at -12, 55, -22.
+5. Right-click the structure block, click the mode button to switch it to "Load".
+6. Type in "random_pixels", turn "include entities" ON, and click "Load"
+7. If it finds the structure file, it will preview the outline. Right-click again and click "load" to bring the structure into the world.
+8. Press the button to run the setup routine.
+9. When it completes, flip the switch to run the wool randomization.
+• Holy crap... you actually did it. And it's your first answer, wow! Welcome to the site, and this is an amazing way to start! – MD XF Jun 5 '17 at 1:59
+• @MDXF In addition to your +10, I'm giving +60 – NoOneIsHere Jun 5 '17 at 2:03
+• @NoOneIsHere All right :P But if you have an answer, it'll have to be +100... – MD XF Jun 5 '17 at 2:05
+• I am going to try and golf this if you give the the world file (I will not post another answer but just give you the file) – Christopher Jun 7 '17 at 16:07
+• Well, shortest answer in each language wins and this is the shortest answer in Minecraft :P have an extra +15 – MD XF Jun 7 '17 at 16:43
+
+# sh + ffmpeg, 52 bytes
+
+ffplay -f rawvideo -s cif -pix_fmt rgb24 /dev/random
+
+
+Does ffmpeg count as an esolang? :D
+
+Sadly the pix_fmt is required, as ffmpeg defaults to yuv420p. That fails the "must have equal likelihood of every possible pixel color" requirement. Conveniently, cif is a shortcut for a fairly large video size that uses less space than "40x40".
+
+Unsurprisingly, optimizing this gif with gifsicle did absolutely nothing. It's 4MiB.
+
+• Does this "replace only one pixel at once"? – Scott Milner Jun 3 '17 at 21:08
+• Technically? ffmpeg will wait for the entire frame to be filled with pixels before displaying it, though. I misread "must only replace 1 pixel at a time" as "may". :/ – Una Jun 3 '17 at 23:42
+• And of course gifsicle couldn't save any bytes in the gif: there is no way to compress arbitrary data and the random pixels are all chaotically arranged, meaning that the most efficient way of encoding them is one pixel at a time. Numberphile (I think?) had a video on "what is information" and did random noise to intentionally mess with YouTube's compression. VSauce had a video on video compression at one point too, but I forget what it was called. – Draco18s Jun 30 '17 at 17:45
+• @Draco18s, I know, the note about it being incompressible was making fun of myself for trying to run gifsicle on it anyway. – Una Jun 30 '17 at 19:15
+• Gifsicle is the wrong tool. Precomp gets it down from 4 MB to 3 MB :) That's because the GIF algorithm expands the randomness instead of compressing it and Precomp reverses this. – schnaader Oct 17 '17 at 16:01
+
+# C on POSIX, 989695 92 bytes
+
+-3 thanks to Tas
+
+#define r rand()
+f(){for(srand(time(0));printf("\e[%d;%dH\e[%d;4%dm ",r%40,r%40,r%2,r%8););}
+
+
+This chooses between 16 colors (dark grey, red, green, blue, orange, cyan, purple, light grey, black, pink, light blue, yellow, light cyan, magenta, white) and prints them directly to the terminal.
+
+Note that if your GPU is too slow, this may seem like it's updating the entire screen at once. It's actually going pixel by pixel, but C is fast.
+
+Alternate solution that makes the colors more distinct:
+
+f(){for(srand(time(0));printf("\e[%d;%dH\e[%d;3%dm█",rand()%40,rand()%40,rand()%2,rand()%8););}
+
+
+Proof that it goes pixel by pixel (screenshot from alternate program):
+
+Wow, that looks almost 3-dimensional...
+
+• It's missing a ; to compile correctly but seems to work great other than that! B-) – cleblanc Jun 1 '17 at 20:28
+• @cleblanc Oh, you're right! I forgot to add that after I switched from while to for. – MD XF Jun 1 '17 at 20:39
+• You could probably shave a few bytes by #define r rand() and then using r%40, r%40, r%2, r%8 – Tas Jun 2 '17 at 4:26
+• By not using 32-bit color this does not meet the requirements. – wberry Jun 4 '17 at 5:49
+• @wberry "Your program must have an even chance of picking all colors (i.e in the range #000000 to #FFFFFF), or all colors that can be displayed on your system." These are all the colors that the POSIX terminal can display. – MD XF Jun 4 '17 at 17:31
+
+# JS+HTML 162+32 (194) 124+13 (137) bytes
+
+Thanks to Luke and other commenters for saving me lots of bytes.
+
+r=n=>n*Math.random()|0
+setInterval("b=c.getContext2d;b.fillStyle='#'+r(2**24).toString(16);b.fillRect(r(99),r(99),1,1)",0)
+<canvas id=c>
+
+• Actually <canvas id=c> should be sufficient as I think the default size for the canvas-element is 300 x 150 px and so exceeds your "viewport size" of 99 x 99 px. Anyway, nice solution. – insertusernamehere Jun 1 '17 at 21:52
+• @insertusernamehere, yes, thanks – Octopus Jun 1 '17 at 21:57
+• Doesn't work in Firefox now though. It does work in Chrome – ETHproductions Jun 1 '17 at 22:09
+• OK, OK, I've got it. Save 2 bytes by doing b=c.getContext2d. (Not sure how to format this, but if "2d" is a template literal, it doesn't need the parentheses.) (Deleting my previous suggestions.) – Rick Hitchcock Jun 1 '17 at 22:26
+• Along with Rick's suggestion, use a with statement to get rid of all instances of b.: r=n=>n*Math.random()|0 setInterval("with(c.getContext2d)fillStyle='#'+r(2**24).toString(16),fillRect(r(99),r(99),1,1)") – darrylyeo Jun 2 '17 at 16:16
+
+# MATL, 28 bytes
+
+40tI3$l3l2$r,40Yr]4$Y(t3YGT  Try it at MATL Online. I have added a half-second pause (.5Y.) to this version. Explanation 40 % Push the number literal 40 to the stack t % Duplicate I % Push the number 3 to the stack 3$l      % Create a 40 x 40 x 3 matrix of 1's (40 x 40 RGB image)
+% Do...while loop
+3l1$r % Generate 3 random numbers (RGB) , % Do twice loop 40Yr % Generate two integers between 1 and 40. These will be the ] % row and column of the pixel to replace 4$Y(   % Replace the pixel with the random RGB value
+t      % Make a copy of the RGB image
+3YG    % Display the image
+T      % Push a literal TRUE to create an infinite loop
+
+• I love it! ---- – MD XF Jun 2 '17 at 1:28
+• out of curiosity, how did you giffify your code output? – Octopus Jun 2 '17 at 5:23
+• @Octopus I just used LICEcap. One of these days, I'm going to incorporate animated GIF output into the online compiler. – Suever Jun 2 '17 at 11:36
+• Seeing as how this answer uses less commands/methods to achieve a similar result, couldn't you convert it to MATL to possibly achieve a lower score? – MD XF Nov 26 '17 at 5:16
+
+# TI-BASIC (84+C(S)E only), 37 35 bytes
+
+:For(A,1,5!
+:For(B,1,5!
+:Pxl-On(A,B,randInt(10,24
+:End
+:End
+:prgmC //"C" is the name of this program
+
+
+Due to hardware limitations, this will eventually crash, since every time a program is nested within a program in TI-BASIC, 15 KB of RAM are allocated to "keep a bookmark" in the parent program. This would run fine on a "theoretical" calculator with infinite RAM, but if we want it to run indefinitely on a real calculator, we can just wrap it in a While 1 loop for an extra 2 bytes:
+
+:While 1
+:...
+:End
+
+
+The TI-83 family calculators with color screens (TI 84+CE and CSE) support 15 colors. They have color codes 10 through 24. This cycles through all the pixels in a 120 by 120 (5!) square and assigns each a random color.
+
+Result:
+
+• Yay, another BASIC answer! Just to be sure, does this run forever? – MD XF Jun 2 '17 at 1:54
+• @MDXF Now it does! ;-). Missed that part the first time. +5 bytes. – Scott Milner Jun 2 '17 at 1:57
+• You can make the for loops start at 0 if you want to cover 100x100 pixels. – kamoroso94 Jun 2 '17 at 13:30
+• @kamoroso94 Ah, true. I could also do 5! if I wanted 120 pixels. – Scott Milner Jun 2 '17 at 15:13
+• @MDXF TI-BASIC is token-based. I.e. For( is 1 byte, Pxl-On( is 1 byte, randInt( is 2 bytes, etc. – Scott Milner Jun 2 '17 at 22:18
+
+# Bash + coreutils, 59 56 bytes
+
+for((;;)){ printf "\e[48;5;shuf -i 0-16777215 -n1m ";}
+
+
+\e[48;5;COLORm is the escape secuence to background color.
+
+Each "pixel" has the chance to be in the [0..16777215] range every time.
+
+• Wow, that's a really good idea! +1 – MD XF Jun 2 '17 at 17:44
+• You can shove off 3 bytes, if you use jot: for((;;)){ printf "\e[48;5;jot -r 1 0 16777215m ";} – Moreaki Jun 3 '17 at 14:27
+• I stole this idea and golfed it down to 45 bytes (\e is 1 escape char, and shuf | xargs makes it shorter (no need for -n 1, and no for). codegolf.stackexchange.com/a/158142/7017 . I can delete it if you want (I'm not really sure if I should just propose this as a comment instead of posting it. My goal is to get a bit of points to one day bounty the amazing answers to the amazing "tetris in game of life" challenge & answer! see codegolf.stackexchange.com/q/11880/7017 – Olivier Dulac Mar 14 at 18:52
+
+# MATLAB, 56 bytes
+
+x=rand(40,40,3);while imagesc(x),x(randi(4800))=rand;end
+
+
+Output looks like the image below. One "pixel" changes at a time, and only one of the RGB-colors changes.
+
+Why? The colors in MATLAB are represented as a 3D-matrix, one layer for R,G and B. The code above changes only one of the layers per iteration. All pixels and all layers can be changed, so if you wait a bit all colors are equally possible in all positions.
+
+Add pause(t) inside the loop to pause t seconds between each image.
+
+You must stop it with Ctrl+C.
+
+• Clever use of the handle to the graphics object as the conditional in the where – Suever Jun 1 '17 at 20:56
+• A rule has been clarified - Your program must have an equal chance of picking all colors/points each iteration. Does your program fulfill this? – MD XF Jun 1 '17 at 21:43
+
+r=_=>255*Math.random()|0;setInterval('x=c.getContext2d;x.fillRect(r(),r(),1,1,x.fillStyle=rgb(${[r(),r(),r()]}))') <canvas id=c> • This will produce evenly distributed RGB colors. You cannot use Hex colors without proper padding as numbers like #7 is not a valid color, or #777 and #777777 are the same color (2x the odds) • The canvas element is 300x150 by default, but I'm actually drawing on a 255x255 square, so there are off canvas pixels, so the effective area is 255x150. • Works only on Google Chrome. • Great first post! Welcome to the site! – MD XF Jun 3 '17 at 18:53 # Excel VBA, 131 102 85 Bytes Anonymous VBE immediate window function that uses a helper function (see below) to output an array of randomly colored cells to the range A1:AN40 of the activesheet object. Note: This solution is restricted to 32-Bit installs of MS Excel (and therefore of Office as a whole) as 8^8 will not compile on 64-Bit versions of VBA Randomize:Cells.RowHeight=48:For Each c In[A1:AN40]:c.Interior.Color=(8^8-1)*Rnd:Next  ## Sample Output ## Previous Version Randomize:Cells.ColumnWidth=2:For Each c In Range("A1:AN40"):c.Interior.Color=RGB(n,n,n):Next  ## Helper Function Outputs a random int in the range [0,255] Function n n=Int(255*Rnd) End Function  # C#, 369288 287 bytes namespace System.Drawing{class P{static void Main(){var g=Graphics.FromHwnd((IntPtr)0);var w=Windows.Forms.Screen.GetBounds(Point.Empty);for(var r=new Random();;)g.FillRectangle(new SolidBrush(Color.FromArgb(r.Next(256),r.Next(256),r.Next(256))),r.Next(w.Width),r.Next(w.Height),1,1);}}}  Saved 88 bytes thanks to @CodyGray. A full program that get's the handle to the screen and it's size and then starts randomly drawing pixels on it. Note that this might grind your graphics card to a halt when ran. Also if the screen or any control decides to repaint at any time the pixels will be lost and have to be redrawn. Note: When running keep focus on the window as to kill it you have to either Alt+F4 or press the close button and doing so when you can't see the screen is a bit hard. I couldn't record this working, with ScreenToGif, as that kept forcing a repaint so the pixels would get removed. However, here is a screenshot of it running after about 10-15 seconds, any longer and I think I may have ground my PC to a halt! The gap in the top right corner is where the screen forced a repaint just as I took the screenshot. Full/Formatted version: namespace System.Drawing { class P { static void Main() { var g = Graphics.FromHdc((IntPtr)0); var w = Windows.Forms.Screen.GetBounds(Point.Empty); for (var r = new Random();;) g.FillRectangle(new SolidBrush(Color.FromArgb(r.Next(256), r.Next(256), r.Next(256))), r.Next(w.Width), r.Next(w.Height), 1, 1); } } }  A version for 308 227 226 bytes that only draws on the region 0-40: namespace System.Drawing{class P{static void Main(){var g=Graphics.FromHdc((IntPtr)0);for(var r=new Random();;)g.FillRectangle(new SolidBrush(Color.FromArgb(r.Next(256),r.Next(256),r.Next(256))),r.Next(40),r.Next(40),1,1);}}}  Example output for this one: • Graphics.FromHwnd((IntPtr)0) would also work, and be much shorter than P/Invoking GetDC. Of course, your code is still like Tas's, and leaks resources like crazy, which is why it grinds your machine to a halt after only a short time of running. – Cody Gray Jun 2 '17 at 9:14 • @CodyGray Oh I know it leaks, should still work within the challenges specs though. And GetDC does not return IntPtr.Zero so sending that to FromHdc will not work. – TheLethalCoder Jun 2 '17 at 10:22 • Read the suggestion more carefully. :-) I'm not suggesting that you call FromHdc, I'm suggesting that you call FromHwnd. Notice that when you call GetDC to obtain the DC for a window handle, you pass in a NULL pointer (0) as the window handle. – Cody Gray Jun 2 '17 at 12:37 • @CodyGray Ah yes that works, thanks! They're named to similar, should have read your comment more carefully... – TheLethalCoder Jun 2 '17 at 12:41 # C# Console, 233220189 188 bytes namespace System{using static Console;class P{static void Main(){for(var r=new Random();;){BackgroundColor=(ConsoleColor)r.Next(16);SetCursorPosition(r.Next(40),r.Next(40));Write(" ");}}}}  Uses "all" (windows) 16 console colors. Thanks for the "feature" to be able to alias classes in C# via the using directive. Edit #1 • Removed some spaces. • Removed zeros from Rando

@@ -1,0 +1,48 @@
+Question: <p>I have a log file being written by another process which I want to watch for changes. Each time a change occurrs I'd like to read the new data in to do some processing on it.</p>
+
+<p>What's the best way to do this? I was hoping there'd be some sort of hook from the PyWin32 library. I've found the <code>win32file.FindNextChangeNotification</code> function but have no idea how to ask it to watch a specific file.</p>
+
+<p>If anyone's done anything like this I'd be really grateful to hear how...</p>
+
+<p><strong>[Edit]</strong> I should have mentioned that I was after a solution that doesn't require polling.</p>
+
+<p><strong>[Edit]</strong> Curses! It seems this doesn't work over a mapped network drive. I'm guessing windows doesn't 'hear' any updates to the file the way it does on a local disk.</p>
+
+Answer: <p>This is another modification of Tim Goldan's script that runs on linux and adds a simple watcher for file modification by using a dict (file=>time).</p>
+
+<p>usage: whateverName.py path_to_dir_to_watch</p>
+
+<pre><code>#!/usr/bin/env python
+
+import os, sys, time
+
+def files_to_timestamp(path):
+    files = [os.path.join(path, f) for f in os.listdir(path)]
+    return dict ([(f, os.path.getmtime(f)) for f in files])
+
+if __name__ == "__main__":
+
+    path_to_watch = sys.argv[1]
+    print "Watching ", path_to_watch
+
+    before = files_to_timestamp(path_to_watch)
+
+    while 1:
+        time.sleep (2)
+        after = files_to_timestamp(path_to_watch)
+
+        added = [f for f in after.keys() if not f in before.keys()]
+        removed = [f for f in before.keys() if not f in after.keys()]
+        modified = []
+
+        for f in before.keys():
+            if not f in removed:
+                if os.path.getmtime(f) != before.get(f):
+                    modified.append(f)
+
+        if added: print "Added: ", ", ".join(added)
+        if removed: print "Removed: ", ", ".join(removed)
+        if modified: print "Modified ", ", ".join(modified)
+
+        before = after
+</code></pre>

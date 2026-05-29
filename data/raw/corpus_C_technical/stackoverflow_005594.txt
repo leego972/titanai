@@ -1,0 +1,57 @@
+Question: <p>I'm working on a web application that will return a variable set of modules depending on user input. Each module is a Python class with a constructor that accepts a single parameter and has an '.html' property that contains the output.</p>
+
+<p>Pulling the class dynamically from the global namespace works:</p>
+
+<pre><code>result = globals()[classname](param).html
+</code></pre>
+
+<p>And it's certainly more succinct than:</p>
+
+<pre><code>if classname == 'Foo':
+    result = Foo(param).html
+elif classname == 'Bar':
+    ...
+</code></pre>
+
+<p>What is considered the best way to write this, stylistically? Are there risks or reasons not to use the global namespace?</p>
+
+Answer: <p>A flaw with this approach is that it may give the user the ability to to more than you want them to.  They can call <em>any</em> single-parameter function in that namespace just by providing the name.  You can help guard against this with a few checks (eg. isinstance(SomeBaseClass, theClass), but its probably better to avoid this approach.  Another disadvantage is that it constrains your class placement.  If you end up with dozens of such classes and decide to group them into modules, your lookup code will stop working.</p>
+
+<p>You have several alternative options:</p>
+
+<ol>
+<li><p>Create an explicit mapping:</p>
+
+<pre><code> class_lookup = {'Class1' : Class1, ... }
+ ...
+ result = class_lookup[className](param).html
+</code></pre>
+
+<p>though this has the disadvantage that you have to re-list all the classes.</p></li>
+<li><p>Nest the classes in an enclosing scope.  Eg. define them within their own module, or within an outer class:</p>
+
+<pre><code>class Namespace(object):
+    class Class1(object):
+        ...
+    class Class2(object):
+        ...
+...
+result = getattr(Namespace, className)(param).html
+</code></pre>
+
+<p>You do inadvertantly expose a couple of additional class variables here though (__bases__, __getattribute__ etc) - probably not exploitable, but not perfect.</p></li>
+<li><p>Construct a lookup dict from the subclass tree.  Make all your classes inherit from a single baseclass.  When all classes have been created, examine all baseclasses and populate a dict from them.  This has the advantage that you can define your classes anywhere (eg. in seperate modules), and so long as you create the registry after all are created, you will find them.</p>
+
+<pre><code>def register_subclasses(base):
+    d={}
+    for cls in base.__subclasses__():
+        d[cls.__name__] = cls
+        d.update(register_subclasses(cls))
+    return d
+
+
+class_lookup = register_subclasses(MyBaseClass)
+</code></pre>
+
+<p>A more advanced variation on the above is to use self-registering classes - create a metaclass than automatically registers any created classes in a dict.  This is probably overkill for this case - its useful in some "user-plugins" scenarios though.</p></li>
+</ol>

@@ -1,0 +1,39 @@
+Question: <p>How to wait for multiple child processes in Python on Windows, without active wait (polling)? Something like this <em>almost</em> works for me:</p>
+
+<pre><code>proc1 = subprocess.Popen(['python','mytest.py'])
+proc2 = subprocess.Popen(['python','mytest.py'])    
+proc1.wait()
+print "1 finished"
+proc2.wait()
+print "2 finished"
+</code></pre>
+
+<p>The problem is that when <code>proc2</code> finishes before <code>proc1</code>, the parent process will still wait for <code>proc1</code>. On Unix one would use <code>waitpid(0)</code> in a loop to get the child processes' return codes as they finish - how to achieve something like this in Python on Windows?</p>
+
+Answer: <p>It might seem overkill, but, here it goes:</p>
+
+<pre><code>import Queue, thread, subprocess
+
+results= Queue.Queue()
+def process_waiter(popen, description, que):
+    try: popen.wait()
+    finally: que.put( (description, popen.returncode) )
+process_count= 0
+
+proc1= subprocess.Popen( ['python', 'mytest.py'] )
+thread.start_new_thread(process_waiter,
+    (proc1, "1 finished", results))
+process_count+= 1
+
+proc2= subprocess.Popen( ['python', 'mytest.py'] )
+thread.start_new_thread(process_waiter,
+    (proc2, "2 finished", results))
+process_count+= 1
+
+# etc
+
+while process_count &gt; 0:
+    description, rc= results.get()
+    print "job", description, "ended with rc =", rc
+    process_count-= 1
+</code></pre>

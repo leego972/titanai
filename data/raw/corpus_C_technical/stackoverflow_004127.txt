@@ -1,0 +1,39 @@
+Question: <p>I'm writing a little debug app for a bit of kit we're developing and I'd like to roll it out to a few users to see if they can provoke any crashes. Does anyone know a way of effectively wrapping a wxPython app to catch any and all unhandled exceptions that would cause the app to crash?</p>
+
+<p>Ideally I'd want to capture all output (not just errors) and log it to a file. Any unhandled exceptions ought to log to the current file and then allow the exception to pass on as per usual (i.e. the logging process ought to be transparent).</p>
+
+<p>I'm sure someone must have done something along these lines before, but I've not managed to turn up anything that looks useful via google.</p>
+
+Answer: <p>For logging standard output, you can use a stdout wrapper, such as this one:</p>
+
+<pre><code>from __future__ import with_statement
+
+class OutWrapper(object):
+    def __init__(self, realOutput, logFileName):
+        self._realOutput = realOutput
+        self._logFileName = logFileName
+
+    def _log(self, text):
+        with open(self._logFileName, 'a') as logFile:
+            logFile.write(text)
+
+    def write(self, text):
+        self._log(text)
+        self._realOutput.write(text)
+</code></pre>
+
+<p>You then have to initialize it in your main Python file (the one that runs everything):</p>
+
+<pre><code>import sys    
+sys.stdout = OutWrapper(sys.stdout, r'c:\temp\log.txt')
+</code></pre>
+
+<p>As to logging exceptions, the easiest thing to do is to wrap <code>MainLoop</code> method of wx.App in a try..except, then extract the exception information, save it in some way, and then re-raise the exception through <code>raise</code>, e.g.:</p>
+
+<pre><code>try:
+    app.MainLoop()
+except:
+    exc_info = sys.exc_info()
+    saveExcInfo(exc_info) # this method you have to write yourself
+    raise
+</code></pre>

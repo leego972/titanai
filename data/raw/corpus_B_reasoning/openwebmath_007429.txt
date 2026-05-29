@@ -1,0 +1,56 @@
+# Polyphase decimation matlab [closed]
+
+I am new to DSP, and currently trying to implement a simple polyphase decimation program in matlab.
+
+M is decimation factor, x is input (for now it is a square wave 8096 samples), y_polyDec is result from polyphase, output is result from regular filter then decimation.
+
+code :
+
+FilterBank_LPF = fir1(127, 1/M);
+y_polyDec = zeros(8096/M, 1);
+
+for i = 1:M
+
+p(:, i) = FilterBank_LPF(i:M:end);
+x(:, i) = input(M-i+1:M:end);
+y_polyDec = filter(p(:, i), 1, x(:, i))+ y_polyDec;
+
+end
+
+out_LPF = filter(FilterBank_LPF, 1, input);
+output = downsample(out_LPF, M);
+
+%===========================================
+
+
+If I compare "output" and "y_polyDec" (either comparing the decimated sample values or frequency spectrum using fvtool) I notice there are differences in the values. I was wondering if my code is wrong, or am I still missing something.
+
+Thank you
+
+## closed as off-topic by lennon310, Wandering Logic, jonsca, Naresh, Jason RMay 6 '14 at 17:19
+
+This question appears to be off-topic. The users who voted to close gave this specific reason:
+
+• "General programming questions are off-topic here, but can be asked on Stack Overflow." – lennon310, Wandering Logic, jonsca, Naresh, Jason R
+If this question can be reworded to fit the rules in the help center, please edit the question.
+
+The problem is in the input signals to your polyphase filters. They should be delayed and subsampled versions of the input signal, like in the following code fragment:
+
+M=8;    % downsampling factor
+L=256;  % length of input signal, integer multiple of M
+x=randn(L,1);  % input signal
+h = fir1(127, 1/M);
+yp = zeros(L/M, 1);
+
+for i = 1:M,
+xtmp = [zeros(i-1,1); x];  % delayed input signal
+tmp = filter( h(i:M:end), 1, xtmp(1:M:L) );  % polyphase filtering
+yp = yp + tmp;  % accumulate outputs of polyphase filters
+end
+
+% compare with standard filtering
+y = filter ( h, 1, x);
+yM = downsample( y, M );
+
+n=1:L/M;
+plot(n,(yM-yp)/max(yM))

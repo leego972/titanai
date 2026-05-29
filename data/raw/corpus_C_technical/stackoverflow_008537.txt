@@ -1,0 +1,42 @@
+Question: <p>I have a model that looks like this:</p>
+
+<pre><code>class Category(models.Model):
+    name = models.CharField(max_length=60)
+
+class Item(models.Model):
+    name = models.CharField(max_length=60)
+    category = models.ForeignKey(Category)
+</code></pre>
+
+<p>I want select count (just the count) of items for each category, so in SQL it would be as simple as this:</p>
+
+<pre><code>select category_id, count(id) from item group by category_id
+</code></pre>
+
+<p>Is there an equivalent of doing this "the Django way"? Or is plain SQL the only option? I am familiar with the <em>count( )</em> method in Django, however I don't see how <em>group by</em> would fit there.</p>
+
+Answer: <p>Since I was a little confused about how grouping in Django 1.1 works I thought I'd elaborate here on how exactly you go about using it. First, to repeat what Michael said:</p>
+
+<blockquote>
+  <p>Here, as I just discovered, is how to do this with the Django 1.1 aggregation API:</p>
+
+<pre><code>from django.db.models import Count
+theanswer = Item.objects.values('category').annotate(Count('category'))
+</code></pre>
+</blockquote>
+
+<p>Note also that you need to <code>from django.db.models import Count</code>!</p>
+
+<p>This will select only the categories and then add an annotation called <code>category__count</code>. Depending on the default ordering this may be all you need, <strong>but if the default ordering uses a field other than <code>category</code> this will not work</strong>. The reason for this is that the fields required for ordering are also selected and make each row unique, so you won't get stuff grouped how you want it. One quick way to fix this is to reset the ordering:</p>
+
+<pre><code>Item.objects.values('category').annotate(Count('category')).order_by()
+</code></pre>
+
+<p>This should produce exactly the results you want. To set the name of the annotation you can use:</p>
+
+<pre><code>...annotate(mycount = Count('category'))...
+</code></pre>
+
+<p>Then you will have an annotation called <code>mycount</code> in the results.</p>
+
+<p>Everything else about grouping was very straightforward to me. Be sure to check out the <a href="http://docs.djangoproject.com/en/dev/topics/db/aggregation">Django aggregation API</a> for more detailed info.</p>

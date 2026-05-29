@@ -1,0 +1,51 @@
+Question: <p>I would like to replicate this in python:</p>
+
+<pre><code>gvimdiff &lt;(hg cat file.txt) file.txt
+</code></pre>
+
+<p>(hg cat file.txt outputs the most recently committed version of file.txt)</p>
+
+<p>I know how to pipe the file to gvimdiff, but it won't accept another file:</p>
+
+<pre><code>$ hg cat file.txt | gvimdiff file.txt -
+Too many edit arguments: "-"
+</code></pre>
+
+<p>Getting to the python part...</p>
+
+<pre><code># hgdiff.py
+import subprocess
+import sys
+file = sys.argv[1]
+subprocess.call(["gvimdiff", "&lt;(hg cat %s)" % file, file])
+</code></pre>
+
+<p>When subprocess is called it merely passes <code>&lt;(hg cat file)</code> onto <code>gvimdiff</code> as a filename.</p>
+
+<p>So, is there any way to redirect a command as bash does?
+For simplicity's sake just cat a file and redirect it to diff:</p>
+
+<pre><code>diff &lt;(cat file.txt) file.txt
+</code></pre>
+
+Answer: <p>It can be done. As of Python 2.5, however, this mechanism is Linux-specific and not portable:</p>
+
+<pre><code>import subprocess
+import sys
+
+file = sys.argv[1]
+p1 = subprocess.Popen(['hg', 'cat', file], stdout=subprocess.PIPE)
+p2 = subprocess.Popen([
+    'gvimdiff',
+    '/proc/self/fd/%s' % p1.stdout.fileno(),
+    file])
+p2.wait()
+</code></pre>
+
+<p>That said, in the specific case of diff, you can simply take one of the files from stdin, and remove the need to use the bash-alike functionality in question:</p>
+
+<pre><code>file = sys.argv[1]
+p1 = subprocess.Popen(['hg', 'cat', file], stdout=subprocess.PIPE)
+p2 = subprocess.Popen(['diff', '-', file], stdin=p1.stdout)
+diff_text = p2.communicate()[0]
+</code></pre>

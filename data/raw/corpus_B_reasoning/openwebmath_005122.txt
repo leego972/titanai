@@ -1,0 +1,63 @@
+# Piecewise integration fail or something else?
+
+I have a not-so-complicated piecewise cubic function, shown below as the yellow curve on the right. It's derivative is on the left; the blue lines are references. Please see the code below where I call it myF (and its derivative myf).
+
+To my surprise, the integration with a parameter $u$ and sine in the argument gives an ugly result involving the complex $i$.
+
+Is the result of $\int$myF$(u\sin x)$d$x$ (as shown in the screenshot below) correct? Or is it some kind of failure due to my erroneous way of using Integrate coupled withPiecewise?
+
+As just the area under the curve modulated by sine, I for now don't see how this can be mathematically true to have involved $\sqrt{-1}$.
+
+Screen shot below:
+
+The code to define the curves, generate the plots, and do the integration is below. When the parameter $u < \frac12$ of course there's no problem since the integration doesn't go over the splitting point' (where is differentiable).
+
+I tried various ways to code the integration with assumptions, but the outcomes are basically the same. Some hint or confirmation would be greatly appreciated. Thank you.
+
+ClearAll[myF, myf, u, v, ImgSz];
+myF[v_] := Piecewise[{
+{0, v < 0},
+{4/3 v^3, 0 <= v < 1/2},
+{1/3 (1 - 6 v + 12 v^2 - 4 v^3), 1/2 <= v < 1},
+{1, v >= 1}
+}];
+myf = D[myF[u], u] /. {u -> v};
+ImgSz = 250;
+Row[{  Plot[{ 1,  (*  symmetry reference  *)
+myf
+}, {v, -.3, 1.3}, PlotRange -> {-0.1, 2}, ImageSize -> ImgSz],
+Plot[{ v, (*  linear reference  *)
+myF[v]
+}, {v, -.3, 1.3}, PlotRange -> {-0.1, 1}, ImageSize -> ImgSz]
+}]
+Assuming[  1/2 < u < 1 ,
+Integrate[ myF[ u Sin[x]], {x, 0, Pi}] ]
+
+
+Summarizing Edit
+
+Okay, so I couldn't recognize the expression as real-disguised-in-complex-conjugate, neither did I know reliable ways to test that. I'm glad to have learned from both answer posts.
+
+In my case, defining the function with UnitStep doesn't allow Mathematica to evaluate differently like in another post (which I cannot find right now). Nor does PrincipalValue -> True or change of variables apply here as it does sometimes. I have accepted that in my case I need to post-process the expression the way I see fit. Nonetheless, for the record, there are some known bugs, old and new, solved and unsolved.
+
+You can convert the answer to a real-looking expression as follows:
+
+FullSimplify[
+1/2 < u < 1]
+(*
+1/9 (-11 Sqrt[-1 + 4 u^2] + 16 u^2 (u - Sqrt[-1 + 4 u^2]) + 6 (1 + 6 u^2) ArcSec[2 u])
+*)
+
+
+Just because an expression contains the imaginary unit $i$ doesn't mean that its imaginary part is non-zero. For example, you could naïvely think that $$\frac{1}{x-i}+\frac{1}{x+i}$$ is complex, but actually it equals $\frac{2 x}{x^2+1}$, which is explicitly real (for real $x$).
+
+In your particular case, you found an expression that looks complex, but it is actually real. For example, if you set u=3/4 and evaluate the integral numerically, you get 0.718597+i5.5511e-17, which has an spurious imaginary part due to numerical error.
+
+If you evaluate
+
+Plot[ReIm@NIntegrate[myF[u Sin[x]], {x, 0, Pi}], {u, 1/2, 1}]
+`
+
+you get
+
+which confirms the fact that the integral is indeed real - its imaginary part vanishes.

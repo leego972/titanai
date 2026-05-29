@@ -1,0 +1,144 @@
+# Introduction
+
+The Calculon library is extremely simple. It is supplied as a set of headers; to use the library, create a type instance of the compiler, create the global symbol table, and then you can instantiate functions. If compiling a script fails, an exception is thrown. If that succeeds, you have an object which you can just call.
+
+Here is an annotated example.
+
+/* Create the type instance, and pull some useful types out of it */
+typedef Calculon::Instance<Calculon::RealIsDouble> Compiler;
+typedef Compiler::Real Real;
+typedef Compiler::Vector<3> Vector3;
+
+/* Create the symbol table */
+Compiler::StandardSymbolTable symbols;
+
+/* Open the script file */
+std::ifstream scriptSource("script.cal");
+
+/* Prototype the function that the script represents, and compile the
+* script. We pass in the Calculon type signature of the function so the
+* compiler knows what parameters we're using */
+typedef void ScriptFunction(Real x, Real y, Real* result);
+Compiler::Program<ScriptFunction> function(symbols, code,
+"(x:real, y:real): (result:real)");
+
+/* Call the function */
+
+function(1, -1, &result);
+
+
+...and that's pretty much it. function() may be called as many times as you like and is thread-safe. When it goes out of scope it will be destroyed.
+
+# Configurations
+
+Right now there are two forms of the Calculon compiler you can use. This:
+
+typedef Calculon::Instance<Calculon::RealIsDouble> Compiler;
+
+
+...and this:
+
+typedef Calculon::Instance<Calculon::RealIsFloat> Compiler;
+
+
+These control whether Calculon's real type is a single-precision or double-precision. There may be more configurations in the future.
+
+You can use both at the same time, if you wish.
+
+# Vectors
+
+The Compiler::Vector<> template refers to a vector with the specified number of parameters. It ensures that the correct alignment is used (which is very important, or else your script will run very badly or produce the wrong results).
+
+It has an m[] member which provides access to the members of the vector. Dereference them at your will. Sorry, they can't be initialised via initialisation lists: you have to assign to their members. (If anyone knows how to force C++ to allow this, please get in touch.)
+
+Vectors which are 1, 2, 3 or 4 elements long may also be derefenced via x, y, z and w, as appropriate.
+
+# Type aliases
+
+When compiling your Calculon script, you may also provide an optional extra parameter which provides a map of type aliases. These allow you to use application-specific names for certain types in the script. The main use for this is if the application requires a certain size of vector and you don't want to bake knowledge of the size of vector into the script.
+
+map<string, string> typeAliases;
+#if defined NINEBYNINE
+typeAliases["matrix"] = "vector*9";
+#else
+typeAliases["matrix"] = "vector*4";
+#endif
+Compiler::Program<ScriptFunction> function(symbols, code,
+"(x:matrix, y:matrix): (result:real)", typeAliases);
+
+
+...allows this script to work with either configuration:
+
+(x*y).sum
+
+
+# Calling conventions
+
+Alas, the mapping between C++ parameters and Calculon parameters is not quite obvious.
+
+Calculon reals are available as Compiler::Real, and Calculon vectors as the appropriate kind of Compiler::Vector. Reals are passed in the obvious way, as in the example above. However, vectors are passed by pointer.
+
+Return parameters are passed last, and always by pointer.
+
+For example:
+
+/* f1(x: real, y: real, v: vector*3): (result: real) */
+typedef void f1(Real x, Real y, Compiler::Vector<3>* v, Real* result);
+
+/* f2(x: real, y: real, v: vector*3): (result: vector*2) */
+typedef void f2(Real x, Real y, Compiler::Vector<3>* v, Compiler::Vector<2>* result);
+
+
+To call such a function, create some Vector objects somewhere and pass their pointers in. The stack will do fine.
+
+Compiler::Vector<2> result;
+Compiler::Vector<3> v;
+v.x = 0; v.y = 1; v.z = 2;
+f2(7, 8, &v, &result);
+
+
+# Registering functions
+
+Functions may be trivially added to the symbol table. (You may create as many symbol tables as you wish; the symbol table is only ever used during the compilation process. Symbol tables are not thread safe!)
+
+extern "C"
+double perlin(Compiler::Vector<3>* v)
+{
+return ...
+}
+
+Compiler::StandardSymbolTable symbols;
+
+
+The first parameter specifies the name; the second parameter gives the type signature of the function; the third parameter is the function to call. The function does not need to be extern "C" but it's a good idea to avoid edge cases.
+
+The type signature uses a similar syntax to Calculon type signatures, but without function names. real must be explicitly specified. float and double are valid here, and cause Calculon to automatically convert between the representation of real that it is using internally to your platform's float or double types. (If you specify real, ensure that your external function uses Compiler::Real as its parameter type.)
+
+If you make a mistake here, really bad things happen. There is no way for Calculon to detect whether the function signature is correct or not, and it just trusts you. If you get it wrong, you may get garbage data or crashes.
+
+Only one value may be returned. Reals (and doubles and floats) are returned inline --- this is different from the calling convention used for Calculon scripts. Vectors are returned by pointer via an extra parameter which appears last.
+
+Note carefully! Calculon is designed for scripts that have no side effects. If you call out to a function which does something... well, it'll work, but the Calculon compiler is allowed to assume that if it calls the function once with a set of parameters, it can call it again with the same parameters and get the same result. Be careful. (And don't forget that rand() has side effects.)
+
+# Registering values
+
+You may also register real and vector global variables in the symbol table. This is useful for simple constants that won't change between runs of the Calculon script (such as: size of the output image, position of various objects in 3D space, etc).
+
+Compiler::StandardSymbolTable symbols;
+
+vector<double> v(4);
+v[0] = 1; v[1] = 2; v[2] = 3; v[3] = 4;
+
+
+These values are compiled as literals into the output machine code, which means they are fast. However, one the script has been compiled, they cannot be changed. Use input parameters if you need values which change.
+
+# Dependencies
+
+The Calculon library uses the STL and iostreams. It does use some Boost, but does not use C++11, for maximum compatibility. Fairly obviously, it uses LLVM 3.3. It may or may not work with other versions of LLVM. (If you need it to work on another version, please get in touch.)
+
+The supplied sample Makefile shows the recommended way to build programs that use Calculon, but the short summary is:
+
+g++ -I\$(shell llvm-config-3.3 --includedir) -lLLVM-3.3 program.cc
+
+
+Calculon works with both gcc and clang++. I haven't tried with Visual Studio (I'd appreciate any reports of workingness or otherwise).

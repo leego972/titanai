@@ -1,0 +1,72 @@
+Question: <p>MySQL ResultSets are by default retrieved completely from the server before any work can be done. In cases of huge result sets this becomes unusable. I would like instead to actually retrieve the rows one by one from the server.</p>
+
+<p>In Java, following the instructions <a href="http://dev.mysql.com/doc/refman/5.1/en/connector-j-reference-implementation-notes.html">here</a> (under "ResultSet"), I create a statement like this:</p>
+
+<pre><code>stmt = conn.createStatement(java.sql.ResultSet.TYPE_FORWARD_ONLY,
+              java.sql.ResultSet.CONCUR_READ_ONLY);
+stmt.setFetchSize(Integer.MIN_VALUE);
+</code></pre>
+
+<p>This works nicely in Java. My question is: is there a way to do the same in python?</p>
+
+<p>One thing I tried is to limit the query to a 1000 rows at a time, like this:</p>
+
+<pre><code>start_row = 0
+while True:
+    cursor = conn.cursor()
+    cursor.execute("SELECT item FROM items LIMIT %d,1000" % start_row)
+    rows = cursor.fetchall()
+    if not rows:
+        break
+    start_row += 1000
+    # Do something with rows...
+</code></pre>
+
+<p>However, this seems to get slower the higher start_row is.</p>
+
+<p>And no, using <code>fetchone()</code> instead of <code>fetchall()</code> doesn't change anything.</p>
+
+<h2>Clarification:</h2>
+
+<p>The naive code I use to reproduce this problem looks like this:</p>
+
+<pre><code>import MySQLdb
+
+conn = MySQLdb.connect(user="user", passwd="password", db="mydb")
+cur = conn.cursor()
+print "Executing query"
+cur.execute("SELECT * FROM bigtable");
+
+print "Starting loop"
+row = cur.fetchone()
+while row is not None:
+    print ", ".join([str(c) for c in row])
+    row = cur.fetchone()
+
+cur.close()
+conn.close()
+</code></pre>
+
+<p>On a ~700,000 rows table, this code runs quickly. But on a ~9,000,000 rows table it prints "Executing Query" and then hangs for a long long time. That is why it makes no difference if I use <code>fetchone()</code> or <code>fetchall()</code>.</p>
+
+Answer: <p>I found the best results mixing a bit from some of the other answers. </p>
+
+<p>This included setting <code>cursorclass=MySQLdb.cursors.SSDictCursor</code> (for MySQLdb) or <code>pymysql.cursors.SSDictCursor</code> (for PyMySQL) as part of the connection settings. This will let the server hold the query/results (the "SS" stands for server side as opposed to the default cursor which brings the results client side) and build a dictionary out of each row (e.g. {'id': 1, 'name': 'Cookie Monster'}). </p>
+
+<p>Then to loop through the rows, there was an infinite loop in both Python 2.7 and 3.4 caused by <code>while rows is not None</code> because even when <code>cur.fetchmany(size=10000)</code> was called and there were no results left, the method returned an empty list (<code>[]</code>) instead of None. </p>
+
+<p>Actual example:</p>
+
+<pre><code>query = """SELECT * FROM my_table"""
+conn = pymysql.connect(host=MYSQL_CREDENTIALS['host'], user=MYSQL_CREDENTIALS['user'],
+                          passwd=MYSQL_CREDENTIALS['passwd'], charset='utf8', cursorclass = pymysql.cursors.SSDictCursor)
+cur = conn.cursor()
+results = cur.execute(query)
+rows = cur.fetchmany(size=100)
+while rows:
+    for row in rows: 
+        process(row)
+    rows = cur.fetchmany(size=100)
+cur.close()
+conn.close()
+</code></pre>

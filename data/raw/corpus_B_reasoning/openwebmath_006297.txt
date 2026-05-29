@@ -1,0 +1,303 @@
+## Monday, December 10, 2018
+
+### More queens problems (2)
+
+In [1], I discussed the Minimum Dominating Set of Queens Problem. Here is a variant:
+
+Given an $$n \times n$$ chess board, place $$n$$ queens on the board such that the number of squares not under attack is maximized.
+
+For an $$n=8$$ problem, the maximum number of non-dominated squares is 11. An example is:
+
+ 11 white pawns are not under attack
+
+We base the model on the one in [1]. First we define two sets of binary variables:
+
+\begin{align} & x_{i,j} = \begin{cases} 1 & \text{if square $$(i,j)$$ is occupied by a queen}\\ 0 & \text{otherwise}\end{cases} \\ & y_{i,j} = \begin{cases} 1 & \text{if square $$(i,j)$$ is under attack} \\ 0 & \text{otherwise}\end{cases}\end{align}
+
+The model can look like:
+
+Maximum Non-Dominated Squares Problem
+\begin{align}\max& \>\color{DarkRed}z=\sum_{i,j} \left(1-\color{DarkRed} y_{i,j}\right)\\ & \sum_{j'} \color{DarkRed}x_{i,j'} + \sum_{i'} \color{DarkRed}x_{i',j} + \sum_{i',j'|i'-j'=i-j} \color{DarkRed}x_{i',j'} +\sum_{i',j'|i'+j'=i+j} \color{DarkRed}x_{i',j'}-3 \color{DarkRed} x_{i,j} \ge \color{DarkBlue}M \cdot \color{DarkRed}y_{i,j} && \forall i,j \\ & \sum_{i,j} \color{DarkRed} x_{i,j} = n \\& \color{DarkRed}x_{i,j},\color{DarkRed}y_{i,j}\in\{0,1\} \end{align}
+
+The funny term $$-3x_{i,j}$$ is to compensate for double counting occurrences of $$x_{i,j}$$ in the previous terms [1]. We need to find a reasonable value for $$M$$. An upper bound is $$M=n$$. For $$n=8$$, there are 48 different optimal solutions.
+
+The problem $$n=9$$ has one structural optimal solution (with 18 unattacked positions), and 3 variants by symmetry:
+
+Is there a good way to find only structural solutions? One way is to use your own cuts as in [4], If we want to use solution pool, we need to invent a constraint that forbids some symmetry (or have an objective that favors some of symmetric versions).
+
+#### References
+
+1. More queens problems, https://yetanothermathprogrammingconsultant.blogspot.com/2018/12/more-queens-problems.html
+2. Bernard Lemaire, Pavel Vitushinkiy, Placing $$n$$ non-dominating queens on the $$n\times n$$ Chessboard, 2011, https://www.ffjm.org/upload/fichiers/N_NON_DOMINATING_QUEENS.pdf
+3. Maximum Queens Chess Problem, https://www.gams.com/latest/gamslib_ml/queens.103
+
+## Saturday, December 8, 2018
+
+### More queens problems
+
+In [1] the famous $$n$$-queens problem was discussed: how many queens can we place on a chess-board such that non of them are attacked by others. Interestingly, we had some non-obvious problem with Cplex enumerating the different configurations (due to tolerance issues).
+
+A different problem is the Minimum Dominating Set of Queens Problem:
+Find the minimum number of queens needed such that they dominate each square.
+Here dominate means: either a square is under attack by at least one queen, or it is occupied by a queen.
+
+To develop is Mixed Integer Programming model, we introduce the familiar binary variables
+
+$x_{i,j} = \begin{cases} 1 & \text{if square $$(i,j)$$ is occupied by a queen}\\ 0 & \text{otherwise}\end{cases}$
+
+A square $$(i,j)$$ is dominated if:
+
+1. $$x_{i,j}=1$$: a queen is located here. This case will be covered by the following other cases, so we don't have to worry about this.
+2. There is a queen in row $$i$$: $\sum_{j'} x_{i,j'} \ge 1$
+3. There is a queen in column $$j$$:$\sum_{i'} x_{i',j} \ge 1$
+4. There is a queen in the same diagonal. The diagonal is described by $$(i',j')$$ such that $$i'-j'=i-j$$. So we have: $\sum_{i',j'|i'-j'=i-j} x_{i',j'}\ge 1$ If you prefer you can write this as $\sum_{i'|1 \le i'-i+j \le n } x_{i',i'-i+j} \ge 1$
+5. There is a queen in the same anti-diagonal. The anti-diagonal is described by $$(i',j')$$ such that $$i'+j'=i+j$$. So we have: $\sum_{i',j'|i'+j'=i+j} x_{i',j'}\ge 1$ This can also be written as $\sum_{i'| 1 \le i+j-i' \le n} x_{i',i+j-i'} \ge 1$
+
+We can write these conditions in one big constraint. So we can write:
+
+Minimum Dominating Set of Queens Problem
+\begin{align}\min& \>\color{DarkRed}z=\sum_{i,j} \color{DarkRed} x_{i,j}\\ & \sum_{j'} \color{DarkRed}x_{i,j'} + \sum_{i'} \color{DarkRed}x_{i',j} + \sum_{i',j'|i'-j'=i-j} \color{DarkRed}x_{i',j'} +\sum_{i',j'|i'+j'=i+j} \color{DarkRed}x_{i',j'} \ge 1 && \forall i,j \\ & \color{DarkRed}x_{i,j}\in\{0,1\} \end{align}
+
+For an $$8\times 8$$ board, we need 5 queens. Here are two solutions:
+
+You can verify that every unoccupied square is under attack.
+
+Note that this formulation actually does a bit of double counting. E.g. when we look at the constraint for cell $$(2,3)$$ we see:
+
+e(2,3)..  x(1,2) + x(1,3) + x(1,4) + x(2,1) + x(2,2) + 4*x(2,3) + x(2,4)
+
++ x(2,5) + x(2,6) + x(2,7) + x(2,8) + x(3,2) + x(3,3) + x(3,4) + x(4,1)
+
++ x(4,3) + x(4,5) + x(5,3) + x(5,6) + x(6,3) + x(6,7) + x(7,3) + x(7,8)
+
++ x(8,3) =G= 1 ; (LHS = 0, INFES = 1 ****)
+
+
+We see that x(2,3) has a coefficient 4. This is harmless. However it looks a bit unpolished. With a little bit more careful modeling we can get rid of this coefficient 4. A complicated way would be: $\sum_{j'}x_{i,j'} + \sum_{i'|i'\ne i} x_{i',j} + \sum_{i',j'|i'-j'=i-j,i'\ne i, j'\ne j} x_{i',j'} +\sum_{i',j'|i'+j'=i+j,i'\ne i, j'\ne j} x_{i',j'} \ge 1 \>\> \forall i,j$ The first summation includes $$x_{i,j}$$ while the other three summations exclude explicitly an occurrence of $$x_{i,j}$$. Simpler is just to subtract $$3 x_{i,j}$$: $\sum_{j'} x_{i,j'} + \sum_{i'} x_{i',j} + \sum_{i',j'|i'-j'=i-j} x_{i',j'} +\sum_{i',j'|i'+j'=i+j} x_{i',j'}-3x_{i,j} \ge 1\>\> \forall i,j$ Here we just compensate for the double counting.
+
+Now we see:
+
+e(2,3)..  x(1,2) + x(1,3) + x(1,4) + x(2,1) + x(2,2) + x(2,3) + x(2,4) + x(2,5)
+
++ x(2,6) + x(2,7) + x(2,8) + x(3,2) + x(3,3) + x(3,4) + x(4,1) + x(4,3)
+
++ x(4,5) + x(5,3) + x(5,6) + x(6,3) + x(6,7) + x(7,3) + x(7,8) + x(8,3)
+
+=G= 1 ; (LHS = 0, INFES = 1 ****)
+
+
+When we ask: how many different solution are there?, we use again the Cplex solution pool. And again, we have our tolerance problem:
+
+pool.absgapNumber of solutions
+02
+0.54860
+
+As the objective is integer valued, in some sense an absolute gap tolerance of 0.5 seems the safest. With this we find the correct number of solutions [2]. See [1] for a more in-depth discussion of this tolerance problem.
+
+#### References
+
+1. Chess and solution pool, http://yetanothermathprogrammingconsultant.blogspot.com/2018/11/chess-and-solution-pool.html.
+2. Weisstein, Eric W.,  Queens Problem, http://mathworld.wolfram.com/QueensProblem.html
+3. Henning Fernau, minimum dominating set of queens: A trivial programming exercise?, Discrete Applied Mathematics, Volume 158, Issue 4, 28 February 2010, Pages 308-318. This is about programming instead of modeling. The issues are very different.
+4. Saad Alharbi and, Ibrahim Venkat, A Genetic Algorithm Based Approach for Solving the Minimum Dominating Set of Queens Problem, Hindawi Journal of Optimization, Volume 2017. I am not sure why a meta-heuristic is a good choice for solving this problem: you will not find proven optimal solutions.
+
+## Tuesday, November 27, 2018
+
+### Chess and solution pool
+
+The $$n$$-queens problem is a popular example of a "chessboard non-attacking problem" [1,2]:
+
+• On an $$n \times n$$ chessboard place as many queens as possible such that none of them is attacked
+• Given this, how many different ways can we place those queens?
+
+We use the usual $$8 \times 8$$ board.
+
+#### Rooks
+
+A related, simpler problem is about placing rooks. The optimization problem is very simple: it is an assignment problem:
+
+n-Rooks Problem
+\begin{align}\max&\> \color{DarkRed}z=\sum_{i,j} \color{DarkRed} x_{i,j}\\ & \sum_j \color{DarkRed}x_{i,j} \le 1 && \forall i\\& \sum_i \color{DarkRed}x_{i,j} \le 1 && \forall j\\ & \color{DarkRed}x_{i,j}\in\{0,1\} \end{align}
+
+For an $$8 \times 8$$ board it is obvious that the number of rooks we can place is 8. Here we show two configurations:
+
+We can easily answer: how many alternative configuration with 8 rooks can we find? This is $n! = 8! = 40,320$ Basically, we enumerate all row and column permutations of the diagonal depicted above. We can use the solution pool in solvers like Cplex and Gurobi to find all of them. Here I use Cplex and the performance is phenomenal: all 40,320 solutions are found in 16 seconds.
+
+#### Board
+
+In the models in this write-up, I assume a board that has the coordinates:
+
+ Coordinate System in Models
+
+This also means that the diagonals:
+ Main diagonal and anti-diagonal
+
+have the form $$\{(i,j)|i=j\}$$ and $$\{(i,j)|i+j=9\}$$. More generally, for the downward sloping main diagonals we have the rule: $i=j+k$ for $$k=-6,\dots,6$$. The anti-diagonals can be described as: $i+j=k$ for $$k=3,\dots,15$$. We can illustrate this with:
+
+ Diagonals and anti-diagonals
+
+The first picture has cell values $$a_{i,j}=i-j$$ and the second one has cell values $$a_{i,j}=i+j$$.
+
+#### Bishops
+
+The model for placing bishops is slightly more complicated: we need to check the main diagonals and the anti-diagonals. We use the notation from the previous paragraph. So with this, our model can look like:
+
+n-Bishops Problem
+\begin{align}\max& \>\color{DarkRed}z=\sum_{i,j} \color{DarkRed} x_{i,j}\\ & \sum_{i-j=k} \color{DarkRed}x_{i,j} \le 1 && k=-(n-2),\dots,(n-2)\\& \sum_{i+j=k} \color{DarkRed}x_{i,j} \le 1 && k=3,\dots,2n-1\\ & \color{DarkRed}x_{i,j}\in\{0,1\} \end{align}
+
+Note that these constraints translate directly into GAMS:
+
+bishop_main(k1).. sum((i,j)$(v(i)-v(j)=v(k1)),x(i,j)) =l= 1; bishop_anti(k2).. sum((i,j)$(v(i)+v(j)=v(k2)),x(i,j)) =l= 1;
+
+Two possible solutions are:
+
+We can accommodate 14 bishops. There are 256 different solutions (according to Cplex).
+
+Note: the GAMS display of the solution is not so useful:
+
+----     47 VARIABLE x.L
+
+1           2           4           5           7           8
+
+1           1                       1           1           1
+2           1
+3           1                                                           1
+6           1                                                           1
+7                                                                       1
+8           1           1           1           1
+
+
+For this reason I show the solution using the $$\LaTeX$$ chessboard package [5]. You should be aware that the coordinate system is different than what we use in the models.
+
+#### Queens
+
+The $$n$$ queens problem is now very simple: we just need to combine the two previous models.
+
+n-Queens Problem
+\begin{align}\max&\> \color{DarkRed}z= \sum_{i,j} \color{DarkRed} x_{i,j}\\ & \sum_j \color{DarkRed}x_{i,j} \le 1 && \forall i\\& \sum_i \color{DarkRed}x_{i,j} \le 1 && \forall j\\ & \sum_{i-j=k} \color{DarkRed}x_{i,j} \le 1 && k=-(n-2),\dots,(n-2)\\& \sum_{i+j=k} \color{DarkRed}x_{i,j} \le 1 && k=3,\dots,2n-1\\ & \color{DarkRed}x_{i,j}\in\{0,1\} \end{align}
+
+A solution can look like:
+
+We can place 8 queens and there are 92 solutions.
+
+Notes:
+
+• Cplex delivered 91 solutions. This seems to be a tolerance issue. I used a solution pool absolute gap of zero (option SolnPoolAGap=0 or as it is called recently: mip.pool.absgap=0) [4]. As the objective jumps by one, it is safe to set the absolute gap to 0.01. With this gap we found all 92 solutions. Is this a bug? Maybe. Possibly. Probably. This 92-th solution is not supposed to be cut off. Obviously, poor scaling is not an issue here: this model is as well-scaled as you can get. I suspect that the (somewhat poorly understood) combination of tolerances (feasibility, integer, optimality) causes Cplex to behave this way. If too many binary variables assume 0.99999 (say within the integer tolerance) we have an objective which is too small. Indeed, we can also get to 92 solutions by setting the integer tolerance epint=0.  Note that setting the integer tolerance to zero will often increase solution times.
+Often tolerances "help" us: they make it easier to find feasible or optimal solutions. Here is a case when they really cause problems.
+Of course this discussion is not a good advertisement for Mixed Integer Programming models. Preferably we should not have to worry about technical details such as tolerances when building and solving models that are otherwise fairly straightforward (no big-M's, well-scaled, small in size).
+• A two step algorithm can help to prevent the tolerance issue discussed above:
+1. Solve the maximization problem: we find max number of queens $$z^*$$.
+2. Create a feasibility problem with number of queens equal to $$z^*$$. I.e. we add the constraint: $\sum_{i,j} x_{i,j}=z^*$ This problem has no objective. Find all feasible integer solutions using the solution pool. We don't need to set a solution pool gap for this.
+On the surface, this looks just like the method above. However, physically having the constraint $$\sum x_{i,j}=z^*$$ in the model will make sure all relaxations obey this constraints. So any binary variables that are automatically integer (i.e. close to 0 or 1) will never cause us to deviate too much from $$z^*$$. This is subtle.
+• Many of the 92 solutions are the result of simple symmetric operations, such as rotating the board, or reflection [2]. The number of different solutions after ignoring these symmetries is just 12. The GAMS model in [3] finds those.
+• The model in [3] handles the bishop constraints differently, by calculating an offset and writing $\sum_i x_{i,i +\mathit{sh}_s} \le 1 \>\>\forall s$ I somewhat prefer our approach.
+
+#### Kings
+
+Kings are handled quite cleverly in [1]. They observe that there cannot be more than one king in each block $\begin{matrix} x_{i,j} & x_{i,j+1}\\ x_{i+1,j} & x_{i+1,j+1}\end{matrix}$ Note that we only have to look forward (and downward) as a previous block would have covered things to the left (or above). The model can look like:
+
+n-Kings Problem
+\begin{align}\max& \>\color{DarkRed}z=\sum_{i,j} \color{DarkRed} x_{i,j}\\ & \color{DarkRed}x_{i,j}+\color{DarkRed}x_{i+1,j}+\color{DarkRed}x_{i,j+1}+\color{DarkRed}x_{i+1,j+1}\le 1 && \forall i,j\le n-1\\ & \color{DarkRed}x_{i,j}\in\{0,1\} \end{align}
+
+Two solutions are:
+
+We can place 16 kings, and there are a lot of possible configurations: 281,571 (says Cplex).
+
+#### Knights
+
+To place knights we set up a set $$\mathit{jump}_{i,j,i',j'}$$ indicating if we can jump from cell $$(i,j)$$ to cell $$(i',j')$$. We only need to look forward, so for each $$(i,j)$$ we need to consider four cases:
+ $$j$$ $$j+1$$ $$j+2$$ $$i-2$$ $$x_{i-2,j+1}$$ $$i-1$$ $$x_{i-1,j+2}$$ $$i$$ $$x_{i,j}$$ $$i+1$$ $$x_{i+1,j+2}$$ $$i+2$$ $$x_{i+2,j+1}$$
+
+Note that near the border we may have fewer than four cases. In GAMS we can populate the set $$\mathit{jump}$$ straightforwardly:
+
+jump(i,j,i-2,j+1) = yes;
+jump(i,j,i-1,j+2) = yes;
+jump(i,j,i+1,j+2) = yes;
+jump(i,j,i+2,j+1) = yes;
+
+The model can look like:
+
+n-Knights Problem
+\begin{align}\max& \>\color{DarkRed}z=\sum_{i,j} \color{DarkRed} x_{i,j}\\ & \color{DarkRed}x_{i,j}+\color{DarkRed}x_{i',j'}\le 1 && \forall i,j,i',j'|\mathit{jump}_{i,j,i',j'}\\ & \color{DarkRed}x_{i,j}\in\{0,1\} \end{align}
+
+We can place 32 knights. There are only two different solutions:
+
+#### Conclusion
+
+The solution pool is a powerful tool to enumerate possibly large numbers of integer solutions. However, with default tolerances, setting the solution pool absolute gap tolerance to zero may cause perfectly good integer solutions to be missed. This is dicey stuff.
+
+#### References
+
+1. L. R. Foulds and D. G. Johnston, An Application of Graph Theory and Integer Programming: Chessboard Non-Attacking Puzzles, Mathematics Magazine Vol. 57, No. 2 (Mar., 1984), pp. 95-104
+2. Eight queens puzzle, https://en.wikipedia.org/wiki/Eight_queens_puzzle
+3. Maximum Queens Chess Problem, https://www.gams.com/latest/gamslib_ml/queens.103
+4. Absolute gap for solution pool, https://www.ibm.com/support/knowledgecenter/en/SSSA5P_12.7.0/ilog.odms.cplex.help/CPLEX/Parameters/topics/SolnPoolAGap.html
+5. chessboard – Print chess boards, https://ctan.org/pkg/chessboard
+6. Danna E., Fenelon M., Gu Z., Wunderling R. (2007) Generating Multiple Solutions for Mixed Integer Programming Problems. In: Fischetti M., Williamson D.P. (eds) Integer Programming and Combinatorial Optimization. IPCO 2007. Lecture Notes in Computer Science, vol 4513. Springer, Berlin, Heidelberg
+
+## Monday, November 19, 2018
+
+### Solving many scenarios
+
+In [1] a problem is described:
+
+Select 2 teams of 6 players from a population of 24 players such that the average ELO rating of each team is a close as possible.
+It came as a surprise to me, given some random data for the ratings, I was always able to find two teams with exactly the same average rating. When we try this for say 1,000 cases, we have to solve 1,000 independent scenarios, each of them solving a small MIP model. It is interesting to see how we can optimize this loop using GAMS.
+
+ApproachDescriptionElapsed Time mm:ss
+A. Standard loopSolve 1,000 models
+loop(k,
+r(i) = round(normal(1400,400));
+solve m minimizing z using mip;
+trace(k,j) = avg.l(j);
+trace(k,'obj') = z.l;
+);
+
+12:12
+B. Optimized loopReduce printing to listing file and use DLL interface.
+m.solvelink=5;
+m.solprint=2;
+
+3:33
+C. Scenario solverSolve 1,000 scenarios by updating model. Solver threads: 1.
+solve m min z using mip scenario dict;
+
+1:32
+D. Scenario solverTell MIP solver to use 4 threads
+m.threads=4;
+
+2:19
+E. Asynchronous scenario solverEach asynchronous solve calls scenario solver with 250 scenarios
+m.solveLink = 3;
+loop(batch,
+ksub(k) = batchmap(batch,k);
+solve m min z using mip scenario dict;
+h(batch) = m.handle;
+);
+
+Note that these solves operate asynchronously.
+0:25
+F. Combine into one problemAdd index $$k$$ to each variable and equation and solve as one big MIP (see below for details). Use 4 threads.7:22
+
+The standard loop is the most self-explanatory. But we incur quite some overhead. In each cycle we have:
+
+1. GAMS generates the model and prints equation and column listing
+2. GAMS shuts down after saving its environment
+3. The solver executable is  called
+4. GAMS restarts and reads back the environment
+5. GAMS reads the solution and prints it
+The optimized loop will keep GAMS in memory and calls the solver as a DLL instead of an executable. In addition printing is omitted. GAMS is still generating each model, and a solver is loading and solving the model from scratch.
+
+The scenario solver will keep the model stored inside the solver and applies updates. In essence the GAMS loop is moved closer to the solver. To enable the scenario solver, we calculate all random ratings in advance:
+
+rk(k,i) = round(normal(1400,400));
+
+As these are very small MIP models, adding solver threads to solve each model is not very useful. In our case it was even slightly worsening things. For small models most of the work is sequential (presolve, scaling, preprocessing etc) and there is also some overhead in doing parallel MIP (fork, wait, join).
+
+Approach E is to setup asynchronous scenario solves. We split the 1,000 scenarios in 4 batches of 250 scenarios. We then solve each batch in parallel and use the scenario solver to solve a batch using 1 solver thread. This more coarse-grained parallelism is way more effective than using multiple threads inside the MIP solver. With this approach we can solve on average 40 small MIP models per second, which I think is pretty good throughput. A disadvantage is that the tools for this are rather poorly designed and the setup for this is quite cumbersome: different loops are needed to launch solvers asynchronously and retrieving results after threads terminate.
+
+There is still some room for further improvements. Using parallel scenario solves we have to assign scenarios to threads in advance. It is possible that one or more threads finish their workload early. This type of starvation is difficult prevent with parallel scenario solves (basically the scenario solver should become more capable and be able to handle multiple threads).
+
+Finally, I also tried to combine all scenarios into one big MIP model. I.e. we have:
+
+Single scenarioCombined mod

@@ -1,0 +1,97 @@
+# Doxygen
+
+TODO: The way how the script API documentation will be generated will change in the future. How we do this, is unclear at the moment.
+
+## Basic idea behind Doxygen
+
+Doxygen analyzes code, searches it for special tags and generates documentation of the analyzed code according to the found tags. Doxygen was designed for languages of the C family (including C++, Java) and could be extended to other laguages of this kind.
+
+In order to make Doxygen work with TNG one has to strictly follow some guidelines during programming.
+
+Within the CMake build system, the target doc was introduced to compile all Doxygen parts. They consist of
+
+• The main docu
+/doc/src
+It provides major information and collects the individual documentation parts. Usually, no code parsing takes place at this stage. CMake lets Doxygen scan all *.dox files found in /doc/src. All contained files ending by *.in are preprocessed by CMake and stored in its build tree to be considered by Doxygen.
+The main documentation is generated in HTML format and stored in /doc/html
+The CMake configuration file is /doc/CMakeLists.txt
+• The module API doc
+/modules/NAME/doc/src
+Each module may provide its own Doxygen documentation. Beside all files found in /modules/NAME/doc/src which will be processed by Doxygen, all source files recursively found in /modules/NAME/NAME will be parsed. Each module should provide a HTML link referencing the main documentation.
+Additionally, each module may provide a documentation for its SWIG interface requiring special considerations.
+The module documentations are stored in /doc/html/modules/NAME and /doc/html/modules_swig/NAME.
+The CMake configuration file is /modules/NAME/CMakeLists.txt using the subroutines in /cmake_subroutines/DoxygenMakeDocForModule.cmake. The Doxygen configuration template /modules/NAME/doc/src/Doxyfile.in is usually copy of the /doc/src/Doxyfile.in.
+
+## Special considerations for TNG
+
+Special care is required in order to let Doxygen generate proper documentation. Particular care requires the interaction with SWIG. Custom commands The following additional commands may be used in the documentation blocks:
+
+This should be placed on each custom page in the main doc. It provides a small menu referencing the index page and most major documentation pages. When adding a custom page, it should be modified in the corresponding CMakeLists.txt.
+\ref_to_parent_doc (in modules)
+This should be placed on the index page in each module. It provides a link to the main documentation.
+
+## Custom Doxygen sections
+
+When generating a module documentation, special sections (flags) are defined which are known by Doxygen. Depending on the sections being defined one can publish custom documentation code. These code blocks can be defined using the Doxygen commands \cond, \if and \ifnot. A small example illustrates it:
+
+//! \cond API_DOC
+//! does something (only available in C++ doc)
+void doSomething();
+//! \endcond
+//! this method is available in C++ and SWIG doc
+void doSomething2();
+//! \if SWIG_DOC This method is documented in SWIG doc only \endif
+void swigCode();
+/**
+\if API_DOC
+\brief computes a value.
+\param val is the value to be set.
+\else
+\brief in Lua, it returns a value.
+\endif
+*/
+void setAValue(double & value);
+
+
+Enabled sections are
+
+API_DOC
+This is enabled if the C++ API reference is created.
+SWIG_DOC
+This is enabled if the SWIG reference is created.
+
+## Custom preprocessor definitions
+
+SWIG parses *.i files in order to know the header files to be generate a binding from. However, there is no easy way to let Doxygen understand SWIG input files. What can be used, is that SWIG ignores the header parts which are selected by
+
+#ifndef SWIG
+...;
+#endif
+
+
+Doxygen can be configured to understand such predefines. When creating the SWIG API documentation, the preprocessor directive
+
+#define SWIG
+
+
+will be emulated by Doxygen.
+
+Note: Doxygen will parse all source files of a module. Therefore, source files being not parsed by SWIG must contain
+
+#ifndef SWIG
+...;
+#endif
+
+
+Else it will be added to the scripting documentation, which is wrong.
+
+## Important commands
+
+Widely used Doxygen commands found in the source files are
+
+• \brief
+• \code \endcode
+• \def
+• \if \endif
+• \param
+• \todo

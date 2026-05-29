@@ -1,0 +1,32 @@
+Question: <p>Given a string with a module name, how do you import everything in the module as if you had called:</p>
+
+<pre><code>from module import *
+</code></pre>
+
+<p>i.e. given string S="module", how does one get the equivalent of the following:</p>
+
+<pre><code>__import__(S, fromlist="*")
+</code></pre>
+
+<p>This doesn't seem to perform as expected (as it doesn't import anything).</p>
+
+<p>Thanks!</p>
+
+Answer: <p>Here's my solution for dynamic naming of local settings files for Django.  Note the addition below of a check to not include attributes containing '__' from the imported file.  The <code>__name__</code> global was being overwritten with the module name of the local settings file, which caused <code>setup_environ()</code>, used in manage.py, to have problems.</p>
+
+<pre><code>try:
+    import socket
+    HOSTNAME = socket.gethostname().replace('.','_')
+    # See http://docs.python.org/library/functions.html#__import__
+    m = __import__(name="settings_%s" % HOSTNAME, globals=globals(), locals=locals(), fromlist="*")
+    try:
+        attrlist = m.__all__
+    except AttributeError:
+        attrlist = dir(m)        
+    for attr in [a for a in attrlist if '__' not in a]:
+        globals()[attr] = getattr(m, attr)
+
+except ImportError, e:
+    sys.stderr.write('Unable to read settings_%s.py\n' % HOSTNAME)
+    sys.exit(1)
+</code></pre>

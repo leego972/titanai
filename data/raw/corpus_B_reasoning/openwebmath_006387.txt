@@ -1,0 +1,195 @@
+Mmh, papery...
+
+Discussion on Reddit · on Simtropolis · on Something Awful
+
+Any amount supports the development ♥
+
+I am writing this update on my phone, from a beautiful, but currently rainy, Spanish town. The last couple weeks were quite eventful - let me summarize:
+
+First, I moved back from Russia to Germany. My wife and me will both do our masters in Munich!
+
+Then we celebrated our wedding a second time, with my German family and friends - and with a special guest who came all the way from Australia: Michael!
+
+Michael and me decided to spend the next week pair-programming Citybound, something that we already planned to do "some day". Now we had this opportunity and even though I was half-distracted by my day job which I took up again (gotta pay rent somehow) I would say we made a lot of meaningful progress.
+
+We even recorded a video outside together, but due to my mistake to ignore the wind, the audio is ruined. And my rambling there is pretty incoherent anyways. That's why I'm writing this as a text post instead! Given that, I will go into a little more technical detail - even though I already hate writing on my phone. (I have to write it from my phone because I'm on holiday and I didn't bring more than my phone, because it's supposed to be holiday, right?) Anyways...
+
+## The initial plan: multithreaded Citybound
+
+The goal we set ourselves for this week was to introduce multi-threading to Citybound, using a small part of the game that we would parallelize as a proof of concept.
+
+We didn't exactly get there, but we got a lot of things leading there done, and covered some other topics in the process.
+
+## Moving to Electron.js
+
+Citybound runs inside a tweaked Chrome Browser, which allows us to both ship the game as a single bundled executable and to make use of some features that are not enabled by default or completely not present in normal browsers.
+
+For most of the development, NW.js was used as this browser container, but recently Electron.js emerged and turned out to be the better-maintained, cleaner-designed, more full-featured and more up-to-date alternative.
+
+Moving all the code of Citybound to Electron went quite well and already paid off: we could already start using WebGL2, for example.
+
+## Hardcore IPC: Shared Memory
+
+Modern JavaScript does offer WebWorkers as primitives for parallelization, but the way they communicate with each other or with the main thread is quite clunky: they can either share data by copying, or they have to completely give up all access to data that is handed over to another thread - these options are either too slow or too impractical, neither something that you can do repeatedly every simulation frame.
+
+Michael had the inspiration and the bravery/foolishness to use a much lower-level way of sharing data: shared memory. This would definitely give us the required speed, but it would make us directly responsible for not getting into any concurrency issues like race conditions.
+
+Because we are using a tweaked browser like Electron.js we can make almost arbitrary functionality available in JavaScript, in our case, there even already existed a NPM package which did just what we needed, (shared memory, using mmaped files to be precise), but only in Linux and Mac. Implementing this also for Windows should be "kinda straightforward", but as this oxymoron tells you, it is not one of the things I look forward to.
+
+Michael played around with this NPM package and made a simple test case work, with a main thread and a worker thread, writing and reading shared memory.
+
+## How we want Citybound to be multithreaded
+
+Now that we had the low level tools to make parallelization possible, we needed to come up with a strategy to correctly make the whole game work in a parallelized context.
+
+Our proposed solution is quite simple: the whole city is spatially subdivided into chunks, each of which functions like a small city itself. Each chunk can be processed by a different thread. The chunks only need to communicate when an agent passes the border between two chunks: they then exchange information regarding this agent and its current trip - it is completely handed over.
+
+This means that each chunk processes only the agents inside it - only it has write access to their underlying data. Still, every thread can read-access the information of all agents in all chunks of he city, which might be needed as reference information. In my oversimplified imagination of the whole idea this completely avoids all race conditions and everything is perfect.
+
+Because the "surface" of each chunk is much smaller than its "volume", the number of agents crossing the border between chunks should be much lower than the number of agents that stay within one chunk. This should keep the overhead of communication between chunks fairly low.
+
+## Storing people in binary data
+
+One problem with the shared memory that we are using is that it is just flat byte buffers - no easy way to store (potentially quite complex) high-level JavaScript objects. What I ended up working on for most of the week was writing a proxy wrapper that allows accessing this huge shared byte buffer as if it was a collection of high-level objects - making sure that in the background all information is correctly serialized to and respectively rebuilt from a very compact binary representation, using a simple data layout schema (which each entity type in the game will have).
+
+This sounds at first like a lot of hassle for no new functionality, but only it really allows us to use shared memory in our high-level simulation and it has some pleasant side effects:
+
+First, it gives us savegames for free, since the serialization/parsing that they would require happens all the time anyways. All that needs to be done is to dump all shared memory to disk on save and to copy a stored buffer to shared memory on load. If all nontransient game state lives in this shared memory (which I hope), then savegames are indeed easy.
+
+Another benefit is that we might be able to port parts or all of the simulation onto another programming language, running in a different thread, but also just accessing this shared memory - and the existing JavaScript code won't even notice the difference.
+
+Finally, I think that some WebGL related stuff might become simpler or faster by all of the simulation data already existing in raw binary form, ready to be sent to the GPU (for example for instanced/batch drawing of cars)
+
+My progress on this I would classify with the ever-so-vague "mostly done".
+
+## A day in the life of a citizen
+
+Thinking about the parallelizability of the simulation forced us to come up with clear architectural plans for the economy, and my existing model for that still had some holes. One such hole was how to organize a citizen agent in the code - so far I just assumed all of a citizens behavior would be contained in a simple class and that all the points where an agent can make a choice would be explicitly hardcoded.
+
+Stated like that, that already sounds bad - Michael had the idea to instead model citizens as state machines and sketched out what the states and transitions for a normal day of a citizen would look like.
+
+Our state machines are not state machines in the strictest sense, they are probabilistic (meaning each transition has a probability of being chosen relative to alternative transitions) and transitions can include side effects that change properties of the citizen, their family, or the whole world. The probabilities of transitions can then also depend on such external properties.
+
+This state machine model made the whole process of defining an agent's behavior much more declarative and extensible. There turned out to be a couple important hub states where a lot of transitions lead to and go from (for example "leavehome") - which would also work really well as hook points for mods to easily extend the behavior of citizens, starting at any existing state in their day and bringing them back to an existing state.
+
+In fact, this structure seemed to have hit the creativity sweet spot between freedom and constraint. Especially after adding a visualization of our current state/transition graph it became very easy to spot mistakes like dead end states as well as to come up with new states and transitions just by looking at the graph for long enough.
+
+The biggest surprise was that even very complex behaviors like getting married or moving out of the parents' home could be modeled there quite easily. Even rare or obscure events, like a pyromaniac setting a couple houses on fire and then returning home happily fit into this framework as well. The possibility space for mods there is certainly inspiring!
+
+## What's next
+
+Now we have to take all these ideas, half-implemented pieces, architecture plans and programmatic sketches and turn them into working code.
+
+This will take some time, but we'll keep you up to date and once I've settled in enough, I definitely want you to participate in livestreams again!
+
+Until then, I hope the perspective I laid out here gives you some food for thought and continued excitement for the wonderful game that this will become!
+
+See you all soon!
+
+Discussion on Reddit · on Simtropolis · on Something Awful
+
+Any amount supports the development ♥
+
+All going according to plans! (Sorry...)
+
+Discussion on Reddit · on Simtropolis · on Something Awful
+
+Any amount supports the development ♥
+
+Long time no see!
+
+Text summary coming soon.
+
+Discussion on Reddit · on Simtropolis · on Something Awful
+
+Any amount supports the development ♥
+
+I've been much more quiet than I want to be or promised to be, sorry for that. I have been very busy with under-the-cover programming and preparations for the (actually very complex) economy system that Citybound will have.
+
+Most of this work requires deep thinking and thus doesn't lend itself well for livestreams and so far it hasn't produced any visible results, that's why I didn't write about it.
+
+Today Michael, however, was so kind to post a really extensive and well-written report of what both of us have been programming on and thinking about behind the scenes. It's very technical, but also gives a very good impression of how Michael and me are working together. And: it even hints at some upcoming fundamental gameplay ideas for Citybound - so I only encourage you to read it!
+
+See you soon,
+Anselm
+
+# Progress Update
+
+## by Michael Lucas-Smith
+
+First off, internally I upgraded our 2D drawing library which is primarily used for debugging interesting geometric problems when they occur. Unlike the canvas2d that comes with HTML5, this drawing library knows what dots and line segments and rays are. It auto-scales the internal content, while keeping things like rays and text the right size. This has sped up my work in particular a lot.
+
+It was around this time that Anselm started to plot out his ideas for the economy. After a bit of back and forth on the design, Anselm settled on creating an abstracted bigraph of the transportation network. The farther out you zoom the simpler the network becomes. On the last live stream there was a moment where a red line was visible - that was part of the abstract lower level of detail network. This will be used to map out economic information. It's going to be wicked when it's done.
+
+Sometime in this period Anselm started using my straight skeleton code for part of the zoning. It worked out of the box for him, which I was very surprised about. I'm still working on this stuff but more in a later part of this status post. While this was going on I was finally getting to the degenerate test cases for straight skeletons, such as a +, L and U shapes.
+
+The deeper I got in to the degenerate test cases, the more I started to notice that perfectly parallel geometric structures did not have perfectly parallel coordinates. I realised that gl-matrix, a javascript library we've been using for vectors and matrices was to blame. How was it to blame though - this is interesting in a computer programmer kind of way. gl-matrix boasts speed by way of its design. Internally it tries to use the best representation of vertices it can for maximum efficiency. In this case, it was using Float32Array.
+
+Now, we graduated from 32-bit to 64-bit in our development quite a while back, but a Float32Array is (naturally) 32-bit and the standard number representation in javascript is 64-bit. What this meant was that every time we put numbers in to a gl-matrix vector and took them out again, we'd be introducing error.. more and more error the more that happened. It happened a lot. This spawned me to suggest I make a new vector and matrix library for Citybound... yes really.
+
+I've implemented a few of these over the years and I didn't look forward to implementing determinants and inverts and matrix multiplication again - so I went for a meta approach. Instead of writing out the expanded versions of those functions by hand and getting it wrong and writing a billion tests to make sure I finally get it right, I made a code generator using static single assignment. Then I wrote code building code for vectors and matrices. The short of it is that on startup, we actually generate our vector and matrix classes and we can generate combined functions that keep variables unfolded and optimised... without having to write it 3 times for each different size of vector.
+
+This new vector and matrix library boringly named numerics kept everything in 64-bit and numerous bugs I was seeing in my straight skeleton code disappeared. Much to our delight, numerous bugs in Anselm's code disappeared too. This could have been a very nasty bug to track down the farther we got in to the development process, so I'm glad it was caught sooner rather than later.
+
+Somewhere in the mix here we started using more and more ES6 features and simply loving them. Going back to Ecmascript 5 would be pure torture and pain and it's not going to happen. However, whenever we ended up in a debugger at a for-of the VM would crash out. Ouch, this was really painful. As the earliest adopter of ES6 for-of in our code base I was dealing with it a lot. When Anselm started hitting it too enough was enough. Anselm then integrated the babel transpiler. What a cool name. It let's us use way more features of ES6 than V8 currently supports and it also fixed up some of our debugging issues in the long run too. It was Anselm's turn to be ahead on ES6 adopting for several weeks (until today in fact!).
+
+Anselm also simplified our module definitions by introducing Object.adopt as a replacement for Object.defineProperties which I had been using extensively. This is a really nice addition but I won't go into its details here. The interesting point of note here is that it doesn't allow Anselm to do auto-complete in Webstorm. LOL!.. so he went on a quest and started to try our github's Atom. I was part of the beta for Atom and at the time it was slow, buggy and lacking features compared to sublime text. It has come a long way since then and I am now using it as my main text editor for Citybound. Anselm is still not happy with his autocomplete situation.
+
+Meanwhile I introduced computed properties so that I could fix up some fundamental issues in the straight skeleton code and for the first time, after putting them in, I was able to run without crash on the random shape generator and all the degenerate tests passed. I have now begun working on open-paths, such as zoning along the side of a road. After that will be support for curves in some manner.
+
+We did some design on how we'd implement [a planning mode for the game] and I can tell you right now, wow, you guys are going to absolutely love what we have in store. If you're still reading this far, feel free to enjoy a bit of hype because planning is now an integral part of the game play and will enrich every part of the design.
+
+Next up Anselm built something really cool on top of my static single assignment meta-programming library, which is called CodeBuilder. He used the babel transpiler parser to parse his method code and then recompile it using the CodeBuilder, which allows even simpler templating of numerical vector or matrix operations. This is seriously cool.
+
+To round this out the latest work we've been touching on is iterators and reducers. Since ES6 gives us a lot more power with iterators and generators and using them is really light-weight on the garbage collection, using them in general is a good idea. But, we wanted more power with them. A few random thoughts several weeks back materialised in to real code and now we're discussing the second iteration of that, where we extend the built in generators to allow chaining of generators for more literate programming in the long term.
+
+In short, a heck of a lot has been going on and I didn't even talk in depth about the stuff Anselm has been implementing on top of all this technology: Economy, road networks, market places, simulation life cycles, demand and of course the (hype) planning mode stuff.
+
+Cheers, Michael
+
+Discussion on Reddit · on Simtropolis · on Something Awful
+
+Any amount supports the development ♥
+
+The past week I spent a lot of time reading through papers and literature on urban economics - I want the economy in Citybound to be as closely implemented to actual research as possible.
+
+There are many approaches and methodologies - but one struck me as the most simple and elegant: the tried and true Monocentric city model.
+
+The Monocentric city model is the cornerstone of urban economics since its formulation in the decade of 1960 by Alonso, Muth and Mills. Source
+
+I wasn't quite sure if I could trust such comparatively old research, but many modern approaches refer to this model and still praise its accuracy:
+
+The implications of the monocentric model, especially for the relations between distance to the Central Business District (CBD) and population density, housing prices, land rent and capital/land ratio are widely known and have been tested many times for a great number of cities and countries. Source
+
+When I started to read about how the model works in detail, and how that could be represented in gameplay in Citybound, I became very excited!
+
+• Consider a city in a featureless plain
+• The optimal, cost-minimizing shape of a city is a circle
+• The city has a fixed population level N
+• All workers must commute to the central business district (CBD),
+which is assumed to be a point Source
+
+## Citybound: 2D is enough!
+
+This allowed for some radical simplifications for Citybound:
+
+• since the terrain is considered featureless, we can switch from 3D to 2D graphics, which will make a lot of things in the game engine easier and will make future development much quicker
+• roads can only be drawn directly to the CBD or in concentric circles around it - greatly simplifying the road geometry code and pathfinding
+• there are only two types of zones: CBD and residential. You can only zone CBD in the center of the map.
+
+Here is an early screenshot of my first iteration of Citybound towards this new model:
+
+## Even better than 2D: 1D
+
+Soon, I found an even more drastic simplification, as described by Ogawa and Fujita:
+
+[...] with the assumption of a linear or circular city, the spatial characteristics of each location in the city can be described simply by the distance from the CBD. Source
+
+A whole city - described by just a line!
+Suddenly my dream of simulating multi-million resident cities fluently, even on old hardware, became graspable!
+
+Porting all of our graphics and game logic to 1D will take some time, but I was able to create an already impressive sneak-preview of the transition progress: a full-scale, 1D, monocentric representation of zoning and traffic in a 3 million resident city, running smoothly in Citybound:
+
+## Citybound - pure minimalistic gameplay
+
+The shift to 1D is not everything. In accordance to the model, the number of citizens and jobs is considered constant. Gameplay

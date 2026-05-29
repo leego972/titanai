@@ -1,0 +1,54 @@
+Question: <p>When defining a method on a class in Python, it looks something like this:</p>
+
+<pre><code>class MyClass(object):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+</code></pre>
+
+<p>But in some other languages, such as C#, you have a reference to the object that the method is bound to with the "this" keyword without declaring it as an argument in the method prototype.  </p>
+
+<p>Was this an intentional language design decision in Python or are there some implementation details that require the passing of "self" as an argument?</p>
+
+Answer: <p>Also allows you to do this: (in short, invoking <code>Outer(3).create_inner_class(4)().weird_sum_with_closure_scope(5)</code> will return 12, but will do so in the craziest of ways.</p>
+
+<pre><code>class Outer(object):
+    def __init__(self, outer_num):
+        self.outer_num = outer_num
+
+    def create_inner_class(outer_self, inner_arg):
+        class Inner(object):
+            inner_arg = inner_arg
+            def weird_sum_with_closure_scope(inner_self, num)
+                return num + outer_self.outer_num + inner_arg
+        return Inner
+</code></pre>
+
+<p>Of course, this is harder to imagine in languages like Java and C#. By making the self reference explicit, you're free to refer to any object by that self reference. Also, such a way of playing with classes at runtime is harder to do in the more static languages - not that's it's necessarily good or bad. It's just that the explicit self allows all this craziness to exist.</p>
+
+<p>Moreover, imagine this: We'd like to customize the behavior of methods (for profiling, or some crazy black magic). This can lead us to think: what if we had a class <code>Method</code> whose behavior we could override or control?</p>
+
+<p>Well here it is:</p>
+
+<pre><code>from functools import partial
+
+class MagicMethod(object):
+    """Does black magic when called"""
+    def __get__(self, obj, obj_type):
+        # This binds the &lt;other&gt; class instance to the &lt;innocent_self&gt; parameter
+        # of the method MagicMethod.invoke
+        return partial(self.invoke, obj)
+
+
+    def invoke(magic_self, innocent_self, *args, **kwargs):
+        # do black magic here
+        ...
+        print magic_self, innocent_self, args, kwargs
+
+class InnocentClass(object):
+    magic_method = MagicMethod()
+</code></pre>
+
+<p>And now: <code>InnocentClass().magic_method()</code> will act like expected. The method will be bound with the <code>innocent_self</code> parameter to <code>InnocentClass</code>, and with the <code>magic_self</code> to the MagicMethod instance. Weird huh? It's like having 2 keywords <code>this1</code> and <code>this2</code> in languages like Java and C#. Magic like this allows frameworks to do stuff that would otherwise be much more verbose.</p>
+
+<p>Again, I don't want to comment on the ethics of this stuff. I just wanted to show things that would be harder to do without an explicit self reference.</p>

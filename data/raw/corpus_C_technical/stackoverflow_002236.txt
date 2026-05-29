@@ -1,0 +1,101 @@
+Question: <p>What are metaclasses? What do you use them for?</p>
+
+Answer: <p><strong>Python 3 update</strong></p>
+
+<p>There are (at this point) two key methods in a metaclass:</p>
+
+<ul>
+<li><code>__prepare__</code>, and</li>
+<li><code>__new__</code></li>
+</ul>
+
+<p><code>__prepare__</code> lets you supply a custom mapping (such as an <code>OrderedDict</code>) to be used as the namespace while the class is being created.  You must return an instance of whatever namespace you choose.  If you don't implement <code>__prepare__</code> a normal <code>dict</code> is used.</p>
+
+<p><code>__new__</code> is responsible for the actual creation/modification of the final class.</p>
+
+<p>A bare-bones, do-nothing-extra metaclass would like:</p>
+
+<pre><code>class Meta(type):
+
+    def __prepare__(metaclass, cls, bases):
+        return dict()
+
+    def __new__(metacls, cls, bases, clsdict):
+        return super().__new__(metacls, cls, bases, clsdict)
+</code></pre>
+
+<p>A simple example:</p>
+
+<p>Say you want some simple validation code to run on your attributes -- like it must always be an <code>int</code> or a <code>str</code>.  Without a metaclass, your class would look something like:</p>
+
+<pre><code>class Person:
+    weight = ValidateType('weight', int)
+    age = ValidateType('age', int)
+    name = ValidateType('name', str)
+</code></pre>
+
+<p>As you can see, you have to repeat the name of the attribute twice.  This makes typos possible along with irritating bugs.</p>
+
+<p>A simple metaclass can address that problem:</p>
+
+<pre><code>class Person(metaclass=Validator):
+    weight = ValidateType(int)
+    age = ValidateType(int)
+    name = ValidateType(str)
+</code></pre>
+
+<p>This is what the metaclass would look like (not using <code>__prepare__</code> since it is not needed):</p>
+
+<pre><code>class Validator(type):
+    def __new__(metacls, cls, bases, clsdict):
+        # search clsdict looking for ValidateType descriptors
+        for name, attr in clsdict.items():
+            if isinstance(attr, ValidateType):
+                attr.name = name
+                attr.attr = '_' + name
+        # create final class and return it
+        return super().__new__(metacls, cls, bases, clsdict)
+</code></pre>
+
+<p>A sample run of:</p>
+
+<pre><code>p = Person()
+p.weight = 9
+print(p.weight)
+p.weight = '9'
+</code></pre>
+
+<p>produces:</p>
+
+<pre><code>9
+Traceback (most recent call last):
+  File "simple_meta.py", line 36, in &lt;module&gt;
+    p.weight = '9'
+  File "simple_meta.py", line 24, in __set__
+    (self.name, self.type, value))
+TypeError: weight must be of type(s) &lt;class 'int'&gt; (got '9')
+</code></pre>
+
+<hr>
+
+<p><strong>Note</strong>:  This example is simple enough it could have also been accomplished with a class decorator, but presumably an actual metaclass would be doing much more.</p>
+
+<p>The 'ValidateType' class for reference:</p>
+
+<pre><code>class ValidateType:
+    def __init__(self, type):
+        self.name = None  # will be set by metaclass
+        self.attr = None  # will be set by metaclass
+        self.type = type
+    def __get__(self, inst, cls):
+        if inst is None:
+            return self
+        else:
+            return inst.__dict__[self.attr]
+    def __set__(self, inst, value):
+        if not isinstance(value, self.type):
+            raise TypeError('%s must be of type(s) %s (got %r)' %
+                    (self.name, self.type, value))
+        else:
+            inst.__dict__[self.attr] = value
+</code></pre>

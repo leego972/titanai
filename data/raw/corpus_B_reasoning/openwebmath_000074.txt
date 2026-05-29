@@ -1,0 +1,74 @@
+# Hartley oscillator not self-starting
+
+I built a Hartley oscillator using an LM358 powered from a single rail of 5V. I used two identical inductors with inductance of 1 mH, a 0.01 uF capacitor, and 10k and 47k resistors for amplifier gain. I noticed that the oscillation does not start by itself, but if I give a voltage kick of 5V to the op-amp inverting input, then the oscillation starts and sustains, but the waveform has a lot of distortions. I thought Hartley oscillators are supposed to be self-starting. Any idea why the circuit is not self-starting? And how can the waveform be made more sinusoidal?
+
+PS: the oscilloscope screen was when the capacitor was 10 uF instead. When I was using 0.01 uF, the discortion was even worse and the spike was more prominent.
+
+PS2: Here is a schematic of the circuit I used:
+
+• Please post a complete schematic of what you actually built. Apr 3 at 4:59
+• An actual picture of the circuit as it is built may be helpful too.
+– Ryan
+Apr 3 at 7:26
+• Are you sure that (-) opamp input and mid-point inductors are tied to the ground? In that configuration, my schematic doesn't work. Apr 4 at 8:33
+• Yes - the midpoint between both inductor must be at ground. However, this circuit cannot work because L1 acts as a load to the opamp only. There must be a resistor Ro between opamp output and the top of L1. In this case, we have a 3rd-order highpass ladder topolgy R0-L1-C2_L2 which shifts the phase at w=wo by 180deg. This is required for the Hartley principle. Very often, this resistor is forgotten when transferring from the transistor to the opamp solution.
+– LvW
+Apr 4 at 11:09
+• Correction: "...top of L1" means: Between opamp output and the common node of L1 and C2.
+– LvW
+Apr 4 at 15:00
+
+There are several problems, many related to the relative wimpiness of LM358 when used from low supply voltages. Even though LM358 is a "jellybean" part, it really gets going at relatively high supply voltages, e.g. +/-10V. Using it at 5V is a complex endeavor. Even a TLC272 would be a more forgiving part for such an oscillator.
+
+1. The op-amp's operating point - the positive input - is set at 0V. Since the lower power supply potential is 0V, the op-amp won't be able to swing symmetrically with respect to 0V. For an LM358, whose input includes ground, the operating point should be at (VCC-3V/2), or in this case 1.0V-1.5V.
+
+2. The op-amp output is DC-shorted through the inductors to ground, at least as shown in your circuit. LM358 will have trouble starting up with such a load, and may otherwise misbehave. The LM358 output should be AC-coupled to the tank instead.
+
+3. A Hartley oscillator requires a 3rd order filter network, i.e. the tank must be connected to the active element through a resistance to form an RC lowpass. With transistors, the output resistance takes care of it. With op-amps, the effective resistance is close to zero, so the resistance has to be added. In this case, an AC coupling can do that job, since it has fairly low reactance at the operating frequency, yet still much higher than that of the op-amp output.
+
+4. A DC pull up of approximately 2k-5kOhm to VCC will improve the output stage linearity - a common trick with op-amps with the output stage same as LM358.
+
+5. The op-amp's negative input should be biased to the operating point voltage through L2.
+
+6. The LM358 doesn't have all that much linear output swing when running from 5V. A voltage clamp (D1) in the feedback circuit will crudely control the oscillation amplitude and prevent distortion from exceeding the useful output swing.
+
+With a better op-amp, the output voltage swing could be higher, and more diodes could be connected in series with D1. For LM358, a single diode's worth of amplitude is about all you can get from a single Hartley stage, although physical hardware may be more lenient than the simulation.
+
+The output amplitude is about 0.5V. For higher output amplitude, use a 2nd gain stage.
+
+The output frequency is about 5.6kHz. Operation at higher frequencies is possible but may be problematic as Q drops and the op-amp runs out of gain needed to compensate.
+
+If you want to play with old-school 40+ year old parts, an LM13700 would be a much better match. It lends itself naturally to gain control and has more bandwidth, and >10x faster output slew rate vs. LM358. It would have no trouble producing a reasonably clean 5Vpp sine wave, from a single +10V supply.
+
+The venerable LM3900 could also act as a variable gain stage for a low-frequency (<10kHz) Hartley oscillator.
+
+simulate this circuit – Schematic created using CircuitLab
+
+The circuit above is not necessarily the best approach with better op-amps: the operating point will be different, the tank can be DC-coupled to the output via a series resistor, etc. LM358 is a versatile part that requires, let's say, a versatile approach to overcoming its limitations.
+
+When building an oscillator it is helpful to realize how and why it can oscillate. The principle of the Hartley oscillator is as follows:
+
+An inverting amplifier is equipped with a feedback loop consisting of a third-order highpass which allows a phase shift of 180° at a certain frequency $$\\omega_0\$$ (giving zero phase shift of the loop gain function).
+
+1.) Using a BJT as an active device, the 3rd-order highpass is realized as a ladder structure R-L1-C-L2 with R=output resistance of the inverting BJT stage.
+
+2.) When we replace the BJT with an opamp with a very small output resistance it is absolutely necessary to use an additional resistor R between the opamp output and the rest of the feedback network. Otherwise the circuit cannot oscillate at the desired frequency.
+
+• You mentioned inverting amplifier having a feedback loop consisting of a 3rd order highpass filter, is that a general property? Apr 3 at 20:30
+• No - it depends on the fedback network. In general, we need zero phase shift at w=wo within the complete feedback loop. For example, when a bandpass is used (with zero phase shift at w=wo) a non-inverting amplifier is required.
+– LvW
+Apr 4 at 6:51
+
+Here is what I get with microcap v12, "transient" behavior. Inductors coupling is zero.
+
+At starting ...
+
+Sometime later
+
+...
+
+Note that output is vanishing slowly, ...
+
+And zoomed in the last time ...
+
+EDIT:

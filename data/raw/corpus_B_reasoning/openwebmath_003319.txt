@@ -1,0 +1,116 @@
+This topic is 4443 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+## Recommended Posts
+
+Platform: WindowsXP Development Program: Visual Studio .NET 2003 Application type: Win32 Hello all, I got a class who got his own thread running, to do some on-goinging processing (keyboard and mouse). At some point when I want exit my program, the thread of course has to exit too. I'm trying to do this with the help of mutexes. First the baseclass looks the following.
+typedef enum
+{
+CTL_KEYBOARD,
+CTL_MOUSE,
+}INPUT_CONTROL, *PINPUT_CONTROL;
+
+class __declspec(dllexport) CObjectInput
+{
+public:
+CObjectInput(HWND hWnd, INPUT_CONTROL Control);
+~CObjectInput();
+
+LPDIRECTINPUT8			GetObject();
+LPDIRECTINPUTDEVICE8		GetDevice();
+void				Acquire();
+void				Unacquire();
+virtual void			Process() = 0;
+
+private:
+HANDLE				Occupied;
+LPDIRECTINPUT8			Object;
+LPDIRECTINPUTDEVICE8		Device;
+};
+
+
+CObjectInput::CObjectInput(HWND hWnd, INPUT_CONTROL Control)
+:	Object(NULL), Device(NULL)
+{
+Occupied = CreateMutex(NULL, false, "Occupied"); // Mutex starting in signaled state, according to documentation
+/* Lots of uninteresting inits here */
+}
+
+CObjectInput::~CObjectInput()
+{
+WaitForSingleObject(Occupied, INFINITE);
+CloseHandle(Occupied);
+if(Object)
+{
+if(Device)
+{
+Device->Release();
+}
+Object->Release();
+}
+}
+
+{
+CObjectInput* Myself = (CObjectInput*)Parameters;
+while(1)
+{
+switch(WaitForSingleObject(Myself->Occupied, INFINITE))
+{
+case WAIT_OBJECT_0:
+Myself->Process(); // Function that need some resources in the baseclass
+ReleaseMutex(Myself->Occupied);
+break;
+case WAIT_FAILED:
+case WAIT_ABANDONED:
+break;
+default:
+break;
+
+}
+}
+return 0;
+}
+
+
+The constructor and destructor are always called in the process execution, so no different thread is executing them. When exiting my program, I sometimes get the following Runtime - error (seen in the image below). Afbreken = Abort, Opnieuw = Try Again, Negeren = Ignore It is being triggered by calling the Myself->Process() function, in the thread execution. That it suddenly becomes an pure virtual function is caused by the class destruction. I am trying to solve this problem by using a mutex. But is not working correctly. I hoped it would work like the following (this is the current situation):
+
+
+[User pressed 'ESC']
+Baseclass Waits for mutex          Run Threadfunction
+Baseclass retrieves mutex          Threadfunction waits for mutex
+Baseclass destroys and closes      Threadfunction exits, waiting for mutex
+mutex                              resulted into abandoned
+
+
+Sometimes this works and sometimes it doesn't. I cannot explain why this happens. According to documentation, only one thread can own the mutex. Both threads are waiting forever (INFINITE milliseconds). See Remarks for more info on Mutexes and WaitForSingleObject Does anyone see what I am doing wrong here? If you need more info, don't hasitate to ask. Best regards, Xeile [Edited by - Xeile on April 22, 2006 8:58:15 AM]
+
+##### Share on other sites
+In C++ an object is considered to be destroyed as soon as execution enters the destructor. Objects in C++ are also destroyed outside in, and so by the time the base class destructor is called the derived class destructor will already have been called. This means by the time the base class destructor is called your vtable is already wrong.
+
+Now if the objects derived class destructor is called in between the ThreadProc thread aquiring the mutex and calling the virtual function, then you will get the error you describe. The locks do not protect that from happening.
+
+##### Share on other sites
+Aha, that makes sence. Thank you, I can continue now :D
+
+Regards,
+
+Xeile
+
+##### Share on other sites
+It's a really good idea to let your threads terminate properly, and wait on each other (but don't use mutexes for this!). Use a proper platform API mechanism (WaitThread) to ensure a thread has terminated before thinking it has.
+
+I usually trigger thread termination by setting a flag in an object associated with the thread. The thread itself sees this and exits it's ThreadMain, allowing the thread to die gracefully.
+
+This is a neat way of doing this without resorting to signals / events and cleaning up undue mess from premature terminations.
+
+• 18
+• 11
+• 16
+• 9
+• 50
+• ### Forum Statistics
+
+• Total Topics
+631396
+• Total Posts
+2999783
+×

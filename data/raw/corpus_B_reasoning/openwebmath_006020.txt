@@ -1,0 +1,71 @@
+seccomp-pledge: Enforce principle of least privilege in Linux kernel
+
+Pledge is like the forbidden fruit we all covet when the boss says we must use things like Linux. Why does it matter? It’s because pledge() actually makes security comprehensible. Linux has never really had a security layer that mere mortals can understand. — [Justine Tunney](https://justine.lol/pledge/).
+
+The Linux kernel is a powerful piece of software that is in widespread use today. Over time, the codebase has grown by a significant margin and so has the need to ensure the security of Linux systems against possible attacks by malicious adversaries. A number of security facilities are implemented in the kernel for this purpose. One such happens to be seccomp-BPF, a system call filtering mechanism that helps reduce the exposed kernel surface whilst executing userland applications.
+
+seccomp filters are expressed as Berkeley Packet Filter (BPF) programs and can be used to trap system calls, depending on the name and arguments passed. As a result, if an application endeavors to spawn a system call which has been disallowed in accordance with some predefined seccomp filtering policy, it will immediately result in an error ⛔invalid system call (core dumped) and the corresponding process will fail to execute. This can help protect the system against hazardous processes which may attempt privilege escalation unbeknownst to the user.
+
+Over at BSD-land, OpenBSD, an operating system often lauded for its excellent security model, also has its own set of mechanisms for providing a secure platform for running applications without leaving room for potential exploits. Two of the most common security features go by the name of pledge and unveil and can largely be considered complementary to each other.
+
+• pledge is a sandboxing mechanism that restricts the operational capabilities of a userland process by defining promises, each of which pertains to a specific subset of actions that a process can be allowed or forbidden, for instance, read-write operations, networking, and so on. By default, a pledge sandbox will prevent a process from accessing the entire filesystem but this can often get inconvenient.
+• unveil gives access to a specific filesystem path that the process may require and lets the user decide the kind of read-write access to said path. Justine Tunney has ported pledge to Linux as a standalone binary with added support for unveil, making it possible to utilize these security features in tandem with those already present in the kernel itself while executing processes on Linux systems.
+
+Getting started with seccomp
+
+At Subconscious Compute, I experimented with seccomp and pledge to provide a hardened interface for application execution that minimizes the attack surface of the kernel and makes processes stick to doing and accessing that which is strictly necessary for proper execution (see the demo at the end of this post). As a security enthusiast and budding Rustacean, I thought this would be a welcome challenge and a great opportunity to hone my Rust programming skills. In retrospect, it definitely has been so.
+
+After doing some research, I discovered seccompiler, a well-documented Rust crate that provides a high-level interface for constructing seccomp filtering policies. It can be used to create Rust-based data structures or JSON objects. Since serde makes it easy to serialize and deserialize JSON, and it could be useful to store the filters on disk for later reference, I decided to go with the JSON option. I then created an outline of the code. To make the seccomp filters user-defined, I broke down the filter creation process into multiple stages with intuitive prompts. This makes it easy for the user to create full-fledged and functional filters with just a few keystrokes.
+
+I wanted to add support in the code itself for displaying the list of system calls that the given process spawns upon execution. I considered using strace for this purpose, until I stumbled upon lurk, a Rust-based alternative with JSON support. It was the perfect choice since I was already planning to use serde for serializing the custom structs, which stored user choices, into seccompiler-compatible JSON. So, I used lurk to display all the system calls alongside the arguments that the process spawned. This would give the user an idea of the kind of filtering that needed to be done, in case they were previously unaware of the operational liberties the process took by default.
+
+After understanding how seccompiler operates and constructing seccomp filters that can be compiled to loadable BPF and installed, I tested out my code with different syscalls and processes. A perplexing issue soon arose in the form of unexpected core dumps when filtering syscalls unrelated to the process. I was depending on lurk to learn about the syscalls which a process spawned, so I initially thought lurk was somehow misbehaving. But strace was not much different either. I later figured out that using cargo run to compile and execute my binary led to a number of additional syscalls getting spawned, some of which were probably getting filtered out while testing, thereby causing core dumps. This was evident when I compared against the syscalls spawned by directly executing the binary. seccompiler installs the filters for the current and child processes, so I instead decided to separate the build process from execution.
+
+pledge and unveil
+
+Once I was done with implementing seccomp, it was time to focus on pledge and unveil. I had initially planned to use Rust’s own libpledge for this purpose but it appeared to be woefully unmaintained and undocumented, and it was a better idea anyway to stand on the shoulders of giants. So, I went with Justine Tunney’s standalone binary itself, which worked quite effectively in my favor. I used wget to make the code automatically fetch the pledge binary from upstream in case it was not already present on disk. Later on, I also added the binary to my project repository, accounting for the possibility of deployment in restricted environments or usage in systems without networking support.
+
+Constructing the prompts for accepting promises as input was not too difficult since everything was well-documented in Justine’s blog.
+
+I also incorporated unveil with support for specifying the nature of read-modify-write operations granted for every path that was unveiled to the process.
+
+Dependency checking is an important aspect since runtime errors can arise if some application tries to make use of a nonexistent dependency. To prevent this from happening, I added an optional dependency check for both wget and lurk, both of which the code depends on. seccompiler best practices involve enabling BPF Just in Time (JIT) compiler support to minimize syscall overhead, so I added another check that ensures this.
+
+Improving DX and UX
+
+The primary objective of the project had been accomplished.
+I had constructed a guided pathway for creating user-defined seccomp filters and designed a wrapper around Justine’s Linux port of pledge that could be used during command invocations.
+
+Until now, however, there was only one way to interact with my code – running it with the process to be sandboxed passed as an argument and then entering choices at every prompt to end up with a restricted-service mode of operation for said process.
+
+It would be more robust if the program could accept all choices directly prior to runtime, something like a non-interactive mode as suggested by a colleague, or even accept input from a Unix IPC socket as a kind of API layer on top of the code as suggested by another friend. Hence, I implemented support for both, creating flags that decide the behavior of the code before it executes so the user can more efficiently specify their preferences if they already know what kind of pledge sandboxing they want.
+
+💡 Note that seccomp filtering would be disabled for this non-interactive mode since it requires the user to be guided through every stage of the filter creation process in order to construct appropriate JSON filters.
+
+Incorporating support for communication with a Unix IPC socket was a good exercise in learning more about socket programming, and I experimented with several ways of approaching this problem before arriving at a simple solution that started with creating a temporary socket which could be used with something like OpenBSD’s netcat, available in most Linux package manager repositories, for communicating with the program.
+
+Once the program was executed in API mode, which could be specified through a flag, the user would be able to communicate with the socket using netcat. To reduce clutter, I decided only the input prompts should be displayed on the client-side whereas everything else, including the lurk output and execution progress of the code, would be displayed on the server-side which, in this case, simply referred to the terminal that the code was executed in. Since seccomp is a Linux-only feature, filtering can only be done on Linux systems, so the filter creation process is disabled if the detected operating system is not running on the Linux kernel.
+
+Final touches and tests
+
+The final stages of my project involved writing integration tests, benchmarking with Criterion and using clippy to make the code more aligned with idiomatic Rust.
+
+Writing the documentation for the code was another step in ensuring ease-of-use, so that the end user would face little difficulty in constructing a sandbox for some process. I added demonstrations for the three modes of interacting with the code and a quick overview of the list of flags that can be passed while executing the binary. Whereas API mode must be explicitly specified, the program automatically switches to non-interactive mode if some flag specific to pledge is passed during execution. Finally, I transferred ownership of the GitHub repository over to SubCom, where it is hosted today under the copyleft AGPL license to promote open-source development.
+
+All in all, this internship was a highly enjoyable and educational experience for me. I learnt quite a bit about systems security and, building on top of already established security mechanisms, gained insight into constructing tools for application hardening. I was already enthusiastic about Rust before, but this project really cemented the memory-safe systems programming language as a powerful medium for building performant and secure software.
+
+The borrow checker’s strictness and the helpful compiler messages have been greatly useful in writing code that does not do the unexpected.
+
+As a Linux user who formerly used OpenBSD, it was thrilling to delve deep into sandboxing mechanisms that I have used on my own systems. Although this was, by and large, a solo project wherein I enjoyed figuring out most things on my own with the help of the Internet, I am deeply grateful to the people at SubCom for not only financing this project but also providing useful suggestions and pointers. Communicating through Notion as well as journaling my progress on the daily, I had a splendid time working with them and look forward to more opportunities of the same kind.
+
+Demo
+
+Executing seccomp-pledge in interactive mode on ls with seccomp filtering out the accept4 syscall, pledge allowing stdio, rpath and tty operations and unveil giving read-only access to current working directory
+
+Find the repository here. Read my detailed internship notes here. The entire project was made using vim on Arch Linux❤️.
+
+Useful References
+
+This work was done by Archisman Dutta — student at Ashoka University — at Subconscious Compute during a 1 month long winter internship in December 2022 and overseen mainly by Siddharth Naithani of Subconscious Compute and NIT Hamirpur. Megha Ramanchandran of Subconscious Compute did the illustrations. If you are interested in projects like these, apply for internship or a fulltime position at our Job Board.
+
+Scroll to Top

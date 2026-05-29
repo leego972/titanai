@@ -1,0 +1,52 @@
+Question: <p>I'm writing a log file viewer for a web application and for that I want to paginate through the lines of the log file.  The items in the file are line based with the newest item on the bottom.</p>
+
+<p>So I need a <code>tail()</code> method that can read <code>n</code> lines from the bottom and supports an offset.  What I came up with looks like this:</p>
+
+<pre><code>def tail(f, n, offset=0):
+    """Reads a n lines from f with an offset of offset lines."""
+    avg_line_length = 74
+    to_read = n + offset
+    while 1:
+        try:
+            f.seek(-(avg_line_length * to_read), 2)
+        except IOError:
+            # woops.  apparently file is smaller than what we want
+            # to step back, go to the beginning instead
+            f.seek(0)
+        pos = f.tell()
+        lines = f.read().splitlines()
+        if len(lines) &gt;= to_read or pos == 0:
+            return lines[-to_read:offset and -offset or None]
+        avg_line_length *= 1.3
+</code></pre>
+
+<p>Is this a reasonable approach?  What is the recommended way to tail log files with offsets?</p>
+
+Answer: <p>Based on Eyecue answer (Jun 10 '10 at 21:28): this class add head() and tail() method to file object.</p>
+
+<pre><code>class File(file):
+    def head(self, lines_2find=1):
+        self.seek(0)                            #Rewind file
+        return [self.next() for x in xrange(lines_2find)]
+
+    def tail(self, lines_2find=1):  
+        self.seek(0, 2)                         #go to end of file
+        bytes_in_file = self.tell()             
+        lines_found, total_bytes_scanned = 0, 0
+        while (lines_2find+1 &gt; lines_found and
+               bytes_in_file &gt; total_bytes_scanned): 
+            byte_block = min(1024, bytes_in_file-total_bytes_scanned)
+            self.seek(-(byte_block+total_bytes_scanned), 2)
+            total_bytes_scanned += byte_block
+            lines_found += self.read(1024).count('\n')
+        self.seek(-total_bytes_scanned, 2)
+        line_list = list(self.readlines())
+        return line_list[-lines_2find:]
+</code></pre>
+
+<p>Usage:</p>
+
+<pre><code>f = File('path/to/file', 'r')
+f.head(3)
+f.tail(3)
+</code></pre>

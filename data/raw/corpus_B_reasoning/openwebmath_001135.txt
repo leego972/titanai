@@ -1,0 +1,536 @@
+# JavaScript: Make a Real typeof
+
+The problems with JavaScript’s typeof operator are manifold. It is so restricted, that its only use is in testing for undefined. The main culprit cause these restrictions is the loose typing together with the automatic type coercion: "2" + 2 results in 22, "2" == 2 is true, t = 2;typeof t returns "number" and t = new Number(2);typeof t returns "object" to name just a few.
+The worst case is probably:
+
+// somewhere on top of the code
+var a = 2;
+// some thousand lines and/or several scripts later
+var b = new Number(2);
+if(a === b){
+// CPR: Cardiopulmonary resuscitation
+console.log("Go on with CPR!");
+} else {
+}
+
+
+# Conversion of Binary Floating Point Numbers—Second Try
+
+The conversion of a string to a binary encoded floating point number is not easy, as shown in my last post. The information given there is a bit too much on the theoretical side. I’ll try to change that here with some real code: String to Bigfloat and Bigfloat to String. Continue reading
+
+# Factoring an Integer in JavaScript with a Wheel
+
+Update: bugfix in code
+
+Factoring an integer with a wheel is a known algorithm for which many examples exist for many programming languages. Google might be of some help to find them.
+Most of them are either way too simple or way too complicated; I would even say that all of them fall into one of these two categories but I do not know all of them.
+One example that could fit both categories at once is the program factor from the GNU-coreutils which uses a wheel to do its work. I did a JavaScript version of it if that language suits you more. The program itself is quite simple yet hard to understand.
+For example: what are these numbers at the start and where do they come from? Continue reading
+
+# Multiple Precision in JavaScript: Rational Arithmetic
+
+Now that we have a (hopefully) working big integer implementation we can go on, either to arbitrary floating point numbers or multiple precision rational numbers. The latter is slightly simpler(1), so let’s take that one first. Continue reading
+
+# Multiple Precision in JavaScript: Fast Division III
+
+## Division by Way of Multiplication with the Reciprocal (Newton Division)
+
+For divisions with participants in the range of millions of bits we can use this method. It is probably the simplest method of all four division algorithms but also the one with the largest overhead.
+
+The algorithm itself is probably the most published one (mainly because of its simplicity, I guess) but the version for integers: not so much, I think. A short search at Google brought up: nothing. Especially nothing about the problems you’ll meet.
+
+At first the actual algorithm for large integers with base-2k digits (226 in the case of my implementation) in pseudocode:
+
+divisionNewton(a,b){
+// checks and balances omitted
+
+// length of numerator in bits
+alen = bitlength(a);
+// length of denominator in bits
+blen = bitlength(b);
+// length of remainder in bits
+rlen = alen - blen;
+
+// We need some extra precision to avoid
+// needing an expensive extra round
+// this value is most probably too high
+// but doesn't add much to the runtime
+extra = ilog2(blen) + ilog2(alen) + 1;
+// at least three extra-bits are needed
+if(extra < 3){
+extra = 3;
+}
+// these extra bits get added to the
+// Numerator by multiplying with 2^extra, that is,
+// shifting it left
+as = a * 2^extra;
+alen = alen + extra;
+rlen = rlen + extra;
+
+// We do not need to do every step in full precision
+// but we must start somewhere.
+
+// By choosing the start precision like that we could
+// do the first approximation purely with normal numbers
+// but the effect is so abysmally small, it is wa below
+// measure-noise on my machine
+startprecision = int (MP_DIGIT_BIT/2);
+// You can pre-compute the individual precisions needed
+// in the iterations, like I described in the previous post
+giantsteps = computeGiantsteps(startprecision,rlen,2);
+steps = giantsteps.length;
+// the first approximation
+// for integers the first approximation can be done directly
+// by calculating 2^k/b and adjust the precision
+t1 = 2^(2 * startprecision);
+bs = b / 2^(blen - startprecision);
+bs = round(bs, ROUND_UP);
+t1 = t1 / bs;
+
+// These iterations look slightly different from most
+// descriptions but they are the very same, I thought it
+// can be done faster that way but I was wrong.
+// you do not need that much temporary variables, it
+// is for legibility only
+for(var i = 0; i < steps ; i++){
+gsi = giantsteps[i];
+// Adjust numerator (2^k) to new precision
+t3 = t1 * 2^(gsi - gs0 + 1);
+// Adjust denominator to new precision
+t4 =  b / 2^(blen - gsi);
+// Do the squaring of the Newton-Raphson algorithm
+t1 = t1^2;
+// Do the multiplication of the Newton-Raphson algorithm
+t1 = t1 * t4;
+// The division of N-R gets replaced by a simple shift
+t4 = t1 / 2^(2 * gs0);
+// Do the subtraction of the Newton-Raphson algorithm
+t1 = t3 - t4;
+gs0 = gsi;
+}
+// the reciprocal is in t1, do the final multiplication to get the quotient
+
+// Adjust the numerator's precision to the precision of the denominator
+// but leave the extra bits in place
+as = as / 2^(blen);
+// Do the actual multiplication N * 1/D to get the raw quotient
+q = as * t1;
+// Get the real quotient by dividing by the 2^k from the top plus the
+// extra bits
+q = q / 2^(rlen + extra);
+// Compute the remainder, we need it
+r = a - q * b;
+// The algorithm as it is implemented can be off by one.
+// do one round of Barrettt reduction as known from the
+// Barrett division treated in my last post to correct
+if( r < 0){
+r = r + b;
+q = q -1;
+}
+else if( r >= b){
+r = r - b;
+q = q + 1;
+}
+return [q, r];
+}
+
+
+The same for my JavaScript implementation of a bigint library:
+
+Bigint.prototype.divisionNewton = function(bint){
+var tlen, blen, rlen, extra;
+var t1, t2, t3, t4, ts, q, r;
+var giantsteps, steps, gs0, gsi, startprecision;
+
+tlen = this.highBit() + 1;
+blen = bint.highBit() + 1;
+rlen = tlen - blen;
+
+// probably too much and should be adjusted to fill a limb if possible, too.
+extra = blen.highBit() + tlen.highBit() + 1;
+// should also have three bits at least
+if(extra < 3){
+extra = 3;
+}
+ts = this.lShift(extra);
+tlen += extra;
+rlen += extra;
+
+// The value of startprecision has been chosen to keep the first
+// approximation in the Number range but is was found to be of about the
+// same speed as with Bigints. YMMV, so please try it out yourself.
+startprecision = 15;
+// precompute individual precisions to keep the iteration loop legible.
+giantsteps = computeGiantsteps(startprecision,rlen,2);
+steps = giantsteps.length;
+
+t1 =  new Bigint(1);
+t1.lShiftInplace(2 * giantsteps[0]);
+t1 = t1.div(bint.rShiftRounded(blen - giantsteps[0]));
+
+// the first entry of giantsteps is not necessarily equal to startprecision
+gs0 = giantsteps[0];
+
+for(var i = 0; i < steps ; i++){
+gsi = giantsteps[i];
+// Adjust numerator (2^k) to new precision
+t3 = t1.lShift(gsi - gs0 + 1);
+// Adjust denominator to new precision
+t4 = bint.rShift(blen - gsi);
+// Do the squaring of the Newton-Raphson algorithm
+t1 = t1.sqr();
+// Do the multiplication of the Newton-Raphson algorithm
+t1 = t1.mul(t4);
+// The division of N-R gets replaced by a simple shift
+t4 = t1.rShift(2 * gs0);
+// Do the subtraction of the Newton-Raphson algorithm
+t1 = t3.sub(t4);
+gs0 = gsi;
+}
+// the reciprocal is in t1, do the final multiplication to get the quotient
+// Adjust the numerator's precision to the precision of the denominator
+ts.rShiftInplace(blen);
+// Do the actual multiplication N*1/D
+q = ts.mul(t1);
+// Divide by 2^k to get the quotient
+q.rShiftInplace(rlen + extra);
+// compute the remainder
+r = this.sub(q.mul(bint));
+// The N_R algorithm as implemented can be off by one, correct it
+if( r.sign == MP_NEG){
+q.decr();
+}
+else if( r.cmp(bint) == MP_GT){
+r = r.sub(bint);
+q.incr();
+}
+return [q, r];
+};
+
+
+If you have implemented your bigint with a decimal base (e.g.: 107) just replace all 2k with 10k and use base 10 integer logarithms where I used base 2 integer logarithms (but both do the same: they count digits).
+
+Next post: a needful little helper to speed up unbalanced multiplication which speeds up all of these fast divsion algorithms.
+
+# Multiple Precision in JavaScript: Fast Division II
+
+## Barrett Division
+
+The Barrett division uses Barrett’s correction algorithm (Barrett reduction) meant for polynomial division, which are in this case the big-integers. It does work for fractions of the form $N \leq 2D$ only so it needs some precomputations for other fractions.
+
+It basically works by computing a low-precision reciprocal of the denominator and using slices of it with slices of the numerator to build the result.
+
+Bigint.prototype.barrettDivision = function(bint) {
+var m = this.highBit() + 1;
+var n = bint.highBit() + 1;
+var mu, largemu, start, q, r, mask, digit, c;
+if (m < n) {
+return [new Bigint(0), this.copy()];
+} else if (m <= 2 * n) {
+mu = bint.inverse(m - n);
+return this.barretDivisionCorrection(bint, mu);
+} else {
+// do school-division with big-digits of a size chosen such that
+// the condition N<=2*D holds.
+
+// Overall mu, gets splitted later
+largemu = bint.inverse(n);
+// choose the startpoint as an integer multiple of n
+start = Math.floor(m / n) * n;
+q = new Bigint(0);
+// first part of the new numerator
+r = this.rShift(start);
+while (start > 0) {
+start -= n;
+// Snip a large digit from the LSB side of the original numerator
+// make room for it in the new numerator
+r.lShiftInplace(n);
+// put the digit there
+// get the right amount of mu (still under the condition N<=2*D)
+mu = largemu.rShiftRounded(2 * n - (r.highBit() + 1));
+// correct the result
+c = r.barretDivisionCorrection(bint, mu);
+// make room for the quotient-part
+q.lShiftInplace(n);
+// put it there
+// the remainder is the new numerator
+r = c[1];
+}
+return [q, r];
+}
+};
+
+
+The reciprocal gets calculated with some rounds of Newton-Raphson root-finding with the precision of the denominator. This already gives a hint that this algorthm works best for fractions of the form $N \leq kD$ with $k \ggg 2$ and a sufficiently large denominator.
+Some tests resulted in a breakeven to the Burnikel-Ziegler algorithm described earlier at $N = 10 D$ with a bit length of about 50k for the denominator but not only might your mileage vary but it is also different with different relations and sizes.
+
+var BARRETT_NEWTON_CUTOFF = 100
+Bigint.prototype.inverse = function(n) {
+var m = this.highBit() + 1;
+var giantsteps;
+var steps, gs, gs0, i;
+var r, s, t, u, w, a, b;
+// truncated division
+if (n <= BARRETT_NEWTON_CUTOFF) {
+var ret = new Bigint(1);
+ret.lShiftInplace(2 * n);
+return ret.div(this.rShiftRounded(m - n));
+}
+// some rounds of Newton-Raphson
+giantsteps = computeGiantsteps(MP_DIGIT_BIT >> 1, n, 2);
+steps = giantsteps.length;
+r = new Bigint(1);
+r.lShiftInplace(2 * giantsteps[0]);
+r = r.div(this.rShiftRounded(m - giantsteps[0]));
+gs0 = giantsteps[0];
+for (i = 0; i < steps; i++) {
+gs = giantsteps[i];
+a = r.lShift(giantsteps[i] - gs0 + 1);
+b = r.sqr().mul(this.rShift(m - giantsteps[i])).rShift(2 * gs0);
+r = a.sub(b);
+gs0 = giantsteps[i];
+}
+return r;
+};
+
+
+The function computeGiantsteps(start, end, stepsize) is a small function to calulate the precision needed for the respective iteration rounds.
+
+// Computes iteration steps for e.g. Newton-Raphson
+// "stepsize" is the length of the steps and a multiplicator.
+// For example stepsize=2 for quadratic convergences (Newton), stepsize=3
+// for cubic ones (Housholder), etc.
+// Yep, just like the similarily named Python function
+function computeGiantsteps(start, end, stepsize) {
+var ret = [ end ],
+i = 1;
+if (arguments.length != 3) {
+return MP_VAL;
+}
+while (true) {
+if (ret[ ret.length - 1 ] <= start * stepsize) {
+break;
+}
+ret[ i++ ] = Math.floor(ret[ret.length - 1] / stepsize) + 2;
+}
+return ret.reverse();
+}
+
+
+The actual Barrett reduction is astonishingly small. It is just:
+
+Bigint.prototype.barretDivisionCorrection = function(b, mu) {
+var m = this.highBit() + 1;
+var n = b.highBit() + 1;
+
+var digit = this.rShift(n - 1);
+var q = digit.mul(mu).rShift(m - n + 1);
+var r = this.sub(b.mul(q));
+
+while (r.sign < 0 || r.cmp(b) != MP_LT) {
+if (r.sign < 0) {
+q.decr();
+} else {
+r = r.sub(b);
+q.incr();
+}
+}
+return [q, r];
+};
+
+
+This works quite well if the reciprocal is not too much off but there are exceptions. Assuming that I did not make an error in the implementation teh following numbers made with the function Bigint.random() from my Bigint implementation
+
+var C = new Bigint(0);
+var D = new Bigint(0);
+var N = 100;
+C.random(100 * 26 * N, 123);
+D.random(40 * 26 * N , 124);
+
+
+it will “hang” in the loop trying to correct a ~5,300 limbs large result with a 4,000 limbs “small” denominator by way of stepwise subtraction.
+Funnily, it works with
+
+var N = 100;
+C.random(99 * 26 * N, 123);
+D.random(40 * 26 * N , 124);
+
+
+and
+
+var N = 100;
+C.random(101 * 26 * N, 123);
+D.random(40 * 26 * N , 124);
+
+
+I was not able to find another example of this behaviour but if you know the reason: please let me know!
+
+# Multiple Precision in JavaScript: Fast Division I
+
+## The Burnikel-Ziegler Algorithm
+
+A method to divide two numbers in an asymptotically faster way then simple schoolbook-division but also usable below the large limits of Barret reduction and multiplication with the reciprocal generated by some rounds of Newton-Raphson root-finding have been found by Christoph Burnikel and Joachim Ziegler and described in their paper “Recursive Division”[1].
+The cutoff-point in my JavaScript Bigint library for Little is about 500 limbs for the numerator and 300 limbs for the denominator, about 4,000 and 2350 decimal digits respectively.
+
+The algorithm itself is a more or less simple divide&conquer algorithm, taken quite literally here. It is described well and clearly in the paper linked to above. The implementation on the other side is not so simple, it took me some time.
+
+The most complicated part was the main function that slices the numerator in pieces of the length of the denominator. The paper has a complicated method to squeeze the very last out of the algorithm which I was not able to implement successfully in JavaScript, something was always wrong; correct at the end but still very slow. So I had the weird idea to take the first sentence in this paragraph literally: cut the numerator in slices of the (bit)length of the denominator. This method leaves some rest most of the times which has to be handled specially. The rest worked—astonishingly!—quite smoothly and was fast at the end. Not as fast as the paper promised (mostly due to JavaScript), but still quite fast.
+
+Without further ado, here is the first function, slicing the input which consists of two positive integers a and b with a>=b:
+
+function divrem(a, b) {
+// (max) size of one block
+var n = b.highBit() + 1;
+var tlen = a.highBit() + 1;
+// # of blocks
+var nblocks = Math.ceil((a.highBit() + 1) / n);
+// # of n-sized blocks
+var mblocks = Math.floor((a.highBit() + 1) / n);
+
+var firstblock;
+var r, q, qr, t;
+var count;
+count = 0;
+
+if (firstblock.cmp(b) != MP_LT) {
+r = new Bigint(0);
+} else {
+r = firstblock;
+mblocks--;
+nblocks--;
+}
+q = new Bigint(0);
+while (nblocks--) {
+t = qr[0];
+r = qr[1];
+mblocks--;
+}
+return [q, r];
+}
+
+
+The numerator gets sliced MSB first, so the very first block is the one which needs special treatment: if it is equal of greater the the denominator we preset the remainder to zero or to the first block otherwise. This gets done such that the input to div2n1n is always 2n large. It is not necessary to use two indices, I have done it for legibility. You might also use a logical or (addition base 2) instead of normal addition but I couldn’t find it faster (YMMV etc. p.p.).
+
+The simplicity of the starting function does come with a small cost: the other two functions are slightly more complicated.
+
+The first function that gets called is div2n1n:
+
+function div2n1n(a, b, n) {
+var mask, q1, q2, r, qr, a3, b1, b2;
+var half;
+if (n <= BURN_ZIEG_CUTOFF) {
+return a.divrem(b);
+}
+var isodd = n & 1;
+if (isodd) {
+a.lShiftInplace(1);
+b = b.lShift(1);
+//b.lShiftInplace(1);
+n++;
+}
+half = n >>> 1;
+b1 = b.rShift(half);
+r = a.rShift(n);
+
+qr = div3n2n(r, a3, b1, b2, half);
+q1 = qr[0];
+r = qr[1];
+
+qr = div3n2n(r, a3, b1, b2, half);
+q2 = qr[0];
+r = qr[1];
+if (isodd) {
+r.rShiftInplace(1);
+}
+return [q1.lShift(half).or(q2), r];
+}
+
+
+The variable BURN_ZIEG_CUTOFF is set to 3,000 bits in my case. It depends a bit on the size of the denominator but not very much in contrast to the original code where it was taken as the variable m which had to fit an integral times into the denominator which means that the denominator had to be expanded if that was not the case together with the numerator causing a lot of error-prone code writing.
+One optimization of the algorithm has been implemented here: the original method does not handle the case of odd n and throws it to the normal division function, too. That is slower than making it even (proof omitted for brevity) for the recursion to consume. The original has the computation of the variables a12, a3, b1, and b2 put into the div3n2n but b1 and b2 is the same in both instances for example.
+
+That makes the function div3n2n quite short:
+
+function div3n2n(a12, a3, b1, b2, n) {
+var t = a12.rShift(n), qr, q, r;
+if (t.cmp(b1) == MP_EQ) {
+q = new Bigint(1);
+q = q.lShift(n);
+q.decr();
+} else {
+qr = div2n1n(a12, b1, n);
+q = qr[0];
+r = qr[1];
+}
+r = r.lShift(n).or(a3).sub(q.mul(b2));
+while (r.sign == MP_NEG) {
+q.decr();
+}
+return [q, r];
+}
+
+
+The differences are not very large (and some were made larger for legibility without harm to the speed)
+Compare to the according functions that follow the paper nearly to the letter:
+
+function divide2n1n(a,b){
+var n = b.used;
+var odd = n&1;
+if(n < BURNIKEL_ZIEGLER_THRESHOLD){
+return a.divrem(b);
+}
+if(odd){
+a.lShiftInplace(1);
+b = b.lShift(1);//b.lShiftInplace(1);
+n++;
+}
+n = n/2;
+var c1 = divide3n2n(a.slice(n,a.used), b);
+var a4 = a.slice(0,n);
+if(odd){
+c2[1].rShiftInplace(1);
+}
+}
+
+var ret = [];
+while (n--) {
+}
+return ret;
+}
+function divide3n2n( a, b){
+var n =  b.used >>> 1;
+var a1 = a.slice(2 * n, a.used);
+//var a2 = a.slice(n,2 * n);
+var a3 = a.slice(0, n);
+var b1 = b.slice(n, b.used);
+var b2 = b.slice(0, n);
+var q, r1,d,r,c;
+var a12 = a.slice(n, a.used);
+
+if(a1.cmp(b1) == MP_LT){
+c = divide2n1n(a12, b1);
+q = c[0];
+r = c[1];
+d = q.mul(b2);
+} else {
+q = new Bigint(0);
+q.used = q.dp.length;
+d = b2.dlShift(n);
+d = d.sub(b2);
+}
+while (r.cmp(d) == MP_LT) {
+q.decr();
+}
+r = r.sub(d);
+q.clamp();
+return [q, r];
+}
+
+
+(I spare you the mess that I made of the slicing function 😉 )
+
+As a side-note: it does not matter which algorithm you use for the final division; it can be schoolbook division or Barret division or even Newton division as long as it is not burnikel-ziegler division itself for obvious reasons. So it might be a good idea to do some branching at that point to chose the right algorithm depending on the size of the input. Or not, to be tested.
+
+In the next post I will talk about Barret reduction and it’s use for an even faster algorithm. The post after that, if nothing comes in the way, is about multiplication with the reciprocal (with the Newton-Raphson root-finding algorithm). All of the algorithms are already implemented in the file bignum.js in the lib subdirectory in Little.
+
+[1] I have a lot of left-over punctuation marks. Anyone interested?

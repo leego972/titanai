@@ -1,0 +1,104 @@
+Question: <p>I have a list of arbitrary length, and I need to split it up into equal size chunks and operate on it. There are some obvious ways to do this, like keeping a counter and two lists, and when the second list fills up, add it to the first list and empty the second list for the next round of data, but this is potentially extremely expensive.</p>
+
+<p>I was wondering if anyone had a good solution to this for lists of any length, e.g. using generators.</p>
+
+<p>This should work:</p>
+
+<pre><code>l = range(1, 1000)
+print chunks(l, 10) -&gt; [ [ 1..10 ], [ 11..20 ], .., [ 991..999 ] ]
+</code></pre>
+
+<p>I was looking for something useful in <code>itertools</code> but I couldn't find anything obviously useful. Might've missed it, though.</p>
+
+<p>Related question: <a href="http://stackoverflow.com/questions/434287/what-is-the-most-pythonic-way-to-iterate-over-a-list-in-chunks">What is the most âpythonicâ way to iterate over a list in chunks?</a></p>
+
+Answer: <h2>Critique of other answers here:</h2>
+
+<p>None of these answers are evenly sized chunks, they all leave a runt chunk at the end, so they're not completely balanced. If you were using these functions to distribute work, you've built-in the prospect of one likely finishing well before the others, so it would sit around doing nothing while the others continued working hard.</p>
+
+<p>For example, the current top answer ends with:</p>
+
+<pre><code>[60, 61, 62, 63, 64, 65, 66, 67, 68, 69],
+[70, 71, 72, 73, 74]]
+</code></pre>
+
+<p>I just hate that runt at the end!</p>
+
+<p>Others, like <code>list(grouper(3, xrange(7)))</code>, and <code>chunk(xrange(7), 3)</code> both return: <code>[(0, 1, 2), (3, 4, 5), (6, None, None)]</code>. The <code>None</code>'s are just padding, and rather inelegant in my opinion. They are NOT evenly chunking the iterables.</p>
+
+<p>Why can't we divide these better?</p>
+
+<h2>My Solution(s)</h2>
+
+<p>Here's a balanced solution, adapted from a function I've used in production (Note in Python 3 to replace <code>xrange</code> with <code>range</code>):</p>
+
+<pre><code>def baskets_from(items, maxbaskets=25):
+    baskets = [[] for _ in xrange(maxbaskets)] # in Python 3 use range
+    for i, item in enumerate(items):
+        baskets[i % maxbaskets].append(item)
+    return filter(None, baskets) 
+</code></pre>
+
+<p>And I created a generator that does the same if you put it into a list:</p>
+
+<pre><code>def iter_baskets_from(items, maxbaskets=3):
+    '''generates evenly balanced baskets from indexable iterable'''
+    item_count = len(items)
+    baskets = min(item_count, maxbaskets)
+    for x_i in xrange(baskets):
+        yield [items[y_i] for y_i in xrange(x_i, item_count, baskets)]
+</code></pre>
+
+<p>And finally, since I see that all of the above functions return elements in a contiguous order (as they were given):</p>
+
+<pre><code>def iter_baskets_contiguous(items, maxbaskets=3, item_count=None):
+    '''
+    generates balanced baskets from iterable, contiguous contents
+    provide item_count if providing a iterator that doesn't support len()
+    '''
+    item_count = item_count or len(items)
+    baskets = min(item_count, maxbaskets)
+    items = iter(items)
+    floor = item_count // baskets 
+    ceiling = floor + 1
+    stepdown = item_count % baskets
+    for x_i in xrange(baskets):
+        length = ceiling if x_i &lt; stepdown else floor
+        yield [items.next() for _ in xrange(length)]
+</code></pre>
+
+<h2>Output</h2>
+
+<p>To test them out:</p>
+
+<pre><code>print(baskets_from(xrange(6), 8))
+print(list(iter_baskets_from(xrange(6), 8)))
+print(list(iter_baskets_contiguous(xrange(6), 8)))
+print(baskets_from(xrange(22), 8))
+print(list(iter_baskets_from(xrange(22), 8)))
+print(list(iter_baskets_contiguous(xrange(22), 8)))
+print(baskets_from('ABCDEFG', 3))
+print(list(iter_baskets_from('ABCDEFG', 3)))
+print(list(iter_baskets_contiguous('ABCDEFG', 3)))
+print(baskets_from(xrange(26), 5))
+print(list(iter_baskets_from(xrange(26), 5)))
+print(list(iter_baskets_contiguous(xrange(26), 5)))
+</code></pre>
+
+<p>Which prints out:</p>
+
+<pre><code>[[0], [1], [2], [3], [4], [5]]
+[[0], [1], [2], [3], [4], [5]]
+[[0], [1], [2], [3], [4], [5]]
+[[0, 8, 16], [1, 9, 17], [2, 10, 18], [3, 11, 19], [4, 12, 20], [5, 13, 21], [6, 14], [7, 15]]
+[[0, 8, 16], [1, 9, 17], [2, 10, 18], [3, 11, 19], [4, 12, 20], [5, 13, 21], [6, 14], [7, 15]]
+[[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14], [15, 16, 17], [18, 19], [20, 21]]
+[['A', 'D', 'G'], ['B', 'E'], ['C', 'F']]
+[['A', 'D', 'G'], ['B', 'E'], ['C', 'F']]
+[['A', 'B', 'C'], ['D', 'E'], ['F', 'G']]
+[[0, 5, 10, 15, 20, 25], [1, 6, 11, 16, 21], [2, 7, 12, 17, 22], [3, 8, 13, 18, 23], [4, 9, 14, 19, 24]]
+[[0, 5, 10, 15, 20, 25], [1, 6, 11, 16, 21], [2, 7, 12, 17, 22], [3, 8, 13, 18, 23], [4, 9, 14, 19, 24]]
+[[0, 1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
+</code></pre>
+
+<p>Notice that the contiguous generator provide chunks in the same length patterns as the other two, but the items are all in order, and they are as evenly divided as one may divide a list of discrete elements.</p>

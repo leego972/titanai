@@ -1,0 +1,80 @@
+Easily capture stdout/stderr of the current process and subprocesses
+
+## Project description
+
+The capturer package makes it easy to capture the stdout and stderr streams of the current process and subprocesses. Output can be relayed to the terminal in real time but is also available to the Python program for additional processing. It’s currently tested on cPython 2.7, 3.5+ and PyPy (2.7). It’s tested on Linux and Mac OS X and may work on other unixes but definitely won’t work on Windows (due to the use of the platform dependent pty module). For usage instructions please refer to the documentation.
+
+## Status
+
+The capturer package was developed as a proof of concept over the course of a weekend, because I was curious to see if it could be done (reliably). After a weekend of extensive testing it seems to work fairly well so I’m publishing the initial release as version 1.0, however I still consider this a proof of concept because I don’t have extensive “production” experience using it yet. Here’s hoping it works as well in practice as it did during my testing :-).
+
+## Installation
+
+The capturer package is available on PyPI which means installation should be as simple as:
+
+\$ pip install capturer
+
+
+There’s actually a multitude of ways to install Python packages (e.g. the per user site-packages directory, virtual environments or just installing system wide) and I have no intention of getting into that discussion here, so if this intimidates you then read up on your options before returning to these instructions ;-).
+
+## Getting started
+
+The easiest way to capture output is to use a context manager:
+
+import subprocess
+from capturer import CaptureOutput
+
+with CaptureOutput() as capturer:
+# Generate some output from Python.
+print "Output from Python"
+# Generate output from a subprocess.
+subprocess.call(["echo", "Output from a subprocess"])
+# Get the output in each of the supported formats.
+assert capturer.get_bytes() == b'Output from Python\r\nOutput from a subprocess\r\n'
+assert capturer.get_lines() == [u'Output from Python', u'Output from a subprocess']
+assert capturer.get_text() == u'Output from Python\nOutput from a subprocess'
+
+
+The use of a context manager (the with statement) ensures that output capturing is enabled and disabled at the appropriate time, regardless of whether exceptions interrupt the normal flow of processing.
+
+Note that the first call to get_bytes(), get_lines() or get_text() will stop the capturing of output by default. This is intended as a sane default to prevent partial reads (which can be confusing as hell when you don’t have experience with them). So we could have simply used print to show the results without causing a recursive “captured output is printed and then captured again” loop. There’s an optional partial=True keyword argument that can be used to disable this behavior (please refer to the documentation for details).
+
+## Design choices
+
+There are existing solutions out there to capture the stdout and stderr streams of (Python) processes. The capturer package was created for a very specific use case that wasn’t catered for by existing solutions (that I could find). This section documents the design choices that guided the development of the capturer package:
+
+### Intercepts writes to low level file descriptors
+
+Libraries like capture and iocapture change Python’s sys.stdout and sys.stderr file objects to fake file objects (using StringIO). This enables capturing of (most) output written to the stdout and stderr streams from the same Python process, however any output from subprocesses is unaffected by the redirection and not captured.
+
+The capturer package instead intercepts writes to low level file descriptors (similar to and inspired by how pytest does it). This enables capturing of output written to the standard output and error streams from the same Python process as well as any subprocesses.
+
+### Uses a pseudo terminal to emulate a real terminal
+
+The capturer package uses a pseudo terminal created using pty.openpty() to capture output. This means subprocesses will use ANSI escape sequences because they think they’re connected to a terminal. In the current implementation you can’t opt out of this, but feel free to submit a feature request to change this :-). This does have some drawbacks:
+
+• The use of pty.openpty() means you need to be running in a UNIX like environment for capturer to work (Windows definitely isn’t supported).
+
+• All output captured is relayed on the stderr stream by default, so capturing changes the semantics of your programs. How much this matters obviously depends on your use case. For the use cases that triggered me to create capturer it doesn’t matter, which explains why this is the default mode.
+
+There is experimental support for capturing stdout and stderr separately and relaying captured output to the appropriate original stream. Basically you call CaptureOutput(merged=False) and then you use the stdout and stderr attributes of the CaptureOutput object to get at the output captured on each stream.
+
+I say experimental because this method of capturing can unintentionally change the order in which captured output is emitted, in order to avoid interleaving output emitted on the stdout and stderr streams (which would most likely result in incomprehensible output). Basically output is relayed on each stream separately after each line break. This means interactive prompts that block on reading from standard input without emitting a line break won’t show up (until it’s too late ;-).
+
+### Relays output to the terminal in real time
+
+The main use case of capturer is to capture all output of a snippet of Python code (including any output by subprocesses) but also relay the output to the terminal in real time. This has a couple of useful properties:
+
+• Long running operations can provide the operator with real time feedback by emitting output on the terminal. This sounds obvious (and it is!) but it is non-trivial to implement (an understatement :-) when you also want to capture the output.
+• Programs like gpg and ssh that use interactive password prompts will render their password prompt on the terminal in real time. This avoids the awkward interaction where a password prompt is silenced but the program still hangs, waiting for input on stdin.
+
+## Contact
+
+The latest version of capturer is available on PyPI and GitHub. The documentation is hosted on Read the Docs and includes a changelog. For bug reports please create an issue on GitHub. If you have questions, suggestions, etc. feel free to send me an e-mail at peter@peterodding.com.
+
+A big thanks goes out to the pytest developers because pytest’s mechanism for capturing the output of subprocesses provided inspiration for the capturer package. No code was copied, but both projects are MIT licensed anyway, so it’s not like it’s very relevant :-).
+
+## Project details
+
+Uploaded source
+Uploaded py2 py3

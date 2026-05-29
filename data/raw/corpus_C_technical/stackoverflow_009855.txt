@@ -1,0 +1,43 @@
+Question: <p>I'm using the <a href="http://docs.python.org/library/subprocess.html">subprocess module</a> to start a subprocess and connect to it's output stream (stdout). I want to be able to execute non-blocking reads on its stdout. Is there a way to make .readline non-blocking or to check if there is data on the stream before I invoke <code>.readline</code>? I'd like this to be portable or at least work under Windows and Linux.</p>
+
+<p>here is how I do it for now (It's blocking on the <code>.readline</code> if no data is avaible):</p>
+
+<pre><code>p = subprocess.Popen('myprogram.exe', stdout = subprocess.PIPE)
+output_str = p.stdout.readline()
+</code></pre>
+
+Answer: <p><a href="http://stackoverflow.com/questions/375427/non-blocking-read-on-a-stream-in-python/4025909#4025909"><code>fcntl</code></a>, <a href="http://stackoverflow.com/questions/375427/non-blocking-read-on-a-stream-in-python/375511#375511"><code>select</code></a>, <a href="http://stackoverflow.com/questions/375427/non-blocking-read-on-a-stream-in-python/437888#437888"><code>asyncproc</code></a> won't help in this case.</p>
+
+<p>A reliable way to read a stream without blocking regardless of operating system is to use <a href="http://docs.python.org/library/queue.html#Queue.Queue.get"><code>Queue.get_nowait()</code></a>:</p>
+
+<pre><code>import sys
+from subprocess import PIPE, Popen
+from threading  import Thread
+
+try:
+    from Queue import Queue, Empty
+except ImportError:
+    from queue import Queue, Empty  # python 3.x
+
+ON_POSIX = 'posix' in sys.builtin_module_names
+
+def enqueue_output(out, queue):
+    for line in iter(out.readline, b''):
+        queue.put(line)
+    out.close()
+
+p = Popen(['myprogram.exe'], stdout=PIPE, bufsize=1, close_fds=ON_POSIX)
+q = Queue()
+t = Thread(target=enqueue_output, args=(p.stdout, q))
+t.daemon = True # thread dies with the program
+t.start()
+
+# ... do other things here
+
+# read line without blocking
+try:  line = q.get_nowait() # or q.get(timeout=.1)
+except Empty:
+    print('no output yet')
+else: # got line
+    # ... do something with line
+</code></pre>

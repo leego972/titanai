@@ -1,0 +1,219 @@
+Question: <p>I have been using Python more and more, and I keep seeing the variable <code>__all__</code> set in different <code>__init__.py</code> files.  Can someone explain what this does?</p>
+
+Answer: <blockquote>
+  <p><strong>Explain __all__ in Python?</strong></p>
+  
+  <p>I keep seeing the variable <code>__all__</code> set in different <code>__init__.py</code> files.</p>
+  
+  <p>What does this do?</p>
+</blockquote>
+
+<h1>What does <code>__all__</code> do?</h1>
+
+<p>It declares the semantically "public" names from a module. If there is a name in <code>__all__</code>, users are expected to use it, and they can have the expectation that it will not change. </p>
+
+<p>It also will have programmatic affects:</p>
+
+<h2><code>import *</code></h2>
+
+<p><code>__all__</code> in a module, e.g. <code>module.py</code>:</p>
+
+<pre><code>__all__ = ['foo', 'Bar']
+</code></pre>
+
+<p>means that when you <code>import *</code> from the module, only those names in the <code>__all__</code> are imported:</p>
+
+<pre><code>from module import *               # imports foo and Bar
+</code></pre>
+
+<h2>Documentation tools</h2>
+
+<p>Documentation and code autocompletion tools may (in fact, should) also inspect the <code>__all__</code> to determine what names to show as available from a module.</p>
+
+<h1><code>__init__.py</code> makes a directory a Python package</h1>
+
+<p>From the <a href="https://docs.python.org/2/tutorial/modules.html#packages">docs</a>:</p>
+
+<blockquote>
+  <p>The <code>__init__.py</code> files are required to make Python treat the directories as containing packages; this is done to prevent directories with a common name, such as string, from unintentionally hiding valid modules that occur later on the module search path.</p>
+  
+  <p>In the simplest case, <code>__init__.py</code> can just be an empty file, but it can also execute initialization code for the package or set the <code>__all__</code> variable.</p>
+</blockquote>
+
+<p>So the <code>__init__.py</code> can declare the <code>__all__</code> for a <em>package</em>.</p>
+
+<h1>Managing an API:</h1>
+
+<p>A package is typically made up of modules that may import one another, but that are necessarily tied together with an <code>__init__.py</code> file. That file is what makes the directory an actual Python package. For example, say you have the following:</p>
+
+<pre><code> package/
+   |-__init__.py # makes directory a Python package
+   |-module_1.py
+   |-module_2.py
+</code></pre>
+
+<p>in the <code>__init__.py</code> you write:</p>
+
+<pre><code>from module_1 import *
+from module_2 import *
+</code></pre>
+
+<p>and in <code>module_1</code> you have:</p>
+
+<pre><code>__all__ = ['foo',]
+</code></pre>
+
+<p>and in <code>module_2</code> you have:</p>
+
+<pre><code>__all__ = ['Bar',]
+</code></pre>
+
+<p>And now you have presented a complete api that someone else can use when they import your package, like so: </p>
+
+<pre><code>import package
+package.foo()
+package.Bar()
+</code></pre>
+
+<p>And they won't have all the other names you used when creating your modules cluttering up the <code>package</code> namespace.</p>
+
+<h1><code>__all__</code> in <code>__init__.py</code></h1>
+
+<p>After more work, maybe you've decided that the modules are too big and need to be split up. So you do the following:</p>
+
+<pre><code> package/
+   |-__init__.py
+   |-module_1/
+   |  |-__init__.py
+   |  |-foo_implementation.py
+   |-module_2/
+      |-__init__.py
+      |-Bar_implementation.py
+</code></pre>
+
+<p>And in each <code>__init__.py</code> you declare an <code>__all__</code>, e.g. in module_1:</p>
+
+<pre><code>from foo_implementation import *
+__all__ = ['foo']
+</code></pre>
+
+<p>And module_2's <code>__init__.py</code>:</p>
+
+<pre><code>from Bar_implementation import *
+__all__ = ['Bar']
+</code></pre>
+
+<p>And you can easily add things to your API that you can manage at the subpackage level instead of the subpackage's module level. If you want to add a new name to the API, you simply update the <code>__init__.py</code>, e.g. in module_2:</p>
+
+<pre><code>from Bar_implementation import *
+from Baz_implementation import *
+__all__ = ['Bar', 'Baz']
+</code></pre>
+
+<p>And if you're not ready to publish <code>Baz</code> in the top level API, in your top level <code>__init__.py</code> you could have:</p>
+
+<pre><code>from module_1 import *       # also constrained by __all__'s
+from module_2 import *       # in the __init__.py's
+__all__ = ['foo', 'Bar']     # further constraining the names advertised
+</code></pre>
+
+<p>and if your users are aware of the availability of <code>Baz</code>, they can use it:</p>
+
+<pre><code>import package
+package.Baz()
+</code></pre>
+
+<p>but if they don't know about it, other tools (like <a href="https://hg.python.org/cpython/file/2.7/Lib/pydoc.py#l173">pydoc</a>) won't inform them.</p>
+
+<p>You can later change that when <code>Baz</code> is ready for prime time:</p>
+
+<pre><code>from module_1 import *
+from module_2 import *
+__all__ = ['foo', 'Bar', 'Baz']
+</code></pre>
+
+<h1>Prefixing <code>_</code> versus <code>__all__</code>:</h1>
+
+<p>By default, Python will export all names that do not start with an <code>_</code>. You certainly <em>could</em> rely on this mechanism. Some packages in the Python standard library, in fact, <em>do</em> rely on this, but to do so, they alias their imports, for example, in <a href="https://hg.python.org/cpython/file/default/Lib/ctypes/__init__.py#l3"><code>ctypes/__init__.py</code></a>:</p>
+
+<pre><code>import os as _os, sys as _sys
+</code></pre>
+
+<p>Using the <code>_</code> convention can be more elegant because it removes the redundancy of naming the names again. But it adds the redundancy for imports (if you have a lot of them) and it is <em>easy</em> to forget to do this consistently - and the last thing you want is to have to indefinitely support something you intended to only be an implementation detail, just because you forgot to prefix an <code>_</code> when naming a function.</p>
+
+<p>I personally write an <code>__all__</code> early in my development lifecycle for modules so that others who might use my code know what they should use and not use.</p>
+
+<p>Most packages in the standard library also use <code>__all__</code>.</p>
+
+<h1>When avoiding <code>__all__</code> makes sense</h1>
+
+<p>It makes sense to stick to the <code>_</code> prefix convention in lieu of <code>__all__</code> when:</p>
+
+<ul>
+<li>You're still in early development mode and have no users, and are constantly tweaking your API.</li>
+<li>Maybe you do have users, but you have unittests that cover the API, and you're still actively adding to the API and tweaking in development.</li>
+</ul>
+
+<h1>An <code>export</code> decorator</h1>
+
+<p>The downside of using <code>__all__</code> is that you have to write the names of functions and classes being exported twice - and the information is kept separate from the definitions. We <em>could</em> use a decorator to solve this problem.</p>
+
+<p>I got the idea for such an export decorator from David Beazley's talk on packaging. This implementation seems to work well in CPython's traditional importer. If you have a special import hook or system, I do not guarantee it, but if you adopt it, it is fairly trivial to back out - you'll just need to manually add the names back into the <code>__all__</code></p>
+
+<p>So in, for example, a utility library, you would define the decorator:</p>
+
+<pre><code>import sys
+
+def export(fn):
+    mod = sys.modules[fn.__module__]
+    if hasattr(mod, '__all__'):
+        mod.__all__.append(fn.__name__)
+    else:
+        mod.__all__ = [fn.__name__]
+    return fn
+</code></pre>
+
+<p>and then, where you would define an <code>__all__</code>, you do this:</p>
+
+<pre><code>$ cat &gt; main.py
+from lib import export
+__all__ = [] # optional - we create a list if __all__ is not there.
+
+@export
+def foo(): pass
+
+@export
+def bar():
+    'bar'
+
+def main():
+    print('main')
+
+if __name__ == '__main__':
+    main()
+</code></pre>
+
+<p>And this works fine whether run as main or imported by another function.</p>
+
+<pre><code>$ cat &gt; run.py
+import main
+main.main()
+
+$ python run.py
+main
+</code></pre>
+
+<p>And API provisioning with <code>import *</code> will work too:</p>
+
+<pre><code>$ cat &gt; run.py
+from main import *
+foo()
+bar()
+main() # expected to error here, not exported
+
+$ python run.py
+Traceback (most recent call last):
+  File "run.py", line 4, in &lt;module&gt;
+    main() # expected to error here, not exported
+NameError: name 'main' is not defined
+</code></pre>

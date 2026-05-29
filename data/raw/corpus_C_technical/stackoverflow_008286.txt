@@ -1,0 +1,62 @@
+Question: <p>What's the best way to do case insensitive string comparison in Python?</p>
+
+<p>I would like to encapsulate comparison of a regular strings to a repository string using in a very simple and pythonic way.  I also would like to have ability to look up values in a dict hashed by strings using regular python strings.  Much obliged for advice.</p>
+
+Answer: <p>Comparing string in a case insensitive way seems like something that's trivial, but it's not. I will be using Python 3, since Python 2 is underdeveloped here.</p>
+
+<p>The first thing to note it that case-removing conversions in unicode aren't trivial. There is text for which <code>text.lower() != text.upper().lower()</code>, such as <code>"Ã"</code>:</p>
+
+<pre><code>"Ã".lower()
+#&gt;&gt;&gt; 'Ã'
+
+"Ã".upper().lower()
+#&gt;&gt;&gt; 'ss'
+</code></pre>
+
+<p>But let's say you wanted to caselessly compare <code>"BUSSE"</code> and <code>"BuÃe"</code>. Heck, you probably also want to compare <code>"BUSSE"</code> and <code>"BUáºE"</code> equal - that's the newer capital form. The recommended way is to use <code>casefold</code>:</p>
+
+<pre><code>help(str.casefold)
+#&gt;&gt;&gt; Help on method_descriptor:
+#&gt;&gt;&gt;
+#&gt;&gt;&gt; casefold(...)
+#&gt;&gt;&gt;     S.casefold() -&gt; str
+#&gt;&gt;&gt;     
+#&gt;&gt;&gt;     Return a version of S suitable for caseless comparisons.
+#&gt;&gt;&gt;
+</code></pre>
+
+<p>Do not just use <code>lower</code>. If <code>casefold</code> is not available, doing <code>.upper().lower()</code> helps (but only somewhat).</p>
+
+<p>Then you should consider accents. If your font renderer is good, you probably think <code>"Ãª" == "eÌ"</code> - but it doesn't:</p>
+
+<pre><code>"Ãª" == "eÌ"
+#&gt;&gt;&gt; False
+</code></pre>
+
+<p>This is because they are actually</p>
+
+<pre><code>import unicodedata
+
+[unicodedata.name(char) for char in "Ãª"]
+#&gt;&gt;&gt; ['LATIN SMALL LETTER E WITH CIRCUMFLEX']
+
+[unicodedata.name(char) for char in "eÌ"]
+#&gt;&gt;&gt; ['LATIN SMALL LETTER E', 'COMBINING CIRCUMFLEX ACCENT']
+</code></pre>
+
+<p>The simplest way to deal with this is <code>unicodedata.normalize</code>. You probably want to use <strong>NFKD</strong> normalization, but feel free to check the documentation. Then one does</p>
+
+<pre><code>unicodedata.normalize("NFKD", "Ãª") == unicodedata.normalize("NFKD", "eÌ")
+#&gt;&gt;&gt; True
+</code></pre>
+
+<p>To finish up, here this is expressed in functions:</p>
+
+<pre><code>import unicodedata
+
+def normalize_caseless(text):
+    return unicodedata.normalize("NFKD", text.casefold())
+
+def caseless_equal(left, right):
+    return normalize_caseless(left) == normalize_caseless(right)
+</code></pre>

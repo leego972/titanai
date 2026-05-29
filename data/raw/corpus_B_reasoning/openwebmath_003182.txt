@@ -1,0 +1,304 @@
+## Saturday, May 31, 2008
+
+### GAMS/IDE bug (minor)
+
+In case of a syntax error, the GAMS/IDE will usually place the cursor on the correct place. This makes it easy to fix errors quickly without even consulting the listing file. Here is a case where the GAMS/IDE gets confused due to substitution of a macro:
+
+In this case the cursor should go to symbol a which has not been declared. For the first error the macro %x% causes the cursor to point to parameterb.
+
+### More cutting stock
+
+>I decided to have a go at the challenge set in this paper - hope you don't mind.
+>
+We receive bars of length 1200 and must cut them into the following
+> [length, quantity] pairs:[100,100],[200,2],[300,2],[493,250],[590,2],
+> [630,2],[780,2],[930,2]
+....
+>So the solution equates to:12 * [100,100,100,100,100,100,100,493]2 *
+> [100,100,100,100,100,630]2 * [100,100,930]2 * [100,300,780]2 *
+>[100,493,590]118 * [200,493,493]
+>
+>Total bars used = 138
+>
+>Theoretical min:
+>(100*100+200*2+300*2+493*250+590*2+630*2+780*2+930*2)/1200=116.76
+
+>
+>...and, finally, the numbers of each length of bar cut:100: 12 * 7 + 2 * 5 + 2 * 2 +
+>2 * 1 + 2 * 1 = 102200: 118 * 1 = 118300: 2 * 1 = 2493: 118 * 2 + 2 * 1 + 12 * 1 =
+>250590: 2 * 1 = 2630: 2 * 1 = 2780: 2 * 1 = 2930: 2 * 1 = 2
+
+I can find a better solution using the column generation model. The following input was used:
+
+*-----------------------------------------------------* Data*----------------------------------------------------- scalar r 'raw width' /1200/; table demanddata(i,*)           width  demand  width1    100     100  width2    200       2  width3    300       2  width4    493     250  width5    590       2  width6    630       2  width7    780       2  width8    930       2;
+
+The result is a solution (not proven optimal) of 131:
+
+----    174 PARAMETER pat  pattern usage                 p4          p5          p9         p10         p11         p15       Totalwidth1                                               1                       2         100width2                                                           1                       2width3                                               1                                   2width4           2                       1                                   2         250width5                       2                                                           2width6                                   1                                               2width7                                               1                                   2width8                                                           1                       2Count           75           1           2           2           2          49         131
+
+### GAMS/Mosek Bug
+
+Mosek does not return the best integer solution found sofar when interrupted. Below we interrupted a MIP run, while integer solutions were found by the solver (the model was no longer intermediate integer infeasible).
+
+**** SOLVER STATUS     8 USER INTERRUPT         **** MODEL STATUS      14 NO SOLUTION RETURNED  **** OBJECTIVE VALUE             3885.0000  RESOURCE USAGE, LIMIT          6.618      3600.000 ITERATION COUNT, LIMIT         0      10000000  MOSEK Link       May  1, 2008 22.7.1 WIN 3927.4700 VIS x86/MS Windows  M O S E K       version 5.0.0.79 (Build date: Jan 29 2008 13:41:45) Copyright (C)   MOSEK ApS, Fruebjergvej 3, Box 16                 DK-2100 Copenhagen, Denmark                 http://www.mosek.com  No solution returned
+
+I don't know if this is caused by a misbehavior of the link or by Mosek itself. Work around: when stopped on a RESLIM limit, GAMS/Mosek will report the best integer solution. Don't press the Interrupt button if you don't want to loose your solution.
+
+Note also that the iteration count is reported as zero, which is another bug.
+
+## Friday, May 30, 2008
+
+### GAMS smin bug
+
+The expression smin(s, xxx) over an empty set s may or may not return -INF. The following fragment from a real world scheduling model with a problem in its input data illustrates inconsistencies in how GAMS evaluates this.
+
+set si /i1,i2/;
+parameter duedateadj(si) /i1 10, i2 10/;
+set k /k1,k2/;
+parameter duration(si,k) / i1.k1 1 /;
+
+parameters
+minduration(si)
+mintime(si)   "calculate in one step"
+mintime2(si)  "calculate in two steps"
+;
+
+mintime(si) = duedateadj(si)-smin(k$duration(si,k),duration(si,k)); minduration(si) = smin(k$duration(si,k),duration(si,k));
+
+display mintime, mintime2;
+
+This should give the same result, however when we run it we see:
+
+----     17 PARAMETER mintime  calculate in one step
+
+i1 9.000,    i2  -INF
+
+----     17 PARAMETER mintime2  calculate in two steps
+
+i1  9.000,    i2 10.000
+
+This is of course highly undesirable. In general I would try to prevent such situations by not using SMIN or SMAX over an empty set. As GAMS does not flag these occurences you will need to add explicit tests for this.
+
+#### Update
+
+This problem has been fixed in GAMS release 24,3,1 (july 2014).
+
+### Date bug in GAMS/IDE
+
+The date format is coded as the number of days since jan 1, 1900. However, it is one off compared to Excel, Access and compared to the date format in Delphi. It is also one off compared to the IDE Charting facility:
+
+set  j /x,y/  i /i1,i2,i3/; parameter data(i,j); * may 30, may 31, june 1data(i,'x') = jdate(2008,5,30)+ord(i)-1;data(i,'y') = ord(i); * check datesparameter check(i,*);check(i,'year') = gyear(data(i,'x'));check(i,'month') = gmonth(data(i,'x'));check(i,'day') = gday(data(i,'x')); option check:0:1:1; display data,check; execute_unload 'data',data;
+
+The result display is:
+
+----     20 PARAMETER data                x           y i1   39597.000       1.000i2   39598.000       2.000i3   39599.000       3.000  ----     20 PARAMETER check             year       month         day i1        2008           5          30i2        2008           5          31i3        2008           6           1
+
+The chart is:
+
+The dates on the x-axis are wrong (click to enlarge). The work around is to add one to each date before exporting (and subtract one after importing).
+
+## Thursday, May 29, 2008
+
+### Color code an Excel spreadsheet
+
+I received a very large spreadsheet to be converted to GAMS. To quickly get a feeling how many formulas there are and where they are located, this code colors all cells with formulas. The color depends on the type of the cell (number, string, logical or error).
+
+Sub color()   ActiveSheet.UsedRange.Style = "Normal"   Call colorsub(xlNumbers, "Accent1")   Call colorsub(xlTextValues, "Accent2")   Call colorsub(xlErrors, "Accent3")   Call colorsub(xlLogical, "Accent4")End Sub Sub colorsub(SpecialCells As Integer, styletype As String)  Dim r As Range  On Error GoTo err   Set r = ActiveSheet.UsedRange.SpecialCells(xlCellTypeFormulas, SpecialCells)  r.Style = styletype err: End Sub
+
+An earlier version used HasFormula on each individual cell. As the spreadsheet I am working on is very large, that approach was very slow. This version returns complete ranges and is much faster.
+
+### Missing info in GAMS listing file
+
+I would highly prefer that the listing file is self-contained. In many cases solvers stop without issuing proper messages to the listing file. Here is an example with PATHNLP:
+
+               S O L V E      S U M M A R Y      MODEL   TIME                OBJECTIVE  LL     TYPE    NLP                 DIRECTION  MAXIMIZE     SOLVER  PATHNLP             FROM LINE  160 **** SOLVER STATUS     4 TERMINATED BY SOLVER      **** MODEL STATUS      7 INTERMEDIATE NONOPTIMAL   **** OBJECTIVE VALUE               47.2365  RESOURCE USAGE, LIMIT         35.697      1000.000 ITERATION COUNT, LIMIT         0        100000 EVALUATION ERRORS              0             0 PATH-NLP         May  1, 2008 22.7.2 WEX 3906.4799 WEI x86_64/MS Windows NLP size: 829 rows, 881 cols, 10145 non-zeros, 1.39% dense.MCP size: 1708 rows/cols, 26626 non-zeros, 0.91% dense.
+
+There is no indication why PATHNLP stopped.
+
+### Difficult MIP
+
+When asked for an example of a small difficult MIP, the following model may be of interest:
+http://www.amsterdamoptimization.com/models/etc/ran14x18.gms. Some notes on this model from a posting on sci.op-research:
+
+The story of the instance ran14x18
+We tried CPLEX 5.0 on this instance, obtaining a solution with objective value 3712 but
+without proving optimality. The same solution was also found in some runs of the genetic
+algorithm from reference 1.
+In response to my posting on sci.op-research, some people tried exact solvers on this
+instance (fctp, mps), but without success. I also contacted CPLEX, but they also failed
+to prove optimality.
+On Friday, 13 November 1998, I announced this web page on sci.op-research. Some
+hours later I received good news: Jeff proved optimality for ran14x18. Some time later,
+a parallel CPLEX version also solved this problem to optimality. I thank the people cited
+below for their efforts and comments concerning this problem!
+To get an impression of the difficulty of this instance, have a look at the discussion
+about the problem, which has remained unsolved for more than 10 months.
+
+Jeff Linderoth (
+..@mcs.anl.gov)
+
+[Tue, 18 Aug 1998] Probably (repeat probably) a MIP solver that uses flow cover
+inequalities would be able to solve the instances. (At least it should do better than
+CPLEX for problems of this class). If you don’t have too many instances, then you can
+send me the MPS files, and I would be happy to try the solver MINTO out on them for you.
+[Fri, 28 Aug 1998] For the problem ran14x18.mps, I ran MINTO until it ran out of memory,
+and was only able to improve the lower bound to 3617.994472. When I get the opportunity,
+I will perform some longer runs and also try out PARINO (which is like a parallel
+version of MINTO) on the problem. I also tried XPRESS and CPLEX and MINTO was much
+better than either of these packages (due to flow cover inequalities). How did bc-opt
+do? I’ll email more results later. (If you don’t hear from me, send me an email to
+remind me). Anyway, sorry I wasn’t able to prove optimality for you, but hopefully the
+results are somewhat useful.
+[Fri, 13 Nov 1998] I proved the optimality of the solution 3712 for the ran14x18 FCTP
+instance. In order to do this I ran my PARINO parallel MIP code for about 52 hours on
+32 Pentium II (300MHz) processors. 7624677 nodes of the branch and bound tree were
+evaluated in this time. PARINO adds "flow cover inequalities" which are usually quite
+useful in helping to improve the LP bounds for these types of problems. Also, I used a
+parallel pseudocost-type branching rule which is often better than the CPLEX default or
+CPLEX’s strong branching.
+
+Mark Wiley (..@lindo.com)
+[Tue, 18 Aug 1998] I saw your recent posting regarding solving randomly generated fixed
+charge transportation models. As Jeff Linderoth mentioned in a subsequent posting, flow
+cover cuts should help significantly on this type of problem. Our LINGO and What’sBest
+packages include this enhancement. If you have some examples in MPS format we could try
+them out.
+[Fri, 21 Aug 1998] Thanks for sending the model. Unfortunately, flow cover cuts (or at
+least our implementation) don’t do as much for your models as I would have liked. Almost
+immediately LINGO finds a feasible integer solution of 4151 and a bound of 3359.81.
+However, after that it makes virtually no progress. I’d be curious to know how MINTO
+performs. I wish I could have given you better news. We will keep your model in our IP
+test set. Perhaps a future version will be able to solve it quickly. It is an
+interesting problem, small but tough.
+Good luck.
+[Fri, 23 Oct 1998] We tinkered with some cut options and let it run a bit longer and
+found a better solution but failed to solve to optimality. Our best solution was 3764
+with a bound of 3522.
+
+Ed Klotz (..@cplex.com)
+[Mon, 2 Feb 1998] I tried a few runs with your problem, without success. I tried this on
+a very fast machine, and it did not help. I think the fundamental difficulty with this
+problem is that is very easy for the optimizer to move fractional solutions in the LP
+subproblems from one variable to the next with little or no degradation in the objective
+value. Adding cuts, or removing the symmetry of the problem, can help.
+[Tue, 3 Feb 1998] Thinking about it [the FCTP model], it’s not very surprising that this
+is difficult for the branch and bound to solve. When you relax the integrality
+requirement on the y_ij, the problem essentially reduces to a regular transportion
+problem (except that the cost coefficients are no longer cij). So the convex hull of the
+LP relaxation is quite different from the convex hull of the integer feasible solutions.
+This characteristic tends to lead to difficult MIPs. And, I am not the only one who
+498 of "Integer and Combinatorial Optimization." "Unfortunately, the bounds obtained
+from these relaxations are frequently very poor primarily because they do not accurately
+represent the fixed costs..." I do not think we will be able to get CPLEX 5.0 to solve
+this problem quickly just by changing parameters. It may be possible to come up with a
+priority order file, but I think the best strategy will be to tighten the formulation
+[Mon, 9 Nov 1998] While CPLEX 6.0 did not perform significantly better on this problem,
+we have a development code that established a bound of 3578.6418 in two hours on a fast
+machine. The associated integer solution of 3774 is therefore within 5.46 percent of
+optimal. We obtained these results with default settings except for setting the
+heuristicfreq parameter to 5 (i.e. we applied a rounding heuristic on every 5th node).
+
+We also did a run with variableselect 3 (strong branching), heuristicfreq 5 that we let
+go for several days. It eventually found a solution of 3714 and a bound of 3655. So,
+CPLEX found a solution within 2 percent of optimal, although it took a long time to do
+so. I suspect that with additional experimentation we can get the development version
+of CPLEX to find a 2 percent solution in a more reasonable amount of time.
+
+Irv Lustig (..@cplex.com)
+[Wed, 25 Nov 1998] We are in the process of developing a new version of CPLEX, so we
+decided to try the ran14x18 problem with our new version on a large number of parallel
+processors. We used an SGI Origin system with 64 processors. Our parallel development
+code solved it with the following output:
+Integer optimal solution (0.0001/0): Objective = 3.7120000000e+03
+Current MIP best bound = 3.7116289184e+03 (gap = 0.371082, 0.010%)
+Solution time = 11517.98 sec.
+Iterations = 500288158 Nodes = 8982253 (101132)
+This corresponds to 3 hours, 12 minutes wall clock time.
+By default, we solve the problem to a .01% gap, but we could decrease this and the time
+would only go up a little bit.
+
+Just ran the model on a (cheap) quad core PC with Cplex 11 using default settings (we used threads 4):
+               S O L V E      S U M M A R Y       MODEL   m                   OBJECTIVE  cost     TYPE    MIP                 DIRECTION  MINIMIZE     SOLVER  CPLEX               FROM LINE  168 **** SOLVER STATUS     1 NORMAL COMPLETION         **** MODEL STATUS      1 OPTIMAL                   **** OBJECTIVE VALUE             3712.0000  RESOURCE USAGE, LIMIT        630.895      3600.000 ITERATION COUNT, LIMIT  48023779      10000000 
+
+So we need 630 seconds on this machine to prove optimality (optcr=0).
+
+### Excel coding
+
+Usually I do Excel programming in VBA, or Delphi and VBScript via Excel Com Automation. The Delphi tools from http://www.axolot.com/components/xlsrwii20.htm are reputed to be very fast, bypassing Excel altogether. Unfortunately it cannot read the spreadsheets I am interested in. We'll try to get the spreadsheet to them pending clients permission.
+
+## Tuesday, May 27, 2008
+
+### Undocumented GAMS/CPLEX options
+
+The following options are useful to make pictures of MIP performance:
+
+• miptrace filename : write trace file to the indicated file
+
+• miptracenode n : write a trace record each n nodes (default: n=100)
+
+• miptracetime r : write a trace record each r seconds (default: r=1)
+
+Example output file:
+
+* miptrace file trace.csv: ID = Cplex 11.0.1* fields are lineNum, seriesID, node, seconds, bestFound, bestBound1, S, 0, 0.075, na, 4053.062, N, 0, 0.084, na, 4053.063, N, 0, 0.09, 1740.37, 3852.174, N, 0, 0.095, 1740.37, 3804.845, N, 0, 0.101, 1740.37, 3798.376, N, 0, 0.107, 1740.37, 3781.777, N, 0, 0.113, 1740.37, 3781.538, N, 0, 0.149, 1826.58, 3779.849, N, 100, 0.229, 2769.62, 3327.7710, N, 200, 0.304, 2891.26, 3135.0211, N, 300, 0.391, 2891.26, 2910.5712, E, 320, 0.397, 2891.26, 2891.26* miptrace file trace.csv closed
+
+It is easy to make a plot of this in Excel:
+
+These options are actually available in all or most MIP solvers under GAMS.
+
+## Monday, May 26, 2008
+
+### Stochastic Dynamic Programming in GAMS
+
+Can this be done? This question comes up regularly.
+
+There are a few interesting papers by Richard Howitt of UC Davis in this respect:
+
+### GAMS/Cplex wish list
+
+Here is my list of features I would like to see added or improved to GAMS/CPLEX:
+
+• Support for user cuts (redundant constraints that can help the solver)
+• Support for lazy constraints (constraints that are only included when violated)
+• Better language support for piecewise linear expressions
+• Proper language support for indicator constraints
+• Sensitivity analysis results to GDX file
+• Sensitivity analysis for bounds
+• Performance improvement for QP/QCP related models
+• Provide unbounded ray
+• Fixing a number of reported bugs (some of them reported on in this blog)
+
+### Mosek bug
+
+Cplex needed a long time to solve the root node of an MIQCP model. I tried Mosek, but that gave
+
+This is with version:
+MOSEK Link       May  1, 2008 22.7.2 WEX 3927.4799 WEI x86_64/MS WindowsM O S E K       version 5.0.0.79 (Build date: Jan 29 2008 13:47:58)
+I sent it to GAMS for further investigation. This problem seems only to happen with the 64 bit version. The work around would be to use the 32 bit version.
+
+## Sunday, May 25, 2008
+
+### Importing large CSV files into GAMS
+
+The tool SQL2GMS can be used to import large CSV files into GAMS. This is especially useful if the CSV file does not fit in Excel. Excel before Office 2007 could only handle up to 65,536 rows (in Office 2007 this is increased to 1,048,576). Examples:
+
+### GAMS/Convert bug
+
+To export GAMS models with semi-continuous variables to MPS files the tool GAMS/Convert can be used. However note that semi-continuous variables with lower bound = upper bound are exported incorrectly. Consider the small example:
+
+semicont variable x;variable y;equation e;y.lo=0;x.fx=1;e.. y =e= x;model m /e/;solve m minimizing y using mip;
+The solution is x=0.
+
+Convert generates the following MPS file:
+ROWS N  obj E  c1COLUMNS    sc1       c1                  -1    x2        obj                  1    x2        c1                   1RHSBOUNDS FX bnd       sc1                  1ENDATA
+In this MPS file column sc1 corresponds to GAMS variable x. However, this representation excludes sc1=0 as sc1 is fixed to one using FX. The correct MPS representation should look like:
+
+ROWS N  obj E  c1COLUMNS    sc1       c1                  -1    x2        obj                  1    x2        c1                   1RHSBOUNDS LO bnd       sc1                  1 SC bnd       sc1                  1ENDATA
+Work around: use the Cplex option writemps to create an MPS file. This will generate correct MPS files with fixed semi-continuous variables.
+
+## Saturday, May 24, 2008
+
+### GAMS/Cplex bug: iteration count reported as zero
+
+In some cases GAMS/Cplex reports erroneously that zero iterations have been performed. Example: run THAI model from the model library with iterlim=5:
+               S O L V E      S U M M A R Y     MODEL   thainavy            OBJECTIVE  obj     TYPE    MIP                 DIRECTION  MINIMIZE     SOLVER  CPLEX               FROM LINE  84**** SOLVER STATUS     4 TERMINATED BY SOLVER  **** MODEL STATUS      14 NO SOLUTION RETURNED **** OBJECTIVE

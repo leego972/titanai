@@ -1,0 +1,102 @@
+What could be easier? Still, percentages in polls often add up to all sorts of numbers other than 100. For example, suppose exactly one third of the participants votes for option A, another third for option B, and another third for option C. All options have exactly one third of the votes, or 33.333…%. Rounding obviously gives 33% for all options, which adds up to 99%, rather than 100%. In a similar situation with six options, every option gets 16.666…% of the votes, rounding gives 17%, and 6 times 17 equals 102!
+
+When presenting poll results, it might make sense to ensure that the percentages always add up to 100, but there are also some more subtle problems. Suppose there are only two options and only 4 out of 1000 participants vote for option A. Rounding would result in 0% for option A and 100% for option B. This does add up to 100%, but the ratio 4:996 is quite different from 0:100. Here we will give a method for finding the most likely assignment of percentages (or integer fractions of some other number than 100). Why? Because it’s fun :) Also, if you ever happen to be founding a democracy, the method used here could be considered to give a more representative result than the method currently in use (in the Netherlands at least). Oh, and their might also be some connections to (Huffman) entropy coding (for the connaisseurs: it’s possible to show that we’re actually minimizing the Kullback-Leibler divergence).
+
+So how can we translate a set of votes into a partition of 100 (or any other number for that matter)? One option is to consider the most likely partition, given the counted votes. The “likelihood” of a partition, given the data, is the probability of the data given the partition. If you’re a statistician, that last sentence probably made perfect sense, if you’re a mere mortal, your head might have come off. The idea is really simple. If we wish to evaluate how likely it is that it rains on 50% of the days in the Netherlands (which is apparently reasonably accurate, according to the royal Dutch meteorological institute), then we just go outside each day for a year and see whether it rains. After a year we have a series of measurements: rain, no rain, rain, no rain, etc. Now we can compute the probability of this sequence given our model that each day you have a 50% chance of rain, this probability (of the data) is the likelihood of the model.
+
+First, lets suppose that we have a number of options: $\mathcal{O}$={A, B, …}. The number of votes on option A is denoted by n(A), and similarly for the other options. Say that we also assign probabilities pA, pB, etc. to each option, then the probability of the data for two options A and B equals
+
+$\displaystyle\binom{n}{n(A)}\,p_A^{n(A)}p_B^{n(B)}\text{ with }p_A+p_B=1.$
+
+This is the well-know Binomial distribution.
+We will equate the computed percentages with the probabilities in our basic model, so everything stays fixed, except for pA and pB. We can thus ignore the binomial and, in general, maximize the following (with $\mathcal{O}$ being the set of options):
+
+$\displaystyle\prod_{A\in\mathcal{O}} p_A^{n(A)}\text{ subject to }\sum_{A\in\mathcal{O}} p_A=1.$
+
+If desired, the logarithm can be taken to yield:
+
+$\displaystyle\sum_{A\in\mathcal{O}} n(A)\,\log(p_A)\text{ subject to }\sum_{A\in\mathcal{O}} p_A=1.$
+
+However, the idea is that the probabilities stem from fractions with some denominator N (typically N equals 100), so each probability has the form num/N. This makes it an integer progamming problem, and a non-convex, non-linear one at that. Perhaps contrary to expectation, integer optimization problems are typically harder than their continuous counterparts, so this is not a good thing. Luckily (in this case) there is a way out.
+
+We can rely on what is quite possibly the most useful technique for making seemingly intractable problems tractable: dynamic programming. First of all, let’s define the following score function, using numA to denote the (integer) numerator for option A:
+
+$\displaystyle S(\mathcal{O},M)=\underset{num}{\rm{maximize}}\prod_{A\in\mathcal{O}} (num_A/N)^{n(A)}\text{ subject to }\sum_{A\in\mathcal{O}} num_A=M.$
+
+It should be clear that we are interested in the partition that gives us S($\mathcal{O}$,N).
+
+We now proceed as follows:
+
+• First create an array S with N+1 elements, fill index zero with the value 1 and fill the rest of the array with zeroes. You can think of this as stating that if there are no options, then the only possibility is to have a total of 0%.
+• Now execute the following for the first option A (assuming n(A)>0):
+for total=N to 0 (backwards)
+S[total] = 0;
+for numerator=1 to total
+newS = S[total-numerator]*pow(numerator/N, n(A))
+if newS > S[total] then
+S[total] = newS
+
+
+Now we have S[M] = S({A},M). Note that the code never overwrites a value of S that we need later1.
+
+• Now we repeat the previous step for all options, and after having processed the last option S[N] will equal S($\mathcal{O}$,N). The trick is that at each step we do not care about how we got to the sum in S[total-numerator], as this does not affect the factor we multiply it with (pow(numerator/N, n)). So it suffices to remember only the best possible way of getting to total-numerator.
+
+We glossed over the fact that we now just have a procedure for getting the value of S($\mathcal{O}$,N), while we are more interested in the partition that gave us this value. This is typical in dynamic programming, and has a really simple solution, we just keep track of the decisions we made. Practically speaking this means that we would have to keep an array of links around that keeps track of the configurations that gave the values in S (which we update each time we update S).
+
+I implemented the above algorithm in a Fiddle, where you can easily try it out for yourself. The code was kept simple, but basically works fine as long as the number of classes does not exceed N. In comparison with the algorithm above, I eliminated the division by N in the score function, and used the logarithm of the score function to avoid raising numbers to insane powers. Some possible enhancements and optimizations include:
+
+• Ensuring that there is a monotone mapping from counts to numerators (that is, a larger count always gets a larger numerator, and equal counts get equal numerators). Currently a list of counts like 1,1,1 results in the numerators 34,33,33 (although 33,34,33 is equally likely, more on that later), which feels a bit odd (although at least it adds up to 100%). Also, if the number of options exceeds N, weird things can and do happen.
+• One may want to detect all partitions that give the maximal score, and then average them or output ranges for example. The idea is that this would solve problems like outputting 34,33,33 when it would have been just as valid to output 33,34,33 or 33,33,34. However, the resulting numerators would no longer be integers, so I’m not sure it’s a good idea. Also, apparently even when assigning seats in the parliament do they eventually fall back to letting fate decide. (At least, that’s what it seems to say in §P.2 of the Dutch “kieswet”.)
+• Only evaluate total=100 for the last class. Similarly, the first class technically does not need to store links (they should all point to zero).
+• As effectively our only problem is rounding fractions, it might make sense to enforce that we either round each numerator up or down. This can restrict the problem space enormously and speed up the algorithm quite a bit, especially for larger values of N. I have not checked whether this will ever change the end result, but if it does the changes will probably be minor.
+• Various optimizations of a purely technical nature (like using typed arrays, which is often faster, although I have not checked that it is so in this case).
+
+Finally, there are also other ways of defining “sensible” partitions. For example, one could look for a partition so that the ratios between the numerators most closely resemble the ratios between fractions. “Most closely resemble” could be defined in terms of differences between logarithms for example. For some purposes such a scheme might make more sense than the approach discussed here.
+
+1 In the inner loop, S[total] is the first value we access, and the outer loop is going backwards (while the inner loop does not go beyond the current total), so after having updated S[total], we never access it again.
+
+Radial gradients have long been a staple of vector graphics. They allow for all sorts of interesting effects, like highlights. However, there are some subtleties to them. This has led to differences between SVG, Canvas, CSS and PDF. And recently there has been some discussion on what the upcoming SVG 2 specification should allow, so time to take a closer look.
+
+First of all, what is a radial gradient? The easiest way to think about it is to imagine a whole bunch of circles being drawn. Conceptually you start at t=0 with a circle with radius r0, colour c0 and centered at (x0,y0), and end at t=1 with a circle with radius r1, colour c1 and centered at (x1,y1). These values are all linearly interpolated to yield intermediate circles:
+
+By convention we consider circles with higher values of t to be above those with lower values of t. This can give the impression of a 3D tube or cone:
+
+Also, in many cases there is support for extending the circles for negative values of t and values of t larger than one:
+
+In these images the first and last circle have equal radius, resulting in a kind of tube. In the second image the tube has been extended, repeating the colour gradient for values of t outside the interval 0-1. For example, the circle for t=-0.8 has the same colour as the circle for t=0.2, and that for t=1.2.
+
+Seems pretty straightforward, doesn’t it? Well, not quite. First of all, there is an obvious choice with respect to the kinds of extensions allowed. But also, more fundamentally, how much freedom one has in specifying the two circles between which we interpolate. There are some technical issues with not enforcing the starting circle to be fully contained in the ending circle.
+Here is table showing some of the different choices that have been made:
+
+Format Start outside of end Extension
+SVG (2) No. Always, using pad, reflect or repeat.
+CSS No (always at the center). Always, using pad or repeat.
+PDF Yes. At start, end, neither or both, using pad.
+
+So what is the problem with a starting circle outside the ending circle? (Or vice-versa!) First of all, it is not so much about the starting circle that needs to be contained in the ending circle, it is about the point where the radius is zero: the zero-radius point. This is most easily pictured by imagining the circles building a 3D cone (with t being the 3rd dimension), if the point where the radius is zero is inside the starting and/or ending circle we only see the top-half of the (double) cone, while if the point where the radius is zero is outside the ending circle we’re looking down on the side of the double cone (for simplicity, we will just talk about being inside or outside the ending circle, but in principle any circle on the gradient will do):
+
+In principle the above is no problem. However, if the zero-radius point is very close to the ending circle, the gradient can quickly switch from one behaviour to the next. In other words, it is unstable:
+
+In the left-most image we see that the zero-radius point (at the intersection of the two lines) is inside the ending circle, with negative values of t giving circles inside the starting circle and t>1 giving circles outside the ending circle. In the middle image, where the zero-radius point is on the ending circle, positive radii map to the left half of the image and negative radii map to the right half. In the third image the zero-radius point is no longer contained in the ending circle, and the plane will no longer be completely filled (you will see the outlines of the double cone).
+
+If we imagine moving the zero-radius point from within the ending circle to outside the ending circle, we see the following:
+
+• First the plane is mostly filled by circles with large values of t, all with positive radii.
+• Just before the zero-radius point touches the ending circle the right half of the plane is filled with circles that are arbitrarily closely packed (so it makes sense to render the average colour of all circles with t>1)
+• As soon as the zero-radius point is on or outside the ending circle we get into a regime where positive radii form a cone on the left half of the plane, while negative radii form a cone on the right half (initially filling both half-planes entirely).
+
+Examples of the “inside” and “outside” regimes (spread method is repeat, the unextended gradients are superimposed over the extended gradients):
+
+SVG appears to be the only specification dealing with this problem, and it does so by specifying that the zero-radius point must be contained within the ending circle. The advantage of this approach is that it can be specified that if the zero-radius point just touches the ending circle (or is even outside it), it should simply behave as if it was very slightly within the ending circle. On the other hand, having the zero-radius point outside the ending circle is essentially just as easy: negative radii map to a cone in one half-plane, positive radii to a cone in the other.
+
+Several possible scenario’s for allowing the zero-radius point to not be contained within the ending circle come to mind:
+
+• Let the author specify what behaviour should be assumed (inside or outside).
+• Let renderers interpolate between the two behaviours. Conceptually the renderer would draw the same gradient many times, with slightly varying radii/positions, and take a weighted average of the results.
+• Allow specification of the starting and/or ending radius (in principle the problem is “symmetric”) as a percentage/fraction of the distance between the starting center and ending circle. 100% would then correspond to the starting circle touching the ending circle exactly. Essentially this puts the responsibility
+
+With one of the above schemes, or some other creative solution, SVG 2 and other future specifications should be able to provide a maximum amount of flexibility, while avoiding the pitfalls of allowing the zero-radius point to be on the starting/ending circle. It should be emphasized that it is the zero-radius point (and not the starting circle) that should be contained in the starting and/or ending circle (if it is contained in one, it is also contained in the other), and that the problem is not with the zero-radius point being outside the circles, but rather with it being on (or very close to) them.
+
+Finally, it should be noted that there are some further opportunities for generalizing radial gradients. For example, CSS 4 might have conic(al) gradients, which essentially vary colour over angle rather than t. It would even be possible to create hybrid “spiral” gradients. Also, there is no particular reason to restrict yourself to circles, the mathematics are virtually just as easy for ellipses (especially with axis-aligned radii).
+
+Posted in Vector graphics | Tagged | 1 Comment

@@ -1,0 +1,58 @@
+Question: <p>I have an rrule instance e.g.</p>
+
+<pre><code>     r = rrule(WEEKLY, byweekday=SA, count=10, dtstart=parse('20081001'))
+</code></pre>
+
+<p>where dtstart and byweekday may change.</p>
+
+<p>If I then want to generate the ten dates that follow on from this
+rrule, what's the best way of doing it? Can I assign a new value to
+the _dtstart member of r? That seems to work but I'm not sure.</p>
+
+<p>e.g. </p>
+
+<pre><code>     r._dtstart = list(r)[-1] or something like that
+</code></pre>
+
+<p>Otherwise I guess I'll create a new rrule and access _dtstart, _count, _byweekday etc. of the original instance.</p>
+
+<p>EDIT:</p>
+
+<p>I've thought about it more, and I think what I should be doing is omitting the 'count' argument when I create the first rrule instance. I can still get ten occurrences the first time I use the rrule</p>
+
+<pre><code>instances = list(r[0:10])
+</code></pre>
+
+<p>and then afterwards I can get more </p>
+
+<pre><code>more = list(r[10:20])
+</code></pre>
+
+<p>I think that solves my problem without any ugliness</p>
+
+Answer: <p>Firstly, <code>r._dtstart = list(r)[-1]</code> will give you the last date in the original sequence of dates. If you use that, without modification, for the beginning of a new sequence, you will end up with a duplicate date, i.e. the last date of the first sequence will be the same as the first date of the new sequence, which is probably not what you want:</p>
+
+<pre><code>&gt;&gt;&gt; from dateutil.rrule import *
+&gt;&gt;&gt; import datetime
+
+&gt;&gt;&gt; r = rrule(WEEKLY, byweekday=SA, count=10, dtstart=datetime.datetime(2008,10,01))
+&gt;&gt;&gt; print list(r)
+[datetime.datetime(2008, 10, 4, 0, 0), datetime.datetime(2008, 10, 11, 0, 0), datetime.datetime(2008, 10, 18, 0, 0), datetime.datetime(2008, 10, 25, 0, 0), datetime.datetime(2008, 11, 1, 0, 0), datetime.datetime(2008, 11, 8, 0, 0), datetime.datetime(2008, 11, 15, 0, 0), datetime.datetime(2008, 11, 22, 0, 0), datetime.datetime(2008, 11, 29, 0, 0), datetime.datetime(2008, 12, 6, 0, 0)]
+&gt;&gt;&gt; r._dtstart = r[-1]
+&gt;&gt;&gt; print list(r)
+[datetime.datetime(2008, 12, 6, 0, 0), datetime.datetime(2008, 12, 13, 0, 0), datetime.datetime(2008, 12, 20, 0, 0), datetime.datetime(2008, 12, 27, 0, 0), datetime.datetime(2009, 1, 3, 0, 0), datetime.datetime(2009, 1, 10, 0, 0), datetime.datetime(2009, 1, 17, 0, 0), datetime.datetime(2009, 1, 24, 0, 0), datetime.datetime(2009, 1, 31, 0, 0), datetime.datetime(2009, 2, 7, 0, 0)]
+</code></pre>
+
+<p>Furthermore, it is considered poor form to manipulate r._dtstart as it is clearly intended to be a private attribute.</p>
+
+<p>Instead, do something like this:</p>
+
+<pre><code>&gt;&gt;&gt; r = rrule(WEEKLY, byweekday=SA, count=10, dtstart=datetime.datetime(2008,10,01))
+&gt;&gt;&gt; r2 = rrule(WEEKLY, byweekday=SA, count=r.count(), dtstart=r[-1] + datetime.timedelta(days=1))
+&gt;&gt;&gt; print list(r)
+[datetime.datetime(2008, 10, 4, 0, 0), datetime.datetime(2008, 10, 11, 0, 0), datetime.datetime(2008, 10, 18, 0, 0), datetime.datetime(2008, 10, 25, 0, 0), datetime.datetime(2008, 11, 1, 0, 0), datetime.datetime(2008, 11, 8, 0, 0), datetime.datetime(2008, 11, 15, 0, 0), datetime.datetime(2008, 11, 22, 0, 0), datetime.datetime(2008, 11, 29, 0, 0), datetime.datetime(2008, 12, 6, 0, 0)]
+&gt;&gt;&gt; print list(r2)
+[datetime.datetime(2008, 12, 13, 0, 0), datetime.datetime(2008, 12, 20, 0, 0), datetime.datetime(2008, 12, 27, 0, 0), datetime.datetime(2009, 1, 3, 0, 0), datetime.datetime(2009, 1, 10, 0, 0), datetime.datetime(2009, 1, 17, 0, 0), datetime.datetime(2009, 1, 24, 0, 0), datetime.datetime(2009, 1, 31, 0, 0), datetime.datetime(2009, 2, 7, 0, 0), datetime.datetime(2009, 2, 14, 0, 0)]
+</code></pre>
+
+<p>This codes does not access any private attributes of rrule (although you might have to look at <code>_byweekday</code>).</p>

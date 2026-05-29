@@ -1,0 +1,73 @@
+Question: <p>Is there any way to read a collection of extension elements with <a href="http://www.feedparser.org/" rel="nofollow">Universal Feed Parser</a>?</p>
+
+<p>This is just a short snippet from Kuler RSS feed:</p>
+
+<pre><code>&lt;channel&gt;
+  &lt;item&gt;
+    &lt;!-- snip: regular RSS elements --&gt;
+    &lt;kuler:themeItem&gt;
+      &lt;kuler:themeID&gt;123456&lt;/kuler:themeID&gt;
+      &lt;!-- snip --&gt;
+      &lt;kuler:themeSwatches&gt;
+        &lt;kuler:swatch&gt;
+          &lt;kuler:swatchHexColor&gt;FFFFFF&lt;/kuler:swatchHexColor&gt;
+          &lt;!-- snip --&gt;
+        &lt;/kuler:swatch&gt;
+        &lt;kuler:swatch&gt;
+          &lt;kuler:swatchHexColor&gt;000000&lt;/kuler:swatchHexColor&gt;
+          &lt;!-- snip --&gt;
+        &lt;/kuler:swatch&gt;
+      &lt;/kuler:themeSwatches&gt;
+    &lt;/kuler:themeItem&gt;
+  &lt;/item&gt;
+&lt;/channel&gt;
+</code></pre>
+
+<p>I tried the following:</p>
+
+<pre><code>&gt;&gt;&gt; feed = feedparser.parse(url)
+&gt;&gt;&gt; feed.channel.title
+u'kuler highest rated themes'
+&gt;&gt;&gt; feed.entries[0].title
+u'Foobar'
+&gt;&gt;&gt; feed.entries[0].kuler_themeid
+u'123456'
+&gt;&gt;&gt; feed.entries[0].kuler_swatch
+u''
+</code></pre>
+
+<p><code>feed.entries[0].kuler_swatchhexcolor</code> returns only last <code>kuler:swatchHexColor</code>. Is there any way to retrieve all elements with <code>feedparser</code>?</p>
+
+<p>I have already worked around the issue by using minidom, but I would like to use Universal Feed Parser if possible (due to very simple API). Can it be extended? I haven't found anything about that in the documentation, so if someone has more experience with the library, please, advise me.</p>
+
+Answer: <p>Universal Feed Parser is really nice for most feeds, but for extended feeds, you might wanna try something called <a href="http://crummy.com/software/BeautifulSoup" rel="nofollow">BeautifulSoup</a>. It's an XML/HTML/XHTML parsing library which is originally designed for screenscraping; turns out it's also brilliant for this sort of thing. The documentation is pretty good, and it's got a self-explanatory API, so if you're thinking of using anything else, that's what I'd recommend.</p>
+
+<p>I'd probably use it like this:</p>
+
+<pre><code>&gt;&gt;&gt; import BeautifulSoup
+&gt;&gt;&gt; import urllib2
+
+# Fetch HTML data from url
+&gt;&gt;&gt; connection = urllib2.urlopen('http://kuler.adobe.com/path/to/rss.xml')
+&gt;&gt;&gt; html_data = connection.read()
+&gt;&gt;&gt; connection.close()
+
+# Create and search the soup
+&gt;&gt;&gt; soup = BeautifulSoup.BeautifulSoup(html_data)
+&gt;&gt;&gt; themes = soup.findAll('kuler:themeitem') # Note: all lower-case element names
+
+# Get the ID of the first theme
+&gt;&gt;&gt; themes[0].find('kuler:themeid').contents[0]
+u'123456'
+
+# Get an ordered list of the hex colors for the first theme
+&gt;&gt;&gt; themeswatches = themes[0].find('kuler:themeswatches')
+&gt;&gt;&gt; colors = [color.contents[0] for color in
+... themeswatches.findAll('kuler:swatchhexcolor')]
+&gt;&gt;&gt; colors
+[u'FFFFFF', u'000000']
+</code></pre>
+
+<p>So you can probably get the idea that this is a very cool library. It wouldn't be too good if you were parsing any old RSS feed, but because the data is from Adobe Kuler, you can be pretty sure that it's not going to vary enough to break your app (i.e. it's a trusted enough source).</p>
+
+<p>Even worse is trying to parse Adobe's goddamn .ASE format. I tried writing a parser for it and it got really horrible, really quickly. Ug. So, yeah, the RSS feeds are probably the easiest way of interfacing with Kuler.</p>

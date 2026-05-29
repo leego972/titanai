@@ -1,0 +1,70 @@
+# Precision control of double integral with $i\epsilon$ prescription
+
+I have the following double integral: $$$$F[\epsilon,\Omega,\sigma] = \iint_{\mathbb{R}^2}\frac{e^{-t^2/2\sigma^2}e^{-T^2/2\sigma^2}}{(t-T-i\epsilon)^2}e^{-i\Omega(t-T)}\,dt\,dT\,.$$$$ Now, there are tricks to solve this analytically (in terms of error functions and stuff). However, when I tried to numerically integrate this using NIntegrate, it gives very bad results especially as $$\epsilon\to 0$$. This is true regardless of the method I tried (GlobalAdaptive, LocalAdaptive, DoubleExponential) with various control over MaxRecursion/MinRecursion and PrecisionGoals or AccuracyGoals. I have also tried to confine my analysis to the strong support of the envelope function $$\sim [-5\sigma,5\sigma]\times [-5\sigma,5\sigma]$$ and indeed the problem mainly originated from this region.
+
+I do observe, however, that MinRecursion tends to improve results but this has very costly computational time. For example, for the simple choice $$\Omega=\sigma=1$$ and for $$\epsilon\sim 10^{-3}$$ reasonable result can be obtained for MinRecursion$$\,=5$$ but behaves badly for $$\epsilon=10^{-4}$$. On the other hand, once I increase MinRecursion to $$10$$, it seems to work for $$\epsilon=10^{-4}$$ but I cannot do any better. I have also ensured to use only input parameters in integers, so that they use infinite precision instead.
+
+I find it hard to believe that an innocuous looking integral with exact analytic solution can be so ill-behaved under double numerical integration. My questions are:
+
+(1) Is there a natural setting for which this sort of numerical integral can be dealt with consistently? I suppose the problem is due to the pole on the real line (before $$i\epsilon$$ prescription), but being non-expert in numerical analysis, I would like a transparent picture of what happens to this blow-up.
+
+(2) What is the origin of the blow-up? Naively the coincident limit $$t=T$$ should cause problems, but I would have thought that the pole prescription makes the coincident limit disappear. There must be something about complex analysis I am not exactly getting, but this looks quite harmless as it is written.
+
+EDIT: I have tried the "Partition" option under LocalAdaptive and it seems to provide some improvements but not very much. I would like to get a coherent larger picture of the integral, however, so the questions still stand from numerical analysis, complex analysis and other perspectives. The following is my latest code (where I kept various entries variable to allow testing various controls), and here $$a\equiv \epsilon$$, $$s\equiv \sigma$$ and $$gap \equiv \Omega$$:
+
+NIntegrate[
+Exp[-t^2/(2 s^2)] Exp[-T^2/(2 s^2)] Exp[-I*gap*(t - T)]/(-I a + t-T)^2,
+{t, tmin, tmax}, {T, tmin, tmax},
+MinRecursion -> minR,
+MaxRecursion -> maxR, PrecisionGoal -> prec, AccuracyGoal -> acc,
+Method -> {"LocalAdaptive", "Partitioning" -> {par1, par2}}]
+
+
+Update: I have tried one recent setting involving PrincipalValue, which essentially tries to do principal value integral at t = T. This improves the result quite a bit even with GlobalAdaptive scheme with minimal settings (i.e. Automatic for most other things), but still not working for small enough $$\epsilon$$. Also, I wonder if PrincipalValue can be used effectively when the singular $$$$line" is not so clear as in this scenario.
+
+• For reference, please include the NIntegrate[] code you were using to evaluate your integral. – J. M. is in limbo Mar 13 '19 at 23:04
+
+The integrand has a near-singularity along the line T == t. This can be specified by the iterator {T, -Infinity, t, Infinity} (see second example). However, NIntegrate works more efficiently when the singularity is parallel to a coordinate axis (see first example). In the first example, we rotate the coordinates so that the near-singularity is along x = 0. In the second example, we help NIntegrate by dividing the T domain further near T == t.
+
+Block[{a = 10^-5, gap = 1, s = 1},
+NIntegrate[
+integrand /. {t -> (x + y)/Sqrt[2], T -> (y - x)/Sqrt[2]} // Simplify,
+{x, -Infinity, 0, Infinity}, {y, -Infinity, Infinity}]
+] // AbsoluteTiming
+(*  {6.4958, -0.279832 + 2.19131*10^-11 I}  *)
+
+Block[{a = 10^-5, gap = 1, s = 1},
+NIntegrate[
+integrand, {t, -Infinity, 0, Infinity},
+{T, -Infinity, t - 2 a, t, t + 2 a, Infinity}]
+] // AbsoluteTiming
+(*  {12.8288, -0.279832 + 4.12048*10^-10 I}  *)
+
+
+Even better in this case is the fact that the variables in the integrand can be separated and the double integral factored into two single integrals:
+
+inty = E^(-(y^2/(2 s^2)))
+intx = integrand/inty /. {t -> (x + y)/Sqrt[2], T -> (y - x)/Sqrt[2]} // Simplify
+(*
+E^(-(y^2/(2 s^2)))
+E^(-I Sqrt[2] gap x - x^2/(2 s^2))/(-I a + Sqrt[2] x)^2
+*)
+
+Block[{a = 10^-5, gap = 1, s = 1},
+NIntegrate[intx, {x, -Infinity, 0, Infinity}] *
+NIntegrate[inty, {y, -Infinity, Infinity}]
+] // AbsoluteTiming
+(*  {0.039515, -0.279833 + 0. I}  *)
+
+Block[{a = 10^-6, gap = 1, s = 1},
+NIntegrate[intx, {x, -Infinity, 0, Infinity}] *
+NIntegrate[inty, {y, -Infinity, Infinity}]
+] // AbsoluteTiming
+(*  {0.038009, -0.279824 + 0. I}  *)
+
+
+It is unlikely that the single integrals will be hard to manage. (The y integral can be done exactly.)
+
+• does that mean that if I have a more complicated denominator where I do not have the freedom to rotate it as cleanly as you did, there is no other way out? Or perhaps is there a way to deal with this via contour integral without the $i\epsilon$? – Everiana Mar 14 '19 at 12:33
+• @Everiana It's hard to say in general. I think one can always make up an example that will defeat a particular numerical approach. OTOH, one may be able to discover a successful approach by further analysis of the integrand at hand. I think I've only seen contour integration applied to single-variable integrals, so I'm not sure how to answer your last question. – Michael E2 Mar 14 '19 at 15:34
+• Actually I found out that for this particular case, we can actually do contour integral! I will update my answer at some point. The idea is to do contour integral of $t$ with poles $T$, and then basically integrate over $T$. – Everiana Mar 20 '19 at 2:18

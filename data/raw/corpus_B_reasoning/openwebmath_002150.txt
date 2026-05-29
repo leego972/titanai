@@ -1,0 +1,228 @@
+# 5 Clustering
+
+Finding categories of cells, illnesses, organisms and then naming them is a core activity in the natural sciences. In Chapter 4 we’ve seen that some data can be modeled as mixtures from different groups or populations with a clear parametric generative model. We saw how in those examples we could use the EM algorithm to disentangle the components. We are going to extend the idea of unraveling of different groups to cases where the clusters do not necessarily have nice elliptic69 Mixture modeling with multivariate normal distributions implies elliptic cluster boundaries. shapes.
+
+Clustering takes data (continuous or quasi-continuous) and adds to them a new categorical group variable that can often simplify decision making; even if this sometimes comes at a cost of ignoring intermediate states. For instance, medical decisions are simplified by replacing possibly complex, high-dimensional diagnostic measurements by simple groupings: a full report of numbers associated with fasting glucose, glycated hemoglobin and plasma glucose two hours after intake is replaced by assigning the patient to a diabetes mellitus “group”.
+
+In this chapter, we will study how to find meaningful clusters or groups in both low-dimensional and high-dimensional nonparametric settings. However, there is a caveat: clustering algorithms are designed to find clusters, so they will find clusters, even where there are none70 This is reminescent of humans: we like to see patterns – even in randomness.. So, cluster validation is an essential component of our process, especially if there is no prior domain knowledge that supports the existence of clusters.
+
+## 5.1 Goals for this chapter
+
+In this chapter we will
+
+• Study the different types of data that can be beneficially clustered.
+
+• See measures of (dis)similarity and distances that help us define clusters.
+
+• Uncover hidden or latent clustering by partitioning the data into tighter sets.
+
+• Use clustering when given biomarkers on each of hundreds of thousands cells. We’ll see that for instance immune cells can be naturally grouped into tight subpopulations.
+
+• Run nonparametric algorithms such as $$k$$-means, $$k$$-medoids on real single cell data.
+
+• Experiment with recursive approaches to clustering that combine observations and groups into a hierarchy of sets; these methods are known as hierarchical clustering.
+
+• Study how to validate clusters through resampling-based bootstrap approaches, which we will demonstrate on a single-cell dataset.
+
+## 5.2 What are the data and why do we cluster them?
+
+### 5.2.1 Clustering can sometimes lead to discoveries.
+
+John Snow made a map of cholera cases and identified clusters of cases. He then collected additional information about the situation of the pumps. The proximity of dense clusters of cases to the Broadstreet pump pointed to the water as a possible culprit. He collected separate sources of information that enabled him to infer the source of the cholera outbreak.
+
+Figure 5.1: John Snow’s map of cholera cases: small barcharts at each house indicate a clustering of diagnosed cases.
+
+David Freedman has a wonderful detailed account of all the steps that led to this discovery (Freedman 1991).
+
+Now, let’s look at another map of London, shown in Figure 5.2. The red dots designate locations that were bombed during World War II. Many theories were put forward during the war by the analytical teams. They attempted to find a rational explanation for the bombing patterns (proximity to utility plants, arsenals, $$...$$). In fact, after the war it was revealed that the bombings were randomly distributed without any attempt at hitting particular targets.
+
+Clustering is a useful technique for understanding complex multivariate data; it is an unsupervised71 Thus named because all variables have the same status, we are not trying to predict or learn the value of one variable (the supervisory response) based on the information from explanatory variables.. Exploratory techniques show groupings that can be important in interpreting the data.
+
+For instance, clustering has enabled researchers to enhance their understanding of cancer biology. Tumors that appeared to be the same based on their anatomical location and histopathology fell into multiple clusters based on their molecular signatures, such as gene expression data (Hallett et al. 2012). Eventually, such clusterings might lead to the definition of new, more relevant disease types. Relevance is evidenced, e.g., by the fact that they are associated with different patient outcomes. What we aim to do in this chapter is understand how pictures like Figure 5.3 are constructed and how to interpret them.
+
+In Chapter 4, we have already studied one technique, the EM algorithm, for uncovering groups. The techniques we explore in this chapter are more general and can be applied to more complex data. Many of them are based on distances between pairs of observations (this can be all versus all, or sometimes only all versus some), and they make no explicit assumptions about the generative mechanism of the data involving particular families of distributions, such as normal, gamma-Poisson, etc. There is a proliferation of clustering algorithms in the literature and in the scientific software landscape; this can be intimidating. In fact it is linked to the diversity of the types of data and the objectives pursued in different domains.
+
+Look up the BiocViews Clustering or the Cluster view on CRAN and count the number of packages providing clustering tools.
+
+## 5.3 How do we measure similarity?
+
+Of a feather: how the distances are measured and similarities between observations defined has a strong impact on the clustering result. Our first step is to decide what we mean by similar. There are multiple ways of comparing birds: for instance, a distance using size and weight will give a different clustering than one using diet or habitat. Once we have chosen the relevant features, we have to decide how we combine differences between the multiple features into a single number. Here is a selection of choices, some of them are illustrated in Figure 5.5.
+
+Figure 5.5: Equal-distance contour plots according to four different distances: points on any one curve are all the same distance from the center point.
+
+Euclidean The Euclidean distance between two points $$A=(a_1,...,a_p)$$ and $$B= (b_1,...,b_p)$$ in a $$p$$-dimensional space (for the $$p$$ features) is the square root of the sum of squares of the differences in all $$p$$ coordinate directions:
+
+$\begin{equation*} d(A,B)=\sqrt{(a_1-b_1)^2+(a_2-b_2)^2+... +(a_p-b_p)^2}. \end{equation*}$
+
+Manhattan The Manhattan, City Block, Taxicab or $$L_1$$ distance takes the sum of the absolute differences in all coordinates.
+
+$\begin{equation*} d(A,B)=|a_1-b_1|+|a_2-b_2|+... +|a_p-b_p|. \end{equation*}$
+
+Maximum The maximum of the absolute differences between coordinates is also called the $$L_\infty$$ distance:
+
+$\begin{equation*} d_\infty(A,B)= \max_{i}|a_i-b_i|. \end{equation*}$
+
+Weighted Euclidean distance is a generalization of the ordinary Euclidean distance, by giving different directions in feature space different weights. We have already encountered one example of a weighted Euclidean distance in Chapter 2, the $$\chi^2$$ distance. It is used to compare rows in contingency tables, and the weight of each feature is the inverse of the expected value. The Mahalanobis distance is another weighted Euclidean distance that takes into account the fact that different features may have a different dynamic range, and that some features may be positively or negatively correlated with each other. The weights in this case are derived from the covariance matrix of the features. See also Question 5.1.
+
+Minkowski Allowing the exponent to be $$m$$ instead of $$2$$, as in the Euclidean distance, gives the Minkowski distance
+
+$$$d(A,B) = \left( (a_1-b_1)^m+(a_2-b_2)^m+... +(a_p-b_p)^m \right)^\frac{1}{m}. \tag{5.1}$$$
+
+Edit, Hamming This distance is the simplest way to compare character sequences. It simply counts the number of differences between two character strings. This could be applied to nucleotide or amino acid sequences – although in that case, the different character substitutions are usually associated with different contributions to the distance (to account for physical or evolutionary similarity), and deletions and insertions may also be allowed.
+
+Binary When the two vectors have binary bits as coordinates, we can think of the non-zero elements as ‘on’ and the zero elements as ‘off’. The binary distance is the proportion of features having only one bit on amongst those features that have at least one bit on.
+
+Jaccard Distance Occurrence of traits or features in ecological or mutation data can be translated into presence and absence and encoded as 1’s and 0’s. In such situations, co-occurence is often more informative than co-absence. For instance, when comparing mutation patterns in HIV, the co-existence in two different strains of a mutation tends to be a more important observation than its co-absence. For this reason, biologists use the Jaccard index. Let’s call our two observation vectors $$S$$ and $$T$$, $$f_{11}$$ the number of times a feature co-occurs in $$S$$ and $$T$$, $$f_{10}$$ (and $$f_{01}$$) the number of times a feature occurs in $$S$$ but not in $$T$$ (and vice versa), and $$f_{00}$$ the number of times a feature is co-absent. The Jaccard index is
+
+$$$J(S,T) = \frac{f_{11}}{f_{01}+f_{10}+f_{11}}, \tag{5.2}$$$
+
+(i.e., it ignores $$f_{00}$$), and the Jaccard dissimilarity is
+
+$$$d_J(S,T) = 1-J(S,T) = \frac{f_{01}+f_{10}}{f_{01}+f_{10}+f_{11}}. \tag{5.3}$$$
+
+Correlation based distance
+
+$\begin{equation*} d(A,B)=\sqrt{2(1-\text{cor}(A,B))}. \end{equation*}$
+
+Figure 5.6: An example for the use of Mahalanobis distances to measure the distance of a new data point (red) from two cluster centers.
+
+► Question 5.1
+
+Which of the two cluster centers in Figure 5.6 is the red point closest to?
+
+► Solution
+
+Figure 5.7: The lower triangle of distances can be computed by any of a hundred different functions in various R packages (vegdist in vegan, daisy in cluster, genetic_distance in gstudio, dist.dna in ape, Dist in amap, distance in ecodist, dist.multiPhylo in distory, shortestPath in gdistance, % dudi.dist and dist.genet in ade4).
+
+## 5.4 Nonparametric mixture detection
+
+### 5.4.1$$k$$-methods: $$k$$-means, $$k$$-medoids and PAM
+
+The centers of the groups are sometimes called medoids, thus the name PAM (partitioning around medoids). Partitioning or iterative relocation methods work well in high-dimensional settings, where we cannot72 This is due to the so-called curse of dimensionality. We will discuss this in more detail in Chapter 12. easily use probability densities, the EM algorithm and parametric mixture modeling in the way we did in Chapter 4. Besides the distance measure, the main choice to be made is the number of clusters $$k$$. The PAM (partitioning around medoids, Kaufman and Rousseeuw (2009)) method is as follows:
+
+1. Starts from a matrix of $$p$$ features measured on a set of $$n$$ observations.
+
+2. Randomly pick $$k$$ distinct cluster centers out of the $$n$$ observations (“seeds”).
+
+3. Assign each of the remaining observation to the group to whose center it is the closest.
+
+4. For each group, choose a new center from the observations in the group, such that the sum of the distances of group members to the center is minimal; this is called the medoid.
+
+5. Repeat Steps 3 and 4 until the groups stabilize.
+
+Each time the algorithm is run, different initial seeds will be picked in Step 2, and in general, this can lead to different final results. A popular implementation is the pam function in the package cluster.
+
+A slight variation of the method replaces the medoids by the arithmetic means (centers of gravity) of the clusters and is called $$k$$-means. While in PAM, the centers are observations, this is not, in general, the case with $$k$$-means. The function kmeans comes with every installation of R in the stats package; an example run is shown in Figure 5.9.
+
+These so-called $$k$$-methods are the most common off-the-shelf methods for clustering; they work particularly well when the clusters are of comparable size and convex (blob-shaped). On the other hand, if the true clusters are very different in size, the larger ones will tend to be broken up; the same is true for groups that have pronounced non-spherical or non-elliptic shapes.
+
+► Question 5.3
+
+The $$k$$-means algorithm alternates between computing the average point and assigning the points to clusters. How does this alternating, iterative method differ from an EM-algorithm?
+
+► Solution
+
+### 5.4.2 Tight clusters with resampling
+
+There are clever schemes that repeat the process many times using different initial centers or resampled datasets. Repeating a clustering procedure multiple times on the same data, but with different starting points creates strong forms according to Diday and Brito (1989). Repeated subsampling of the dataset and applying a clustering method will result in groups of observations that are “almost always” grouped together; these are called tight clusters (Tseng and Wong 2005). The study of strong forms or tight clusters facilitates the choice of the number of clusters. A recent package developed to combine and compare the output from many different clusterings is clusterExperiment. Here we give an example from its vignette. Single-cell RNA-Seq experiments provide counts of reads, representing gene transcripts, from individual cells. The single cell resolution enables scientists, among other things, to follow cell lineage dynamics. Clustering has proved very useful for analysing such data.
+
+► Question 5.4
+
+Follow the vignette of the package clusterExperiment. Call the ensemble clustering function clusterMany, using pam for the individual clustering efforts. Set the choice of genes to include at either the 60, 100 or 150 most variable genes. Plot the clustering results for $$k$$ varying between 4 and 9. What do you notice?
+
+► Solution
+
+## 5.5 Clustering examples: flow cytometry and mass cytometry
+
+You can find reviews of bioinformatics methods for flow cytometry in (O’Neill et al. 2013) and a well-kept wikipedia article.
+
+Studying measurements on single cells improves both the focus and resolution with which we can analyze cell types and dynamics. Flow cytometry enables the simultaneous measurement of about 10 different cell markers. Mass cytometry expands the collection of measurements to as many as 80 proteins per cell. A particularly promising application of this technology is the study of immune cell dynamics.
+
+### 5.5.1 Flow cytometry and mass cytometry
+
+At different stages of their development, immune cells express unique combinations of proteins on their surfaces. These protein-markers are called CDs (clusters of differentiation) and are collected by flow cytometry (using fluorescence, see Hulett et al. (1969)) or mass cytometry (using single-cell atomic mass spectrometry of heavy element reporters, see Bendall et al. (2012)). An example of a commonly used CD is CD4, this protein is expressed by helper T cells that are referred to as being “CD4+”. Note however that some cells express CD4 (thus are CD4+), but are not actually helper T cells. We start by loading some useful Bioconductor packages for cytometry data, flowCore and flowViz, and read in an examplary data object fcsB as follows:
+
+library("flowCore")
+library("flowViz")
+slotNames(fcsB)
+## [1] "exprs"       "parameters"  "description"
+
+Figure 5.11 shows a scatterplot of two of the variables available in the fcsB data. (We will see how to make such plots below.) We can see clear bimodality and clustering in these two dimensions.
+
+► Question 5.5
+
+1. Look at the structure of the fcsB object (hint: the colnames function). How many variables were measured?
+2. Subset the data to look at the first few rows (hint: use Biobase::exprs(fcsB)). How many cells were measured?
+
+### 5.5.2 Data preprocessing
+
+First we load the table data that reports the mapping between isotopes and markers (antibodies), and then we replace the isotope names in the column names of fcsB with the marker names. This makes the subsequent analysis and plotting code more readable:
+
+markersB = readr::read_csv("../data/Bendall_2011_markers.csv")
+mt = match(markersB$isotope, colnames(fcsB)) stopifnot(!any(is.na(mt))) colnames(fcsB)[mt] = markersB$marker
+
+Now we are ready to generate Figure 5.11
+
+Figure 5.11: Cell measurements that show clear clustering in two dimensions.
+
+flowPlot(fcsB, plotParameters = colnames(fcsB)[2:3], logy = TRUE)
+
+Plotting the data in two dimensions as in Figure 5.11 already shows that the cells can be grouped into subpopulations. Sometimes just one of the markers can be used to define populations on their own; in that case simple rectangular gating is used to separate the populations; for instance, CD4+ cells can be gated by taking the subpopulation with high values for the CD4 marker. Cell clustering can be improved by carefully choosing transformations of the data. The left part of Figure 5.12 shows a simple one dimensional histogram before transformation; on the right of Figure 5.12 we see the distribution after transformation. It reveals a bimodality and the existence of two cell populations.
+
+Data Transformation: hyperbolic arcsin (asinh). It is standard to transform both flow and mass cytometry data using one of several special functions. We take the example of the inverse hyperbolic sine (asinh):
+
+$\begin{equation*} \operatorname{asinh}(x) = \log{(x + \sqrt{x^2 + 1})}. \end{equation*}$
+
+From this we can see that for large values of $$x$$, $$\operatorname{asinh}(x)$$ behaves like the $$\log$$ and is practically equal to $$\log(x)+\log(2)$$; for small $$x$$ the function is close to linear in $$x$$.
+
+Try running the following code to see the two main regimes of the transformation: small values and large values.
+
+v1 = seq(0, 1, length.out = 100)
+plot(log(v1), asinh(v1), type = 'l')
+plot(v1, asinh(v1), type = 'l')
+v3 = seq(30, 3000, length = 100)
+plot(log(v3), asinh(v3), type= 'l')
+
+This is another example of a variance stabilizing transformation, also mentioned in Chapters 4 and 8. Figure 5.12 is produced by the following code, that uses the flowCore package.
+
+asinhtrsf = arcsinhTransform(a = 0.1, b = 1)
+fcsBT = transform(fcsB,
+transformList(colnames(fcsB)[-c(1, 2, 41)], asinhtrsf))
+densityplot( ~CD3all, fcsB)
+densityplot( ~CD3all, fcsBT)
+
+► Question 5.6
+
+How many dimensions does the following code use to split the data into 2 groups using $$k$$-means ?
+
+kf = kmeansFilter("CD3all" = c("Pop1","Pop2"), filterId="myKmFilter")
+fres = flowCore::filter(fcsBT, kf)
+summary(fres)
+## Pop1: 33429 of 91392 events (36.58%)
+## Pop2: 57963 of 91392 events (63.42%)
+fcsBT1 = flowCore::split(fcsBT, fres, population = "Pop1")
+fcsBT2 = flowCore::split(fcsBT, fres, population = "Pop2")
+
+Figure 5.13, generated by the following code, shows a naïve projection of the data into the two dimensions spanned by the CD3 and CD56 markers:
+
+Figure 5.13: After transformation these cells were clustered using kmeans.
+
+library("flowPeaks")
+fp = flowPeaks(Biobase::exprs(fcsBT)[, c("CD3all", "CD56")])
+plot(fp)
+
+When plotting points that densely populate an area we should try to avoid overplotting. We saw some of the preferred techniques in Chapter 3; here we use contours and shading. This is done as follows:
+
+Figure 5.14: Like Figure 5.13, using contours.
+
+flowPlot(fcsBT, plotParameters = c("CD3all", "CD56"), logy = FALSE)
+contour(fcsBT[, c(40, 19)], add = TRUE)
+
+A more recent Bioconductor package, ggcyto, has been designed to enable the plotting of each patient in a diffent facet using ggplot.
+
+Try comparing the output using this approach to what we did above using the following:
+
+library("ggcyto")
+library("labeling")
+ggcd4cd8=ggcyto(fcsB,aes(x=CD4,y=CD8))
+ggcd4=ggcyto(fcsB,aes(x=CD4))

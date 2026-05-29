@@ -1,0 +1,32 @@
+Question: <p>How can I fetch more than 1000 record from data store and put all in one single list to pass to django?</p>
+
+Answer: <p>App Engine gives you a nice way of "paging" through the results by 1000 by ordering on Keys and using the last key as the next offset. They even provide some sample code here:</p>
+
+<p><a href="http://code.google.com/appengine/docs/python/datastore/queriesandindexes.html#Queries_on_Keys">http://code.google.com/appengine/docs/python/datastore/queriesandindexes.html#Queries_on_Keys</a></p>
+
+<p>Although their example spreads the queries out over many requests, you can change the page size from 20 to 1000 and query in a loop, combining the querysets. Additionally you might use itertools to link the queries without evaluating them before they're needed.</p>
+
+<p>For example, to count how many rows beyond 1000:</p>
+
+<pre><code>class MyModel(db.Expando):
+    @classmethod
+    def count_all(cls):
+        """
+        Count *all* of the rows (without maxing out at 1000)
+        """
+        count = 0
+        query = cls.all().order('__key__')
+
+        while count % 1000 == 0:
+            current_count = query.count()
+            if current_count == 0:
+                break
+
+            count += current_count
+
+            if current_count == 1000:
+                last_key = query.fetch(1, 999)[0].key()
+                query = query.filter('__key__ &gt; ', last_key)
+
+        return count
+</code></pre>

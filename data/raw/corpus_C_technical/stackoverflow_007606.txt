@@ -1,0 +1,60 @@
+Question: <p>How do I execute the following shell command using the Python <a href="https://docs.python.org/library/subprocess.html"><code>subprocess</code></a> module?</p>
+
+<pre><code>echo "input data" | awk -f script.awk | sort &gt; outfile.txt
+</code></pre>
+
+<p>The input data will come from a string, so I don't actually need <code>echo</code>.  I've got this far, can anyone explain how I get it to pipe through <code>sort</code> too?</p>
+
+<pre><code>p_awk = subprocess.Popen(["awk","-f","script.awk"],
+                          stdin=subprocess.PIPE,
+                          stdout=file("outfile.txt", "w"))
+p_awk.communicate( "input data" )
+</code></pre>
+
+<p><strong>UPDATE</strong>:  Note that while the accepted answer below doesn't actually answer the question as asked, I believe S.Lott is right and it's better to avoid having to solve that problem in the first place!</p>
+
+Answer: <p>You'd be a little happier with the following.</p>
+
+<pre><code>import subprocess
+
+awk_sort = subprocess.Popen( "awk -f script.awk | sort &gt; outfile.txt",
+    stdin=subprocess.PIPE, shell=True )
+awk_sort.communicate( b"input data\n" )
+</code></pre>
+
+<p>Delegate part of the work to the shell.  Let it connect two processes with a pipeline.</p>
+
+<p>You'd be a lot happier rewriting 'script.awk' into Python, eliminating awk and the pipeline.</p>
+
+<p><strong>Edit</strong>.  Some of the reasons for suggesting that awk isn't helping.</p>
+
+<p>[There are too many reasons to respond via comments.]</p>
+
+<ol>
+<li><p>Awk is adding a step of no significant value.  There's nothing unique about awk's processing that Python doesn't handle.</p></li>
+<li><p>The pipelining from awk to sort, for large sets of data, may improve elapsed processing time.  For short sets of data, it has no significant benefit.  A quick measurement of <code>awk &gt;file ; sort file</code> and <code>awk | sort</code> will reveal of concurrency helps.  With sort, it rarely helps because sort is not a once-through filter.</p></li>
+<li><p>The simplicity of "Python to sort" processing (instead of "Python to awk to sort") prevents the exact kind of questions being asked here.</p></li>
+<li><p>Python -- while wordier than awk -- is also explicit where awk has certain implicit rules that are opaque to newbies, and confusing to non-specialists.</p></li>
+<li><p>Awk (like the shell script itself) adds Yet Another Programming language.  If all of this can be done in one language (Python), eliminating the shell and the awk programming eliminates two programming languages, allowing someone to focus on the value-producing parts of the task.</p></li>
+</ol>
+
+<p>Bottom line: awk can't add significant value.  In this case, awk is a net cost; it added enough complexity that it was necessary to ask this question.  Removing awk will be a net gain.</p>
+
+<p><strong>Sidebar</strong> Why building a pipeline (<code>a | b</code>) is so hard.</p>
+
+<p>When the shell is confronted with <code>a | b</code> it has to do the following.</p>
+
+<ol>
+<li><p>Fork a child process of the original shell.  This will eventually become b.</p></li>
+<li><p>Build an os pipe.  (not a Python subprocess.PIPE) but call <code>os.pipe()</code> which returns two new file descriptors that are connected via  common buffer.  At this point the process has stdin, stdout, stderr from its parent, plus a file that will be "a's stdout" and "b's stdin".  </p></li>
+<li><p>Fork a child.  The child replaces its stdout with the new a's stdout.  Exec the <code>a</code> process.</p></li>
+<li><p>The b child closes replaces its stdin with the new b's stdin.  Exec the <code>b</code> process.</p></li>
+<li><p>The b child waits for a to complete.  </p></li>
+<li><p>The parent is waiting for b to complete.</p></li>
+</ol>
+
+<p>I think that the above can be used recursively to spawn <code>a | b | c</code>, but you have to implicitly parenthesize long pipelines, treating them as if they're <code>a | (b | c)</code>.</p>
+
+<p>Since Python has <code>os.pipe()</code>, <code>os.exec()</code> and <code>os.fork()</code>, and you can replace <code>sys.stdin</code> and <code>sys.stdout</code>, there's a way to do the above in pure Python.  Indeed, you may be able to work out some shortcuts using <code>os.pipe()</code> and <code>subprocess.Popen</code>.</p>
+
+<p>However, it's easier to delegate that operation to the shell.</p>

@@ -1,0 +1,192 @@
+Detect when a point belongs to a bounding box with distances
+
+I have a box with known bounding coordinates (latitudes and longitudes): latN, latS, lonW, lonE.
+
+I have a mystery point P with unknown coordinates. The only data available is the distance from P to any point p. dist(p,P).
+
+I need a function that tells me whether this point is inside or outside the box.
+
+-
+So you have no knowledge of the coordinates of $P$, but you always have the distance to $P$ available? –  rschwieb Sep 11 '12 at 12:35
+Ah, I think I now understand. You know the bounding latitudes and longitudes of a box. You have some mystery point $P$, that might be inside or outside the box, and you want to determine which. The only other data you have is the distance of $P$ from any point $p$. Is this right? –  Matt Pressland Sep 11 '12 at 12:37
+Yes that's it. It's a magic point! –  Jordi Planadecursach Sep 11 '12 at 14:16
+Is this supposed to be on a sphere, or on a flat plane? If on a sphere what is the definition of dist? –  Maesumi Oct 9 '12 at 10:32
+Its is just a flat plane –  Jordi Planadecursach Oct 9 '12 at 10:50
+
+Once we know the coordinates of P then the problem revers to a well known answer. To get the coordinates of $P=(x, y)$ we take three measurements. I have moved the coordinate system onto one corner and named the objects accordingly, with $a$ the horizontal side and $b$ the vertical side. In addition, we are going to find the coordinates of P in polar notation, with the distance $r$ and angle $\theta$.
+
+Measuring $\vec{AP}$ we get the distance $r$. Measuring $\vec{BP}$ gives us the cosine and measuring $\vec{DP}$ gives us the sine, by means of the law of cosines.
+
+$$\cos\theta = \frac{r^2+a^2-d_{BP}^2}{2 a r}$$ $$\sin\theta = \frac{r^2+b^2-d_{DP}^2}{2 b r}$$
+
+So the location of P is
+
+$$x = r \cos\theta = d_{AP} \frac{r^2+a^2-d_{BP}^2}{2 a r}$$ $$y = r \sin\theta = d_{AP} \frac{r^2+b^2-d_{DP}^2}{2 b r}$$
+
+The point is inside if $x>=0$ and $x<=a$ and $y>=0$ and $y<=b$.
+
+I have checked this with the above C# code
+
+static void Main(string[] args)
+{
+
+double a=2;
+double b=1;
+
+Point A=new Point(0, 0);
+Point B=new Point(a, 0);
+Point D=new Point(0, b);
+
+for(double x=-5; x<=5; x+=0.5)
+{
+for(double y=-5; y<=5; y+=0.5)
+{
+Point P=new Point(x, y);
+
+double d_AP=A.DistanceTo(P);
+double d_BP=B.DistanceTo(P);
+double d_DP=D.DistanceTo(P);
+
+double r=d_AP;
+double cos=(a*a+r*r-d_BP*d_BP)/(2*a*r);
+double sin=(b*b+r*r-d_DP*d_DP)/(2*b*r);
+
+double x_P=r*cos;
+double y_P=r*sin;
+
+P.inside=(x_P>=0&&x_P<=a)&&(y_P>=0&&y_P<=b);
+
+Point Q=new Point(x_P, y_P);
+if(P.DistanceTo(Q)>1e-6)
+{
+Console.WriteLine("({0},{1}) - ({2},{3})", x, y, x_P, y_P);
+}
+}
+}
+
+}
+
+public struct Point
+{
+double x, y;  //private, not visible
+public bool inside;
+
+public Point(double x, double y)
+{
+this.x=x;
+this.y=y;
+this.inside=false;
+}
+
+public double DistanceTo(Point p)
+{
+return Math.Sqrt((p.x-x)*(p.x-x)+(p.y-y)*(p.y-y));
+}
+}
+
+
+and it all checks out ok. No need to check for signs and quadrants. It all works out cleanly.
+
+-
+
+There's a geometric way to do it, too.
+
+Draw a rectangle and a point inside it. You can make four oriented triangles by connecting the point to the diagonals, and then uniformly drawing arrows on the edges so that they all "flow clockwise" or "flow counterclockwise".
+
+Now if you imagine dragging the point over an edge, you'll see that three of the triangles retain their orientation, but the one whose edge has been crossed will flip orientation. If you go over a corner instead, two of the four triangles will flip orientation.
+
+So, by uniformly representing these four triangles with vectors, you just have to check their cross products to see if they are all the same sign. If two disagree with the other two, you know the point lies on a diagonal outside. If one disagrees with the rest, it lies outside of one of the edges. If they all agree, the point is inside.
+
+Here's the setup. Suppose you are given $(a_1,a_2),(b_1,b_2),(c_1,c_2),(d_1,d_2)$ as the corners of the rectangle (in cyclic order, say, clockwise), and $(e_1,e_2)$ is the point.
+
+One triangle will have vector edges (in this order) $(a_1,a_2)-(e_1,e_2)$ and $(b_1,b_2)-(a_1,a_2)$. The other three will be: $(b_1,b_2)-(e_1,e_2)$ and $(c_1,c_2)-(b_1,b_2)$ $(c_1,c_2)-(e_1,e_2)$ and $(d_1,d_2)-(c_1,c_2)$ $(d_1,d_2)-(e_1,e_2)$ and $(a_1,a_2)-(d_1,d_2)$
+
+They've all been set up so that if the point is inside, then taking the cross product of the first vector with the second in any of these four pairs, they will all have the same sign (all positive or all negative).
+
+Given any four points in cyclic order like this, you can fill out the four equations and check all their cross products.
+
+-
+I realize it seems like a complex setup, but if you are given say 1000 rectangles, and you want to know if a given point is inside or outside of each of them, then a program does this pretty efficiently. Sorry if it doesn't fit your tools at hand: it's hard to match our answers to your resources, sometimes. –  rschwieb Sep 10 '12 at 15:45
+having e1,e2 is as easy as latS<e2<latN & lonW<e1<lonE, no need for cross product, am I missing anything? –  Jordi Planadecursach Sep 10 '12 at 19:51
+@JordiPlanadecursach I might agree, but the author mentions something about "lat" and "lon" not being available. Since I only have a vague notion of what both of you are thinking of, I just avoided it altogether. –  rschwieb Sep 10 '12 at 20:13
+I really like this, but my understanding is that we don't have $(e_1,e_2)$. We have some reference point $P$ that we do know the coordinates of, and we know the distance from $p=(e_1,e_2)$ to $P$, but not the values of $e_1$ and $e_2$. (I think - I'm still not completely sure I haven't misunderstood the question.) –  Matt Pressland Sep 11 '12 at 10:20
+@MattPressland Yeah, I agree. Let's see if we can get the OP to improve the question. –  rschwieb Sep 11 '12 at 12:33
+
+As I understand your question, it is somehow similar to this:How to check if a point is inside a rectangle. I see that my answer (while received no votes), may be correct and may be simply applied in your case.
+
+-
+To locate my answer, please do a find on my name after you have clicked the link. –  Emmad Kareem Oct 4 '12 at 23:37
+
+One (far-from-optimal, but straightforward) way to do it: since you have the box's coordinates available, you also presumably have the four corners of the box available. Now, knowing $P$'s distances from the two points along one edge lets you narrow down the point's location to one of two points $i_1$ and $i_2$ (since the two circles $|P-p_1|=r_1$ and $|P-p_2|=r_2$ have at most two intersection points). Similarly, knowing $P$'s distance from the two points along the other edge narrows down its location to one of two points $i_3$ and $i_4$. (If you really want, I can flesh this out with the equations for those two points - but it's straightforward to find them yourself; it's just a bit of algebra or alternately a bit of geometry) Now, the kicker: the two sets of two points can't be the same, because $i_2$ is the reflection of $i_1$ about the edge $p_1p_2$ and $i_3$ is the reflection of $i_4$ about a different edge $p_3p_4$. This means that you can compare to determine which of the points $i_1,i_2$ is identical to which point $i_3,i_4$ and that's enough to get your point precisely. Once you have that, the standard point-in-rectangle tests should suffice.
+
+Note that for algorithmic reasons, once you have $i_1$ and $i_2$ you may want to perform the point-in-rectangle test on both of them; they can't both be in the rectangle, but it's possible that they're both out of the rectangle, in which case you don't have to bother going on and finding $i_3$ and $i_4$.
+
+-
+
+The distance measurement from any point gives you a circle around that point as a locus of possible positions of $P$. Make any such measurement from a point $A$. If the question is not settled after this (i.e. if the circle crosses the boundary of the rectangle), make a measurement from any other point $B$. The two intersecting circles leave only two possibilities for the location of $P$. If you are lucky, both options are inside or both outside the rectnagle and we are done. Otherwise, a third measurement taken form any point $C$ not collinear with $A$ and $B$ will settle the question of exact position of $P$ (and after that we easily see if $P$ is inside or not.
+
+One may wish to choose the first point $A$ in an "optimal" faschion such that the probability of a definite answer is maximized. While this requires knowledge about soem a prioi distribution where $P$ might be, the center of the rechtangle seems like a good idea. The result is nondecisive only if the measured distance is between half the smallest side of the rectangle and half the diagonal of the rectangle.
+
+-
+
+Measure distances from the four corners of the rectangle.
+
+Consider the four triangles formed from P and the four sides of the rectangle.
+
+Apply the Law of Cosines to measure the angles of the four triangles next to the sides of the rectangle.
+
+If any is larger than 90 degrees then you are outside. Otherwise you are inside.
+
+EDIT 1:
+
+Suppose your rectangle is $EFGH$ where the sides are $d(EF)=d(HG)=x$ and $d(FG)=d(EH)=y$.
+
+Let the distance of $P$ from $E,F,G,H$ be $e,f,g,h$ respectively.
+
+Now by Law of Cosines applied to angle $EHP=\alpha$ we have $\cos (\alpha) = (y^2+h^2-e^2)/(2yh)$. If the angle is larger than $90^\circ$ then $y^2+h^2-e^2<0$. We need to apply a similar check 8 times. If any of the expressions is negative then we are outside. Else we are inside (or on boundary). So you have to check the sign of 8 expressions.
+
+If either of the following
+
+$y^2+h^2-e^2$, $y^2+e^2-h^2$, $x^2+e^2-f^2$, $x^2+f^2-e^2$, $y^2+f^2-g^2$, $y^2+g^2-f^2$, $x^2+g^2-h^2$, $x^2+h^2-g^2$
+
+is negative $P$ is outside.
+
+EDIT 2:
+
+In case efficiency is a consideration: To test that $P$ is inside`, or on the border, checking with respect to 3 sides will do. So it takes 6 inequalities. For example
+
+$y^2+h^2-e^2\ge 0$, and $y^2+e^2-h^2\ge 0$, and
+
+$x^2+e^2-f^2\ge 0$, and $x^2+f^2-e^2\ge 0$, and
+
+$y^2+f^2-g^2\ge 0$, and $y^2+g^2-f^2\ge 0$.
+
+EDIT 3:
+
+A similar approach will work for checking with respect to a convex polygon.
+
+-
+can you translate that into a boolean equation ? –  Jordi Planadecursach Oct 8 '12 at 20:33
+I added a formulation. –  Maesumi Oct 8 '12 at 22:17
+
+You have the coordinates of the four corners of the box. I'll imagine that the box is situated so its sides are horizontal or vertical (This could be easily obtained by a rotation if box wasn't originally like this). So you can also get the coordinates of:
+
+$p_M$, the center of the box (inside the box),
+
+$p_L$, the point directly to the left of the center so that the left side of the box bisects the line joining $p_M$ to $p_L$,
+
+$p_R$, the point directly to the right of the center so the right side of the box bisects the line joining $p_M$ to $p_R$,
+
+two further points $p_A$ and $p_B$ respectively above and below the box, so that the top/bottom of the box bisects the line joing $p_M$ to $p_A$ or $p_B$.
+
+Now for your mystery point P you find
+
+$t_M=d(p_m,P)$, $t_L=d(p_L,P)$, and similarly for $t_R,t_A,t_B$.
+
+Now use the fact that the mystery point $P$ is on the (half plane to the) left of the right side iff it is closer to the point $p_M$ than it is to $p_R$, i.e. iff $t_M>t_R$. Similarly $P$ is to the right of the left side iff $t_M>t_L$, and $P$ is below the top of the box iff $t_M>t_A$, and finally $P$ is above the bottom of the box iff $t_M>t_B$.
+
+We now have that p lies in the box iff each of the quantities $t_M-t_*$ is positive, where * is one of the four symbols $L,R,A,B$. For the function, define
+
+$f(distances)=min(t_M-t_L,t_M-t_R,t_M-t_A,t_M-t_B)$. Then $f>0$ iff $P$ lies in the interior of the box, while $f>=0$ iff $P$ lies in the interior or on the boundary of the box.
+
+-

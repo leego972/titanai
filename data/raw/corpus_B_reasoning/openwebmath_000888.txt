@@ -1,0 +1,167 @@
+# Nand2Tetris Code Module
+
+I'm working through the Assembler assignment in the Nand2Tetris course (chapter 6). The suggested implementation contains 4 modules: Main, Parser, Code, SyntaxTree. Today I wanted to get some feedback on my implementation of the Code module.
+
+The book specifies a general API in order to allow students to use whichever programming language they want; I choose Python 2.7. The Code module takes a line of a simplified dialect of Assembly code called Hack and produces binary.
+
+The Code module only deals with a single class of instruction in Hack language: The C-Instruction. This instruction takes the form dest=comp;jump, where either dest= OR ;jump may be optionally omitted. comp is one of 28 valid expressions. dest is the destination to store the result of the computation: it can be any permutation of the three registers available (A, D, M). jump is a condition which, if true, moves control flow the address in instruction memory currently stored in register A.
+
+The resulting opcode takes the form: 111a cccc ccdd djjj, where a and cccc cc correspond to the comp, ddd corresponds to the dest, and jjj corresponds to the jump. For more details, see Chapters 4 and 6 of the textbook.
+
+Please review on style, implementation (especially those terribly ugly lookup tables), etc.
+
+#!/usr/bin/python
+# hack code translator
+
+# Sample conversion:
+# HACK Instruction: M = 1
+# 111
+# a = 0
+# cccccc = 1111 11
+# ddd = 001
+# jjj = 000
+# BINARY Opcode:    1110 1111 1100 1000
+
+jumpTable = { 'null': '000',
+'JGT' : '001',
+'JEQ' : '010',
+'JEQ' : '010',
+'JGE' : '011',
+'JLT' : '100',
+'JNE' : '101',
+'JLE' : '110',
+'JMP' : '111'  }
+
+compTable = { '0'   : '101010',
+'1'   : '111111',
+'-1'  : '111010',
+'D'   : '001100',
+'A'   : '110000',
+'!D'  : '001101',
+'!A'  : '110001',
+'-D'  : '001111',
+'-A'  : '110011',
+'D+1' : '011111',
+'A+1' : '110111',
+'D-1' : '001110',
+'A-1' : '110010',
+'D+A' : '000010',
+'D-A' : '010011',
+'A-D' : '000111',
+'D&A' : '000000',
+'D|A' : '010101' }
+
+def dest(srcStr):
+# Of the three portions of the opcodes,
+# this is the only one that makes obvious logical sense
+# No point in a lookup table
+
+# Any combination of A, D, M
+# in that order
+# TODO: bitops this
+bits = ['0', '0', '0']  # 0 by default
+if 'A' in srcStr:
+bits[0] = '1'
+if 'D' in srcStr:
+bits[1] = '1'
+if 'M' in srcStr:
+bits[2] = '1'
+
+return ''.join(bits)
+
+def comp(srcStr):
+aBit = '0'
+
+if 'M' in srcStr:
+if 'A' in srcStr:
+raise SyntaxError
+else:
+aBit = '1'
+nStr = srcStr.replace('M', 'A')  # this way we use only one lookup table
+
+else:
+nStr = srcStr[:]  # non-destructive copy
+
+return aBit + compTable[nStr]
+
+def jump(srcStr):
+return jumpTable[srcStr]
+
+
+1. The values in your lookup tables are strings of binary digits, for example '111010'. It would be closer to the way that real assemblers work if you represented these as numbers in binary, for example 0b111010. I presume you use string concatenation to assemble the instructions at present:
+
+instruction = '111' + comp + dest + jump
+
+
+With numeric values for the instruction fields, you'll need to use bitwise operations instead:
+
+instruction = 0b111 << 13 | comp << 6 | dest << 3 | jump
+
+2. There's no error handling. It's likely that assembly programs will contain mistakes, for example:
+
+M=-1;JGR   // oops: typo for JGT
+
+
+The user would like to get an error message, preferably one that gives the file and line number and an explanation of what went wrong:
+
+prog.asm(17): bad jump field "JGR"
+
+
+But as far I can see from the code you posted, what will happen here is that Python will raise a KeyError in jump, which is much less useful.
+
+(Possibly there's error handling in the rest of the code that you didn't show us, but I can only comment on what I see here.)
+
+3. It's even worse for the dest field: this doesn't seem to produce any errors at all, so if I write:
+
+BAD=1;JEQ     // Oops: typo for MAD
+
+
+AD=1;JEQ
+
+
+and I never get told about my mistake.
+
+4. The logic for lookup of the comp field is needlessly complex. It would be simplest just to make a 7-bit lookup table (including the a bit). Trying to modify the instruction wastes time, and it makes it harder to produce good error messages (outputting the modified instruction will confuse the user, so you have to hang on to the unmodified instruction for use in error messages).
+
+If you don't want to write out the whole 7-bit lookup table, then write code to generate it:
+
+fullCompTable = compTable.copy()
+for k, v in compTable.items():
+if 'A' in k:
+fullCompTable[k.replace('A', 'M')] = 1 << 6 | v
+
+
+and run this once, when the assembler starts up.
+
+5. The comment for dest says "No point in a lookup table" but that's not true. A lookup table will be faster than the computation in dest. And it only needs 15 entries. Again, if you don't want to write it out by hand, you could compute it:
+
+from itertools import permutations
+
+destTable = {
+''.join('MDA'[i] for i in p): sum(1<<i for i in p)
+for n in range(1, 4)
+for p in permutations(range(3), n)
+}
+
+
+but this is longer than writing it out in full:
+
+destTable = {
+'A': 4, 'AD': 6, 'ADM': 7, 'AM': 5, 'AMD': 7, 'D': 2, 'DA': 6, 'DAM': 7,
+'DM': 3, 'DMA': 7, 'M': 1, 'MA': 5, 'MAD': 7, 'MD': 3, 'MDA': 7
+}
+
+6. There's no need to take a copy here:
+
+nStr = srcStr[:]  # non-destructive copy
+
+
+Just write:
+
+nStr = srcStr
+
+• Maybe generating the jump table (dictionary) on the fly is better, typing it all out a typo may easily slip in. On the other hand it is easier to write it by hand... which of the two do you suggest? May 29 '15 at 18:01
+• @Caridorc: I don't see any way to compute jumpTable, so it has to be written out. May 29 '15 at 18:04
+• sorry I meant the destTable May 29 '15 at 18:04
+• @Caridorc: You could do both: that is, compute it and copy the result into the source code. (That's what I did.) May 29 '15 at 18:06
+• Nice solution, so that after the computation you can inspect it and check if it is all right :) May 29 '15 at 18:09

@@ -1,0 +1,74 @@
+# B-Prolog
+
+B-Prolog was a high-performance implementation of the standard Prolog language with several extended features including matching clauses, action rules for event handling, finite-domain constraint solving, arrays and hash tables, declarative loops, and tabling. First released in 1994, B-Prolog is now a widely used CLP system.  The constraint solver of B-Prolog was ranked top in two categories in the Second International Solvers Competition, and it also took the second place in P class in the second ASP solver competition  and the second place overall in the third ASP solver competition. B-Prolog underpins the PRISM system, a logic-based probabilistic reasoning and learning system. B-Prolog is a commercial product, but it can be used for learning and non-profit research purposes free of charge (since version 7.8 for individual users, including commercial individual users, B-Prolog is free of charge ). B-Prolog is not anymore actively developed, but it forms the basis for the Picat programming language.
+
+Matching clauses 
+A matching clause is a form of a clause where the determinacy and input/output unifications are denoted explicitly. The compiler translates matching clauses into matching trees and generates indexes for all input arguments. The compilation of matching clauses is much simpler than that of normal Prolog clauses because no complex program analysis or specialization is necessary; and the generated code tends to be more compact and faster. The B-Prolog compiler and most of the library predicates are written in matching clauses.
+
+A matching clause takes the following form:
+
+H, G => B
+
+where H is an atomic formula, G and B are two sequences of atomic formulas. H is called the head, G the guard, and B the body of the clause. No call in G can bind variables in H and all calls in G must be in-line tests. In other words, the guard must be flat. The following gives an example predicate in matching clauses that merges two sorted lists:
+
+merge([],Ys,Zs) => Zs=Ys.
+merge(Xs,[],Zs) => Zs=Xs.
+merge([X|Xs],[Y|Ys],Zs),X<Y => Zs=[X|ZsT],merge(Xs,[Y|Ys],ZsT).
+merge(Xs,[Y|Ys],Zs) => Zs=[Y|ZsT],merge(Xs,Ys,ZsT).
+
+The cons [Y|Ys] occurs in both the head and the body of the third clause. To avoid reconstructing the term, we can rewrite the clause into the following:
+
+merge([X|Xs],Ys,Zs),Ys=[Y|_],X<Y => Zs=[X|ZsT],merge(Xs,Ys,ZsT).
+
+The call Ys=[Y|_] in the guard matches Ys against the pattern [Y|_].
+
+Action rules 
+The lack of a facility for programming "active" sub-goals that can be reactive to the environment has been considered one of the weaknesses of logic programming. To overcome this, B-Prolog provides a simple and yet powerful language, called Action Rules (AR), for programming agents. An agent is a subgoal that can be delayed and can later be activated by events. Each time an agent is activated, some action may be executed. Agents are a more general notion than delay constructs in early Prolog systems and processes in concurrent logic programming languages in the sense that agents can be responsive to various kinds of events including instantiation, domain, time, and user-defined events.
+
+An action rule takes the following
+
+H, G, {E} => B
+
+where H is a pattern for agents, G is a sequence of conditions on the agents, E is a set of patterns for events that can activate the agents, and B is a sequence of actions performed by the agents when they are activated.  When the event pattern E together with the enclosing braces is missing, an action rule degenerates into a matching clause.
+
+A set of built-in events is provided for programming constraint propagators and interactive graphical user interfaces. For example, ins(X) is an event that is posted when the variable X is instantiated. A user program can create and post its own events and define agents to handle them. A user-defined event takes the form of event(X,O) where X is a variable, called a suspension variable, that connects the event with its handling agents, and O is a Prolog term that contains the information to be transmitted to the agents. The built-in post(E) posts the event E.
+
+Consider the following examples:
+
+echo(X),{event(X,Mes)}=>writeln(Mes).
+ping(T),{time(T)} => writeln(ping).
+
+The agent echo(X) echoes whatever message it receives. For example,
+
+?-echo(X),post(event(X,hello)),post(event(X,world)).
+
+outputs the message hello followed by world. The agent ping(T) responds to time events from the timer T. Each time it receives a time event, it prints the message ping. For example,
+
+?-timer(T,1000),ping(T),repeat,fail.
+
+creates a timer that posts a time event every second and creates an agent ping(T) to respond to the events. The loop after the agent is needed to make the agent perpetual.
+
+AR has been found useful for programming simple concurrency, implementing constraint propagators, and developing interactive graphical user interfaces. It has served as an intermediate language for compiling Constraint Handling Rules (CHR) and Answer Set Programs (ASP).
+
+CLP(FD) 
+Like many Prolog-based finite-domain constraint solvers, B-Prolog's finite-domain solver was heavily influenced by the CHIP system. The first fully-fledged solver was released with B-Prolog version 2.1 in March 1997. That solver was implemented in an early version of AR, called delay clauses. During the past decade, the implementation language AR has been extended to support a rich class of domain events (ins(X),bound(X),dom(X,E), and dom_any(X,E)) for programming constraint propagators and the system has been enriched with new domains (Boolean, trees, and finite sets), global constraints, and specialized fast constraint propagators. Recently, the two built-ins in/2 and notin/2 have been extended to allow positive and negative table (also called extensional) constraints.
+
+Thanks to the employment of AR as the implementation language, the constraint solving part of B-Prolog is relatively small (3800 lines of Prolog code and 6000 lines of C code, including comments and spaces) but its performance is very competitive. The AR language is open to the user for implementing problem-specific propagators. For example, the following defines a propagator for maintaining arc consistency for the constraint X+Y #= C. Whenever an inner element Ey is excluded from the domain of Y, this propagator is triggered to exclude Ex, the counterpart of Ey, from the domain of X. For the constraint X+Y #= C, we need to generate two propagators, namely, 'X_in_C_Y_ac'(X,Y,C) and 'X_in_C_Y_ac'(Y,X,C), to maintain the arc consistency. In addition to these two propagators, we also need to generate propagators for maintaining interval consistency since no dom(Y,Ey) event is posted if the excluded value happens to be a bound. The constraint needs to be preprocessed to make it arc consistent before the propagators
+are generated.
+
+'X_in_C_Y_ac'(X,Y,C),var(X),var(Y),
+   {dom(Y,Ey)}
+   =>         
+   Ex is C-Ey,        
+   domain_set_false(X,Ex).
+'X_in_C_Y_ac'(X,Y,C) => true.
+
+Arrays and the array subscript notation 
+In B-Prolog, the maximum arity of a structure is 65535. This entails that a structure can be used as a one-dimensional array, and a multi-dimensional array can be represented as a structure of structures. To facilitate creating arrays, B-Prolog provides a built-in, called  new_array(X,Dims), where X must be an uninstantiated variable and Dims a list of positive integers that specifies the dimensions of the array. For example, the call new_array(X,[10,20]) binds X to a two dimensional array whose first dimension has 10 elements and second dimension has 20 elements. All the array elements are initialized to be free variables.
+
+The built-in predicate arg/3 can be used to access array elements, but it requires a temporary variable to store the result, and a chain of calls to access an element of a multi-dimensional array. To facilitate accessing array elements, B-Prolog supports the array subscript notation X[I1,...,In], where X is a structure and each Ii is an integer expression. This common notation for accessing arrays is, however, not part of the standard Prolog syntax. To accommodate this notation, the parser is modified to insert a token ^ between a variable token and [. So, the notation X[I1,...,In] is just a shorthand for X^[I1,...,In]. This notation is interpreted as an array access when it occurs in an arithmetic expression, a constraint, or as an argument of a call to @=/2. In any other context, it is treated as the term itself. The array subscript notation can also be used to access elements of lists. For example, the nth/3 predicate can be defined as follows:
+
+nth(I,L,E) :- E @= L[I].
+
+Loops with foreach and list comprehension 
+Prolog relies on recursion to describe loops. The lack of powerful loop constructs has arguably made Prolog less acceptable to beginners and less productive to experienced programmers because it is often tedious to define small auxiliary recursive predicates for loops. The emergence of constraint program

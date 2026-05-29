@@ -1,0 +1,52 @@
+# Arb 0.4
+
+January 26, 2013
+
+I’ve tagged version 0.4 of Arb. Here is an overview of the changes:
+
+• much faster fmpr_mul, fmprb_mul and set_round, resulting in general speed improvements
+• code for computing the Hurwitz zeta function with derivatives
+• fixed and documented error bounds for hypergeometric series
+• better algorithm for series evaluation of the gamma function at a rational point
+• much faster generation of Bernoulli numbers
+• complex log, exp, pow, trigonometric functions (currently based on MPFR)
+• complex nth roots via Newton iteration
+• added code for arithmetic on fmpcb_polys
+• code for computing Khinchin’s constant
+• code for rising factorials of polynomials or power series
+• faster sin_cos
+• better div_2expm1
+• many other new helper functions
+• more test code for core operations
+
+A few highlights:
+
+### Faster multiplication
+
+I have optimized a few low-level functions, including fmpr_mul (floating-point multiplication) and fmprb_mul (ball multiplication). This should result in much less overhead for Arb arithmetic at precisions up to several thousand bits. Here is a table of timings in nanoseconds:
+
+ bits mpfr_mul fmpr_mul (new) fmprb_mul (old) fmprb_mul (new) 15 34 15 163 68 30 34 15 166 69 60 34 16 170 70 120 39 53 294 112 240 69 70 318 128 480 146 128 386 188 960 350 337 610 395 1920 888 1060 1400 1110 3840 2640 3210 3770 3280 7680 7649 9060 9750 9110
+
+MPFR is 10-30% faster between approximately 1000 and 100000 bits thanks to using Mulder’s mulhigh (not yet implemented in Arb). However, fmprb_mul now gets within 2x of a single mpfr_mul even at very low precision (except precisely at two limbs, where some more work is needed). This basically means that ball arithmetic with the fmprb type generically becomes faster than interval arithmetic with MPFR. The overhead for fmprb_mul is now nearly as small as it can be with the current data representation (I can perhaps get rid of a few more nanoseconds by eliminating some function call overhead). Changing the representation should allow getting within 1.1x or so of mpfr_mul at any precision.
+
+That said, a few important functions are still quite slow (including addition, division and elementary functions), and for now this will drag down performance for many computations.
+
+As a slightly more high-level benchmark, here is how long it now takes to compute $M^{-1}$ where $M$ is a random $n \times n$ matrix with real entries:
+
+ Digits n Sage 5.3 (RR) Sage 5.3 (RIF) Mathematica 8.0 Arb 0.4 10 10 0.719 ms 1.16 ms 0.88 ms 0.34 ms 100 10 0.841 ms 1.33 ms 0.99 ms 0.74 ms 100 100 0.618 s 1.10 s 0.33 s 0.53 s 1000 10 3.16 ms 6.35 ms 6.32 ms 3.90 ms 1000 100 2.86 s 5.81 s 3.26 s 3.26 s
+
+The timings for Arb are already closer to those for Sage’s RR (floating-point real field) than those for RIF (real interval field), while providing the correctness guarantees of the latter. A significant portion of the Sage timings might just be Python overhead, though. I was really puzzled to find that Mathematica is much faster than Sage here; any ideas what it’s doing internally?
+
+### Hurwitz zeta function
+
+A new function has been added for computing $\zeta(s,a) = \sum_{k=0}^{\infty} (k+a)^{-s}$ for arbitrary complex $s, a$. In fact, the function allows computing a list of Taylor series coefficients with respect to $s$, i.e. $\zeta(s,a), \zeta’(s,a), \ldots \zeta^{(d)}(s,a) / d!$ (with provably correct error bounds). For example, setting $s = 1, a = 1$ (and removing the pole), we obtain correct values for the Stieltjes constants (or generalized Euler constants) to any desired precision. Computing the 1000 first Stieltjes constants accurately to 1000 digits takes 14 seconds, and computing the 5000 first Stieltjes constants accurately to 5000 digits takes 40 minutes; this is a thousand times or so faster than numerically evaluating the corresponding StieltjesGamma[] constants in Mathematica or repeatedly calling the stieltjes() function in mpmath. The implementation is not yet optimized for evaluating just the value $\zeta(s,a)$ (especially for large imaginary parts of $s$), and will be a bit slower than Pari or mpmath for this.
+
+### Bernoulli numbers
+
+Arb now contains a brand new module for generating Bernoulli numbers, implementing an algorithm recently described by Remco Bloemen (with some minor enhancements). The idea is to evaluate the defining sum for the zeta function and recycling powers in a table. This algorithm has two advantages: it’s faster in practice than anything else I’m aware of, and it can generate one or a few Bernoulli numbers at a time without having to store all Bernoulli numbers.
+
+Indeed, to compute all the Bernoulli numbers up to $B_{50000}$, FLINT currently takes 830 seconds (internally using fast multimodular power series arithmetic and fast Chinese remaindering), while the new code in Arb clocks in at only 110 seconds. The interested (and patient) reader may check how long this computation takes in their computer algebra system of choice!
+
+One important practical benefit is that the precomputation time for functions based on Euler-Maclaurin summation decreases significantly. For example, to evaluate the gamma function of a small real argument to 10000-digit accuracy, Arb now takes 2.1 seconds the first time and 0.56 seconds subsequent times (after the Bernoulli numbers have been cached); previously, the first evaluation took about 20 seconds. For comparison, Mathematica 8 takes 12.8 seconds and MPFR takes 69 seconds (neither system caches the Bernoulli numbers); mpmath takes 86 seconds the first time and 1.9 seconds subsequent times.
+
+Unless I mixed some data up, all timings reported in this post were done on an Intel Xeon X5675 3.07 GHz processor.

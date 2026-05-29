@@ -1,0 +1,82 @@
+nnls {RcppML} R Documentation
+
+## Non-negative least squares
+
+### Description
+
+Solves the equation a %*% x = b for x subject to x > 0.
+
+### Usage
+
+nnls(a, b, cd_maxit = 100L, cd_tol = 1e-08, fast_nnls = FALSE, L1 = 0)
+
+
+### Arguments
+
+ a symmetric positive definite matrix giving coefficients of the linear system b matrix giving the right-hand side(s) of the linear system cd_maxit maximum number of coordinate descent iterations cd_tol stopping criteria, difference in x across consecutive solutions over the sum of x fast_nnls initialize coordinate descent with a FAST NNLS approximation L1 L1/LASSO penalty to be subtracted from b
+
+### Details
+
+This is a very fast implementation of non-negative least squares (NNLS), suitable for very small or very large systems.
+
+Algorithm. Sequential coordinate descent (CD) is at the core of this implementation, and requires an initialization of x. There are two supported methods for initialization of x:
+
+1. Zero-filled initialization when fast_nnls = FALSE and cd_maxit > 0. This is generally very efficient for well-conditioned and small systems.
+
+2. Approximation with FAST when fast_nnls = TRUE. Forward active set tuning (FAST), described below, finds an approximate active set using unconstrained least squares solutions found by Cholesky decomposition and substitution. To use only FAST approximation, set cd_maxit = 0.
+
+a must be symmetric positive definite if FAST NNLS is used, but this is not checked.
+
+See our BioRXiv manuscript (references) for benchmarking against Lawson-Hanson NNLS and for a more technical introduction to these methods.
+
+Coordinate Descent NNLS. Least squares by sequential coordinate descent is used to ensure the solution returned is exact. This algorithm was introduced by Franc et al. (2005), and our implementation is a vectorized and optimized rendition of that found in the NNLM R package by Xihui Lin (2020).
+
+FAST NNLS. Forward active set tuning (FAST) is an exact or near-exact NNLS approximation initialized by an unconstrained least squares solution. Negative values in this unconstrained solution are set to zero (the "active set"), and all other values are added to a "feasible set". An unconstrained least squares solution is then solved for the "feasible set", any negative values in the resulting solution are set to zero, and the process is repeated until the feasible set solution is strictly positive.
+
+The FAST algorithm has a definite convergence guarantee because the feasible set will either converge or become smaller with each iteration. The result is generally exact or nearly exact for small well-conditioned systems (< 50 variables) within 2 iterations and thus sets up coordinate descent for very rapid convergence. The FAST method is similar to the first phase of the so-called "TNT-NN" algorithm (Myre et al., 2017), but the latter half of that method relies heavily on heuristics to refine the approximate active set, which we avoid by using coordinate descent instead.
+
+### Value
+
+vector or matrix giving solution for x
+
+Zach DeBruine
+
+### References
+
+DeBruine, ZJ, Melcher, K, and Triche, TJ. (2021). "High-performance non-negative matrix factorization for large single-cell data." BioRXiv.
+
+Franc, VC, Hlavac, VC, and Navara, M. (2005). "Sequential Coordinate-Wise Algorithm for the Non-negative Least Squares Problem. Proc. Int'l Conf. Computer Analysis of Images and Patterns."
+
+Lin, X, and Boutros, PC (2020). "Optimization and expansion of non-negative matrix factorization." BMC Bioinformatics.
+
+Myre, JM, Frahm, E, Lilja DJ, and Saar, MO. (2017) "TNT-NN: A Fast Active Set Method for Solving Large Non-Negative Least Squares Problems". Proc. Computer Science.
+
+nmf, project
+
+### Examples
+
+## Not run:
+# compare solution to base::solve for a random system
+X <- matrix(runif(100), 10, 10)
+a <- crossprod(X)
+b <- crossprod(X, runif(10))
+unconstrained_soln <- solve(a, b)
+nonneg_soln <- nnls(a, b)
+unconstrained_err <- mean((a %*% unconstrained_soln - b)^2)
+nonnegative_err <- mean((a %*% nonneg_soln - b)^2)
+unconstrained_err
+nonnegative_err
+all.equal(solve(a, b), nnls(a, b))
+
+# example adapted from multiway::fnnls example 1
+X <- matrix(1:100,50,2)
+y <- matrix(101:150,50,1)
+beta <- solve(crossprod(X)) %*% crossprod(X, y)
+beta
+beta <- nnls(crossprod(X), crossprod(X, y))
+beta
+
+## End(Not run)
+
+
+[Package RcppML version 0.3.7 Index]

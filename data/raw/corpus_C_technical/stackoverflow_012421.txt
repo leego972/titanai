@@ -1,0 +1,31 @@
+Question: <p>In my app i need to save changed values (old and new) when model gets saved. Any examples or working code?</p>
+
+<p>I need this for premoderation of content. For example, if user changes something in model, then administrator can see all changes in separate table and then decide to apply them or not.</p>
+
+Answer: <p>Django is currently sending all columns to the database, even if you just changed one.  To change this, some changes in the database system would be necessary.  This could be easily implemented on the existing code by adding a set of dirty fields to the model and adding column names to it, each time you <code>__set__</code> a column value.</p>
+
+<p>If you need that feature, I would suggest you look at the Django ORM, implement it and put a patch into the Django trac.  It should be very easy to add that and it would help other users too.  When you do that, add a hook that is called each time a column is set.</p>
+
+<p>If you don't want to hack on Django itself, you could copy the dict on object creation and diff it.</p>
+
+<p>Maybe with a mixin like this:</p>
+
+<pre><code>class DiffingMixin(object):
+
+    def __init__(self, *args, **kwargs):
+        super(DiffingMixin, self).__init__(*args, **kwargs)
+        self._original_state = dict(self.__dict__)
+
+    def get_changed_columns(self):
+        missing = object()
+        result = {}
+        for key, value in self._original_state.iteritems():
+            if key != self.__dict__.get(key, missing):
+                result[key] = value
+        return result
+
+ class MyModel(DiffingMixin, models.Model):
+     pass
+</code></pre>
+
+<p>This code is untested but should work.  When you call <code>model.get_changed_columns()</code> you get a dict of all changed values.  This of course won't work for mutable objects in columns because the original state is a flat copy of the dict.</p>

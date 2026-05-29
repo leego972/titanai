@@ -1,0 +1,84 @@
+Question: <p>I want to write a program that would print every combination of a set of variables to a text file, creating a word list. Each answer should be written on a separate line and write all of the results for 1 digit, 2 digits, and 3 digits to a single text file.</p>
+
+<p>Is there a simple way I can write a python program that can accomplish this? Here is an example of the output I am expecting when printing all the binary number combinations possible for 1, 2, and 3 digits:</p>
+
+<pre><code>Output:
+0  
+1
+
+00  
+01  
+10  
+11
+
+000  
+001  
+010  
+011  
+100  
+101  
+110  
+111
+</code></pre>
+
+Answer: <p>A naÃ¯ve solution which solves the problem and is general enough for any application you might have is this:</p>
+
+<pre><code>def combinations(words, length):
+    if length == 0:
+        return []
+    result = [[word] for word in words]
+    while length &gt; 1:
+        new_result = []
+        for combo in result:
+            new_result.extend(combo + [word] for word in words)
+        result = new_result[:]
+        length -= 1
+    return result
+</code></pre>
+
+<p>Basically, this gradually builds up a tree in memory of all the combinations, and then returns them. It is memory-intensive, however, and so is impractical for large-scale combinations.</p>
+
+<p>Another solution for the problem is, indeed, to use counting, but then to transform the numbers generated into a list of words from the wordlist. To do so, we first need a function (called <code>number_to_list()</code>):</p>
+
+<pre><code>def number_to_list(number, words):
+    list_out = []
+    while number:
+        list_out = [number % len(words)] + list_out
+        number = number // len(words)
+    return [words[n] for n in list_out]
+</code></pre>
+
+<p>This is, in fact, a system for converting decimal numbers to other bases. We then write the counting function; this is relatively simple, and will make up the core of the application:</p>
+
+<pre><code>def combinations(words, length):
+    numbers = xrange(len(words)**length)
+    for number in numbers:
+        combo = number_to_list(number, words)
+        if len(combo) &lt; length:
+            combo = [words[0]] * (length - len(combo)) + combo
+        yield combo
+</code></pre>
+
+<p>This is a Python generator; making it a generator allows it to use up less RAM. There is a little work to be done after turning the number into a list of words; this is because these lists will need padding so that they are at the requested length. It would be used like this:</p>
+
+<pre><code>&gt;&gt;&gt; list(combinations('01', 3))
+[['0', '0', '0'], ['0', '0', '1'],
+['0', '1', '0'], ['0', '1', '1'],
+['1', '0', '0'], ['1', '0', '1'],
+['1', '1', '0'], ['1', '1', '1']]
+</code></pre>
+
+<p>As you can see, you get back a list of lists. Each of these sub-lists contains a sequence of the original words; you might then do something like <code>map(''.join, list(combinations('01', 3)))</code> to retrieve the following result:</p>
+
+<pre><code>['000', '001', '010', '011', '100', '101', '110', '111']
+</code></pre>
+
+<p>You could then write this to disk; a better idea, however, would be to use the built-in optimizations that generators have and do something like this:</p>
+
+<pre><code>fileout = open('filename.txt', 'w')
+fileout.writelines(
+    ''.join(combo) for combo in combinations('01', 3))
+fileout.close()
+</code></pre>
+
+<p>This will only use as much RAM as necessary (enough to store one combination). I hope this helps.</p>

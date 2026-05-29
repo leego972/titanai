@@ -1,0 +1,122 @@
+Question: <p>How feasible would it be to compile Python (possibly via an intermediate C representation) into machine code?</p>
+
+<p>Presumably it would need to link to a Python runtime library, and any parts of the Python standard library which were Python themselves would need to be compiled (and linked in) too.</p>
+
+<p>Also, you would need to bundle the Python interpreter if you wanted to do dynamic evaluation of expressions, but perhaps a subset of Python that didn't allow this would still be useful.</p>
+
+<p>Would it provide any speed and/or memory usage advantages?  Presumably the startup time of the Python interpreter would be eliminated (although shared libraries would still need loading at startup).</p>
+
+Answer: <p>This doesn't compile Python to machine code. But allows to create a shared library to call Python code.</p>
+
+<p>If what you are looking for is an easy way to run Python code from C without relying on execp stuff. You could generate a shared library from python code wrapped with a few calls to <a href="https://docs.python.org/2.7/c-api/intro.html#embedding-python" rel="nofollow">Python embedding API</a>. Well the application is a shared library, an .so that you can use in many other libraries/applications.</p>
+
+<p>Here is a simple example which create a shared library, that you can link with a C program. The shared library executes Python code.</p>
+
+<p>The python file that will be executed is <code>pythoncalledfromc.py</code>:</p>
+
+<pre><code># -*- encoding:utf-8 -*-
+# this file must be named "pythoncalledfrom.py"
+
+def main(string):  # args must a string
+    print "python is called from c"
+    print "string sent by Â«cÂ» code is:"
+    print string
+    print "end of Â«cÂ» code input"
+    return 0xc0c4  # return something
+</code></pre>
+
+<p>You can try it with <code>python2 -c "import pythoncalledfromc; pythoncalledfromc.main('HELLO')</code>. It will output:</p>
+
+<pre><code>python is called from c
+string sent by Â«cÂ» code is:
+HELLO
+end of Â«cÂ» code input
+</code></pre>
+
+<p>The shared library will be defined by the following by <code>callpython.h</code>:</p>
+
+<pre><code>#ifndef CALL_PYTHON
+#define CALL_PYTHON
+
+void callpython_init(void);
+int callpython(char ** arguments);
+void callpython_finalize(void);
+
+#endif
+</code></pre>
+
+<p>The associated <code>callpython.c</code> is:</p>
+
+<pre><code>// gcc `python2.7-config --ldflags` `python2.7-config --cflags` callpython.c -lpython2.7 -shared -fPIC -o callpython.so
+
+#include &lt;stdlib.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;python2.7/Python.h&gt;
+
+#include "callpython.h"
+
+#define PYTHON_EXEC_STRING_LENGTH 52
+#define PYTHON_EXEC_STRING "import pythoncalledfromc; pythoncalledfromc.main(\"%s\")"
+
+
+void callpython_init(void) {
+     Py_Initialize();
+}
+
+int callpython(char ** arguments) {
+  int arguments_string_size = (int) strlen(*arguments);
+  char * python_script_to_execute = malloc(arguments_string_size + PYTHON_EXEC_STRING_LENGTH);
+  PyObject *__main__, *locals;
+  PyObject * result = NULL;
+
+  if (python_script_to_execute == NULL)
+    return -1;
+
+  __main__ = PyImport_AddModule("__main__");
+  if (__main__ == NULL)
+    return -1;
+
+  locals = PyModule_GetDict(__main__);
+
+  sprintf(python_script_to_execute, PYTHON_EXEC_STRING, *arguments);
+  result = PyRun_String(python_script_to_execute, Py_file_input, locals, locals);
+  if(result == NULL)
+    return -1;
+  return 0;
+}
+
+void callpython_finalize(void) {
+  Py_Finalize();
+}
+</code></pre>
+
+<p>You can compile it with the following command:</p>
+
+<pre><code>gcc `python2.7-config --ldflags` `python2.7-config --cflags` callpython.c -lpython2.7 -shared -fPIC -o callpython.so
+</code></pre>
+
+<p>Create a file named <code>callpythonfromc.c</code> that contains the following:</p>
+
+<pre><code>#include "callpython.h"
+
+int main(void) {
+  char * example = "HELLO";
+  callpython_init();
+  callpython(&amp;example);
+  callpython_finalize();
+  return 0;
+}
+</code></pre>
+
+<p>Compile it and run:</p>
+
+<pre><code>gcc callpythonfromc.c callpython.so -o callpythonfromc
+PYTHONPATH=`pwd` LD_LIBRARY_PATH=`pwd` ./callpythonfromc
+</code></pre>
+
+<p>This is a very basic example. It can work, but depending on the library it might be still difficult to serialize C data structures to Python and from Python to C. Things can be automated somewhat...</p>
+
+<p><a href="http://stackoverflow.com/questions/138521/is-it-feasible-to-compile-python-to-machine-code/23596973#23596973">Nuitka</a> might be helpful.</p>
+
+<p>Also there is <a href="http://numba.pydata.org/" rel="nofollow">numba</a> but they both don't aim to do what you want exactly. Generating a C header from Python code is possible, but only if you specify the how to convert the Python types to C types or can infer that information. See <a href="https://bitbucket.org/logilab/astroid" rel="nofollow">python astroid</a> for a Python ast analyzer.</p>

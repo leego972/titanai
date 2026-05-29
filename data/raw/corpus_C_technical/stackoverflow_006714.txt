@@ -1,0 +1,105 @@
+Question: <p>Here is my sample code. It is meant to be an iterative procedure for gauss seidel (matrix solver). Essentially when the error is small enough it breaks out of the while loop.</p>
+
+<pre><code>i=1
+while (i&gt;0):
+    x_past = x_present
+
+    j=0
+    while(j&lt;3):
+        value=0
+        k=0
+        while(k&lt;3):
+            if(k!=j):
+                if(i==1):
+                    if(k&gt;j):
+                        value=value+0
+                    else:
+                        value=value+x_present[k]*eqn[j][k]    
+                else:
+                    value=value+x_present[k]*eqn[j][k]
+            else:
+                value=value+eqn[j][k]
+            k=k+1
+        x_present[j:j+1]=[value]
+        j=j+1
+    print "X_PAST"
+    print x_past
+    print "X_PRESENT"
+    print x_present    
+    if(error(x_past, x_present)&lt;10**-2):
+        break;
+    i=i+1
+</code></pre>
+
+<p>I've reduced the code so its more manageable. if you don't understand what its doing its not really that important to solving this problem.</p>
+
+<p>Here is the issue. Everytime </p>
+
+<pre><code>x_present[j:j+1]=[value]
+</code></pre>
+
+<p>is run, x_past is made equal to x_present. I don't know why this is the case as the only place i have set x_past equal to x_present is at the top of the loop. If I take away the </p>
+
+<pre><code>x_past=x_present
+</code></pre>
+
+<p>sentence, x_past is never made equal to x_present. This leads me to think it is some combination of the two statements that is causing the issue.</p>
+
+<p>This is a big problem cause if x_past = x_present the error = 0 every time and the loop breaks after the first iteration. The code does work, for example if I tell the code to run for 8 iterations and the break it gives me the answer its supposed to.</p>
+
+<p>I've been trying to figure this out for the last 4 hours and am completely stumped. I haven't been working with python long, so my trouble shooting skills syntax wise aren't that great. Any help would be appreciated!!</p>
+
+Answer: <p>As others pointed out the answer is to replace: <code>x_past = x_present</code> by <code>x_past = x_present[:]</code>. In general you could use a <code>copy</code> module to copy an object in Python.</p>
+
+<pre><code>&gt;&gt;&gt; import copy
+&gt;&gt;&gt; a = range(10)
+&gt;&gt;&gt; a
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+&gt;&gt;&gt; b = a
+&gt;&gt;&gt; a += 10, 11
+&gt;&gt;&gt; a
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+&gt;&gt;&gt; b
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+&gt;&gt;&gt; c = copy.copy(a) # shallow copy
+&gt;&gt;&gt; c
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+&gt;&gt;&gt; del a[3:]
+&gt;&gt;&gt; a
+[0, 1, 2]
+&gt;&gt;&gt; b
+[0, 1, 2]
+&gt;&gt;&gt; c
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+</code></pre>
+
+<p>Your code is unpythonic to say the least.</p>
+
+<p>It could be replaced by something like the following code:</p>
+
+<pre><code>import copy
+# assert(len(x_present) &gt;= len(eqn))
+
+first = True
+while True:
+    x_past = copy.copy(x_present) # copy
+
+    for j, eqj in enumerate(eqn):
+        x_present[j] = sum(x_present[k] * eqj[k] 
+                           for k in range(j if first else len(eqj)) 
+                           if k != j)
+        x_present[j] += eqj[j] 
+
+    print "X_PAST\n%s\nX_PRESENT\n%s" % (x_past, x_present)
+    if allequal(x_past, x_present, tolerance=10**-2):
+        break
+    first = False
+</code></pre>
+
+<p>Here's a definition of <code>allequal()</code> (using an absolute error. It might or might not be a good idea in your case (you could use a relative error instead)):</p>
+
+<pre><code>def allequal(x, y, tolerance):
+    return (len(x) == len(y) and 
+            all(-tolerance &lt; (xx - yy) &lt; tolerance
+                for xx, yy in zip(x, y)))
+</code></pre>

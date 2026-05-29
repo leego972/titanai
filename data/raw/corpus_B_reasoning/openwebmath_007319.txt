@@ -1,0 +1,145 @@
+# [NTG-context] counting the words in a TeX document
+
+Mojca Miklavec mojca.miklavec.lists at gmail.com
+Sun Aug 6 02:31:31 CEST 2006
+
+```On 8/5/06, Hans Hagen wrote:
+> Mojca Miklavec wrote:
+> > Hello,
+> >
+> > I would like to ask how difficult it would be to count the number of
+> > words in a TeX/ConTeXt document. If it's too complex, please ignore
+> > the rest of the message.
+> the way i do such things (and worse trickery) is using pdftotext
+>
+> you can of course use tex, but then ther ecan be generated words and so and it is insane to use tex (or adapt a tex style) for that; it may help to run with (nondestructive)
+>
+> \setupalign[nothyphenated]
+>
+> anyhow, here is a script (i could not locate my normal one)
+>
+> === wordcount.rb ===
+>
+> if (file = ARGV[0]) && file && FileTest.file?(file) then
+>     begin
+>         system("pdftotext #{ARGV[0]} wc.log")
+>         data.gsub!(/\d[\.\:]*\w+/o) do ' ' end  # remove suffixes
+>         data.gsub!(/\d/o)           do ' ' end  # remove numbers
+>         data.gsub!(/\-\s+/mo)       do ' ' end  # remove hyphenation
+>         data.gsub!(/\-/mo)          do ' ' end  # split compound words
+>         data.gsub!(/[\.\,\<\>\/\?\\\|\'\"\;\:\]\{\}\{\+\=\-\_\)\(\*\&\^\%\\$\#\@\!\~\`]/mo) do ' ' end
+>         words = data.split(/\s+/)
+>         count = Hash.new
+>         words.each do |w|
+>             count[w] = (count[w] || 0) + 1
+>         end
+>     rescue
+>         puts("some error #{\$!}")
+>     else
+>         puts("words  : #{words.size}")
+>         puts("unique : #{count.size}")
+>     end
+>     if ARGV[1] =~ /list/ then
+>         puts("\n")
+>         count.sort.each do |k,v|
+>             puts("#{k} : #{v}")
+>         end
+>     end
+> end
+>
+>
+> usage: wc filename.pdf [list]
+>
+> it this kind of stuff is usefull, we can add it to one of the scripts that come with context
+
+Thanks a lot! I guess that's *it*! I always forget about the most
+powerful feature of ConTeXt in comparison to LaTeX - scripting can be
+added to almost any place (and the user doesn't need to install any
+
+Here's some of my feedback:
+- pdftotext is far from being useful for pdf to text conversion
+(doesn't handle any accents), but is perfectly suitable for wordcount
+- \[ is missing in the last gsub (only the right bracket is deleted)
+- something strange (but not critical) happens to en-dashes
+
+But everything else looks like a perfect functionality for ctxtools --wordcount.
+
+> A very crude approach. There is a program called detex
+> http://ctan.org/tex-archive/support/detex/ I have not used it, but I
+> think that it strips off every command \something from the tex file.
+> Then you can filter the file through wc to get a rough estimate of
+> the number of words. One approach that will work is
+>
+> \startstatistics[filename][words|letters|lines]
+>
+> maps to
+>
+> \startbuffer[\jobname-statistics-filename]
+>
+> and
+>
+> \stopstatistics maps to
+>
+> \stopbuffer
+> \getbuffer[\jobname-statistics-filename]
+> \executesystemcommand{detex \jobname-statistics-filename.tmp | wc
+> <flags correspondingto words|lines|letters> }
+
+I took a look, but it merely looks like a parser for hardcoded (La)TeX
+(someone should correct me if I'm wrong).
+
+However, the fact that abstracts for which one might need wordcount
+usually don't have too much trickery involved (they're usually olmost
+pure plain text), doing the same, only with a simple ruby script
+instead of compiling/installing some external LaTeX-aware C program
+
+> It wasn't too complex for Michael Downes using LaTeX:
+>
+> \ProvidesFile{wordcount.tex}[2000/09/27 v1.5 Michael Downes]
+> % Copyright 2000 Michael John Downes
+> % This file has no restrictions on its use, distribution, or sale.
+> %
+> % If you run LaTeX on wordcount.tex it will prompt you for the name of a
+> % document to be counted. For most people, however, it will be more
+
+This solution is more likely to produce better results (just that it
+includes slightly more work). It actually runs (La)TeX, just redefines
+a few commands before, so that counting the words is then a
+straightforward parsing of log files based on the number of some
+boxes.
+
+Base on those three answers I got a more clear idea of two (different,
+but complementary) methods that might be sensible:
+
+a) ctxtools --wordcount filename[tex|pdf]
+to do the wordcount for the whole document using pdftotext + ruby regexp
+
+b)
+\usemodule[wordcount]
+
+whatever
+
+\startstatistics[name][words|letters|lines]
+some more-or-less plain text
+\stopstatistics
+
+whatever
+
+and according to Aditya's idea, run a (ruby) regular expression
+(insead of detex) on it which would write the nicely formatted desired
+number to the output/log file. (I don't know if it's possible to use
+the first approach for the second problem, but it doesn't make sense
+to complicate things too much.)
+
+As long as the command names are carefully chosen (and extensible if
+the need for more complex behaviour arises in the future), that should
+be about everything and it doesn't seem so difficult to implement
+after all. (But I would write to the documentation that the resulting
+numbers might change slightly in the future if the algorithm for
+counting the words is improved.)
+
+Any thoughts?
+
+Thanks a lot,
+Mojca
+```

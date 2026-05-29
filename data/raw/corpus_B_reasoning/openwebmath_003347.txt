@@ -1,0 +1,236 @@
+# “Z-level” in TikZ
+
+This is an idle question, but neverthless, I think it's interesting.
+
+Does TikZ have a simple way to implement a "z-level" specification. By this, I don't mean 3D drawing, I mean specifying which parts of the picture are on top of what.
+
+So I'd write something like this:
+
+\draw[fill, blue,zlevel=1] (0,0) circle (2);
+\draw[fill,red,zlevel=2] (0,0) circle (1);
+
+
+and have the red circle appear on top of the blue one (since it has a higher z-level). I know I could just reverse the order, but I can imagine that being able to specify things this way round might make incremental changes to a TikZ picture in beamer easier by simplifying the overlay specifications...
+
+I suppose you could do something with remember picture, but it seems a "z-level" key would be the easiest solution (from the end user perspective).
+
+Is there anything like this? Is it possible?
+
+• It should be noted that if you need only two levels, then having the part "below" in between  \begin{scope}[on background layer]…\end{scope} is enough. The solutions below are to accommodate more than 2 layers. – Clément Feb 4 at 18:23
+
+You can use the layers describe in section 108 Layered Graphics of the pgfmanual. You need to declare the layers first using \pgfdeclarelayer and then use them with \pgfsetlayers outside the picture. With the {pgfonlayer}{<layer name>} environment you can can wrap TikZ or PGF commands to be drawn on this layer. The background library provides a on background layer style for scopes, so it should be possible to define a zlevel style as well:
+
+\tikzset{zlevel/.style={%
+execute at begin scope={\pgfonlayer{#1}},
+execute at end scope={\endpgfonlayer}
+}}
+
+
+But you need to put all the commands into a scope.
+
+• Turns out your last sentence isn't wholly correct! (See my updated answer) – Loop Space Jun 13 '11 at 14:02
+• @Andrew: Nice! I was thinking about if this might be possible, but didn't had the time to investigate. – Martin Scharrer Jun 13 '11 at 14:13
+• @MartinScharrer Please, I would so use a MWE here now, since I have no idea as how scopes work. – yo' May 26 '13 at 21:32
+• @tohecz: TikZ scope are normal environments \begin{scope}[zlevel=...] ... \end{scope}. – Martin Scharrer May 27 '13 at 5:36
+
+Yes. They are called "layers". I've used this a few times in various solutions:
+
+As have various others:
+
+https://tex.stackexchange.com/search?q=pgfonlayer
+
+Update: In a desperate attempt to "out-TikZ" Martin, here's a version that works as a key on a single path. It works by a bit of sneaky hackery together with careful observation as to when particular commands get executed. We need to install some code at the beginning and the end of the path. The beginning is okay as TikZ options get parsed early on. The end is a little trickier and that's where the sneaky hackery comes in. Basically, the \tikz@path@do@at@end macro gets done, as it says, at the end. It occurs after an \endgroup and the keys on the path are examined inside that group, so at first sight it seems that there's no way for a key inside the group to hook in to that \tikz@path@do@at@end without making a global assignment (something I'm reluctant to do). But if we introduce a new \begingroup then the original \endgroup at the end of the TikZ path-setting routine no longer ends the main grouping but ends our internal grouping, thus allowing us access to \tikz@path@do@at@end. So long as we are careful and end the outer group, followed again by \tikz@path@do@at@end (which is now back to its original meaning) then we can put our layer ending code there.
+
+\documentclass{article}
+\usepackage{tikz}
+\pgfdeclarelayer{back}
+\pgfsetlayers{back,main}
+
+\makeatletter
+\pgfkeys{%
+/tikz/on layer/.code={
+\def\tikz@path@do@at@end{\endpgfonlayer\endgroup\tikz@path@do@at@end}%
+\pgfonlayer{#1}\begingroup%
+}%
+}
+\makeatother
+
+\begin{document}
+\begin{tikzpicture}
+\fill[green!50!white,opacity=.5] (0,0) rectangle (8,8);
+\begin{pgfonlayer}{back}
+\draw[ultra thick,red,line width=1cm] (-1,-1) -- (9,9);
+\end{pgfonlayer}
+\draw[ultra thick,red,line width=1cm,on layer=back] (-1,9) -- (9,-1);
+\end{tikzpicture}
+\end{document}
+
+
+with the result that both the red lines are behind the green rectangle.
+
+(As with many of my hackery answers, this comes with a "use at own risk" warning, and is also as much about the hack as the specific application. Indeed, I'd been looking for a way to hook in to that \tikz@path@do@at@end macro for something else and this might just be how I can do it.)
+
+Edit: (again) I don't know how "safe" modifying \tikz@path@do@at@end is so here's an alternative that uses \aftergroup instead. It uses the same idea of the hack: start a new group so that the existing \endgroup is taken as the end of the inner group. This is a replacement for the \pgfkeys bit in the previous example:
+
+\pgfkeys{%
+/tikz/on layer/.code={
+\pgfonlayer{#1}\begingroup
+\aftergroup\endpgfonlayer
+\aftergroup\endgroup
+},
+/tikz/node on layer/.code={
+\pgfonlayer{#1}\begingroup
+\expandafter\def\expandafter\tikz@node@finish\expandafter{\expandafter\endgroup\expandafter\endpgfonlayer\tikz@node@finish}%
+}
+}
+
+
+Update: As Bruce pointed out in the comments, on layer doesn't work within the \node command (though \path[on layer=back] node {node}; works). That's because \node[options] becomes \path node[options] and not \path[options] node so the hooks are in different places. After a bit of detective work, I found a hook to hang the closing bit of the layer command on. So \node[node on layer=back] {on back layer}; works. I still need to look a bit further to find something that works with \draw (0,0) -- node[put this on the back layer but not the path] {back} (8,0);.
+
+(and no longer any need for \makeatletter!)
+
+Update (2012-03-07): Revisiting this, I found that the node on layer was no longer working (if it ever did - I'm dubious now as I don't think that the TikZ code has changed). I have found a new set of hooks to hook into for the nodes. One significant advantage of the new approach is that it is possible to put nodes on a different level to their surrounding path. Rather neat, I thought.
+
+Here's the current code:
+
+\documentclass{article}
+%\url{https://tex.stackexchange.com/q/46957/86}
+\usepackage{tikz}
+%\usepackage[tracelevel=silent]{trace-pgfkeys}
+\pgfdeclarelayer{back}
+\pgfdeclarelayer{front}
+\pgfsetlayers{back,main,front}
+
+\makeatletter
+\pgfkeys{%
+/tikz/on layer/.code={
+\pgfonlayer{#1}\begingroup
+\aftergroup\endpgfonlayer
+\aftergroup\endgroup
+},
+/tikz/node on layer/.code={
+\gdef\node@@on@layer{%
+\setbox\tikz@tempbox=\hbox\bgroup\pgfonlayer{#1}\unhbox\tikz@tempbox\endpgfonlayer\egroup}
+\aftergroup\node@on@layer
+},
+/tikz/end node on layer/.code={
+\endpgfonlayer\endgroup\endgroup
+}
+}
+
+\def\node@on@layer{\aftergroup\node@@on@layer}
+
+\makeatother
+\begin{document}
+\begin{tikzpicture}
+\draw[line width=1cm,red] (2,1) -- (2,-1);
+\draw[ultra thick,white,preaction={on layer=back,line width=1cm,blue,draw}] (0,0) -- (4,0);
+\draw[line width=1cm,red] (2,-2) -- (2,-4);
+\draw[ultra thick,white,postaction={on layer=back,line width=1cm,blue,draw}] (0,-3) -- (4,-3);
+\begin{scope}[xshift=5cm]
+\draw[line width=1cm,red] (2,1) -- (2,-1);
+\draw[ultra thick,white,preaction={line width=1cm,blue,draw}] (0,0) -- (4,0);
+\draw[line width=1cm,red] (2,-2) -- (2,-4);
+\draw[ultra thick,white,postaction={line width=1cm,blue,draw}] (0,-3) -- (4,-3);
+\end{scope}
+\begin{scope}[yshift=-5.2cm,xshift=2cm]
+\draw[line width=1cm,red] (0,1) -- (0,-1);
+\path[on layer=back] node[draw] (a) {At the back of beyond};
+\node[node on layer=front] at (0,-2) (b) {At the front of beyond};
+\draw[line width=1cm,red] (b.north) -- (b.south);
+\draw[line width=1cm,red] node[thin,black,draw,node on layer=back] at (0,-4) (c) {At the side of beyond} (c.north) -- (c.south);
+\begin{scope}[xshift=5cm]
+\draw[line width=1cm,red] (0,1) -- (0,-1);
+\path node[draw] (a) {At the back of beyond};
+\node at (0,-2) (b) {At the front of beyond};
+\draw[line width=1cm,red] (b.north) -- (b.south);
+\draw[line width=1cm,red] node[thin,black,draw] at (0,-4) (c) {At the side of beyond} (c.north) -- (c.south);
+\end{scope}
+\end{scope}
+\end{tikzpicture}
+\end{document}
+
+
+(NB the commented out package is left in deliberately as it was very useful in figuring out what was going on. See How do I debug pgfkeys? for more details on that package.)
+
+Here's the result of the above. In each case, the layering is happening on the left and not on the right. The fact that the left and right are different proves that something is being shifted from one layer to another.
+
+• +1 for taking the "out-TikZ Martin" challenge :-) and another impressive lesson for what one can achieve with TikZ by "just" defining some extra styles. – Daniel Jun 14 '11 at 7:48
+• @Daniel: Thanks! The more I look at the code, the more opportunities I see for doing "weird" stuff like this. Turns out my last sentence was right: this was just what I needed. There's lots of unseen "hooks" that one can use to mess with TikZ's routine and make it do something completely different to what was intended. – Loop Space Jun 14 '11 at 7:51
+• @Andrew: This looks brilliant. But your code doesn't seem to work for nodes. If I type \node[on layer=back] {This should be on back layer} at (3,3); then it doesn't put it on the back layer. – Bruce Bartlett Jun 15 '11 at 17:49
+• @Bruce: True. Looking at the code, I can't see any easy hooks for the \node command. Although \node is "an abbreviation for \path node" the options to the \node don't get put on the \path. A way around it is \path[on layer=back] node {This should be on the back layer} at (3,3);. – Loop Space Jun 15 '11 at 18:55
+• @Andrew: Ok good, that's not a bad workaround. – Bruce Bartlett Jun 15 '11 at 19:24
+
+This is merely a supplement to Loop Space's fantastic answer, which makes it work as I'd expect with the TikZ backgrounds library. The only reason I've renamed the background and foreground layers is for consistency with the backgrounds library and with my own extension of that.
+
+\documentclass[border=10pt,multi,tikz]{standalone}
+
+\usetikzlibrary{backgrounds}
+\pgfdeclarelayer{foreground}
+\pgfsetlayers{background,main,foreground}
+
+\makeatletter
+\tikzset{%
+on foreground layer/.style={%
+execute at begin scope={%
+\pgfonlayer{foreground}%
+\let\tikz@options=\pgfutil@empty%
+\tikzset{every on foreground layer/.try,#1}%
+\tikz@options%
+},
+execute at end scope={\endpgfonlayer}
+},
+% addasu o ateb Loop Space: https://tex.stackexchange.com/a/20426/
+%\url{https://tex.stackexchange.com/q/46957/86}
+on layer/.code={%
+\pgfonlayer{#1}\begingroup
+\aftergroup\endpgfonlayer
+\aftergroup\endgroup
+},
+node on layer/.code={%
+\gdef\node@@on@layer{%
+\setbox\tikz@tempbox=\hbox\bgroup\pgfonlayer{#1}\unhbox\tikz@tempbox\endpgfonlayer\egroup}
+\aftergroup\node@on@layer
+},
+}
+
+\def\node@on@layer{\aftergroup\node@@on@layer}
+
+\makeatother
+
+\begin{document}
+\begin{tikzpicture}
+\draw[line width=1cm,red] (2,1) -- (2,-1);
+\draw[ultra thick,white,preaction={on layer=background,line width=1cm,blue,draw}] (0,0) -- (4,0);
+\draw[line width=1cm,red] (2,-2) -- (2,-4);
+\draw[ultra thick,white,postaction={on layer=background,line width=1cm,blue,draw}] (0,-3) -- (4,-3);
+\begin{scope}[xshift=5cm]
+\draw[line width=1cm,red] (2,1) -- (2,-1);
+\draw[ultra thick,white,preaction={line width=1cm,blue,draw}] (0,0) -- (4,0);
+\draw[line width=1cm,red] (2,-2) -- (2,-4);
+\draw[ultra thick,white,postaction={line width=1cm,blue,draw}] (0,-3) -- (4,-3);
+\end{scope}
+\begin{scope}[yshift=-5.2cm,xshift=2cm]
+\draw[line width=1cm,red] (0,1) -- (0,-1);
+\path[on layer=background] node[draw] (a) {At the background of beyond};
+\node[node on layer=foreground] at (0,-2) (b) {At the front of beyond};
+\draw[line width=1cm,red] (b.north) -- (b.south);
+\draw[line width=1cm,red] node[thin,black,draw,node on layer=background] at (0,-4) (c) {At the side of beyond} (c.north) -- (c.south);
+\begin{scope}[xshift=5cm]
+\draw[line width=1cm,red] (0,1) -- (0,-1);
+\path node[draw] (a) {At the background of beyond};
+\node at (0,-2) (b) {At the front of beyond};
+\draw[line width=1cm,red] (b.north) -- (b.south);
+\draw[line width=1cm,red] node[thin,black,draw] at (0,-4) (c) {At the side of beyond} (c.north) -- (c.south);
+\end{scope}
+\end{scope}
+\path (current bounding box.north west) -- (current bounding box.north east) \foreach \i [count=\j] in {0,.225,.275,.5,.725,.775,1} {coordinate [pos=\i] (p\j)};
+\begin{scope}[on background layer]
+\fill [yellow, fill opacity=.3] (current bounding box.north west) rectangle (current bounding box.south -| p2) (p7) rectangle (p6 |- current bounding box.south);
+\end{scope}
+\begin{scope}[on foreground layer]
+\fill [green, fill opacity=.3] (p2) rectangle (current bounding box.south -| p3) (p6) rectangle (p5 |- current bounding box.south);
+\end{scope}
+\fill [magenta, fill opacity=.3] (p3) rectangle (current bounding box.south -| p4) (p5) rectangle (p4 |- current bounding box.south);
+\end{tikzpicture}
+\end{document}

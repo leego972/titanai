@@ -1,0 +1,87 @@
+Question: <p>I would like create my own collection that has all the attributes of python list and also knows how to save/load itself into/from a database.  Also I want to make the load implicit and lazy, as in it doesn't happen at the point of creation of the list, but waits until its first used.</p>
+
+<p>Is there a single<code>__xxx__</code>method I can override to load the list on first usage of any list property  (such as<code>len</code>,<code>getitem</code>,<code>iter</code>...etc) without having to override them all?</p>
+
+Answer: <p>Not a <em>single</em>, but 5 is enough:</p>
+
+<pre><code>from collections import MutableSequence
+
+class Monitored(MutableSequence):
+Â  Â  def __init__(self):
+Â  Â  Â  Â  super(Monitored, self).__init__()
+Â  Â  Â  Â  self._list = []
+
+Â  Â  def __len__(self):
+Â  Â  Â  Â  r = len(self._list)
+Â  Â  Â  Â  print "len: {0:d}".format(r)
+Â  Â  Â  Â  return r
+
+Â  Â  def __getitem__(self, index):
+Â  Â  Â  Â  r = self._list[index]
+Â  Â  Â  Â  print "getitem: {0!s}".format(index)
+Â  Â  Â  Â  return r
+
+Â  Â  def __setitem__(self, index, value):
+Â  Â  Â  Â  print "setitem {0!s}: {1:s}".format(index, repr(value))
+Â  Â  Â  Â  self._list[index] = value
+
+Â  Â  def __delitem__(self, index):
+Â  Â  Â  Â  print "delitem: {0!s}".format(index)
+Â  Â  Â  Â  del self._list[index]
+
+Â  Â  def insert(self, index, value):
+Â  Â  Â  Â  print "insert at {0:d}: {1:s}".format(index, repr(value))
+Â  Â  Â  Â  self._list.insert(index, value)
+</code></pre>
+
+<p>The correct way of checking if something implements the whole list interface is to check if it is a subclass of <code>MutableSequence</code>. The ABCs found in the <code>collections</code> module, of which <code>MutableSequence</code> is one, are there for two reasons: </p>
+
+<ol>
+<li><p>to allow you to make your own classes emulating internal container types so that they are usable everywhere a normal built-in is. </p></li>
+<li><p>to use as argument for <code>isinstance</code> and <code>issubclass</code> to verify that an object implements the necessary functionality:</p></li>
+</ol>
+
+<p><p></p>
+
+<pre><code>&gt;&gt;&gt; isinstance([], MutableSequence)
+True
+&gt;&gt;&gt; issubclass(list, MutableSequence)
+True
+</code></pre>
+
+<p>Our <code>Monitored</code> class works like this:</p>
+
+<pre>
+>>> m = Monitored()
+>>> m.append(3)
+len: 0
+insert at 0: 3
+>>> m.extend((1, 4))
+len: 1
+insert at 1: 1
+len: 2
+insert at 2: 4
+>>> m.l
+[3, 1, 4]
+>>> m.remove(4)
+getitem: 0
+getitem: 1
+getitem: 2
+delitem: 2
+>>> m.pop(0)   # after this, m.l == [1]
+getitem: 0
+delitem: 0
+3
+>>> m.insert(0, 4)
+insert at 0: 4
+>>> m.reverse()   # After reversing, m.l == [1, 4]
+len: 2
+getitem: 1
+getitem: 0
+setitem 0: 1
+setitem 1: 4
+>>> m.index(4)
+getitem: 0
+getitem: 1
+1
+</pre>

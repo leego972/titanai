@@ -1,0 +1,132 @@
+ouroboros-consensus-test-0.1.0.0: Tests of the consensus layer
+
+Test.Util.FS.Sim.Error
+
+Description
+
+HasFS instance wrapping SimFS that generates errors, suitable for testing error handling.
+
+Synopsis
+
+Introduce possibility of errors
+
+TODO: Lenses would be nice for the setters
+
+runSimErrorFS ∷ (MonadSTM m, MonadThrow m) ⇒ MockFSErrors → (StrictTVar m ErrorsHasFS m HandleMock → m a) → m (a, MockFS) Source #
+
+Runs a computation provided an Errors and an initial MockFS, producing a result and the final state of the filesystem.
+
+withErrorsMonadSTM m ⇒ StrictTVar m ErrorsErrors → m a → m a Source #
+
+Execute the next action using the given Errors. After the action is finished, the previous Errors are restored.
+
+Streams
+
+An ErrorStream is a possibly infinite Stream of (Maybe) FsErrorTypes.
+
+Nothing indicates that there is no error.
+
+Each time the ErrorStream is used (see runErrorStream), the first element (Nothing in case the list is empty) is taken from the list and an ErrorStream with the remainder of the list is returned. The first element represents whether an error should be returned or not.
+
+An FsError consists of a number of fields: fsErrorType, a fsErrorPath, etc. Only the first fields is interesting. Therefore, we only generate the FsErrorType. The FsErrorType will be used to construct the actual FsError.
+
+ErrorStream for hGetSome: an error or a partial get.
+
+ErrorStream for hPutSome: an error and possibly some corruption, or a partial write.
+
+newtype Stream a Source #
+
+A Stream is a possibly infinite stream of Maybe as.
+
+Constructors
+
+ Stream FieldsgetStream ∷ [Maybe a]
+
+Instances
+
+Instances details
+ Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methodsfmap ∷ (a → b) → Stream a → Stream b Source #(<\$) ∷ a → Stream b → Stream a Source # Show a ⇒ Show (Stream a) Source # Instance detailsDefined in Test.Util.FS.Sim.Error MethodsshowList ∷ [Stream a] → ShowS Source # Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methods(<>) ∷ Stream a → Stream a → Stream a Source #stimes ∷ Integral b ⇒ b → Stream a → Stream a Source # Monoid (Stream a) Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methodsmappend ∷ Stream a → Stream a → Stream a Source #mconcat ∷ [Stream a] → Stream a Source #
+
+always ∷ a → Stream a Source #
+
+Make a Stream that always generates the given a.
+
+mkStream ∷ [Maybe a] → Stream a Source #
+
+Create a Stream based on the given possibly infinite list of Maybe as.
+
+mkStreamGenInt → Gen a → Gen (Stream a) Source #
+
+Make a Stream generator based on a a generator.
+
+The generator generates a finite stream of 10 elements, where each element has a chance of being either Nothing or an element generated with the given a generator (wrapped in a Just).
+
+The first argument is the likelihood (as used by frequency) of a Just where Nothing has likelihood 2.
+
+Return True if the stream is empty.
+
+A stream consisting of only Nothings (even if it is only one) is not considered to be empty.
+
+runStreamStream a → (Maybe a, Stream a) Source #
+
+Advance the Stream. Return the Maybe a and the remaining Stream.
+
+newtype Partial Source #
+
+Given a Partial p where p > 0, we do the following to make a call to hGetSome or hPutSome partial:
+
+• hGetSome: we subtract p from the number of requested bytes. If that would result in 0 requested bytes or less, we request 1 byte. If the number of requested bytes was already 0, leave it untouched, as we can't simulate a partial read in this case.
+• hPutSome: we drop the last p bytes from the bytestring. If that would result in an empty bytestring, just take the first byte of the bytestring. If the bytestring was already empty, leave it untouched, as we can't simulate a partial write in this case.
+
+Constructors
+
+ Partial Word64
+
+Instances
+
+Instances details
+ Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methods Arbitrary Partial Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methodsarbitrary ∷ Gen Partialshrink ∷ Partial → [Partial]
+
+Generating corruption for hPutSome
+
+Model possible corruptions that could happen to a hPutSome call.
+
+Constructors
+
+ SubstituteWithJunk Blob The blob to write is substituted with corrupt junk PartialWrite Partial Only perform the write partially
+
+Instances
+
+Instances details
+ Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methods Arbitrary PutCorruption Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methods
+
+Apply the PutCorruption to the ByteString.
+
+Error streams for HasFS
+
+data Errors Source #
+
+Error streams for the methods of the HasFS type class.
+
+An ErrorStream is provided for each method of the HasFS type class. This ErrorStream will be used to generate potential errors that will be thrown by the corresponding method.
+
+For hPutSome, an ErrorStreamWithCorruption is provided to simulate corruption.
+
+An Errors is used in conjunction with SimErrorFS, which is a layer on top of SimFS that simulates methods throwing FsErrors.
+
+Instances
+
+Instances details
+ Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methods Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methodsstimes ∷ Integral b ⇒ b → Errors → Errors Source # Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methods Arbitrary Errors Source # Instance detailsDefined in Test.Util.FS.Sim.Error Methodsarbitrary ∷ Gen Errorsshrink ∷ Errors → [Errors]
+
+Return True if all streams are empty (null).
+
+Arguments
+
+ ∷ Bool True -> generate partial writes → Bool True -> generate SubstituteWithJunk corruptions → Gen Errors
+
+Generator for Errors that allows some things to be disabled.
+
+This is needed by the VolatileDB state machine tests, which try to predict what should happen based on the Errors, which is too complex sometimes.
+
+Use the given ErrorStream for each field/method. No corruption of hPutSome.

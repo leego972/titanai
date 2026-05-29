@@ -1,0 +1,109 @@
+WGCNA HELP - Error: REAL() can only be applied to a 'numeric', not a 'integer'
+2
+0
+Entering edit mode
+sm15766 ▴ 30
+@sm15766-9497
+Last seen 6.6 years ago
+
+Hi,
+
+I've been analysing gene expression networks from my RNAseq dataset using the WGCNA software, using the following code on a single  .csv folder with individuals making the columns and different genes making up the rows - I used the gene expression values as FPFM from the tuxedo pipeline. I used this code:
+
+R
+setwd("/home/user/edgeR")
+library(WGCNA)
+options(stringsAsFactors = FALSE)
+nSets = 1
+setLabels = c("alpha")
+shortLabels = c("alpha")
+multiExpr = vector(mode = "list", length = nSets)
+names(multiExpr[[1]]$data) = alphaData$substanceBXH;
+rownames(multiExpr[[1]]$data) = names(alphaData)[-c(1:8)]; exprSize = checkSets(multiExpr) exprSize gsg = goodSamplesGenesMS(multiExpr, verbose = 3); gsg$allOK
+sampleTrees = list()
+for (set in 1:nSets)
+{
+sampleTrees[[set]] = hclust(dist(multiExpr[[set]]$data), method = "average") } pdf(file = "Plots/SampleClustering.pdf", width = 12, height = 12); par(mfrow=c(2,1)) par(mar = c(0, 4, 2, 0)) for (set in 1:nSets) plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]), xlab="", sub="", cex = 0.7); dev.off() save(multiExpr,setLabels, shortLabels, file = "Consensus-dataInput.RData") enableWGCNAThreads() lnames = load(file = "Consensus-dataInput.RData"); lnames nSets = checkSets(multiExpr)$nSets
+powers = c(seq(4,10,by=1), seq(12,20, by=2));
+powerTables = vector(mode = "list", length = nSets);
+for (set in 1:nSets)
+powerTables[[set]] = list(data = pickSoftThreshold(multiExpr[[set]]$data, powerVector=powers, verbose = 2)[[2]]); collectGarbage(); colors = c("black", "red") plotCols = c(2,5,6,7) colNames = c("Scale Free Topology Model Fit", "Mean connectivity", "Median connectivity", "Max connectivity"); ylim = matrix(NA, nrow = 2, ncol = 4); for (set in 1:nSets) { for (col in 1:length(plotCols)){ ylim[1, col] = min(ylim[1, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+ylim[2, col] = max(ylim[2, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE); } } sizeGrWindow(8, 6) par(mfcol = c(2,2)); par(mar = c(4.2, 4.2 , 2.2, 0.5)) cex1 = 0.7; for (col in 1:length(plotCols)) for (set in 1:nSets) { if (set==1) { plot(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+xlab="Soft Threshold (power)",ylab=colNames[col],type="n", ylim = ylim[, col],
+main = colNames[col]);
+}
+if (col==1)
+{
+text(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2], labels=powers,cex=cex1,col=colors[set]); } else text(powerTables[[set]]$data[,1], powerTables[[set]]\$data[,plotCols[col]],
+labels=powers,cex=cex1,col=colors[set]);
+if (col==1)
+{
+legend("bottomright", legend = setLabels, col = colors, pch = 20) ;
+} else
+legend("topright", legend = setLabels, col = colors, pch = 20) ;
+}
+net = blockwiseConsensusModules(
+multiExpr, power = 6, minModuleSize = 30, deepSplit = 2,
+pamRespectsDendro = FALSE,
+mergeCutHeight = 0.25, numericLabels = TRUE,
+minKMEtoStay = 0,
+saveTOMs = TRUE, verbose = 5)
+
+which returns the error
+
+Could not find a suitable move to improve the clustering.
+..merging smaller clusters...
+..Working on block 1 .
+....Working on set 1
+Error: REAL() can only be applied to a 'numeric', not a 'integer'
+
+Any ideas on what might be causing this? Thanks!
+
+wgcna rnaseq R bioconductor • 5.9k views
+2
+Entering edit mode
+@peter-langfelder-4469
+Last seen 6 months ago
+United States
+
+Aaron is correct, the problem arises because some internal functions expect real numbers, not integers. This can be fixed easily as Keith suggested.
+
+More generally, I don't recommend applying WGCNA directly to integer (count) data. See WGCNA FAQ at https://labs.genetics.ucla.edu/horvath/CoexpressionNetwork/Rpackages/WGCNA/faq.html, point 3 (Working with RNA-seq data) for some advice on working with RNA-seq data (the most common integer data).
+
+0
+Entering edit mode
+
+Hey,
+
+log2(myarray+1)
+
+and then exported it back into a text file which looked  like:
+
+ X10G48 X35Y87 X36W26 X23Y79 X2B84 X12Y30 X10B70 X10G87 X36W62 X23Y70 X2UNA X12Y47 X10R99 X10G17 X35Y44 X36W35 X23Y59 X2B82 X12Y51 5.0874628413 5.1292830169 5.3219280949 6.2288186905 5.4594316186 5.4594316186 5.1292830169 4.8579809951 5.4262647547 6.3750394313 5.2854022189 4.8579809951 4.5849625007 5.3575520046 5.3575520046 5.2854022189 4.0874628413 5.4262647547 4.2479275134 4.1699250014 5.4262647547 5.4918530963 6.0874628413 5.2854022189 5.8826430494 5.3923174228 4.9068905956 4.7004397181 5.8826430494 5.7548875022 4.8579809951 4.8073549221 5.3219280949 4.1699250014 5 4.9541963104 4.8073549221 2.3219280949 0 0 0 0 0 0 2.8073549221 0 0 0 0 0 3.7004397181 4.0874628413 0 2.3219280949 2.8073549221 0 3 0 0 0 1.5849625007 0 0 3.4594316186 0 0 0 0 2.3219280949 1.5849625007 4.9541963104 0 1.5849625007 0 0 2.5849625007 5.4918530963 5.8579809951 5.2479275134 6.1699250014 5.5235619561 5.5849625007 5.6438561898 5.7548875022 5.2094533656 5.5849625007 6.0874628413 5.6147098441 5.3219280949 6.2854022189 4.1699250014 5.3219280949 5.3923174228 6.022367813 5.2094533656 5.4594316186 5.5545888517 5.4262647547 6.1699250014 5.7548875022 5.7548875022 5.6438561898 5.6147098441 4.2479275134 5.7548875022 5.9541963104 5.2479275134 4.7548875022 6.3037807482 5.4594316186 4.9068905956 5.7548875022 5.5849625007 4.5235619561 10.2131042196 10.7598881832 10.3264294871 9.9351650496 9.6474584265 9.5313814605 9.6438561898 10.0112272554 9.8856963733 9.5313814605 10.1305705628 10.342074668 10.0620461377 10.4283601727 10.7944158664 10.2807707701 10.9701058906 10.4252159033 9.9985904297 10.2215871213 10.822570831 10.3793783671 10.0042204663 9.6147098441 9.5468944599 9.7262181593 10.0927571409 9.8041310212 9.5468944599 10.2288186905 10.401946124 10.0953970228 10.3912435894 10.7540523675 10.3286749273 11.048486874 10.4726908392 10.0714623626
+
+But the same error came up again as before:
+
+Error: REAL() can only be applied to a 'numeric', not a 'integer'
+
+Am I doing something wrong?
+
+0
+Entering edit mode
+Keith Hughitt ▴ 170
+@keith-hughitt-6740
+Last seen 6 months ago
+United States
+
+Not sure what the underlying cause is, but I've found that some methods seem not like discrete data and simply casting it to float may help, e.g.:
+
+Keith
+
+1
+Entering edit mode
+
+From the developer side, the error probably comes from the C-level API, where REAL macro expects a SEXP of double-precision values rather than integers. I suspect that someone, somewhere, didn't put any coercion of user inputs to double-precision values, e.g., via as.double or with coerceVector. This results in the observed error upon entry into C.
+
+0
+Entering edit mode
+
+OK thanks, that sounds reasonable. I am very much a rookie when it comes to R coding and stuff - could you reccomend a way to fix it perhaps? Thanks!

@@ -1,0 +1,210 @@
+# Use of Module Design Pattern in simple D3 “overlay” program
+
+I have been learning JS (mostly using D3) and I wanted to put the Module Design Pattern to use. I wrote a simple script that lets you build a bar chart with more ease / readable code.
+
+The end user code:
+
+canvas.initialise()
+canvas.margin(20, 100, 60, 20)
+canvas.width(500)
+canvas.height(400)
+canvas.finalise()
+svg = canvas.get_canvas()
+
+my_data = [["A", 10], ["B", -3], ["C", 4]]
+
+bar_chart.data(my_data)
+bar_chart.x_scale([0, canvas.get_width()], .1, 1)
+bar_chart.y_scale([canvas.get_height(), 0])
+bar_chart.formatting(".2f")
+
+
+The library code which uses the MDP:
+
+var canvas = (function ()
+{
+// private
+var svg;
+var margin, width, height, x_pos, y_pos;
+
+var initialise = function () { svg = d3.select("body").append("svg") }
+var set_position = function (x, y) { x_pos = x; y_pos = y;}
+var set_margins = function (top, bottom, left, right) { margin = { top: top, bottom: bottom, left: left, right: right }; }
+var set_width = function (val) { width = val - margin.left - margin.right; svg.attr("width", val + margin.left + margin.right); }
+var set_height = function (val) { height = val - margin.top - margin.bottom; svg.attr("height", val + margin.top + margin.bottom); }
+var finalise = function ()
+{
+svg.append("g").attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+.attr("x", x_pos)
+.attr("y", y_pos)
+}
+
+return {
+initialise: initialise,
+position: set_position,
+margin: set_margins,
+width: set_width,
+height: set_height,
+finalise: finalise,
+get_canvas: function () { return svg },
+get_margin: function () { return margin },
+get_width: function () { return width },
+get_height: function () { return height }
+}
+}());
+
+var bar_chart = (function ()
+{
+var data,
+x, y,
+xAxis, yAxis,
+formatting;
+
+var set_data = function(data_input)
+{
+data = data_input;
+}
+
+var set_x_scale = function (interval, padding, outer_padding)
+{
+x = d3.scale.ordinal()
+}
+
+var set_y_scale = function (interval)
+{
+y = d3.scale.linear()
+.range(interval)
+}
+
+var set_formatting = function (fmt)
+{
+formatting = d3.format(fmt);
+}
+
+var add_to = function(svg)
+{
+console.log(data)
+
+xAxis = d3.svg.axis()
+.scale(x) // call ticks?
+
+yAxis = d3.svg.axis()
+.scale(y)
+.orient("left")
+.tickFormat(formatting)
+
+x.domain(data.map(function (d) { return d[0] }))
+y.domain([-5, 15]) //make general
+
+// Put the axes on the canvas
+svg.append("g")
+.attr("class", "x axis")
+.attr("transform", "translate(" + canvas.get_margin().left + "," + canvas.get_height() + ")")
+.call(xAxis)
+
+svg.append("g")
+.attr("class", "y axis")
+.attr("transform", "translate(" + canvas.get_margin().left + ",0)")
+.call(yAxis)
+
+// Put the data in rectangle elements and put on canvas
+var bars = svg.selectAll(".bar")
+.data(data)
+.enter()
+.append("rect")
+.attr("class", "bar")
+.attr("width", x.rangeBand())
+.attr("x", function (d) { return x(d[0]) + canvas.get_margin().left })  // hmm...
+.attr("y", function (d)
+{
+if (d[1] < 0)
+{
+return y(0);
+}
+else
+return y(d[1])
+})
+.attr("height", function (d) { return y(0) - y(Math.abs(d[1])) });
+
+}
+
+return {
+data: set_data,
+formatting: set_formatting,
+x_scale: set_x_scale,
+y_scale: set_y_scale,
+}
+
+}());
+
+
+My concerns:
+
+• I feel that having to make sure to call some functions before others means my structure is off (sometimes unavoidable, but comments on this would be useful)
+• is this a suitable use of the design pattern?
+• can usability be enhanced by using the pattern differently?
+• is a different pattern more suitable in this case?
+• Note: in JavaScript, the convention is to use camelCase, not snake_case. – somebody May 31 '16 at 12:17
+• Also, you have left out multiple semicolons, and the braces for return y(d[1]). You should probably run your code throught JSHint to fix small code style inconsistencies before you post it here. – somebody May 31 '16 at 12:22
+• Also, I'm not sure making the variables does anything, since you expose the variable anyway. If there's no real reason to hide the variables, you can make the bar chart keep an internal reference to the svg, then make data() call redraw() (which would be a clear() followed by an add_to()) if svg has been set (i.e. if (svg) { this.redraw(); }. Otherwise, if you don't want the graph to be editable, set an internal variable to true once data() is called, so you can warn or throw and error when data() is called again. – somebody May 31 '16 at 12:31
+• @somebody It's not a bad thing to leave out semicolons; it's just that you either use semicolons; or stick to the style of only using semicolons when necessary (a style used by npm); but the bad thing is making a mish-mash-mosh of style. – gcampbell Jun 2 '16 at 16:43
+• @gcampbell Yeah, I know, but the semicolons that were there confused me slightly. – somebody Jun 2 '16 at 16:57
+
+You make some really good points in your concerns list, particularly with your first one and the reason behind it:
+
+Your modules have too many dependencies
+
+The idea behind a module is to create self-containing, single-purposed code. Your canvas module depends on the order in which the user calls the functions. Your bar_chart is particularly needed with it's addTo method requiring direct accesses the canvas module. Good modules are simple and straightforward. They encase some complicated task into a black box, allowing the user to be ignorant of what is going on under the hood. This allows the user to focus on using the module instead of worrying about possible side effects.
+
+A Suggested refactor for usability that also eliminates function order dependencies
+
+Here's a more user friendly way for a user to make a bar chart:
+
+var canvas = createCanvas({
+margins: {
+top: 20,
+left: 60,
+right: 20,
+bottom: 100
+},
+width: 420, // 500 - 60 - 20, maybe the 500 totalWidth is more intuitive
+height: 280 // 400 - 20 - 100
+});
+
+drawBarChart({
+canvas: canvas,
+data: [["A", 10], ["B", -3], ["C", 4]],
+range: [-5, 15],
+numberFormat: ".2f", // optional parameter
+barInnerPadding: 0.1, // optional parameter
+barOuterPadding: 1 // optional parameter
+});
+
+
+This gives the developer a CSS-esque interface for creating charts. There's no worry about calling functions in the wrong order, all the properties are named, and this affords you the power to easily make any of the properties optional.
+
+Here's a JSFiddle of a refactor I did on your code that provides the aforementioned user interface.
+
+Some things I refactored and why:
+
+1. I separated the "canvas" into a data object and a createSVG function because I felt your canvas was doing two things, storing formatting data and building/formatting/storing an svg. (Also, I heavily prefer the functional programming paradigm over OOP)
+2. I condensed your bar_chart module into a single drawBarChart function because splitting up all the logic to create a chart adds the dependency that the functions must be called in a specific order. (I think there ought to be a few inline functions in my drawBarChart, though. Emphasis on inline; If we don't have duplicate code and the functions aren't called anywhere else, making the functions somewhere else only displaces code from where it's actually executed)
+3. I made a lot of parameters optional and also gave the user the ability to specify the range of the y-axis. Optional parameters generally pan out to be more user friendly. If a user wants to learn how to do a specific formatting thing for the drawBarChart function, then they can, but if they don't want to, then they don't have to worry about it.
+
+Useless Code
+
+The x and y positions in canvas don't provide any functionality to your program. Consider removing them. (If you actually end up wanting to add them later, then you can add them later, currently they only act as a distraction).
+
+Style Conventions
+
+As long as your style doesn't inhibit readability, go for it. The only reason I bring this up is because some of your lines of code get really, really long. For example:
+
+var set_height = function (val) { height = val - margin.top - margin.bottom; svg.attr("height", val + margin.top + margin.bottom); }
+
+
+This function would be much more readable on multiple lines.
+
+I'm impressed with your d3! I learned a bit a awhile back but didn't have a good reason keep it up. Keep up the good work!
+
+• Thank you, this is exactly the type of answer I was looking for. I am not a big fan of functional programming but I guess it won't be a bad idea to get used to when it comes to JS. Thanks again! – turnip Jun 2 '16 at 13:10
+• @PPG JS supports OOP as well, just in ES5 the syntax is far from the normal class <classname> {}. – somebody Jun 2 '16 at 22:18

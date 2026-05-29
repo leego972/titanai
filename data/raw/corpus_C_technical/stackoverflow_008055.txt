@@ -1,0 +1,71 @@
+Question: <p>I have been trying to find information on how to retrieve attachments from a gmail account in either python or PHP, I'm hoping that someone here can be of some help, thanks.</p>
+
+<p>Related:</p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/348630/how-can-i-download-all-emails-with-attachments-from-gmail">How can I download all emails with attachments from Gmail?</a></li>
+</ul>
+
+Answer: <p>I took the code above and fixed it and tested it. It works with PHP5.</p>
+
+<pre><code>&lt;?php 
+
+$gmail_username = 'email@gmail.com';
+$gmail_password = 'password';
+$imap = imap_open ("{imap.gmail.com:993/imap/ssl}INBOX", $gmail_username, $gmail_password) or die("can't connect: " . imap_last_error());
+$savefilepath = '//Server/share/Local/Pathname/'; //absolute path to images directory
+$imagefilepath = '/Local/Pathname/'; //relative path to images directory
+$savethumbpath = '/Local/Pathname/'; //relative path to images directory
+$headers = imap_headers($imap);
+foreach ($headers as $mail) {
+    $flags = substr($mail, 0, 4);
+    //Check for unread msgs, get their UID, and queue them up
+    if (strpos($flags, "U")) {
+        preg_match('/[0-9]+/',$mail,$match);
+        $new_msg[] = implode('',$match);     
+    }
+}
+if ($new_msg) {
+    foreach ($new_msg as $result) {
+        $structure = imap_fetchstructure($imap,$result);
+        $parts = $structure-&gt;parts;
+        foreach ($parts as $part) {
+            if ($part-&gt;parameters[0]-&gt;attribute == "NAME") {
+                //Generate a filename with format DATE_RANDOM#_ATTACHMENTNAME.EXT
+                $savefilename = date("m-d-Y") . '_' . rand() . '_' . $part-&gt;parameters[0]-&gt;value;
+                   save_attachment(imap_fetchbody($imap,$result,2),$savefilename,$savefilepath,$savethumbpath);
+                imap_fetchbody($imap,$result,2); //This marks message as read
+            } 
+        }
+    }
+}
+/* grab emails */
+$emails = imap_search($imap,'ALL');
+/* if emails are returned, cycle through each... */
+if($emails) {
+  /* put the newest emails on top */
+  $total = imap_num_msg($imap);
+  /* for every email... */
+  for( $i = $total; $i &gt;= 1; $i--) {
+        $headers = imap_header($imap, $i);
+        $from = $headers-&gt;from[0]-&gt;mailbox . "@" . $headers-&gt;from[0]-&gt;host;
+        echo $from . "\n";
+        imap_delete($imap,$i);
+        imap_mail_move($imap,"$i:$i", "[Gmail]/Trash"); // Change or remove this line if you are not connecting to gmail. The path to the Trash folder in your Gmail may be different, capitalization is relevant.
+  }
+}else{
+        echo "no emails";
+}
+/* close the connection */
+   imap_expunge($imap);
+   imap_close($imap);
+
+function save_attachment( $content , $filename , $localfilepath, $thumbfilepath ) {
+     if (imap_base64($content) != FALSE) {   
+         $file = fopen($localfilepath.$filename, 'w');
+         fwrite($file, imap_base64($content));
+         fclose($file);
+     }
+}
+?&gt;
+</code></pre>

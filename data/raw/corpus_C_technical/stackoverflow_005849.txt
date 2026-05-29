@@ -1,0 +1,48 @@
+Question: <p>What is the use of the <code>yield</code> keyword in Python? What does it do?</p>
+
+<p>For example, I'm trying to understand this code<sup><strong>1</strong></sup>:</p>
+
+<pre><code>def _get_child_candidates(self, distance, min_dist, max_dist):
+    if self._leftchild and distance - max_dist &lt; self._median:
+        yield self._leftchild
+    if self._rightchild and distance + max_dist &gt;= self._median:
+        yield self._rightchild  
+</code></pre>
+
+<p>And this is the caller:</p>
+
+<pre><code>result, candidates = list(), [self]
+while candidates:
+    node = candidates.pop()
+    distance = node._get_dist(obj)
+    if distance &lt;= max_dist and distance &gt;= min_dist:
+        result.extend(node._values)
+    candidates.extend(node._get_child_candidates(distance, min_dist, max_dist))
+return result
+</code></pre>
+
+<p>What happens when the method <code>_get_child_candidates</code> is called?
+A list is returned? A single element is returned? Is it called again? When will subsequent calls stop?</p>
+
+<hr>
+
+<p><sub>
+1. The code comes from Jochen Schulz (jrschulz), who made a great Python library for metric spaces. This is the link to the complete source: <a href="http://well-adjusted.de/~jrschulz/mspace/">Module mspace</a>.</sub></p>
+
+Answer: <p>(My below answer only speaks from the perspective of using Python generator, not the <a href="http://stackoverflow.com/questions/8389812/how-are-generators-and-coroutines-implemented-in-cpython">underlying implementation of generator mechanism</a>, which involves some tricks of stack and heap manipulation.)</p>
+
+<p>When <code>yield</code> is used instead of a <code>return</code> in a python function, that function is turned into something special called <code>generator function</code>. That function will return an object of <code>generator</code> type. <strong>The <code>yield</code> keyword is a flag to notify the python compiler to treat such function specially.</strong> Normal functions will terminate once some value is returned from it. But with the help of the compiler, the generator function <strong>can be thought of</strong> as resumable. That is, the execution context will be restored and the execution will continue from last run. Until you explicitly call return, which will raise a <code>StopIteration</code> exception (which is also part of the iterator protocol), or reach the end of the function. I found a lot of references about <code>generator</code> but this <a href="https://docs.python.org/dev/howto/functional.html#generators" rel="nofollow">one</a> from the <code>functional programming perspective</code> is the most digestable.</p>
+
+<p>(Now I want to talk about the rationale behind <code>generator</code>, and the <code>iterator</code> based on my own understanding. I hope this can help you grasp the <strong><em>essential motivation</em></strong> of iterator and generator. Such concept shows up in other languages as well such as C#.)</p>
+
+<p>As I understand, when we want to process a bunch of data, we usually first store the data somewhere and then process it one by one. But this <strong><em>intuitive</em></strong> approach is problematic. If the data volume is huge, it's expensive to store them as a whole beforehand. <strong>So instead of storing the <code>data</code> itself directly, why not store some kind of <code>metadata</code> indirectly, i.e. <code>the logic how the data is computed</code></strong>. </p>
+
+<p>There are 2 approaches to wrap such metadata.</p>
+
+<ol>
+<li>The OO approach, we wrap the metadata <code>as a class</code>. This is the so-called <code>iterator</code> who implements the iterator protocol (i.e. the <code>__next__()</code>, and <code>__iter__()</code> methods). This is also the commonly seen <a href="https://en.wikipedia.org/wiki/Iterator_pattern#Python" rel="nofollow">iterator design pattern</a>.</li>
+<li>The functional approach, we wrap the metadata <code>as a function</code>. This is
+the so-called <code>generator function</code>. But under the hood, the returned <code>generator object</code> still <code>IS-A</code> iterator because it also implements the iterator protocol.</li>
+</ol>
+
+<p>Either way, an iterator is created, i.e. some object that can give you the data you want. The OO approach may be a bit complex. Anyway, which one to use is up to you.</p>

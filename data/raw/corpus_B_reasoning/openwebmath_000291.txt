@@ -1,0 +1,49 @@
+# Neural Networks for k step ahead time series forecasting
+
+I am looking into neural networks and had a conceptual question about time series forecasting.
+
+Let's say I have hourly temperature measurements at a given location several for several month. My goal would be to forecast, from a time t, the expected temperature for the next k hours. Which of the following architectures would be the best/recommended/feasible?
+
+1. The input of the neural network is n values in the past from a time t : $[y_t,y_{t-1}, ...,y_{t-n+1}]$ and my output is k nodes representing the values in the future: $[y_{t+1},y_{t+2},....,y_{t+k}]$ Different n would be tested and historical data would be used to train the NN.
+
+2. The input is the same n values in the past but this time k different neural networks would be trained each for a specific time step fro 1 to k.
+
+1st neural network $[y_t,y_{t-1}, ...,y_{t-n+1}] => y_{t+1}$
+
+2nd neural network $[y_t,y_{t-1}, ...,y_{t-n+1}] => y_{t+2}$
+
+etc.
+
+Each network would be trained separately on the historical data and all k networks would be used with the same input to produce $[y_{t+1},y_{t+2},....,y_{t+k}]$
+
+3. A single neural network is trained to produce only 1h ahead forecast $[y_t,y_{t-1}, ...,y_{t-n+1}]=>y_{t+1}$ To predict k values in the future, the neural network is used iteratively with the forecasted value used as an input at the next step, as such:
+
+1st step $[y_t,y_{t-1}, ...,y_{t-n+1}] => \hat{y}_{t+1}$
+
+2nd step $[\hat{y}_{t+1},y_t,y_{t-1}, ...,y_{t-n+2}] => \hat{y}_{t+2}$
+
+3rd step $[\hat{y}_{t+2},\hat{y}_{t+1},y_t,...,y_{t-n+3}] => \hat{y}_{t+3}$ etc.
+
+I have the feeling that the 1st method would be very hard to train because of the large number of inputs and outputs. The first hour ahead should be more correlated to the past values in time and thus easier to forecast, conversely as k becomes large the correlation between the past and future values becomes smaller and thus harder to predict. A single NN architecture combining all k hours would thus perform poorly overall as the later hours might penalize the overall behaviour.
+
+The second architecture might compensate that as the neural networks for the first few times ahead might be performant while the later ones will not. Knowing that could be somewhat useful.
+
+As the third architecture only uses one neural network for 1h ahead forecast. We can expect this NN to be the most performant out of the k networks from the second architecture, thus the output value could be considered correct enough to be used as the real value and used as an input for the next time step. This assumption is of course not true but perhaps for a certain number of steps k the deviation would not be too important.
+
+That's the 3 options I have though about, are they somewhat correct or is there a fundamental logic behind Neural Networks which I haven't grasped? The literature I have found on the subject didn't go into detail on how to predict more than on step in the future.
+
+• Particularly due to the boot-stepping process reflecting the aut0-dependence of forecasts NEVER MIND the possibility of anomalies arising in the future AND the need to incorporate uncertainties in future values of predictors. The small print taketh away! – IrishStat Aug 25 '17 at 21:30
+
+Assuming you keep the size of the network fixed across your three proposed architectures (with #2 having k-times as many parameters overall), I expect #2 to give the most accurate results since all parameters in the network are being used to make a single prediction, however this comes at the cost of requiring a k-times larger memory footprint and k-times more training time, which is unlikely to be worth the marginal increase in accuracy.
+
+#3 is the most elegant, and the most likely to produce smooth, aesthetically-pleasing results, but as Nate Diamond points out below, this approach will compound prediction errors, eventually leading to unrealistic predictions for large values of k.
+
+If you make the network large enough, and use an appropriate loss function (see below), then #1 is likely to be your best bet. Your concern about the network being difficult to train due to the "large number of inputs and outputs" is largely unwarranted, as new techniques used in training such as ReLU's, batch-norm, and ADAM eliminate many of the problems previously encountered when training very large networks. As for your concern about the high-variance errors in the large-k predictions swamping the (more consistent) error signals coming from the small-k predictions, this can be mitigated by using a loss function that accounts for component-wise variance. For example, instead of the standard RMSE loss: $$\sqrt{\frac{\sum_{i=1}^m\sum_{j=1}^k (\hat{y}^{(i)}_j - y^{(i)}_j)^2}{m}}$$ you could use a variant of RMSE which weights the error in each component inversely proportional to the variance of its errors across the previous mini-batch: $$\sqrt{\frac{\sum_{i=1}^m\sum_{j=1}^k \frac{1}{\sigma^2_j}(\hat{y}^{(i)}_j - y^{(i)}_j)^2}{m}}$$ Where $$m = \text{size of the minibatch}$$ $$\sigma^2_j = \text{variance of the errors in the } j^{th} \text{ component over the previous minibatch}$$ $$\bullet_j^{(i)} = \text{value of the } j^{th} \text{ component of the } i^{th} \text{ sample}$$
+
+There is also another option not on your list which you may want to consider, namely using a recurrent neural network architecture such as seq-2-seq which allows for variable-length inputs and outputs: https://github.com/guillaume-chevalier/seq2seq-signal-prediction
+
+• Number 2 will potentially give pretty "spikey" results, as the forecasts are all independent. So one network that predicts a spike in step 3 may not be predicted or handled by networks 4+. Repeat this for every interval. – Nate Diamond Aug 26 '17 at 0:13
+• If we're talking about minimizing something along the lines of total RMS error of the predicted vs the actual values, then I don't see how it couldn't be better. But yes, it will probably be more jagged-looking – jon_simon Aug 26 '17 at 0:15
+• The point is, claiming "the best results" may not be accurate. It matters what the use case is. Numbers 1 and 3 don't have this problem to the same degree (though Number 3 has other problems, like carrying forward errors). – Nate Diamond Aug 26 '17 at 0:18
+• Additionally, just saying "an LSTM network" doesn't answer why or how it helps. If you're suggesting that OP use an RNN to output a sequence of values using something like seq2seq, then that is something for OP to consider. Additionally, the link you provide contains a paper describing an "LSTM Network", but only in the context of behavior/anomaly detection and not forecasting. – Nate Diamond Aug 26 '17 at 0:22
+• Fair point, I updated my answer – jon_simon Aug 26 '17 at 1:10

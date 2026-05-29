@@ -1,0 +1,158 @@
+# Section 02: Hashing and Randomness
+
+Notes by William Mallard [9/15/2017]
+
+## Python tips
+
+### Random functions
+
+NumPy includes a random module which includes a number of handy functions for generating and working with random numbers.
+
+To access numpy.random’s functions, import numpy:
+
+import numpy as np
+
+
+To generate a random number from the half-open interval [0,1):
+
+x = np.random.random()
+
+
+To select an item from a list according to a list of weights:
+
+L = ['abc', 'def', 'ghi']
+w = [.2, .5, .3]
+
+x = np.random.choice(L, p=w)
+
+
+Note that your list of weights is supposed to be a probability distribution, so it must sum to 1. If it doesn’t, choice() will complain.
+
+To select a number from a normal distribution with mean mu and standard deviation sigma:
+
+x = np.random.normal(mu, sigma)
+
+
+You can read up on the various random functions on the SciPy website. We’ll discuss seed() and seeding your random number generator below.
+
+### Translation tables
+
+If you want to transform a string according to some specific set of character substitutions, you can efficiently do so with a translation table.
+
+T = str.maketrans('abc', 'xyz')
+
+print('abacab'.translate(T))
+print('ccccba'.translate(T))
+print('bcbcba'.translate(T))
+
+	xyxzxy
+zzzzyx
+yzyzyx
+
+
+Note that we only need to build the translation table once. As long as we store it somewhere, we can reuse the same translation table over and over again.
+
+### String reversal
+
+To reverse a string, we can use a common list and string slicing idiom.
+
+S = 'abcdef'
+print(S[::-1])
+
+	fedcba
+
+
+### Writing gzip files
+
+Text-based bioinformatics data is usually stored and shared in compressed form. Common compression tools are gzip (.gz files), WinZip (.zip files), and bzip2 (.bz2 files). If you have an uncompressed file called foo.txt, simply run gzip foo.txt to generate a compressed version called foo.txt.gz. If foo.txt was larger than a few kilobytes, this compressed version will take up a fraction of the space.
+
+To generate a gzip’d text file directly from Python, you can use the gzip library. The gzip library provides an open() function that works just like the normal open() function, except it compresses the data before writing it to disk. There is one small difference in its usage: Instead of opening the file in write mode with ‘w’, we need to specify that we want to open the gzip file in text-writing mode with ‘wt’.
+
+import gzip
+
+with gzip.open('foo.txt.gz', 'wt') as fd:
+for line in lines:
+print(line, file=fd)
+
+
+## Hashing
+
+### Hash functions
+
+A hash function maps keys (data of arbitrary size) to hashes (values of a fixed size). For example, consider a hash function that takes any possible string of characters as its input, and generates a 32-bit integer as its output. This function would take the string’s bytes, smash them together via some special combination of bit shifts and logical operators, and spit out a 32-bit integer. It does so in such a way that keys will be uniformly distributed across the range of outputs – so if you hash a string, and then change it by a single letter and hash it again, the two hash values will be totally different.
+
+### Hash tables
+
+A hash table is a data structure built on top of a normal list, with its length equal to the number of possible hashes. To add a value to the hash table, you hash the key, and add some value to the list at the index corresponding to the hash.
+
+## Randomness
+
+### Random vs Pseudorandom
+
+Randomness refers to the absence of any pattern. Truly random numbers only arise from physical processes (eg, radioactive decay, thermal noise, etc). Sequences of random numbers exhibit certain statistical properties that are useful for various computational applications.
+
+Computers are deterministic, so they cannot generate truly random numbers on their own. However, there are ways to make them generate sequences of numbers with many of the statistial properties of a truly random sequence. We call these random-looking (though ultimately deterministic) sequences pseudorandom.
+
+### Pseudorandom Number Generators
+
+Pseudorandom number generators (PRNGs) produce sequences of pseudorandom numbers. At their core is a recursive function combining bit shifts and bitwise logical operations. You feed the previous number into the generator to get the next number in the sequence.
+
+### Seeds
+
+Where does the PRNG get its very first number? By default, Python seeds its PRNG with whatever time it is when you ask for your first random number. But there’s nothing stopping you from overriding that and giving it your favorite number!
+
+A seed is a number you give a PRNG to initialize its internal state. So in a sense, the seed serves as a unique identifier for a sequence of pseudorandom numbers.
+
+What’s nice about this, is you can initialize Python’s PRNG to some state at the beginning of your program, and then every subsequent run will use the same sequence of pseudorandom numbers.
+
+Why would you want that?
+
+1.) Debugging. This is useful for comparing your results as you tweak your code. If your edits didn’t alter the number or order of calls to the PRNG, then the random data you’re working with should be consistent across runs.
+
+2.) Reproducibility. When you give your code to someone else, or publish it in a journal, other people can re-run your code and verify that they get the exact same output. Biology is currently plagued by irreproducible results. Biological systems are intrinsically noisy, so there’s probably a limit to how reproducible we can make results from the bench. But computational analyses have no excuse for being irreproducible, as long as you provide your analysis code, and seed your random number generators!
+
+To seed Python’s pseudorandom number generator:
+
+import numpy as np
+
+np.random.seed(42)
+
+
+You can then proceed to use functions from np.random as usual.
+
+import numpy as np
+
+# Seed the PRNG with 1, and randomly
+# generate 20 integers from 0 through 9.
+np.random.seed(1)
+np.random.randint(10, size=20)
+# Result: array([5, 8, 9, 5, 0, 0, 1, 7, 6, 9, 2, 4, 5, 2, 4, 2, 4, 7, 7, 9])
+
+# Seed the PRNG with 2, and randomly
+# generate 20 integers from 0 through 9.
+np.random.seed(2)
+np.random.randint(10, size=20)
+# Result: array([8, 8, 6, 2, 8, 7, 2, 1, 5, 4, 4, 5, 7, 3, 6, 4, 3, 7, 6, 1])
+# These 20 numbers differ from the first 20.
+
+# Seed the PRNG with 1 again, and randomly
+# generate 20 integers from 0 through 9.
+np.random.seed(1)
+np.random.randint(10, size=20)
+# Result: array([5, 8, 9, 5, 0, 0, 1, 7, 6, 9, 2, 4, 5, 2, 4, 2, 4, 7, 7, 9])
+# These 20 numbers match the first 20 exactly!
+
+# Seed the PRNG with 1 again, and randomly
+# generate 20 integers from 0 through 9.
+np.random.seed(1)
+np.random.randint(10, size=5)
+np.random.randint(10, size=5)
+np.random.randint(10, size=5)
+np.random.randint(10, size=5)
+# Result:
+# array([5, 8, 9, 5, 0])
+# array([0, 1, 7, 6, 9])
+# array([2, 4, 5, 2, 4])
+# array([2, 4, 7, 7, 9])
+# These 20 numbers still match the first 20,
+# even though we pulled them out 5 at a time.

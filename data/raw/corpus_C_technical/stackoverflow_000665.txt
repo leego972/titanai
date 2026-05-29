@@ -1,0 +1,216 @@
+Question: <p>I'm mainly a C# developer, but I'm currently working on a project in Python.</p>
+
+<p>How can I represent the equivalent of an Enum in Python?  </p>
+
+Answer: <p>Here's an approach with some different characteristics I find valuable:</p>
+
+<ul>
+<li>allows > and &lt; comparison based on order in enum, not lexical order</li>
+<li>can address item by name, property or index: x.a, x['a'] or x[0]</li>
+<li>supports slicing operations like [:] or [-1]</li>
+</ul>
+
+<p>and most importantly <strong>prevents comparisons between enums of different types</strong>!</p>
+
+<p>Based closely on <a href="http://code.activestate.com/recipes/413486-first-class-enums-in-python" rel="nofollow">http://code.activestate.com/recipes/413486-first-class-enums-in-python</a>.</p>
+
+<p>Many doctests included here to illustrate what's different about this approach.</p>
+
+<pre><code>def enum(*names):
+    """
+SYNOPSIS
+    Well-behaved enumerated type, easier than creating custom classes
+
+DESCRIPTION
+    Create a custom type that implements an enumeration.  Similar in concept
+    to a C enum but with some additional capabilities and protections.  See
+    http://code.activestate.com/recipes/413486-first-class-enums-in-python/.
+
+PARAMETERS
+    names       Ordered list of names.  The order in which names are given
+                will be the sort order in the enum type.  Duplicate names
+                are not allowed.  Unicode names are mapped to ASCII.
+
+RETURNS
+    Object of type enum, with the input names and the enumerated values.
+
+EXAMPLES
+    &gt;&gt;&gt; letters = enum('a','e','i','o','u','b','c','y','z')
+    &gt;&gt;&gt; letters.a &lt; letters.e
+    True
+
+    ## index by property
+    &gt;&gt;&gt; letters.a
+    a
+
+    ## index by position
+    &gt;&gt;&gt; letters[0]
+    a
+
+    ## index by name, helpful for bridging string inputs to enum
+    &gt;&gt;&gt; letters['a']
+    a
+
+    ## sorting by order in the enum() create, not character value
+    &gt;&gt;&gt; letters.u &lt; letters.b
+    True
+
+    ## normal slicing operations available
+    &gt;&gt;&gt; letters[-1]
+    z
+
+    ## error since there are not 100 items in enum
+    &gt;&gt;&gt; letters[99]
+    Traceback (most recent call last):
+        ...
+    IndexError: tuple index out of range
+
+    ## error since name does not exist in enum
+    &gt;&gt;&gt; letters['ggg']
+    Traceback (most recent call last):
+        ...
+    ValueError: tuple.index(x): x not in tuple
+
+    ## enums must be named using valid Python identifiers
+    &gt;&gt;&gt; numbers = enum(1,2,3,4)
+    Traceback (most recent call last):
+        ...
+    AssertionError: Enum values must be string or unicode
+
+    &gt;&gt;&gt; a = enum('-a','-b')
+    Traceback (most recent call last):
+        ...
+    TypeError: Error when calling the metaclass bases
+        __slots__ must be identifiers
+
+    ## create another enum
+    &gt;&gt;&gt; tags = enum('a','b','c')
+    &gt;&gt;&gt; tags.a
+    a
+    &gt;&gt;&gt; letters.a
+    a
+
+    ## can't compare values from different enums
+    &gt;&gt;&gt; letters.a == tags.a
+    Traceback (most recent call last):
+        ...
+    AssertionError: Only values from the same enum are comparable
+
+    &gt;&gt;&gt; letters.a &lt; tags.a
+    Traceback (most recent call last):
+        ...
+    AssertionError: Only values from the same enum are comparable
+
+    ## can't update enum after create
+    &gt;&gt;&gt; letters.a = 'x'
+    Traceback (most recent call last):
+        ...
+    AttributeError: 'EnumClass' object attribute 'a' is read-only
+
+    ## can't update enum after create
+    &gt;&gt;&gt; del letters.u
+    Traceback (most recent call last):
+        ...
+    AttributeError: 'EnumClass' object attribute 'u' is read-only
+
+    ## can't have non-unique enum values
+    &gt;&gt;&gt; x = enum('a','b','c','a')
+    Traceback (most recent call last):
+        ...
+    AssertionError: Enums must not repeat values
+
+    ## can't have zero enum values
+    &gt;&gt;&gt; x = enum()
+    Traceback (most recent call last):
+        ...
+    AssertionError: Empty enums are not supported
+
+    ## can't have enum values that look like special function names
+    ## since these could collide and lead to non-obvious errors
+    &gt;&gt;&gt; x = enum('a','b','c','__cmp__')
+    Traceback (most recent call last):
+        ...
+    AssertionError: Enum values beginning with __ are not supported
+
+LIMITATIONS
+    Enum values of unicode type are not preserved, mapped to ASCII instead.
+
+    """
+    ## must have at least one enum value
+    assert names, 'Empty enums are not supported'
+    ## enum values must be strings
+    assert len([i for i in names if not isinstance(i, types.StringTypes) and not \
+        isinstance(i, unicode)]) == 0, 'Enum values must be string or unicode'
+    ## enum values must not collide with special function names
+    assert len([i for i in names if i.startswith("__")]) == 0,\
+        'Enum values beginning with __ are not supported'
+    ## each enum value must be unique from all others
+    assert names == uniquify(names), 'Enums must not repeat values'
+
+    class EnumClass(object):
+        """ See parent function for explanation """
+
+        __slots__ = names
+
+        def __iter__(self):
+            return iter(constants)
+
+        def __len__(self):
+            return len(constants)
+
+        def __getitem__(self, i):
+            ## this makes xx['name'] possible
+            if isinstance(i, types.StringTypes):
+                i = names.index(i)
+            ## handles the more normal xx[0]
+            return constants[i]
+
+        def __repr__(self):
+            return 'enum' + str(names)
+
+        def __str__(self):
+            return 'enum ' + str(constants)
+
+        def index(self, i):
+            return names.index(i)
+
+    class EnumValue(object):
+        """ See parent function for explanation """
+
+        __slots__ = ('__value')
+
+        def __init__(self, value):
+            self.__value = value
+
+        value = property(lambda self: self.__value)
+
+        enumtype = property(lambda self: enumtype)
+
+        def __hash__(self):
+            return hash(self.__value)
+
+        def __cmp__(self, other):
+            assert self.enumtype is other.enumtype, 'Only values from the same enum are comparable'
+            return cmp(self.value, other.value)
+
+        def __invert__(self):
+            return constants[maximum - self.value]
+
+        def __nonzero__(self):
+            ## return bool(self.value)
+            ## Original code led to bool(x[0])==False, not correct
+            return True
+
+        def __repr__(self):
+            return str(names[self.value])
+
+    maximum = len(names) - 1
+    constants = [None] * len(names)
+    for i, each in enumerate(names):
+        val = EnumValue(i)
+        setattr(EnumClass, each, val)
+        constants[i] = val
+    constants = tuple(constants)
+    enumtype = EnumClass()
+    return enumtype
+</code></pre>

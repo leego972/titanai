@@ -1,0 +1,44 @@
+# Supervised topic classification
+
+I am trying to perform a classification between 20K objects to 40 classes.
+The features of the classification are text based, per each objects i have its raw text.
+In addition i have a ~300 training sample, roughly 8 samples per class.
+
+Ive tried using the following method:
+1) Vectorize the data - using tf_idf.
+2) Decomposing the vectors - using NMF.
+3) Training all sorts of classifiers on decomposed vectors.
+
+My problem are the big differences between training and test sets prediction accuracy, even after selecting only few latent variables(post decomposition).
+
+• If i use decomposition and selecting only top latent variables -
+train prediction accuracy(PA) is around the 30% and test's is at 10%.
+• If i dont use decomposition and train the classifier using the vectors (tried vectors shapes sizes from 1000 to 10000 by capping max_features in the vectorizer) -
+train PA is ~100% and test PA is ~40%.
+
+Ive grid-searched different vectorizing, decomposition and classifiers hyper params, and kept getting the same difference in prediction accuracy.
+
+Questions:
+1) Is it an overfit problem?
+2) If so, how come its still happening even when choosing only few features for classification?
+3) Is my method well suited for this problem? are there any other options i should consider?
+
+I can see a few problems:
+
+1. How big is the difference? We expect the testing set to have worse performance. Is it 10% worse (pretty good)? 25% worse?
+2. How long are your training documents in words?
+3. You should probably use some other metric aside from accuracy for two reasons: You have 40 classes, so your random performance baseline will probably be around 2.5% accuracy under the assumption that all 8 classes are the same size in the training set. Use a confusion matrix, or per-class precision/recall/F1-score/AUC instead.
+
+Also, I can imagine having only 8 samples per class might be a pretty big problem particularly if those 8 samples have very heterogeneous lexicons.
+
+If the number of words in your samples is large, you essentially have a lot of parameters, many more than your number of samples, and regularization can be helpful. But, before you do that try chi-squared feature selection for each class to determine which words are predictive within each class. The problem with vanilla TF-IDF is that it is measuring how "influential" each word is across the entire corpus, not with respect to each class, unless you specifically set up your data or code to do that.
+
+To answer questions 1 and 2: It is probably an overfitting problem and your features are either not predictive or not scaled properly.
+
+It is important to develop intuition into the problem you are solving rather than rely on grid search and cross-validation, because that will just leave you frustrated.
+
+For question 3: I would try the above first. You may also want to look at Supervised Latent Dirichlet Allocation (SLDA) which essentially fits words into topics based on a response variable (class in this case). I believe there is code for the multinomial case or you can construct a series of logistic SLDA models in a one vs rest ensemble. The topic representation of each unseen document becomes the predictor variables (the X in standard regression). SLDA is available in the lda package for R and a few C implementations are on Github.
+
+• My training documents as per words count vary from 10 words to 2000. Is there a good way evaluating lexicons heterogeneity? What measure should i use and what benchmarks? – yoav_aaa Nov 1 '16 at 11:33
+• I usually don't use as many categories, so I may be off, but your accuracy seems to make sense. Remember that the random baseline is around 2.5% for 40 classes, so your classifier is doing something. The test accuracy drop is a bit steep considering the baseline, but somewhat expected. Have you considered just using words as features? By heterogeneity, I just mean, do the samples in each class approx. share the same vocabulary? Or are they wildly different? – Ryan Rosario Nov 1 '16 at 23:05
+• Each class vocabulary have some shared words (approx 30% of TF_IDF top terms per class) and there are some share words between classes. Everything makes sense but the actual results. By using words as features, do you mean use only the term-frequency? – yoav_aaa Nov 2 '16 at 7:03

@@ -1,0 +1,149 @@
+Ifpack2 Templated Preconditioning Package Version 1.0
+Ifpack2::Details::Chebyshev< ScalarType, MV, MAT > Class Template Reference
+
+Left-scaled Chebyshev iteration. More...
+
+#include <Ifpack2_Details_Chebyshev_decl.hpp>
+
+List of all members.
+
+## Public Member Functions
+
+Chebyshev (Teuchos::RCP< const MAT > A)
+Chebyshev (Teuchos::RCP< const MAT > A, Teuchos::ParameterList &params)
+void setParameters (Teuchos::ParameterList &plist)
+Set (or reset) parameters.
+void compute ()
+(Re)compute the left scaling, and (if applicable) estimate max and min eigenvalues of D_inv * A.
+MT apply (const MV &B, MV &X)
+Teuchos::RCP< const MAT > getMatrix () const
+Get the matrix given to the constructor.
+bool hasTransposeApply () const
+Whether it's possible to apply the transpose of this operator.
+void print (std::ostream &out)
+Print instance data to the given output stream.
+
+## Detailed Description
+
+### template<class ScalarType, class MV, class MAT> class Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >
+
+Left-scaled Chebyshev iteration.
+
+Template Parameters:
+ ScalarType The type of entries in the matrix and vectors. MV Specialization of Tpetra::MultiVector. MAT Corresponding specialization of Tpetra::RowMatrix.
+
+This class implements two variants of Chebyshev iteration: 1. A direct imitation of Ifpack's implementation 2. A textbook version of the algorithm
+
+All implemented variants use the diagonal of the matrix to precondition the linear system on the left. Diagonal entries less than machine precision are replaced with machine precision.
+
+The first version imitates Ifpack::Chebyshev, both in how it sets parameters and in the actual iteration (ApplyInverse()). The "textbook" in variant #2 above is "Templates for the Solution of Linear Systems," 2nd edition. Experiments show that the Ifpack imitation is much less sensitive to the eigenvalue bounds than the textbook version, so users should prefer it. (In fact, it is the default.)
+
+We require that the matrix A be real valued and symmetric positive definite. If users could provide the ellipse parameters ("d" and "c" in the literature, where d is the real-valued center of the ellipse, and d-c and d+c the two foci), the iteration itself would work fine with nonsymmetric real-valued A, as long as the eigenvalues of A can be bounded in an ellipse that is entirely to the right of the origin.
+
+There is also dead code for imitating ML's Chebyshev implementation (ML_Cheby(), in packages/ml/src/Smoother/ml_smoother.c). I couldn't get it to converge in time to be useful for testing, so it is disabled.
+
+## Constructor & Destructor Documentation
+
+template<class ScalarType , class MV , class MAT>
+ Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::Chebyshev ( Teuchos::RCP< const MAT > A )
+
+Constructor that takes a sparse matrix and sets default parameters.
+
+Parameters:
+ A [in] The matrix A in the linear system to solve. A must be real-valued and symmetric positive definite.
+template<class ScalarType , class MV , class MAT>
+ Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::Chebyshev ( Teuchos::RCP< const MAT > A, Teuchos::ParameterList & params )
+
+Constructor that takes a sparse matrix and sets the user's parameters.
+
+Parameters:
+ A [in] The matrix A in the linear system to solve. A must be real-valued and symmetric positive definite. params [in/out] On input: the parameters. On output: filled with the current parameter settings.
+
+## Member Function Documentation
+
+template<class ScalarType , class MV , class MAT >
+ void Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::setParameters ( Teuchos::ParameterList & plist )
+
+Set (or reset) parameters.
+
+This method fills in the input ParameterList with missing parameters set to their default values. You may call this method as many times as you want. On each call, the input ParameterList is treated as a complete list of the desired parameters, not as a "delta" or change list from the current set of parameters. (That is, if you remove parameters from the list that were there in the last call to setParameters() and call setParameters() again with the revised list, this method will use default values for the removed parameters, rather than letting the current settings remain.) However, since the method fills in missing parameters, you may keep calling it with the ParameterList used in the previous call in order to get the same behavior as before.
+
+Parameters that govern spectral bounds of the matrix:
+
+• "chebyshev: max eigenvalue" (ScalarType): lambdaMax, an upper bound of the bounding ellipse of the eigenvalues of the matrix A. If you do not set this parameter, we will compute an approximation. See "Parameters that govern eigenvalue analysis" to control this approximation process.
+• "chebyshev: ratio eigenvalue" (ScalarType): eigRatio, the ratio of lambdaMax to the lower bound of the bounding ellipse of the eigenvalues of A. We use lambdaMax and eigRatio to determine the Chebyshev iteration coefficients. This parameter is optional and defaults to 30.
+• "chebyshev: min eigenvalue" (ScalarType): lambdaMin, a lower bound of real part of bounding ellipse of eigenvalues of the matrix A. This parameter is optional and only used for a quick check if the matrix is the identity matrix (if lambdaMax == lambdaMin == 1).
+
+Parameters that govern the number of Chebyshev iterations:
+
+• "chebyshev: degree" (int): numIters, the number of iterations. This overrides "relaxation: sweeps" and "smoother: sweeps" (see below).
+• "relaxation: sweeps" (int): numIters, the number of iterations. We include this for compatibility with Ifpack. This overrides "smoother: sweeps" (see below).
+• "smoother: sweeps" (int): numIters, as above. We include this for compatibility with ML.
+
+Parameters that govern eigenvalue analysis:
+
+• "chebyshev: eigenvalue max iterations" (int): eigMaxIters, the number of power method iterations used to compute the maximum eigenvalue. This overrides "eigen-analysis: iterations" (see below).
+• "eigen-analysis: iterations" (int): eigMaxIters, as above. We include this parameter for compatibility with ML.
+• "eigen-analysis: type" (std::string): The algorithm to use for estimating the max eigenvalue. This parameter is optional. Currently, we only support "power-method" (or "power method"), which is what Ifpack::Chebyshev uses for eigenanalysis. We include this parameter for compatibility with ML.
+
+Parameters that govern other algorithmic details:
+
+• "chebyshev: operator inv diagonal" (RCP<const V> or const V*): If nonnull, we will use a deep copy of this vector for left scaling as the inverse diagonal of the matrix A, instead of computing the inverse diagonal ourselves. We will make a copy every time you call setParameters(). If you ever call setParameters() without this parameter, we will clear our copy and compute the inverse diagonal ourselves again. You are responsible for updating this if the matrix has changed.
+• "chebyshev: min diagonal value" (ST): minDiagVal. If any entry of the diagonal of the matrix is less than this in magnitude, it will be replaced with this value in the inverse diagonal used for left scaling.
+• "chebyshev: zero starting solution" (bool): If true, then always use the zero vector(s) as the initial guess(es). If false, then apply() will use X on input as the initial guess(es).
+
+Parameters that govern backwards compatibility:
+
+• "chebyshev: textbook algorithm" (bool): If true, use the textbook version of Chebyshev iteration. We recommend against this, since the default algorithm is less sensitive to the quality of the eigenvalue bounds.
+• "chebyshev: compute max residual norm" (bool): If true, apply() will compute and return the max (absolute) residual norm. Otherwise, apply() returns 0. This defaults to false.
+Precondition:
+lambdaMin, lambdaMax, and eigRatio are real
+0 < lambdaMin <= lambdaMax
+numIters >= 0
+eigMaxIters >= 0
+
+Default settings for parameters relating to spectral bounds come from Ifpack.
+
+template<class ScalarType , class MV , class MAT >
+ void Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::compute ( )
+
+(Re)compute the left scaling, and (if applicable) estimate max and min eigenvalues of D_inv * A.
+
+You must call this method before calling apply(),
+
+• if you have not yet called this method,
+• if the matrix (either its values or its structure) has changed, or
+• any time after you call setParameters().
+
+Advanced users may omit calling compute() after calling setParameters(), as long as none of the changed parameters affect either computation of the inverse diagonal, or estimation of the max or min eigenvalues.
+
+If estimation of the eigenvalues is required, this method may take as long as several Chebyshev iterations.
+
+template<class ScalarType , class MV, class MAT >
+ Chebyshev< ScalarType, MV, MAT >::MT Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::apply ( const MV & B, MV & X )
+
+Solve Ax=b for x with Chebyshev iteration with left diagonal scaling.
+
+Parameters:
+ B [in] Right-hand side(s) in the linear system to solve. X [in] Initial guess(es) for the linear system to solve.
+
+If the "chebyshev: compute max residual norm" parameter is true (not the default), then this method returns the maximum (over all columns) absolute residual 2-norm after iterating. Otherwise, it returns zero.
+
+Warning:
+If you did not set the "chebyshev: zero starting solution" parameter to true, then this method will use X as the starting guess for Chebyshev iteration. If you did not initialize X before calling this method, then the resulting solution will be undefined, since it will be computed using uninitialized data.
+template<class ScalarType , class MV , class MAT >
+ Teuchos::RCP< const MAT > Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::getMatrix ( ) const
+
+Get the matrix given to the constructor.
+
+template<class ScalarType , class MV , class MAT >
+ bool Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::hasTransposeApply ( ) const
+
+Whether it's possible to apply the transpose of this operator.
+
+template<class ScalarType , class MV , class MAT >
+ void Ifpack2::Details::Chebyshev< ScalarType, MV, MAT >::print ( std::ostream & out )
+
+Print instance data to the given output stream.
+
+The documentation for this class was generated from the following files:

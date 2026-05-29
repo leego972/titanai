@@ -1,0 +1,424 @@
+================================================================================
+TITAN AI — TRAINING PACK 038: ZERO TRUST IMPLEMENTATION — DEEP TECHNICAL GUIDE
+IDENTITY, DEVICE, NETWORK MICROSEGMENTATION, ACCESS PROXIES, PAM, SASE
+================================================================================
+
+================================================================================
+PART 1: ZERO TRUST IDENTITY FOUNDATION
+================================================================================
+
+--- IDENTITY AS THE NEW PERIMETER ---
+
+THE SHIFT:
+  Old: Network location = trust. Inside firewall = trusted.
+  Zero Trust: Identity = trust signal. Location irrelevant. Verify every request.
+  
+  Identity signals in modern ZT:
+  1. Strong authentication (MFA, passwordless)
+  2. Device health (is device managed, compliant, patched?)
+  3. Location/risk context (unusual location? New device? Risky IP?)
+  4. Behavior baseline (is this request typical for this user?)
+  
+  ALL four must be evaluated per request, not just at login.
+
+--- PASSWORDLESS AUTHENTICATION ---
+
+PHISHING-RESISTANT MFA (the gold standard):
+  SMS OTP: Phishable. SIM swappable. Not phishing-resistant.
+  TOTP (Google Authenticator): Phishable. Attacker can relay OTP in real-time.
+  Push notification: Phishable via fatigue (send 50 pushes until user approves).
+  
+  PHISHING-RESISTANT:
+  FIDO2/WebAuthn: Hardware-bound credentials. Cannot be phished.
+  Certificate-based auth: PKI-bound to specific device.
+  
+  WHY FIDO2 IS PHISHING-PROOF:
+  Credential is bound to the origin (domain).
+  If user goes to phishing site (fake-bank.com): Browser presents different credential.
+  That credential is only valid for real bank.com. Attacker gets nothing useful.
+  
+  NIST SP 800-63: FIDO2 is AAL3 (highest authentication assurance level).
+  US government mandate: Phishing-resistant MFA for all federal employees.
+
+FIDO2 TECHNICAL FLOW:
+
+Registration:
+  1. User initiates registration on bank.com.
+  2. Server sends: challenge (random bytes), rp.id (bank.com).
+  3. Browser calls: navigator.credentials.create({publicKey: {...}}).
+  4. Authenticator (YubiKey, phone): Generate key pair bound to rp.id + user handle.
+     Private key: NEVER leaves authenticator. Ever.
+  5. Return: credential_id, public_key, attestation.
+  6. Server: Store credential_id + public_key for user.
+
+Authentication:
+  1. Server sends: challenge, rp.id (bank.com).
+  2. Browser calls: navigator.credentials.get({publicKey: {...}}).
+  3. Authenticator: Verifies rp.id matches current origin (bank.com, not fake-bank.com).
+  4. User verification: Fingerprint or PIN on authenticator.
+  5. Authenticator signs: challenge with private key.
+  6. Server verifies: Signature with stored public key. Challenge matches. Origin matches.
+  7. User authenticated.
+  
+  If attacker phishes to fake-bank.com:
+  Step 3: rp.id check fails. Authenticator refuses to sign for wrong origin.
+  No credential is returned. Phishing fails completely.
+
+PASSKEYS (consumer FIDO2):
+  Same security as hardware FIDO2.
+  Private key stored in: Device TPM/Secure Enclave. Synchronized via cloud (iCloud Keychain, Google Password Manager) with E2E encryption.
+  User experience: Face ID / Touch ID instead of password.
+  Cross-device: Sign in on laptop using phone passkey via QR code + BLE proximity check.
+  
+  Platform support: iOS 16+, Android 9+, Windows 11 (Windows Hello).
+  Enterprise rollout: Okta, Microsoft Entra ID, Duo all support passkeys.
+
+--- ADAPTIVE AUTHENTICATION ---
+
+RISK ENGINE INPUTS:
+  User behavior: Location, device, time of day, apps accessed, data volume.
+  Device signals: Managed/unmanaged, OS version, jailbreak status, EDR health.
+  Network: Known good IP (corporate VPN) vs. unknown residential vs. anonymous proxy vs. Tor.
+  Request context: Sensitive operation (wire transfer, admin access) vs. read-only.
+  
+RISK SCORING:
+  Each signal contributes to risk score (0-100).
+  Low risk (< 30): Transparent. No MFA step-up.
+  Medium risk (30-70): Require MFA.
+  High risk (70+): Require hardware MFA + manager approval. Or: Block + alert.
+  
+  Example policies:
+  Rule 1: If NEW DEVICE + PRIVILEGED ROLE ACCESS → require hardware token
+  Rule 2: If UNUSUAL COUNTRY + SENSITIVE DATA → block + alert SOC
+  Rule 3: If IMPOSSIBLE TRAVEL (US → China in 2 hours) → block + alert
+  Rule 4: If 3am + bulk download + not VPN → step-up MFA + alert
+  Rule 5: If KNOWN MALICIOUS IP → block hard, alert SOC
+
+OKTA IDENTITY ENGINE — POLICY EXAMPLE:
+  {
+    "name": "Privileged Access Policy",
+    "conditions": {
+      "groups": {"include": ["admins", "privileged-users"]},
+      "app": {"id": "admin-portal"}
+    },
+    "actions": {
+      "appSignOn": {
+        "access": "ALLOW",
+        "verificationMethod": {
+          "factorMode": "2FA",
+          "type": "ASSURANCE",
+          "reauthenticateIn": "PT1H",  // Re-auth after 1 hour
+          "constraints": [
+            {"knowledge": {"types": ["password"]}},
+            {"possession": {"hardwareProtection": "REQUIRED"}}  // Hardware key required
+          ]
+        }
+      }
+    }
+  }
+  
+  Result: Admin portal access requires password + hardware security key. Re-auth every hour.
+
+================================================================================
+PART 2: DEVICE TRUST AND MANAGEMENT
+================================================================================
+
+--- ENDPOINT POSTURE CHECKING ---
+
+MANAGED DEVICE REQUIREMENTS (Zero Trust device policy):
+  MDM enrolled (Jamf for macOS, Intune for Windows/macOS/iOS/Android).
+  OS version: Within N versions of current. Not EOL.
+  Patch level: Within 30 days of latest security patch.
+  Disk encryption: FileVault (macOS), BitLocker (Windows) enabled.
+  EDR agent: CrowdStrike/SentinelOne/Defender running, not tampered.
+  No jailbreak/root: Integrity confirmed by TPM/Secure Enclave.
+  
+DEVICE CERTIFICATE (the enforcement mechanism):
+  At MDM enrollment: Device receives certificate signed by corporate CA.
+  This certificate: Bound to device's TPM. Cannot be exported.
+  
+  Authentication flow:
+  User tries to access protected resource.
+  Browser/client presents device certificate.
+  Access proxy (Cloudflare Access, BeyondCorp, Zscaler) verifies:
+  - Certificate valid and signed by corporate CA?
+  - Device in MDM as compliant?
+  - Certificate not revoked?
+  If all pass: Allow. If any fail: Block.
+  
+  A personal/unmanaged device: Has no corporate certificate. Cannot access protected resources.
+  Even with valid user credentials: No device cert = no access. This is Zero Trust.
+
+INTUNE COMPLIANCE POLICIES:
+  # Example compliance policy via Microsoft Intune:
+  # Windows devices must be:
+  compliance_requirements:
+    os_minimum_version: "10.0.19041"  # Windows 10 20H1
+    bitlocker_enabled: true
+    secure_boot_enabled: true
+    code_integrity_enabled: true
+    firewall_enabled: true
+    antivirus_enabled: true
+    antivirus_signature_up_to_date: true
+    defender_atp_required: true  # Microsoft Defender for Endpoint must be reporting
+    password_required: true
+    password_minimum_length: 12
+  
+  # Conditional Access: Block access if device not compliant
+  conditional_access:
+    grant: "require_compliant_device"
+    # Non-compliant: Redirect to remediation page, not the app
+
+================================================================================
+PART 3: ACCESS PROXIES AND BCP (BEYOND CORPORATE PERIMETER)
+================================================================================
+
+--- GOOGLE BEYONDCORP MODEL ---
+
+THE ARCHITECTURE:
+  No VPN. Applications NOT directly accessible from internet.
+  All access through: Identity-Aware Proxy (IAP).
+  IAP checks: Identity + device health EVERY request.
+  
+  User → IAP → Application (only if identity + device check pass)
+  
+  NOT: User → VPN → Corporate network → Application (implicit trust)
+
+CLOUDFLARE ACCESS (SaaS BeyondCorp):
+
+Application definition:
+  Application: "Internal Wiki"
+  Domain: wiki.company.com → proxied through Cloudflare
+  Protected: No direct route to origin. Only via Cloudflare.
+  
+Policy:
+  Allow: @company.com email + device posture check passes
+  Allow: contractors@partner.com email + Okta group "contractors"
+  Block: Everyone else
+  
+  Require: Any user must:
+  - Have company-issued Cloudflare WARP client installed (device check)
+  - OR: Access from managed device with client certificate
+  - AND: Authenticate via Okta (SAML)
+  - AND: Device compliant per Intune
+  
+WARP CLIENT (Cloudflare's device agent):
+  Installed on: All managed devices.
+  Function: Routes traffic through Cloudflare. Provides device posture signals to Access.
+  Posture checks: OS version, disk encryption, firewall, running processes, serial number match.
+  
+  In Access policy:
+  {
+    "name": "Require Managed Device",
+    "action": "allow",
+    "rules": [
+      {"identity": {"email_domain": "company.com"}},
+      {"device_posture": {"check": "managed_device_required"}}
+    ]
+  }
+  
+  Non-compliant device: Shows remediation page. "Your device needs FileVault enabled."
+  Links to: Instructions. Cannot access until compliant.
+
+--- PRIVILEGED ACCESS MANAGEMENT (PAM) ---
+
+PAM: Just-in-time, least-privilege access to privileged accounts and systems.
+
+CORE PRINCIPLES:
+  No standing privileges: Admins have no admin rights until they request them.
+  Just-in-time (JIT): Request access → approval → temporary access granted → expires.
+  Just-enough access (JEA): Only the specific resource, specific action, for specific time.
+  Full session recording: Every privileged session recorded. Replay in investigations.
+  Credential vaulting: All privileged passwords stored in vault. Users may never see them.
+
+CYBERARK PRIVILEGED ACCESS MANAGER:
+  
+  Vault: Stores all privileged credentials (encrypted, HSM-backed).
+  CPM (Central Policy Manager): Automatically rotates passwords per policy.
+  PSM (Privileged Session Manager): All privileged sessions proxied through PSM.
+    User connects to PSM → PSM logs in to target → session recording starts → proxied.
+    User never sees actual password. Session fully recorded.
+  
+  Use case — Admin accessing production server:
+  1. Admin requests: "SSH access to prod-db-01 for emergency incident"
+  2. Approval: Manager approves. Ticket linked.
+  3. CyberArk: Grants time-limited access (2 hours).
+  4. Admin connects: Via CyberArk portal. PSM provides SSH session.
+  5. Session recorded: Every command logged. Video recording.
+  6. After 2 hours: Access revoked. Password rotated.
+  
+  Forensic value: "Who ran DROP TABLE at 3pm on prod-db-01?" → Pull session recording.
+
+HASHICORP BOUNDARY (open-source PAM):
+  SSH access broker. No direct SSH to servers needed.
+  
+  Setup:
+  # Define target (production DB)
+  resource "boundary_target" "prod_db" {
+    name     = "production-database"
+    scope_id = var.org_scope_id
+    type     = "ssh"
+    
+    host_source_ids     = [boundary_host_set.prod.id]
+    injected_application_credential_source_ids = [boundary_credential_library.vault_ssh.id]
+    session_max_seconds = 7200  # 2-hour max session
+  }
+  
+  # Admin connects:
+  boundary connect ssh -target-id=ttcp_abc123
+  # Boundary: Authenticates user, checks authorization, creates ephemeral SSH certificate
+  # Injects credential. Admin gets shell. Boundary logs session metadata.
+
+================================================================================
+PART 4: NETWORK MICROSEGMENTATION
+================================================================================
+
+--- SOFTWARE-DEFINED MICROSEGMENTATION ---
+
+TRADITIONAL FIREWALLS: North-south traffic (in/out of network) protected.
+  East-west traffic (server to server): Implicitly trusted. No inspection.
+  
+  Attack consequence: Compromise one server → Lateral movement to all servers on same VLAN.
+
+MICROSEGMENTATION: Policies on east-west traffic. Every server-to-server flow explicit.
+  If not explicitly allowed: Denied. Even between servers in same datacenter.
+
+ILLUMIO APPROACH (agentless microsegmentation):
+  Agent: Installed on every workload (VM, container, bare metal).
+  Maps: Every connection to/from every workload.
+  Policy: Define allowed flows. Agent enforces via OS firewall (iptables, Windows Firewall).
+  
+  Map phase: 30 days of observation. See all existing traffic patterns.
+  Label: Workloads by role, environment, app tier (role:web, env:production, app:payments).
+  Policy: Write rules using labels (not IPs — IPs change, labels don't).
+  
+  Example Illumio policy (label-based):
+  Allow:
+    From: role=web-tier AND env=production
+    To: role=app-tier AND env=production AND app=payments
+    Port: 8080 TCP
+  
+  Result: Only web servers can reach app servers. DB servers cannot reach web servers directly.
+  Change: Migrate server to new IP → labels follow → policy still applies. No rule update.
+
+CALICO NETWORK POLICY (Kubernetes):
+  (More detailed in Pack 035 — covered here in context of enterprise microsegmentation)
+  
+  Calico Enterprise: Extends Kubernetes network policies to VMs and bare metal.
+  Unified: Same policy language and enforcement across K8s and non-K8s workloads.
+
+ZERO TRUST NETWORK ACCESS (ZTNA):
+  Replaces VPN. No network-level access. App-level access only.
+  
+  VPN: User connects → Gets access to entire network segment.
+  ZTNA: User connects → Gets access to SPECIFIC APPLICATION ONLY.
+  
+  ZTNA architectures:
+  Agent-based: Software on device → secure tunnel → access proxy → specific app.
+  Agentless: Browser → reverse proxy → specific app (no client install).
+  
+  Zscaler Private Access (ZPA):
+  App connector: Lightweight agent on each internal server. Outbound connection to Zscaler cloud.
+  User agent: On device. Outbound connection to Zscaler cloud.
+  Never: Users connect inbound to corporate network.
+  Never: Servers exposed to internet at all.
+  
+  Result: Even if ZPA credentials stolen → attacker only accesses that one app, nothing else.
+
+================================================================================
+PART 5: SASE (SECURE ACCESS SERVICE EDGE)
+================================================================================
+
+--- SASE ARCHITECTURE ---
+
+SASE: Convergence of networking (SD-WAN) and security (SSE) in cloud-delivered service.
+  SD-WAN: Software-defined WAN. Optimize routing. Replace MPLS.
+  SSE (Security Service Edge): SWG + CASB + ZTNA + FWaaS in one cloud service.
+
+SASE COMPONENTS:
+  SWG (Secure Web Gateway): Proxy all internet traffic. URL filter, malware scan, DLP.
+  CASB (Cloud Access Security Broker): Visibility and control over SaaS apps.
+  ZTNA: Replace VPN. App-level access to internal resources.
+  FWaaS (Firewall as a Service): Cloud-native firewall. Inspect all traffic.
+  SDWAN: Optimize WAN connectivity. Dynamic path selection.
+  
+  All delivered from: Cloud PoPs (Points of Presence) globally.
+  Users connect to nearest PoP: All traffic inspected there. Not backhaul to data center.
+
+ZSCALER INTERNET ACCESS (ZIA) — SWG DEEP DIVE:
+  All user HTTP/HTTPS traffic → Zscaler PoP → Inspected → Internet.
+  
+  SSL inspection: Break and inspect HTTPS at PoP. Detect encrypted threats.
+  User experience: Installed Zscaler app → transparent proxy → same browsing experience.
+  
+  Policies:
+  URL category filtering: Block: P2P, proxy sites, adult content, gambling.
+  File inspection: Download → scanned in cloud sandbox. Malware blocked.
+  DLP: Detect: Credit card numbers, SSNs, source code in uploads. Block or alert.
+  Bandwidth control: Throttle streaming video for non-approved apps. Protect business traffic.
+  
+  Advanced threat: Zero-day protection via cloud sandbox (Zscaler Sandbox).
+  Upload suspicious file → detonate in cloud → behavioral analysis → verdict in seconds.
+  Meanwhile: User sees "File inspection in progress..." Blocked if malicious.
+
+CASB USE CASES:
+  Shadow IT discovery: See ALL SaaS apps employees use (not just approved).
+    Typical finding: 800+ unauthorized apps in use. Security team knew of 50.
+  
+  Data exfiltration prevention:
+    Policy: Block upload of >5MB to personal Dropbox. Allow to corporate Box.
+    Policy: Detect "confidential" labels in uploaded files. Alert + block.
+  
+  Inline vs API mode:
+    Inline (real-time): Traffic proxied through CASB. See all data in transit.
+    API mode: CASB connects to SaaS API. Scans already-uploaded content.
+    Both: Needed for complete coverage.
+
+================================================================================
+PART 6: ZERO TRUST MATURITY MODEL
+================================================================================
+
+CISA ZERO TRUST MATURITY MODEL (2023 — 5 pillars, 4 stages):
+
+PILLARS: Identity, Device, Network, Application Workload, Data.
+
+STAGES:
+  Traditional → Initial → Advanced → Optimal
+
+IDENTITY PILLAR PROGRESSION:
+  Traditional: Username/password. No MFA.
+  Initial: MFA required. Some identity governance.
+  Advanced: Phishing-resistant MFA. Risk-based authentication. Continuous validation.
+  Optimal: Dynamic access based on real-time risk. Just-in-time provisioning. Full lifecycle automation.
+
+NETWORK PILLAR PROGRESSION:
+  Traditional: Macro-segmentation (VLANs). Implicit east-west trust.
+  Initial: Some network segmentation. Basic access controls between zones.
+  Advanced: Micro-segmentation per workload. Encrypted east-west traffic. ZTNA replacing VPN.
+  Optimal: All traffic encrypted, authenticated, authorized per flow. Fully software-defined.
+
+ASSESSMENT TOOL: CISA publishes self-assessment questionnaire.
+Rate your current state per pillar per stage.
+Use: Justify roadmap budget. Prioritize highest-risk gaps first.
+Track: Progress quarterly. Report to CISO/board.
+
+QUICK WINS (high impact, low effort):
+  Enforce phishing-resistant MFA for all admin accounts (1-2 weeks).
+  Enable Conditional Access: Block access from non-compliant devices (2-4 weeks).
+  Deploy LAPS: Unique local admin passwords on all workstations (1 week).
+  Enable Defender Credential Guard: Stop credential theft from memory (1-2 weeks).
+  Deploy default-deny firewall rules at east-west chokepoints (2-4 weeks).
+  
+  These alone: Prevent 80% of common attack paths observed in real breaches.
+
+================================================================================
+END OF PACK 038: ZERO TRUST IMPLEMENTATION
+Total: FIDO2/WebAuthn phishing resistance (registration/authentication flows,
+passkeys), adaptive authentication risk engine (signals/scoring/Okta policy),
+device trust (MDM enrollment/device certificates/Intune compliance), Cloudflare
+Access BeyondCorp (WARP client, posture checks, policy JSON), PAM (CyberArk
+session recording/JIT, HashiCorp Boundary with Terraform), network microsegmentation
+(Illumio label-based policies, ZTNA vs VPN comparison, Zscaler Private Access),
+SASE architecture (ZIA SSL inspection/DLP/sandbox, CASB shadow IT/API mode),
+CISA Zero Trust Maturity Model (5 pillars × 4 stages), quick wins prioritization.
+================================================================================

@@ -1,0 +1,30 @@
+Home Is there better way to create lazy variable initialization?
+
+# Is there better way to create lazy variable initialization?
+
+netanelrevah
+1#
+netanelrevah Published in 2017-12-06 21:22:39Z
+ I want to create code that initialize variable only when I really need it. But initializing in the regular way: var = None if var is None: var = factory() var2 = var  Make too much noise in the code. I tried to create fast solution but I feel there is better option. This is my solution that is fast but can't get parameters and use defaultdict for this. def lazy_variable(factory): data = defaultdict(factory) return lambda: data[''] var = lazy_variable(a_factory) var2 = var()  More questions: is there fast python container that holds only one variable? is there a way to return value without calling the function with parenthesis? EDIT: Please consider performance. I know i can create a class that can have this behavior, but it slower then the simple solution and also the default dict solution. trying some of the solutions: define: import cachetools.func import random @cachetools.func.lru_cache(None) def factory(i): return random.random()  and run: %%timeit for i in xrange(100): q = factory(i) q = factory(i)  got: 100 loops, best of 3: 2.63 ms per loop  naive: %%timeit for i in xrange(100): a = None if a is None: a = random.random() q = a q = a  got: The slowest run took 4.71 times longer than the fastest. This could mean that an intermediate result is being cached. 100000 loops, best of 3: 14.8 µs per loop  I'm not sure what was cached defaultdict solution: %%timeit for i in xrange(100): a = lazy_variable(random.random) q = a() q = a()  got: The slowest run took 4.11 times longer than the fastest. This could mean that an intermediate result is being cached. 10000 loops, best of 3: 76.3 µs per loop  Tnx!
+Michael Butscher
+2#
+Michael Butscher Reply to 2017-12-06 21:41:54Z
+ A simple container (but which needs the parentheses nevertheless) can be done e.g. like this: class Container: UNDEF = object() def __init__(self, factory): self.data = Container.UNDEF self.factory = factory def __call__(self): if self.data is Container.UNDEF: self.data = self.factory() return self.data # Test: var = Container(lambda: 5) print(var()) print(var()) 
+zwer
+3#
+zwer Reply to 2017-12-06 21:52:52Z
+ If we're talking about instance variables, then yes - you can write your own wrapper and have it behave the way you want: class LazyVar(object): def __init__(self, factory, *args, **kwargs): self.id = "__value_" + str(id(self)) # internal store self.factory = factory self.args = args self.kwargs = kwargs def __get__(self, instance, owner): if instance is None: return self else: try: return getattr(instance, self.id) except AttributeError: value = self.factory(*self.args, **self.kwargs) setattr(instance, self.id, value) return value def factory(name): print("Factory called, initializing: " + name) return name.upper() # just for giggles class TestClass(object): foo = LazyVar(factory, "foo") bar = LazyVar(factory, "bar")  You can test it as: test = TestClass() print("Foo will get initialized the moment we mention it") print("Foo's value is:", test.foo) print("It will also work for referencing, so even tho bar is not initialized...") another_bar = test.bar print("It gets initialized the moment we set its value to some other variable") print("They, of course, have the same value: {} vs {}".format(test.bar, another_bar))  Which will print: Foo will get initialized the moment we mention it Factory called, initializing: foo Foo's value is: FOO It will also work for referencing, so even tho bar is not initialized... Factory called, initializing: bar It gets initialized the moment we set its value to some other variable They, of course, have the same value: BAR vs BAR Unfortunately, you cannot use the same trick for globally declared variables as __get__() gets called only when accessed as instance vars.
+timgeb
+4#
+timgeb Reply to 2017-12-06 21:54:39Z
+ Well you could simply access locals() or globals() and type var2 = locals().get('var', factory())  but I have never been in a situation where that would be useful, so you should probably evaluate why you want to do what you want to do.
+Paul Panzer
+5#
+Paul Panzer Reply to 2017-12-06 22:35:29Z
+ If I understand you correctly then some of the functionality you are interested in is provided by functools.lru_cache: import functools as ft @ft.lru_cache(None) def lazy(): print("I'm working soo hard") return sum(range(1000)) lazy() # 1st time factory is called # I'm working soo hard # 499500 lazy() # afterwards cached result is used # 499500  The decorated factory may also take parameters: @ft.lru_cache(None) def lazy_with_args(x): print("I'm working so hard") return sum((x+i)**2 for i in range(100)) lazy_with_args(3.4) # I'm working so hard # 363165.99999999994 lazy_with_args(3.4) # 363165.99999999994 # new parametes, factory is used to compute new value lazy_with_args(-1.2) # I'm working so hard # 316614.00000000006 lazy_with_args(-1.2) # 316614.00000000006 # old value stays in cache lazy_with_args(3.4) # 363165.99999999994 
+netanelrevah
+6#
+netanelrevah Reply to 2017-12-12 22:06:21Z
+ Ok, I think i found a nice and fast solution using generators: def create_and_generate(creator): value = creator() while True: yield value def lazy_variable(creator): generator_instance = create_and_generate(creator) return lambda: next(generator_instance)  another fast solution is: def lazy_variable(factory): data = [] def f(): if not data: data.extend((factory(),)) return data[0] return f  but I thing the generator is more clear.
+ You need to login account before you can post.
+Processed in 0.314799 second(s) , Gzip On .

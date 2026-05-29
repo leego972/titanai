@@ -1,0 +1,197 @@
+Averaging/smoothing a process variable for a readout - LCD
+
+Dacr0n
+
+Member
+Hey all!
+
+I have a arduino microcontroller acting like a PID thermostat.
+
+I also have a 2x16 LCD screen hooked up... the first line displays the "setpoint" and the second line displays the current temp or "process variable".
+
+All is working fine except the sample rate of the PID script is causing the numbers on the second line to be all scrambled like.
+
+What I am wondering is how can I write a little piece of code that takes the "process variable"(current temp) and averages or smoothens it out for the display. Instead of changing the digits every 200 milliseconds like the sample rate is at.
+
+And FYI the sample rate must be 200ms so I can't change that.
+
+Here's what my current code looks like:
+Code:
+/********************************************************
+* PID Simple Example
+* Reading analog input 0 to control analog PWM output 3
+********************************************************/
+
+#include <PID_Beta6.h>
+#include <LiquidCrystal.h>
+
+//Define Variables we'll be connecting to
+double Setpoint, Input, Output;
+
+//Specify the links and initial tuning parameters
+PID myPID(&Input, &Output, &Setpoint, 2,3,0);
+
+// we should connect LCD like on the page
+//http://arduino.cc/en/Tutorial/LiquidCrystalBlink
+//only instead pin 5 (which is already in use
+//we would use pin 8 instead
+//so we would engage pins 12, 11, 8, 4, 3, 2
+// so, input pin better to redefine
+LiquidCrystal lcd(12, 11, 8, 4, 3, 2);
+
+const int onPin = 5; // choose the input pin to trigger heater
+//leave them the same
+const int upPin = 6;   // choose the input pin to increase temp
+const int downPin = 7;   // choose the input pin to decrease temp
+int buttonState = 0;     // variable for reading the pin status
+//also we would need pre-states of Up and Down button
+//because person is slower then processor.
+// and when I push button, loop would cycle several times
+// then value would encerase for more then 1
+int DownPushed = 0;
+int UpPushed = 0;
+int OnPushed = 0;
+int PID_ON = 0;
+
+unsigned long lastTime;
+
+void setup()
+{
+Serial.begin( 19200 );
+//initialize the variables we're linked to
+Input = analogRead(0);
+Setpoint = 100;
+
+// Declare inputs
+pinMode(onPin, INPUT);    // declare pushbutton as input
+pinMode(upPin, INPUT);    // declare pushbutton as input
+pinMode(downPin, INPUT);    // declare pushbutton as input
+
+//turn the PID on STANDBY
+myPID.SetMode(MANUAL);
+Output=0;
+myPID.SetSampleTime(200);
+myPID.SetTunings(2,3,0);
+myPID.SetOutputLimits(0, 200);
+lastTime = millis();
+
+// set up the LCD's number of columns and rows:
+lcd.begin(16,2);
+}
+
+void loop()
+{
+buttonState = digitalRead(onPin);
+// here I'm changing the behaviour
+// previously it worked only while you push the on button
+// now it would be switch on/off button
+// you push it once - switch on
+// push second time - switch off
+if (buttonState == HIGH) {
+// turn LED/HEATER on:
+myPID.SetMode(AUTO);
+}
+else {
+// turn LED/HEATER off:
+myPID.SetMode(MANUAL);
+Output=0;
+}
+
+unsigned long lastTime;
+
+// I would not change these lines, because you are expecting 250 ms for a "push"
+// that is if you hold button for more then 1/4 second,
+if(digitalRead(upPin)==HIGH) {
+if (millis()-lastTime >= 250) {
+Setpoint+=1;
+lastTime=millis();
+}
+}
+
+if(digitalRead(downPin)==HIGH) {
+if (millis()-lastTime >= 250) {
+Setpoint-=1;
+lastTime=millis();
+}
+}
+Input = analogRead(0);
+myPID.Compute();
+analogWrite(10,Output);
+//and output to LCD
+lcd.setCursor(0,0);
+//if heater is on - show *
+//if not - empty
+if( PID_ON ==1 ) {
+lcd.print("*");
+}
+else {
+lcd.print(" ");
+};
+lcd.print("--SET--: ");
+lcd.print((int)(Setpoint) );
+lcd.setCursor( 0,1);
+lcd.print(" --AIR--: ");
+lcd.print( Input );
+}
+
+I have to write some sort of script that deals with and averages that last line "Input" and displays the process variable (temperature) every 1000 or 2000 ms (1 or 2 seconds) instead of every 200ms leaving me with just a blur of numbers.
+
+I have no clue what to do
+A friend told me:
+
+"there are two different issues involved here. One is the "busyness" of the display updating every 200ms. The other is the "bounciness" of the data. Smoothing the data by itself is not enough, in my experience, since a value that only changes by one or two counts, but changes 5 times a second, is still distracting. So the display updates should be further apart as well as having the data smoothed."
+
+another friend told me :
+"one way to get around that is to have a cycle counter that triggers your display: you display if the counter has reached a pre-defined number.
+
+but within each cycle, you continue to update the average.
+
+the interesting about exponential smoothing is that at any given point, the "average" contains information about all the past measurements. it is just that the older measurements are weighted exponentially less than the newer ones."
+
+Is there any advice you recommend ? I a kind of a rookie at coding and would appreciate any help! Maybe how to apply the advice those people gave me?
+
+Many thanks!
+
+Here is a clip of what the display does. The top number is fine because that represents whatever the setpoint is.... the readout below is what I need to make a little more readable.
+
+YouTube - LCD
+
+Dacr0n
+
+Member
+Someone told me:
+
+Increment a counter every pass. On the fifth pass, set the counter to zero, print out the average."
+
+but im a bit lost as to how to do that.
+
+3v0
+
+Coop Build Coordinator
+Forum Supporter
+Make an array of 5 elements.
+
+Replace the oldest reading in the array with the next new reading.
+
+Each time you update the 0th element of the array add all elements of the array and divide by 5.
+
+Display that value.
+
+A moving average may be better.
+
+Do as above but use a 10 element array and average all 10 for a reading. Display this average as frequently or in frequently as you like.
+
+Last edited:
+
+Mosaic
+
+Well-Known Member
+To keep things efficient, try to sample using 4 ,8,16 samples etc.....that way, calculating the avg is quick when done with binary division. Although a Hw divider (might) be quicker....
+
+A moving avg is better,as 3v0 said. But u have more housekeeping. U have to keep rolling the array data to make space for the next new sample and then calc the avg. Basically u create an array stack that u keep pushing a new sample onto, thus the rest of the data keeps moving down the stack as new data is pushed on top of it. If u have a 16 element stack....the bottom sample is sixteen samples old.
+
+This results in a smoothing of the data and compensates for any spikes or transients quite well based on the historical samples. Further, u avg every time a sample is taken so your data display is updated faster.You don't wait for 16 new samples.
+
+Last edited:
+
+Loading

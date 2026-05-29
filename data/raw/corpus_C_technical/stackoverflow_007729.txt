@@ -1,0 +1,162 @@
+Question: <p>Well I testing my jython program, that does some neat [".xls", ".doc", ".rtf", ".tif", ".tiff", ".pdf" files]  -> pdf (intermediary file) -> tif (final output) conversion using Open Office. We moved away from MS Office due to the problems we had with automation. Now it seems we have knocked down  many bottles related to show stopper errors with one bottle remaining. OO hangs after a while.  </p>
+
+<p>It happens where you see this line '&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;' in the code  </p>
+
+<p>What is the correct way for me to handle a stalled Open Office process. could you please provide useful links, and give me a good suggestion on the way out.<br />
+Also one more question.  </p>
+
+<p>Sum up:<br />
+* How to handle a stalled Open Office instance?<br />
+* How to make conversion with java headless, so I dont have a GUI popping up all the time wasting memory.<br />
+* also any general suggestions on code quality, optimizations and general coding standards will be most appreciated.
+<hr /></p>
+
+<p>Traceback (innermost last):<br />
+  File "dcmail.py", line 184, in ?<br />
+  File "dcmail.py", line 174, in main<br />
+  File "C:\DCMail\digestemails.py", line 126, in process_inbox<br />
+  File "C:\DCMail\digestemails.py", line 258, in _convert<br />
+  File "C:\DCMail\digestemails.py", line 284, in _choose_conversion_type<br />
+  File "C:\DCMail\digestemails.py", line 287, in _open_office_convert<br />
+  File "C:\DCMail\digestemails.py", line 299, in _load_attachment_to_convert<br />
+com.sun.star.lang.DisposedException: java.io.EOFException<br />
+        at com.sun.star.lib.uno.bridges.java_remote.java_remote_bridge$MessageDi
+spatcher.run(java_remote_bridge.java:176)  </p>
+
+<p>com.sun.star.lang.DisposedException: com.sun.star.lang.DisposedException: java.i
+o.EOFException  </p>
+
+<p>Just to clear up this exception only throws when I kill the open office process. Otherwise the program just waits for open office to complete. Indefinitely<br />
+<hr /></p>
+
+<p>The Code (with non functional code tags)  </p>
+
+<p>[code]    </p>
+
+<blockquote>
+  <blockquote>
+    <p>#ghost script handles these file types<br />
+        GS_WHITELIST=[".pdf"]<br />
+        #Open Office handles these file types<br />
+        OO_WHITELIST=[".xls", ".doc", ".rtf", ".tif", ".tiff"]<br />
+        #whitelist is used to check against any unsupported files.<br />
+        WHITELIST=GS_WHITELIST + OO_WHITELIST   </p>
+  </blockquote>
+</blockquote>
+
+<pre><code>def _get_service_manager(self):
+    try:
+        self._context=Bootstrap.bootstrap();
+        self._xMultiCompFactory=self._context.getServiceManager()
+        self._xcomponentloader=UnoRuntime.queryInterface(XComponentLoader, self._xMultiCompFactory.createInstanceWithContext("com.sun.star.frame.Desktop", self._context))
+    except:
+        raise OpenOfficeException("Exception Occurred with Open Office")
+
+def _choose_conversion_type(self,fn):
+    ext=os.path.splitext(fn)[1]
+    if ext in GS_WHITELIST:
+        self._ghostscript_convert_to_tiff(fn)
+    elif ext in OO_WHITELIST:
+        self._open_office_convert(fn)
+
+def _open_office_convert(self,fn):
+    self._load_attachment_to_convert(fn)
+    self._save_as_pdf(fn)
+    self._ghostscript_convert_to_tiff(fn)
+
+def _load_attachment_to_convert(self, file):
+    file=self._create_UNO_File_URL(file)
+    properties=[]
+    p=PropertyValue()
+    p.Name="Hidden"
+    p.Value=True
+    properties.append(p)
+    properties=tuple(properties) 
+    self._doc=self._xcomponentloader.loadComponentFromURL(file, "_blank",0, properties) &lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt; here is line 299
+
+def _create_UNO_File_URL(self, filepath):
+    try:
+        file=str("file:///" + filepath)
+        file=file.replace("\\", "/")
+    except MalformedURLException, e:
+        raise e
+    return file
+
+def _save_as_pdf(self, docSource):
+    dirName=os.path.dirname(docSource)
+    baseName=os.path.basename(docSource)
+    baseName, ext=os.path.splitext(baseName)
+    dirTmpPdfConverted=os.path.join(dirName + DIR + PDF_TEMP_CONVERT_DIR)
+    if not os.path.exists(dirTmpPdfConverted):
+        os.makedirs(dirTmpPdfConverted)
+    pdfDest=os.path.join(dirTmpPdfConverted + DIR + baseName + ".pdf")
+    url_save=self._create_UNO_File_URL(pdfDest)
+    properties=self._create_properties(ext)
+    try:
+        try:
+            self._xstorable=UnoRuntime.queryInterface(XStorable, self._doc);
+            self._xstorable.storeToURL(url_save, properties)
+        except AttributeError,e:
+                self.logger.info("pdf file already created (" + str(e) + ")")
+                raise e
+    finally:
+        try:
+            self._doc.dispose()
+        except:
+            raise
+
+def _create_properties(self,ext):
+    properties=[]
+    p=PropertyValue()
+    p.Name="Overwrite"
+    p.Value=True
+    properties.append(p)
+    p=PropertyValue()
+    p.Name="FilterName"
+    if   ext==".doc":
+        p.Value='writer_pdf_Export'
+    elif ext==".rtf":
+        p.Value='writer_pdf_Export'
+    elif ext==".xls":
+        p.Value='calc_pdf_Export'
+    elif ext==".tif":
+        p.Value='draw_pdf_Export'
+    elif ext==".tiff":
+        p.Value='draw_pdf_Export'
+    properties.append(p)
+    return tuple(properties)
+
+def _ghostscript_convert_to_tiff(self, docSource):
+    dest, source=self._get_dest_and_source_conversion_file(docSource)
+    try:
+        command = ' '.join([
+            self._ghostscriptPath + 'gswin32c.exe',
+           '-q',
+           '-dNOPAUSE',
+           '-dBATCH',
+           '-r500',
+           '-sDEVICE=tiffg4',
+           '-sPAPERSIZE=a4',
+           '-sOutputFile=%s %s' % (dest, source),
+           ])
+        self._execute_ghostscript(command)
+        self.convertedTifDocList.append(dest)
+    except OSError, e:
+        self.logger.info(e)
+        raise e
+    except TypeError, (e):
+        raise e
+    except AttributeError, (e):
+        raise e
+    except:
+        raise
+</code></pre>
+
+<p>[/code]</p>
+
+Answer: <p>OpenOffice.org has a "-headless" parameter to run it without a GUI. I'm not sure this actually frees up all resources that would be spent on GUI. Here's how I run my server-side headless instance:</p>
+
+<pre><code>soffice -headless -accept="socket,port=1234;urp" -display :25
+</code></pre>
+
+<p>I can't tell what's causing the stalling problems for your Python script, but you might want to to check out <a href="http://www.artofsolving.com/opensource/pyodconverter" rel="nofollow">PyODConverter</a>, and see what this script does differently to maybe catch the error causing your trouble.</p>

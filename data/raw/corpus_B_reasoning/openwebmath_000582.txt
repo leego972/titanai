@@ -1,0 +1,34 @@
+# Gathering response from a pagable service
+
+I'm wondering how this code could be improved. I especially don't like the use of mutable Buffer but not sure what the best way to get it out cleanly.
+
+  def find(service: Service): Traversable[Long] = {
+def loop(lastId: Option[Long])
+(acc: mutable.Buffer[Long])
+(quota: Int): Traversable[Long] = {
+val response = service.call(lastId.getOrElse(-1))
+if (response.size() > 0 && quota > 0) {
+loop(response.last.getId)(acc ++ response)(quota - 1)
+} else {
+(acc ++ response).toList
+}
+}
+loop(None)(mutable.Buffer())(3)
+}
+
+
+You might want to try Scala Streams.
+
+val Quota = 3
+
+def find(service: Service) = {
+def chunks(lastIdOption: Option[Long]): Stream[Stream[Int]] = {
+Stream.cons(response, chunks(response.last.id))
+}
+chunks(None).take(Quota).flatten
+}
+
+
+The chunks function returns an infinite stream of pages. The take(3) limits it to three pages. The flatten method joins the inner list in a large stream.
+
+Stream is lazy, so it should fetch only the data that are needed. However, you should not expect some artificial intelligence in the Streams. For example this will always fetch the first page even if quota is zero. I hope this is not an issue in your case. If you are in doubt with the laziness, you can add some print in the chunks function to check (or falsify) your assumptions.

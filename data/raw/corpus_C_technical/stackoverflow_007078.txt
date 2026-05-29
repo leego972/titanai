@@ -1,0 +1,38 @@
+Question: <p>So let's say I'm using Python 2.5's built-in default sqlite3 and I have a Django model class with the following code:</p>
+
+<pre><code>class SomeEntity(models.Model):
+    some_field = models.CharField(max_length=50, db_index=True, unique=True)
+</code></pre>
+
+<p>I've got the admin interface setup and everything appears to be working fine except that I can create two SomeEntity records, one with some_field='some value' and one with some_field='Some Value' because the unique constraint on some_field appears to be case sensitive.</p>
+
+<p>Is there some way to force sqlite to perform a case <em>in</em>sensitive comparison when checking for uniqueness?</p>
+
+<p>I can't seem to find an option for this in Django's docs and I'm wondering if there's something that I can do directly to sqlite to get it to behave the way I want. :-)</p>
+
+Answer: <p>Yes this can easily be done by adding a unique index to the table with the following command:</p>
+
+<p>CREATE UNIQUE INDEX uidxName ON mytable (myfield COLLATE NOCASE)</p>
+
+<p>If you need case insensitivity for nonASCII letters, you will need to register your own COLLATION with commands similar to the following:</p>
+
+<p>The following example shows a custom collation that sorts âthe wrong wayâ:</p>
+
+<pre><code>import sqlite3
+
+def collate_reverse(string1, string2):
+    return -cmp(string1, string2)
+
+con = sqlite3.connect(":memory:")
+con.create_collation("reverse", collate_reverse)
+
+cur = con.cursor()
+cur.execute("create table test(x)")
+cur.executemany("insert into test(x) values (?)", [("a",), ("b",)])
+cur.execute("select x from test order by x collate reverse")
+for row in cur:
+    print row
+con.close()
+</code></pre>
+
+<p>Additional python documentation for sqlite3 shown <a href="http://docs.python.org/library/sqlite3.html">here</a></p>

@@ -1,0 +1,84 @@
+Question: <p>This question is related to (but perhaps not quite the same as):</p>
+
+<p><a href="http://stackoverflow.com/questions/61451/does-django-have-html-helpers">http://stackoverflow.com/questions/61451/does-django-have-html-helpers</a></p>
+
+<p>My problem is this: In Django, I am constantly reproducing the basic formatting for low-level database objects. Here's an example:</p>
+
+<p>I have two classes, Person and Address. There are multiple Addresses for each Person, setup likeso (in their respective <strong>models.py</strong>)</p>
+
+<pre><code>class Person(models.Model):
+  ...
+
+class Address(models.Model):
+  contact = models.ForeignKey(Person)
+</code></pre>
+
+<p>Now, whenever I look at a Person, I want to see all their Addresses. So suppose <strong>Persons/views.py</strong> has something likeso:</p>
+
+<pre><code>def detail(request, person_id):
+   person = get_object_or_404( Person, pk=person_id )
+   return render_to_response('persons/details.html',
+      { 'title' : unicode(person), 'addresses': person.address_set.all() } )
+</code></pre>
+
+<p>And, I have a template, <strong>persons/details.html</strong>, with code, for example, like-so:</p>
+
+<pre><code>{% extends "base.html" %}
+
+{% for address in addresses %}
+&lt;b&gt;{{ address.name }}&lt;/b&gt;
+  {{ address.type }} &lt;br&gt;
+  {{ address.street_1 }}&lt;br&gt;
+  {{ address.street_2 }}&lt;br&gt;
+  {{ address.city }} {{ address.stateprov }} {{ address.postalcode }}&lt;br&gt;
+  {{ address.country }}
+  &lt;hr&gt;
+{{ endfor }}
+</code></pre>
+
+<p>I am repeating this code quite a bit, often with minor variations, such when it's in a table, and then &lt; br > must be substituted by &lt; /td >&lt; td >. Other times, I don't want a street_2 to display (or the &lt; br > after it). All to say, there is fundamental logic that I want to express, that I am even more loath to tote around with block-and-copy!</p>
+
+<p>What I want is a <strong>persons/details.html</strong> with, for example, the following: </p>
+
+<pre><code>{% extends "base.html" %}
+{% for address in addresses %} 
+  {% address.as_html4 %}
+{% endfor %}
+</code></pre>
+
+<p>And if I want inline table, something likeso (I guess!):</p>
+
+<pre><code>{% extends "base.html" %}
+&lt;table&gt;&lt;tr&gt;
+{% for address in addresses %}
+  &lt;tr&gt;&lt;td&gt; {% address.as_html4 &lt;/td&gt;&lt;td&gt; %} &lt;/td&gt;&lt;/tr&gt;
+{% endfor %}
+&lt;/table&gt;
+</code></pre>
+
+<p>The question is, then: Where is the best place to put the formatting? The logic?</p>
+
+<p>Django seem to have the following (plausible) options:</p>
+
+<ol>
+<li><p>Put the formatting in models.py</p></li>
+<li><p>Put the logic/formatting in views.py</p></li>
+<li><p>Put the logic/formatting in some other sub-class of Person or Address (i.e.  addresses/html4.py)</p></li>
+<li><p>Create custom tags</p></li>
+</ol>
+
+<p>Help / insight much appreciated!</p>
+
+Answer: <p>Sounds like an <a href="http://docs.djangoproject.com/en/dev/howto/custom-template-tags/#inclusion-tags" rel="nofollow">inclusion tag</a> is what you're looking for. You could have a template and tag for each major variation and use the tag's arguments to customise the context for each template as required.</p>
+
+<p>Basic tag definition:</p>
+
+<pre><code>@register.inclusion_tag('person/address.html')
+def display_address(address):
+    return {'address': address}
+</code></pre>
+
+<p>Use in templates (assuming the templatetag module containing it has already been <code>{% load %}</code>-ed):</p>
+
+<pre><code>{% display_address address %}
+</code></pre>

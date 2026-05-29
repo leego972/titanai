@@ -1,0 +1,76 @@
+Question: <p>The typical ConfigParser generated file looks like:</p>
+
+<pre><code>[Section]
+bar=foo
+[Section 2]
+bar2= baz
+</code></pre>
+
+<p>Now, is there a way to index lists like, for instance:</p>
+
+<pre><code>[Section 3]
+barList={
+    item1,
+    item2
+}
+</code></pre>
+
+<p>Related question: <a href="http://stackoverflow.com/questions/287757/pythons-configparser-unique-keys-per-section">Pythonâs ConfigParser unique keys per section</a></p>
+
+<p>? Thanks in advance</p>
+
+Answer: <pre><code>import ConfigParser
+import os
+
+class Parser(object):
+    """attributes may need additional manipulation"""
+    def __init__(self, section):
+        """section to retun all options on, formatted as an object
+        transforms all comma-delimited options to lists
+        comma-delimited lists with colons are transformed to dicts
+        dicts will have values expressed as lists, no matter the length
+        """
+        c = ConfigParser.RawConfigParser()
+        c.read(os.path.join(os.path.dirname(__file__), 'config.cfg'))
+
+        self.section_name = section
+
+        self.__dict__.update({k:v for k, v in c.items(section)})
+
+        #transform all ',' into lists, all ':' into dicts
+        for key, value in self.__dict__.items():
+            if value.find(':') &gt; 0:
+                #dict
+                vals = value.split(',')
+                dicts = [{k:v} for k, v in [d.split(':') for d in vals]]
+                merged = {}
+                for d in dicts:
+                    for k, v in d.items():
+                        merged.setdefault(k, []).append(v)
+                self.__dict__[key] = merged
+            elif value.find(',') &gt; 0:
+                #list
+                self.__dict__[key] = value.split(',')
+</code></pre>
+
+<p>So now my <code>config.cfg</code> file, which could look like this:</p>
+
+<pre><code>[server]
+credentials=username:admin,password:$3&lt;r3t
+loggingdirs=/tmp/logs,~/logs,/var/lib/www/logs
+timeoutwait=15
+</code></pre>
+
+<p>Can be parsed into fine-grained-enough objects for my small project.</p>
+
+<pre><code>&gt;&gt;&gt; import config
+&gt;&gt;&gt; my_server = config.Parser('server')
+&gt;&gt;&gt; my_server.credentials
+{'username': ['admin'], 'password', ['$3&lt;r3t']}
+&gt;&gt;&gt; my_server.loggingdirs:
+['/tmp/logs', '~/logs', '/var/lib/www/logs']
+&gt;&gt;&gt; my_server.timeoutwait
+'15'
+</code></pre>
+
+<p>This is for very quick parsing of simple configs, you lose all ability to fetch ints, bools, and other types of output without either transforming the object returned from <code>Parser</code>, or re-doing the parsing job accomplished by the Parser class elsewhere.</p>

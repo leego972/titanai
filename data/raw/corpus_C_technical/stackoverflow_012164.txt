@@ -1,0 +1,35 @@
+Question: <p>How to wait for multiple child processes in Python on Windows, without active wait (polling)? Something like this <em>almost</em> works for me:</p>
+
+<pre><code>proc1 = subprocess.Popen(['python','mytest.py'])
+proc2 = subprocess.Popen(['python','mytest.py'])    
+proc1.wait()
+print "1 finished"
+proc2.wait()
+print "2 finished"
+</code></pre>
+
+<p>The problem is that when <code>proc2</code> finishes before <code>proc1</code>, the parent process will still wait for <code>proc1</code>. On Unix one would use <code>waitpid(0)</code> in a loop to get the child processes' return codes as they finish - how to achieve something like this in Python on Windows?</p>
+
+Answer: <p>Twisted on Windows will perform an active wait under the covers. If you don't want to use threads, you will have to use the win32 API to avoid polling. Something like this:</p>
+
+<pre><code>import win32process
+import win32event
+
+# Note: CreateProcess() args are somewhat cryptic, look them up on MSDN
+proc1, thread1, pid1, tid1 = win32process.CreateProcess(...)
+proc2, thread2, pid2, tid2 = win32process.CreateProcess(...)
+thread1.close()
+thread2.close()
+
+processes = {proc1: "proc1", proc2: "proc2"}
+
+while processes:
+    handles = processes.keys()
+    # Note: WaitForMultipleObjects() supports at most 64 processes at a time
+    index = win32event.WaitForMultipleObjects(handles, False, win32event.INFINITE)
+    finished = handles[index]
+    exitcode = win32process.GetExitCodeProcess(finished)
+    procname = processes.pop(finished)
+    finished.close()
+    print "Subprocess %s finished with exit code %d" % (procname, exitcode)
+</code></pre>

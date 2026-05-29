@@ -1,0 +1,115 @@
+## Sparse files with Python
+
+###### Written by Barry Warsaw in technology on Sat 14 January 2017. Tags: linux, python,
+
+For a project at work we create sparse files, which on Linux and other POSIX systems, represent empty blocks more efficiently. Let's say you have a file that's a gibibyte [1] in size, but which contains mostly zeros, i.e. the NUL byte. It would be inefficient to write out all those zeros, so file systems that support sparse files actually just write some metadata to represent all those zeros. The real, non-zero data is then written wherever it may occur. These sections of zero bytes are called "holes".
+
+Sparse files are used in many situations, such as disk images, database files, etc. so having an efficient representation is pretty important. When the file is read, the operating system transparently turns those holes into the correct number of zero bytes, so software reading sparse files generally don't have to do anything special. They just read data as normal, and the OS gives them zeros for the holes.
+
+You can create a sparse file right from the shell:
+
+$truncate -s 1000000 /tmp/sparse  Now /tmp/sparse is a file containing one million zeros. It actually consumes almost no space on disk (just some metadata), but for most intents and purposes, the file is one million bytes in size: $ ls -l /tmp/sparse
+-rw-rw-r-- 1 barry barry 1000000 Jan 14 11:36 /tmp/sparse
+$wc -c /tmp/sparse 1000000 /tmp/sparse  The commands ls and wc don't really know or care that the file is sparse; they just keep working as if it weren't. But, sometimes you do need to know that a file contains holes. A common case is if you want to copy the file to some other location, say on a different file system. A naive use of cp will fill in those holes, so a command like this: $ cp /tmp/sparse ~/full
+
+
+makes ~/full a non-sparse file. It fills in the holes with actual zero bytes. Some commands, like cp have options to try to deal with sparse files, but detecting them is always a bit of a guess. I'm not aware of any standard, POSIX or otherwise, that defines exactly how sparse files are supposed to work.
+
+And in fact, their implementation and representation is file system dependent. The Linux ubiquitous EXT4 file system supports them, but many file systems (e.g. Windows FAT) do not. In those cases, you'll just get a file with all those zeros filled in.
+
+One commonly described heuristic to detect an empty sparse file is to use the stat command from the shell to print the number of allocated blocks:
+
+$stat --format="%b" /tmp/sparse 0  Here we see that no blocks have been allocated, so the file is entirely sparse. It contains one big hole of zeros. If the file were only partially sparse (i.e. it contained a mix of holes and data), you could try to compare the number of blocks allocated with what you'd expect given the reported file size, but that does get complicated rather quickly. Still, this should be good enough, right? Well, not quite! Because the number of blocks allocated is actually file system dependent too. The above examples come from an EXT4 file system, but ZFS returns something different: $ truncate -s 1000000 /tmp/sparse
+\$ stat --format="%b" /tmp/sparse
+1
+
+
+Uh oh.
+
+While detecting and handling sparse files always involve heuristics and thus may be error prone, we can do better if we write some code. We'll use Python naturally, but all of this can be fairly easily translated to C. First, let's create a sparse file:
+
+>>> import os
+>>> from pathlib import Path
+>>> sparse = Path('/tmp/sparse')
+>>> sparse.touch()
+>>> os.truncate(str(sparse), 1000000)
+
+
+This is equivalent to the truncate command we used in the shell [2].
+
+Now, just like in the shell, we can use stat to get the number of blocks allocated:
+
+>>> sparse.stat().st_blocks
+0
+
+
+but just like in the shell, this returns a different number on ZFS:
+
+>>> sparse.stat().st_blocks
+1
+
+
+So how can we do better?
+
+There is a POSIX C function called lseek which supports repositioning the file pointer associated with an open file descriptor. Generally lseek is used to read or write data at a specific byte offset relative to some other location, e.g. the start or end of the file, or the current file position. So if you want to read the 10th byte from the end of the file, you can do this:
+
+>>> with open(str(p), 'r') as fp:
+...   os.lseek(fp.fileno(), -10, os.SEEK_END)
+...
+999990
+'\x00'
+
+
+This tells us that there's a zero byte at offset 999990 in the file, but we still don't know whether that zero byte is actually there or comes from a hole.
+
+As it turns out, Linux [3] has a couple of extra options for seeking, SEEK_DATA and SEEK_HOLE. The former lets you find the next location where actual data exists, relative to the given offset, while the latter lets you find the next location of a hole. So we seek relative to the start of the file, and look for the next non-hole block of data. Then if we seek past the end of the file, we know the entire file is sparse, i.e. it found no data!
+
+In Python, when you seek for data in the case of an entirely empty file, you'll get an exception because your seek went past the end of the file. Here then is a Python function which will return a boolean indicating whether the entire file is empty or not:
+
+import os
+import errno
+
+def is_empty(path):
+with open(str(path), 'r') as fp:
+try:
+os.lseek(fp.fileno(), 0, os.SEEK_DATA)
+except OSError as error:
+# There is no OSError subclass for ENXIO.
+if error.errno != errno.ENXIO:
+raise
+# The expected exception occurred, meaning, there is no data in
+# the file, so it's entirely sparse.
+return True
+# The expected exception did not occur, so there is data in the file.
+return False
+
+
+Now if we call this function on the sparse file we created earlier, it returns the correct results regardless of which file system we are on:
+
+>>> is_empty(sparse)
+True
+
+
+To prove this, let's write a single byte into the middle of the file:
+
+>>> with open(str(sparse), 'wb+') as fp:
+...   os.lseek(fp.fileno(), 500202, os.SEEK_SET)
+...   fp.write(b'\x01')
+...
+500202
+1
+
+
+There is now a hole at the front of the file, followed by a single byte of data, followed by another hole. Our function above returns the expected result:
+
+>>> is_empty(sparse)
+False
+
+
+You should be able to season all this to taste for any other sparse file operations you may need to perform.
+
+## Footnotes
+
+ [1] A gibibyte is 1024 ^ 3 bytes, as opposed to the more commonly heard, but misunderstood term "gigabyte" which is 1000 ^ 3 bytes.
+ [2] Unlike the truncate shell command, Python's os.truncate() function does not create the file if it doesn't yet exist.
+ [3] As of kernel 3.1 per the lseek(2) manpage. These APIs may also be implemented in other POSIX operating systems, so check your manpages!

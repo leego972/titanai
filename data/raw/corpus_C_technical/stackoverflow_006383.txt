@@ -1,0 +1,57 @@
+Question: <p>What is the easiest way to use a DLL file from within Python?</p>
+
+<p>Specifically, how can this be done <em>without</em> writing any additional wrapper C++ code to expose the functionality to Python?</p>
+
+<p>Native Python functionality is strongly preferred over using a third-party library.</p>
+
+Answer: <p>For ease of use, <a href="http://docs.python.org/library/ctypes.html">ctypes</a> is the way to go.</p>
+
+<p>The following example of ctypes is from actual code I've written (in Python 2.5).  This has been, by far, the easiest way I've found for doing what you ask.</p>
+
+<pre><code>import ctypes
+
+# Load DLL into memory.
+
+hllDll = ctypes.WinDLL ("c:\\PComm\\ehlapi32.dll")
+
+# Set up prototype and parameters for the desired function call.
+# HLLAPI
+
+hllApiProto = ctypes.WINFUNCTYPE (
+    ctypes.c_int,      # Return type.
+    ctypes.c_void_p,   # Parameters 1 ...
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p)   # ... thru 4.
+hllApiParams = (1, "p1", 0), (1, "p2", 0), (1, "p3",0), (1, "p4",0),
+
+# Actually map the call ("HLLAPI(...)") to a Python name.
+
+hllApi = hllApiProto (("HLLAPI", hllDll), hllApiParams)
+
+# This is how you can actually call the DLL function.
+# Set up the variables and call the Python name with them.
+
+p1 = ctypes.c_int (1)
+p2 = ctypes.c_char_p (sessionVar)
+p3 = ctypes.c_int (1)
+p4 = ctypes.c_int (0)
+hllApi (ctypes.byref (p1), p2, ctypes.byref (p3), ctypes.byref (p4))
+</code></pre>
+
+<p>The <code>ctypes</code> stuff has all the C-type data types (<code>int</code>, <code>char</code>, <code>short</code>, <code>void*</code>, and so on) and can pass by value or reference.  It can also return specific data types although my example doesn't do that (the HLL API returns values by modifying a variable passed by reference).</p>
+
+<hr>
+
+<p>In terms of the specific example shown above, IBM's EHLLAPI is a fairly consistent interface.</p>
+
+<p>All calls pass four void pointers (EHLLAPI sends the return code back through the fourth parameter, a pointer to an <code>int</code> so, while I specify <code>int</code> as the return type, I can safely ignore it) as per IBM's documentation <a href="http://publib.boulder.ibm.com/infocenter/pcomhelp/v5r9/index.jsp?topic=/com.ibm.pcomm.doc/books/html/emulator_programming08.htm">here</a>. In other words, the C variant of the function would be:</p>
+
+<pre><code>int hllApi (void *p1, void *p2, void *p3, void *p4)
+</code></pre>
+
+<p>This makes for a single, simple <code>ctypes</code> function able to do anything the EHLLAPI library provides, but it's likely that other libraries will need a separate <code>ctypes</code> function set up per library function.</p>
+
+<p>The return value from <code>WINFUNCTYPE</code> is a function prototype but you still have to set up more  parameter information (over and above the types). Each tuple in <code>hllApiParams</code> has a parameter "direction" (1 = input, 2 = output and so on), a parameter name and a default value - see the <code>ctypes</code> doco for details</p>
+
+<p>Once you have the prototype and parameter information, you can create a Python "callable" <code>hllApi</code> with which to call the function. You simply create the needed variable (<code>p1</code> through <code>p4</code> in my case) and call the function with them.</p>

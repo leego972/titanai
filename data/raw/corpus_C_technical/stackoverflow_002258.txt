@@ -1,0 +1,75 @@
+Question: <p>I've seen several examples of code like this:</p>
+
+<pre><code>if not someobj:
+    #do something
+</code></pre>
+
+<p>But I'm wondering why not doing:</p>
+
+<pre><code>if someobj == None:
+    #do something
+</code></pre>
+
+<p>Is there any difference? Does one have an advantage over the other?</p>
+
+Answer: <p>In the first test, Python try to convert the object to a <code>bool</code> value if it is not already one. Roughly, <strong>we are asking the object : are you meaningful or not ?</strong> This is done using the following algorithm :</p>
+
+<ol>
+<li><p>If the object has a <code>__nonzero__</code> special method (as do numeric built-ins, <code>int</code> and <code>float</code>), it calls this method. It must either return a <code>bool</code> value which is then directly used, or an <code>int</code> value that is considered <code>False</code> if equal to zero.</p></li>
+<li><p>Otherwise, if the object has a <code>__len__</code> special method (as do container built-ins, <code>list</code>, <code>dict</code>, <code>set</code>, <code>tuple</code>, ...), it calls this method, considering a container <code>False</code> if it is empty (length is zero).</p></li>
+<li><p>Otherwise, the object is considered <code>True</code> unless it is <code>None</code> in which case, it is considered <code>False</code>.</p></li>
+</ol>
+
+<p>In the second test, the object is compared for equality to <code>None</code>. Here, <strong>we are asking the object, "Are you equal to this other value?"</strong> This is done using the following algorithm :</p>
+
+<ol>
+<li><p>If the object has a <code>__eq__</code> method, it is called, and the return value is then converted to a <code>bool</code>value and used to determine the outcome of the <code>if</code>.</p></li>
+<li><p>Otherwise, if the object has a <code>__cmp__</code> method, it is called. This function must return an <code>int</code> indicating the order of the two object (<code>-1</code> if <code>self &lt; other</code>, <code>0</code> if <code>self == other</code>, <code>+1</code> if <code>self &gt; other</code>).</p></li>
+<li><p>Otherwise, the object are compared for identity (ie. they are reference to the same object, as can be tested by the <code>is</code> operator).</p></li>
+</ol>
+
+<p>There is another test possible using the <code>is</code> operator. <strong>We would be asking the object, "Are you this particular object?"</strong></p>
+
+<p>Generally, I would recommend to use the first test with non-numerical values, to use the test for equality when you want to compare objects of the same nature (two strings, two numbers, ...) and to check for identity only when using sentinel values (<code>None</code> meaning not initialized for a member field for exemple, or when using the <code>getattr</code> or the <code>__getitem__</code> methods).</p>
+
+<p>To summarize, we have :</p>
+
+<pre><code>&gt;&gt;&gt; class A(object):
+...    def __repr__(self):
+...        return 'A()'
+...    def __nonzero__(self):
+...        return False
+
+&gt;&gt;&gt; class B(object):
+...    def __repr__(self):
+...        return 'B()'
+...    def __len__(self):
+...        return 0
+
+&gt;&gt;&gt; class C(object):
+...    def __repr__(self):
+...        return 'C()'
+...    def __cmp__(self, other):
+...        return 0
+
+&gt;&gt;&gt; class D(object):
+...    def __repr__(self):
+...        return 'D()'
+...    def __eq__(self, other):
+...        return True
+
+&gt;&gt;&gt; for obj in ['', (), [], {}, 0, 0., A(), B(), C(), D(), None]:
+...     print '%4s: bool(obj) -&gt; %5s, obj == None -&gt; %5s, obj is None -&gt; %5s' % \
+...         (repr(obj), bool(obj), obj == None, obj is None)
+  '': bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+  (): bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+  []: bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+  {}: bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+   0: bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+ 0.0: bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+ A(): bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+ B(): bool(obj) -&gt; False, obj == None -&gt; False, obj is None -&gt; False
+ C(): bool(obj) -&gt;  True, obj == None -&gt;  True, obj is None -&gt; False
+ D(): bool(obj) -&gt;  True, obj == None -&gt;  True, obj is None -&gt; False
+None: bool(obj) -&gt; False, obj == None -&gt;  True, obj is None -&gt;  True
+</code></pre>

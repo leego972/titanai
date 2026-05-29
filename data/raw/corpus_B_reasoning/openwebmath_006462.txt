@@ -1,0 +1,251 @@
+Discover Elixir & Phoenix
+
+Back to All Courses
+
+Lesson 10
+
+# Forms
+
+In the previous lesson, we learned how to create changesets from a struct and using them to add a record to the database.
+
+The last piece of that puzzle is that we want the changeset to be generated based on what the user sends from the browser. In other words, we want the "params" sent to the create_user/1-function to come from a form that the user fills in.
+
+## Creating an empty changeset
+
+Let's check out the form that we currently have at the /signup path:
+
+What we want to do now is initialise this signup-page with an empty changeset that the user can populate. In order to easily create this empty changeset, we're going to slightly tweak create_user in our Accounts module, by extracting the changeset-related functions into their own register_changeset/1 function:
+
+# lib/messengyr/accounts/accounts.ex
+
+defmodule Messengyr.Accounts do
+
+# ...
+
+# Update this function:
+def create_user(params) do
+register_changeset(params)
+|> Repo.insert
+end
+
+# ... and add this function:
+def register_changeset(params \\ %{}) do
+%User{}
+end
+
+end
+
+Next, we go to the controller function for the signup page:
+
+# lib/messengyr_web/controller/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+def signup(conn, _params) do
+render conn
+end
+end
+
+Instead of just having a boring render conn here, we'll now create the empty changeset and pass it to our render function in a map, under the key user_changeset, so that we can use it in the template.
+
+# lib/messengyr_web/controller/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+# Remember to alias the module first:
+alias Messengyr.Accounts
+
+# ...
+
+def signup(conn, _params) do
+# Create the empty changeset:
+changeset = Accounts.register_changeset()
+
+# Pass it to "render":
+render conn, user_changeset: changeset
+end
+
+end
+
+## Generating forms
+
+Okay, so now that we can access the user_changeset from the template, here's how we're going to rewrite it (don't worry if it looks complicated at first):
+
+# lib/messengyr_web/templates/page/signup.html.eex
+
+<%= form_for @user_changeset, page_path(@conn, :create_user), fn f -> %>
+
+<%= text_input f, :email, placeholder: "Email" %>
+
+<% end %>
+
+</div>
+
+After making these changes, you'll get an error if you go to /signup in your browser:
+
+We'll take care of this soon.
+
+So first -- what's all this about? Why has our form tag been replaced with Elixir's form_for, and why are our inputs now text_input?
+
+It turns out that Phoenix comes bundled with some helpers to make our form handling much more maintainable! As you already know, &lt;%= essentially just means "run this code as normal Elixir code, and output the result in the template". Let's go through the helpers we're using one by one:
+
+• form_for replaces our form tag. In it, we specify what changeset we want to use for the form (user_changeset), and then we tell Elixir what controller function should be called when the user sends the form. In this case it's PageController.create_user (which doesn't exist yet -- that's why we see the error message).
+
+• text_input works exactly like aninput tag, except that we also specify the keys of the map that will be sent when we send the form (:email:username and :password).
+
+• submit just generates a button tag with type="submit". When you click on it, it will trigger the form action.
+
+## Handling form requests
+
+Alright, now let's fix that error message we've got. For that, we need to create a route for the PageController action :create_user. We'll use the endpoint POST /signup for that:
+
+# lib/messengyr_web/router.ex
+
+defmodule MessengyrWeb.Router do
+
+# ...
+
+scope "/", MessengyrWeb do
+
+# ...
+
+post "/signup", PageController, :create_user
+end
+
+end
+# lib/messengyr_web/controllers/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+def create_user(conn, params) do
+IO.puts "Create user!"
+end
+
+end
+
+Now, whenever the user clicks "Sign up", a POST request will be sent to /signup, and you'll see the following error page:
+
+The error is due to the fact that we're not returning a conn, but if you check your Elixir console, you'll see that the request at least worked as expected:
+
+There's our "IO.puts"!
+
+All we have to do now is build this create_user/2 function properly! We want it to read the parameters that the users sends in and build a new changeset from those. If the changeset is valid, we insert it into the database and return a success message to the browser. If not, we simply return an error message.
+
+The first thing we'll do is apply some of our previous Elixir knowledge and use pattern matching! If you log the params argument, you'll see that we get all sorts of info from the POST request (like _csrf_token_utf8...). However, we're only interested in the user parameter. To make it easy for us, we can extract that part into a user_params variable, right in the function definition:
+
+# lib/messengyr_web/controllers/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+def create_user(conn, %{"user" => user_params}) do
+IO.puts "Create user!"
+IO.inspect user_params
+end
+
+end
+
+Next, we simply call Accounts.create_user/2 using these params, and that function will build the new changeset for us and attempt to insert it into the database. We'll inspect the results to see what happens:
+
+# lib/messengyr_web/controllers/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+def create_user(conn, %{"user" => user_params}) do
+IO.puts "Create user!"
+IO.inspect user_params
+
+Accounts.create_user(user_params)
+|> IO.inspect
+end
+
+end
+
+Seems like the changeset is invalid.
+
+Since we didn't fill in our username or email before clicking "Submit", the function returns a tuple with an :error atom and the invalid changeset. We need to catch this error and show it to the user so that they know what went wrong!
+
+## Error flashes
+
+So we know that if Repo.insert fails (because of an invalid changeset), we get a tuple containing an :error atom and the changeset with its errors. In the previous lesson, we also learned that if the function succeeds, we will instead get a tuple with an :ok atom and a **struct **representation of the row we just inserted into the database.
+
+The two cases that we need to handle
+
+Let's handle these two cases in a case statement through pattern matching:
+
+# lib/messengyr_web/controllers/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+def create_user(conn, %{"user" => user_params}) do
+case Accounts.create_user(user_params) do
+{:ok, _user} ->
+IO.puts "It worked!"
+{:error, user_changeset} ->
+IO.puts "It failed!"
+end
+end
+
+end
+
+If we send the same form again, the console should now print "It failed!". Our pattern matching works!
+
+These logs are handy for us, but they're still invisible to the user, so finally, we need to show these messages to the user in the browser.
+
+Phoenix has a built-in solution, called flashes, for showing short one-time messages to the user, like errors or success messages.
+
+If everything goes well, we want to redirect the user to the landing page and show an info flash. If something goes wrong however, we want to go back to the signup page and show an error flash. Let's change our case statement to handle this using the put_flash function:
+
+# lib/messengyr_web/controllers/page_controller.ex
+
+defmodule MessengyrWeb.PageController do
+
+# ...
+
+def create_user(conn, %{"user" => user_params}) do
+case Accounts.create_user(user_params) do
+{:ok, _user} ->
+conn
+|> put_flash(:info, "User created successfully!")
+|> redirect(to: "/")
+{:error, user_changeset} ->
+conn
+|> put_flash(:error, "Unable to create account!")
+|> render("signup.html", user_changeset: user_changeset)
+end
+end
+
+end
+
+Try signing up without filling in any field again, and you'll see this:
+
+## Error tags
+
+We're almost there now! What we have is already pretty good, but ideally, we'd want to show the user exactly which fields are invalid and why.
+
+Remember, the returned invalid changeset already has all the information that we need about which fields are invalid (thanks to its errors-key). Moreover, we're already passing back this invalid changeset into the template, so all we need to do is use some magic Phoenix tags to render these errors. Open the signup page template again and add the following error tags:
+
+# lib/messengyr_web/templates/page/signup.html.eex
+
+<!-- ... -->
+
+<%= form_for @user_changeset, page_path(@conn, :create_user), fn f -> %>
+
+<%= text_input f, :email, placeholder: "Email" %>
+<%= error_tag f, :email %> <!-- Add this! -->
+
+<%= error_tag f, :username %> <!-- ...and this! -->
+
+<!-- ... -->
+Awesome, we now have pretty good error messages! It's worth noting that the PageController's create_user function is not entirely done yet, since we still need to hash the user's password before we insert the record into the database. We'll look into that in the next lesson!

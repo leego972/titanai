@@ -1,0 +1,179 @@
+## R6RS Status Report
+
+New status report on the R6RS effort (also available as PDF).
+
+Previous LtU discussion (March 2006).
+
+## Comment viewing options
+
+### Fantastic work
+
+Watching R6RS take shape is just fantastic. A careful and deliberate approach that reasons from first principles is very satisfying. Kudos!
+
+Not to say that I didn't almost faint when I saw the "cons only works for lists" proposal, but you can't agree with everyone on everything.
+
+Cheers,
+Chris Dean
+
+### Improper and mutable lists
+
+My dynamically typed language Kogut has immutable lists and the second argument of cons is restricted to be a list. I would be pleasantly amused if Scheme was brought here too (but I don't believe that this would happen, tradition is too strong). It's perfectly compatible with dynamic typing.
+
+The advantage of this approach is eliminating numerous dilemmas about which lists may or must be shared or copied, and how a particular operation should behave when given an improper list, and when particular errors are detected.
+
+For example the Kogut operation corresponding to apply in Scheme has clear error conditions. There is no temptation to say â€œwell, an improper list here should be an error, but we don't always detect this because it would increase the asymptotic cost for no other gainâ€.
+
+The behavior of possible sharing of the argument list between the caller and the callee becomes irrelevant (technically it's still observable, but without mutation it doesn't matter in practice). There is no question about what should happen when the list bound to a â€œrestâ€ parameter is mutated, or whether unquote-splicing as the last element of a list must copy the list it splices, or whether append is allowed to let the result share cons cells with an argument other than the last one if the last argument is an empty list.
+
+Pairs make a perfect sense as a separate type from non-empty lists.
+
+### "quoth the raven, 404"
+
+It seems to have moved to a new location.
+
+Fixed.
+
+### And, of course, so has the
+
+And, of course, so has the PDF.
+
+### weak pointers
+
+This is the sort of material I like, since I (mostly) get Scheme and want my infrastructure to align with expansion into a full Scheme eventually, once a small kernel is grown enough. I doubt I'll ever have time to add something that appeared in R5RS, though, with other things on my plate. But the thing I'd skip first is practically designed to be added later as a layer. (Yes, I'm not naming the feature; it's a game for readers.)
+
+Okay, weak pointers. I'd have thought weak pointers were a gimme. There must be something complex to argue about then, or a really irritating effect to achieve during garbage collection. Which is it? I like to design in weak pointer support first as part of the gc planning. Is this because I'm implementing in C++? Is it hard to consider implementing weak pointers in a language that never had them in the stardard?
+
+Hmm, now that I think about it more, I can see weak pointers would be irritating if you intended to have a very complex incremental garbage collector -- one you were barely smart enough to debug, say -- or you wanted to let your friends plan to implement their own very complex gc schemes. It would be one more hoop to jump through, reducing your options a lot, and might imply you finish scanning the entire arena of memory that might have a strong reference to the object a weak pointer denotes. Folks who don't want to do this would strongly resist the feature of weak pointers, right?
+
+ctdean: Not to say that I didn't almost faint when I saw the "cons only works for lists" proposal, but you can't agree with everyone on everything.
+
+Yeah, that was weird. The 'only works for lists' has a strong static as opposed to dynamic flavor to it, that I'd expect appeals to folks who want to impose ideal prescriptive rules. Is the motivation entirely optimization? So code needn't perform the check of non-nil list termination? But, but ... then you'd also not perform checks for circular lists either, which is even more expensive. Oh, my bad, you can't make circular lists either using a cons requiring a nil terminated list (and assuming no pair mutation).
+
+I don't like the prescriptive route much, unless another type is introduced with the constrained behavior. Limiting older system semantics in the name of optimization kinda sucks, because it feels like a slippery slope. It leads to more and more things for your own good, as decided by language gods.
+
+[Edit: I forgot to add the riff I'd planned on weakness in prescriptive approaches, using Unicode as an example. I was handed a string library where the architect had prescribed 'there will be no embedded nuls' because the Unicode standard said strings won't contain null. Then I had to clean up the mess: what do you do when the embedded null actually appears? Go into denial? Better to have a separate descriptive approach that can represent anything possible, then layer on judgments about adherence to a prescriptive rule.]
+
+### Weak pointers and finalizers
+
+I agree that there are quite fundamental and should be provided by practical languages. Unfortunately there are at least two difficulties associated with them:
+
+• Finalizers are started asynchronously and should run in a separate thread. See Hans Boehm's paper Destructors, Finalizers, and Synchronization. This means that any language which provides finalizers should also provide threads.
+• It's not clear whether a finalizer should prevent objects it refers to from being finalized. Well, it is clear for me: it should. Otherwise the presence of finalizers leaks from abstractions: it's unsafe to use a finalizable object from another finalizer. But it's not clear for everybody, e.g. it doesn't prevent such object from being finalized in Glasgow Haskell.
+
+The semantics I prefer here has an unpleasant consequence: a finalizer may not refer to the object it is registered for, since it would never be finalized (a memory leak). Which sometimes forces to split an object into parts, so the finalizer can refer to only some fields of it, and this disallows some potential compiler optimizations which would remove indirections.
+
+### weak pointers uncoupled from finalizers
+
+I read Boehm's Destructors, Finalizers, and Synchronization just now, at least twice through parts that seemed to apply, thinking about it carefully since I could not find a definite interaction of finalizers and weak pointers. I think they are similar in usage context but mostly independent of each other in effect.
+
+Thank you, that was a good read. I especially liked section 3 on the finalizer model used by Cedar's gc (and Boehm's own C++ gc), because it showed way to partially order objects to be finalized, which I hadn't thought about, so finalizers that used other objects to be finalized will go first.
+
+I want to extend Boehm's terminology with another data structure named W: the set of objects containing weak pointers. (You might use W to refer to before or after gc images of this data, but you get roughly the same results either way.) Boehm refers to a Smalltalk weak array, for example, and these would be in the set W containing weak pointers.
+
+So F is data for finalization and W is data containing weak pointers. Both of them require special handling in gc following the intial steps dealing with ordinary data. But they need not interfere with one another. Processing F would go first since objects referenced only by finalizers might add that last strong reference causing something to get copied. Then W would be processed to nil out weak pointers that never got copied from a strong reference.
+
+Qrczak: I agree that [weak pointers and finalizers] are quite fundamental and should be provided by practical languages. Unfortunately there are at least two difficulties associated with them:
+
+After careful thought, I believe weak pointers are not affected by finalizers; you can add both features to a language and have code for each almost totally ignore each other, except for handling them in the right order. So Boehm's paper doesn't offer a reason why adding weak pointers to a language might later run into trouble when adding more features. (But since this might not be really obvious, I can see why discussion might cause weak pointers to be tabled.)
+
+To make matters confusing, Boehm notes a gc implementation might support notification after gc that weakly referenced objects had been collected, and this vaguely resembles finalization in nature, though no finalization is involved. However, notification is in no way required for collected weak pointers; that's just an optimization for certain uses. To perform the notification, you'd probably try to run notifiers in separate threads after gc, the same way you'd run finalizers; but that's just correct logic for running post gc async code -- it has nothing to do with weak pointers per se.
+
+Anyway, I'm glad you brought this up, even if I'm taking the position the two features aren't as related as one might suppose.
+
+[Edit: if running a finalizer could make an unreachable object reachable, some folks might want this to stop a weak pointer from being nil'd out of the weak collection. But that would just make things complex; you might as well have the finalizer put the object right back into the collection involved. There's no need to have gc guarantee such results.]
+
+### On weak references and finalization
+
+This paper deals with these issues and define a semantics for finalization wrt weak references.
+
+### prefer solutions in gc layer
+
+Daniel Yokomizo: This paper deals with these issues and define a semantics for finalization wrt weak references.
+
+That 1999 Jones/Marlow/Elliott paper only describes what happens under Haskell when you don't give yourself freedom to change the garbage collector, then try to use Haskell as it exists already to implement finalizers wrt weak references in memo tables.
+
+The problem they describe with "key in value" in weak hash tables doesn't exist when gc primitives are just slightly more powerful than the Haskell assumed in the paper. The problem is caused only when you have weak pointers to keys but strong pointers to values with strong pointers from values to the keys. Nothing stops you from using making the values weak as well, which totally solves the problem. And I suppose if the values had weak refs to the keys, the problem would also go away.
+
+The third paragraph of their intro starts with this sentence: One "solution" is to build in memo functions as a primitive of the language implementation, with special magic in the garbage collector and elsewhere to deal with these questions.
+
+Scare quotes here imply they didn't care to fix the problem in the gc layer. :-) But it's the gc layer I'm addressing in my earlier remarks. So this paper isn't really applicable if you have enough variety in the weak pointer support (tables with weak keys and values both, or in whatever mixture you want). The "key in value" problem doesn't exist if the value is also on the far side of a weak pointer.
+
+### Weak pointers coupled with finalizers
+
+Coupling weak pointers with finalizers is convenient because a weak pointer can serve as a handle to control the finalizer (trigger it manually or cancel it), and because typical uses of weak pointers are associated with finalizers (to remove the weak pointer itself from some data structure). This is what GHC does.
+
+A weak reference registers a triple <K, V, finalizer>. A weak reference can be active or inactive; it is created active. A weak reference can be asked for a value; if it's active, it returns V, otherwise it tells so.
+
+There are implicit strong references to all weak references, and from a weak reference to its finalizer. There are no implicit strong references to K and V.
+
+The garbage collector computes the smallest set L satisfying these conditions:
+
+1. GC roots are in L.
+2. For each object from L, objects it holds with strong references are in L.
+3. For each active weak reference, if its K is in L, then its V is in L too.
+
+After L is computed, weak references whose Ks are not in L become inactive: they are removed from the global set of weak references, and their finalizers are scheduled for finalization. Other objects which are not in L are freed.
+
+Often V is the same as K. For an entry in a weak dictionary, K is the key, and V is the pair consisting of the key and the value.
+
+The design of Glasgow Haskell differs from this slightly:
+
+A weak reference doesn't keep its finalizer with a strong reference. The third condition for L changes thus:
+
+1. For each active weak reference, if its K is in L, then its V and its finalizer are in L too.
+
+After finalizers are scheduled for finalization, these finalizers are added to L, together with other objects implied by condition 2 (in particular this may resurrect some K objects). The remaining objects not in L are freed.
+
+Java is like Glasgow Haskell, except that K and V are always the same object, and that there are only tree kinds of finalizers: doing notihing, calling K.finalize(), or adding the weak reference to a ReferenceQueue. .NET is similar.
+
+If there is a cycle among K objects and finalizers associated with them, Glasgow Haskell runs all these finalizers in an unspecified order, and Kogut doesn't run these finalizers at all (memory leak).
+
+### partially ordered finalizable objects
+
+Qrkzak: It's not clear whether a finalizer should prevent objects it refers to from being finalized. Well, it is clear for me: it should.
+
+Sounds good to me too. I bought that part of Boehm's section 3, that being referenced by some other finalizer ought to grant an object a reprieve from current collection, since this would ensure you'd run finalizers in a good partial order (objects needed by no one before objects needed by some other object's finalizer).
+
+### Overview Paper
+
+Rys, it seems to me that you have made a lot of research on implementing GCs, reading your comments here in LtU. Would you consider writing an overview/tutorial paper, or a literate program heavy on the English with what you know of the topic? I would be super-interested in reading a reasoned, opinionated account that (1) allowed me to write an implementation from only reading a reasoned description of the collector, and (2) allowed me to see what forces are at play in the design of a modern collector that is similar and/or different from the currently-in-use generational ones. You come across in your posts as articulate, thoughtful, insightful; I would love to read a mind-dump of you on the topic.
+
+### reference implementation?
+
+That's very flattering and graciously said, but I fear my gc enthusiasm makes me a loudmouth. I'm no where near an expert (except almost in the narrow area of weak refs where I've done thinking, coding, and writing). I'd recently designed another specific revision of an earlier copy gc, making it easy to test mentally against ideas mentioned here. (Eg I can see how finalizers interact with my gc.) But ultimately my gc's not far from Standard ML's copy gc from early 90's, which I imitated in a gc I wrote then for a Dylan prototype. Lately I've only added subtle wrinkles for specific useful reasons.
+
+Matias Giovannini: Would you consider writing an overview/tutorial paper, or a literate program heavy on the English with what you know of the topic?
+
+You asked that so nicely. Maybe, but I should code more and talk less first. I'm working on another rev of the basic runtime I like to use, with a focus on simplicity to get a Lisp-like assembler off the ground, to use for this thing I've been calling gyp. This time I'm using an MIT license; I might release early code after doing little more than gc and a parser to cause the gc to be used. I could annotate the code with the sort of literate commentary you want, but I'd hate to interrupt my flow if I get going.
+
+A well done paper would need to consider and describe far more things than will actually appear in my next gc, and a nice academic style ought to be thorough and inclusive, and properly respectful of past contributions of others, etc, etc. You're not asking for this, I hope?
+
+If you read gc source code in Standard ML, and also read Andrew Appel's very lucid account of Cheney style copy collection in Compiling with Continuations, then you'd understand my ideas roughly as diffs; but some diffs have interesting consequences.
+
+For the gc, I work at the design level of raw memory that you'd tackle in assembler, but I prefer to simplify as much as possible using less painful C and C++ notation. (Enums are so much better to work with than integer constants.) But it's still very low level choices in memory layout, which must dovetail with the ways allocation and gc works. So picking formats directly affects options in gc behavior. For example, if you ask yourself how to represent weak semantics, you can go through a lot of variations, like I did. I promise I'll describe it sometime. But I don't want to abuse this forum.
+
+### That's very flattering and
+
+That's very flattering and graciously said, but I fear my gc enthusiasm makes me a loudmouth.
+
+No, I don't think you're a loudmouth; on the contrary, I believe your enthusiasm makes you an excellent communicator of the issues involved. I enjoy reading your posts here, I would enjoy reading a hard-copy of a collated account of your experience. Of course, I don't want to put you in the obligation of producing anything at all, not code, much less an explanation; but I would love if you would, that's all.
+
+A well done paper would need to consider and describe far more things than will actually appear in my next gc, and a nice academic style ought to be thorough and inclusive, and properly respectful of past contributions of others, etc, etc. You're not asking for this, I hope?
+
+Of course not, not in the least. An academic paper (which might or might not be good) is, I think, a very specific cultural artifact that is in dialog with other papers, building upon them and expanding its field, and it has to explicitely acknowledge that debt, or heritage, or continuity. A technical note, if you will, can perfectly obviate the need for the usual Abstract--Intro--Related--Exposition--Conclusion--References structure (an inescapable straightjacket, I'm afraid); much as survey papers don't need to present original research, and often are no more than a commented list of references. A TN can be loud, and opinionated, and quirky; it's not that it's of lesser quality, but more of a different category altogether.
+
+Again, far be from me to impose on you.
+
+### gc technote pending
+
+Your technote idea made the scope sound manageable, so I started one yesterday. But it's taking longer than I expected, so I wanted to post this note to say thanks for the suggestion first. (I've no projected completion date yet; I'm moving this holiday weekend, otherwise I'd probably get it done.)
+
+Yesterday's first partial draft of a technote used an experimental style (very brief exploded details) that didn't gel at all. The result was a big pile of details missing patterns and flow; it seems I factored out the wrong part. So the next draft will aim for cogent overview as a priority.
+
+I can justify (to myself) the cost of writing a technote as follows. I plan to release code using gc under terms letting anyone change it anyway they like. So if I explain why it works, folks will be less likely to seriously erode or impair the mechanism through poorly conceived alterations. :-)
+
+But a very spare TN is my goal; it's tempting to do a better job than necessary, partly from joy in writing and partly from love of beauty in the subject matter. And brevity is better if one hopes to get the essential ideas well embedded in more minds. It won't be quite as fun as a core dump.
+
+### When discussing papers that
+
+When discussing papers that were previously discussed on LtU, please try to link to the LTU discussion instead of directly to the pa

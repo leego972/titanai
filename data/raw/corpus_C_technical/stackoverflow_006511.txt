@@ -1,0 +1,65 @@
+Question: <p>I have a models <code>A</code> and <code>B</code>, that are like this:</p>
+
+<pre><code>class A(models.Model):
+  title = models.CharField(max_length=20)
+  (...)
+
+class B(models.Model):
+  date = models.DateTimeField(auto_now_add=True)
+  (...)
+  a = models.ForeignKey(A)
+</code></pre>
+
+<p>Now I have some <code>A</code> and <code>B</code> objects, and I'd like to get a query that selects all <code>A</code> objects that have less then 2 <code>B</code> pointing at them.</p>
+
+<p>A is something like a pool thing, and users (the B) join pool. if there's only 1 or 0 joined, the pool shouldn't be displayed at all.</p>
+
+<p>Is it possible with such model design? Or should I modify that a bit?</p>
+
+Answer: <p>Sounds like a job for <a href="http://docs.djangoproject.com/en/dev/ref/models/querysets/#extra-select-none-where-none-params-none-tables-none-order-by-none-select-params-none"><code>extra</code></a>.</p>
+
+<pre><code>A.objects.extra(
+    select={
+        'b_count': 'SELECT COUNT(*) FROM yourapp_b WHERE yourapp_b.a_id = yourapp_a.id',
+    },
+    where=['b_count &lt; 2']
+)
+</code></pre>
+
+<p>If the B count is something you often need as a filtering or ordering criterion, or needs to be displayed on list views, you could consider denormalisation by adding a b_count field to your A model and using signals to update it when a B is added or deleted:</p>
+
+<pre><code>from django.db import connection, transaction
+from django.db.models.signals import post_delete, post_save
+
+def update_b_count(instance, **kwargs):
+    """
+    Updates the B count for the A related to the given B.
+    """
+    if not kwargs.get('created', True) or kwargs.get('raw', False):
+        return
+    cursor = connection.cursor()
+    cursor.execute(
+        'UPDATE yourapp_a SET b_count = ('
+            'SELECT COUNT(*) FROM yourapp_b '
+            'WHERE yourapp_b.a_id = yourapp_a.id'
+        ') '
+        'WHERE id = %s', [instance.a_id])
+    transaction.commit_unless_managed()
+
+post_save.connect(update_b_count, sender=B)
+post_delete.connect(update_b_count, sender=B)
+</code></pre>
+
+<p>Another solution would be to manage a status flag on the A object when you're adding or removing a related B.</p>
+
+<pre><code>B.objects.create(a=some_a)
+if some_a.hidden and some_a.b_set.count() &gt; 1:
+    A.objects.filter(id=some_a.id).update(hidden=False)
+
+...
+
+some_a = b.a
+some_b.delete()
+if not some_a.hidden and some_a.b_set.count() &lt; 2:
+    A.objects.filter(id=some_a.id).update(hidden=True)
+</code></pre>

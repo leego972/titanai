@@ -1,0 +1,83 @@
+Question: <p>I have a bunch of files (TV episodes, although that is fairly arbitrary) that I want to check match a specific naming/organisation scheme..</p>
+
+<p>Currently: I have three arrays of regex, one for valid filenames, one for files missing an episode name, and one for valid paths.</p>
+
+<p>Then, I loop though each valid-filename regex, if it matches, append it to a "valid" dict, if not, do the same with the missing-ep-name regexs, if it matches this I append it to an "invalid" dict with an error code (2:'missing epsiode name'), if it matches neither, it gets added to invalid with the 'malformed name' error code.</p>
+
+<p>The current code can be found <a href="http://github.com/dbr/checktveps/tree/8a6dc68ad61e684c8d8f0ca1dc37a22d1c51aa82/2checkTvEps.py" rel="nofollow">here</a></p>
+
+<p>I want to add a rule that checks for the presence of a folder.jpg file in each directory, but to add this would make the code substantially more messy in it's current state.. </p>
+
+<p>How could I write this system in a more expandable way?</p>
+
+<p>The rules it needs to check would be..</p>
+
+<ul>
+<li>File is in the format <code>Show Name - [01x23] - Episode Name.avi</code> or <code>Show Name - [01xSpecial02] - Special Name.avi</code> or <code>Show Name - [01xExtra01] - Extra Name.avi</code></li>
+<li>If filename is in the format <code>Show Name - [01x23].avi</code> display it a 'missing episode name' section of the output</li>
+<li>The path should be in the format <code>Show Name/season 2/the_file.avi</code> (where season 2 should be the correct season number in the filename)</li>
+<li>each <code>Show Name/season 1/</code> folder should contain "folder.jpg"</li>
+</ul>
+
+<p>.any ideas? While I'm trying to check TV episodes, this concept/code should be able to apply to many things..</p>
+
+<p>The only thought I had was a list of dicts in the format:</p>
+
+<pre><code>checker = [
+{
+    'name':'valid files',
+    'type':'file',
+    'function':check_valid(), # runs check_valid() on all files
+    'status':0 # if it returns True, this is the status the file gets
+}
+</code></pre>
+
+Answer: <blockquote>
+  <p>I want to add a rule that checks for
+  the presence of a folder.jpg file in
+  each directory, but to add this would
+  make the code substantially more messy
+  in it's current state..</p>
+</blockquote>
+
+<p>This doesn't look bad.  In fact your current code does it very nicely, and Sven mentioned a good way to do it as well:</p>
+
+<ol>
+<li>Get a list of all the files</li>
+<li>Check for "required" files</li>
+</ol>
+
+<p>You would just have have add to your dictionary a list of required files:</p>
+
+<pre><code>checker = {
+  ...
+  'required': ['file', 'list', 'for_required']
+}
+</code></pre>
+
+<p>As far as there being a better/extensible way to do this?  I am not exactly sure.  I could only really think of a way to possibly drop the "multiple" regular expressions and build off of Sven's idea for using a delimiter.  So my strategy would be defining a dictionary as follows (and I'm sorry I don't know Python syntax and I'm a tad to lazy to look it up but it should make sense.  The /regex/ is shorthand for a regex):</p>
+
+<pre><code>check_dict = {
+  'delim'    : /\-/,
+  'parts'    : [ 'Show Name', 'Episode Name', 'Episode Number' ],
+  'patterns' : [/valid name/, /valid episode name/, /valid number/ ],
+  'required' : ['list', 'of', 'files'],
+  'ignored'  : ['.*', 'hidden.txt'],
+  'start_dir': '/path/to/dir/to/test/'
+}
+</code></pre>
+
+<ol>
+<li>Split the filename based on the delimiter.</li>
+<li>Check each of the parts.</li>
+</ol>
+
+<p>Because its an ordered list you can determine what parts are missing and if a section doesn't match any pattern it is malformed.  Here the <code>parts</code> and <code>patterns</code> have a 1 to 1 ratio.  Two arrays instead of a dictionary enforces the order.</p>
+
+<p>Ignored and required files can be listed.  The <code>.</code> and <code>..</code> files should probably be ignored automatically.  The user should be allowed to input "globs" which can be shell expanded.  I'm thinking here of <code>svn:ignore</code> properties, but globbing is natural for listing files.</p>
+
+<p>Here <code>start_dir</code> would be default to the current directory but if you wanted a single file to run automated testing of a bunch of directories this would be useful.</p>
+
+<p>The real loose end here is the path template and along the same lines what path is required for "valid files".  I really couldn't come up with a solid idea without writing one large regular expression and taking groups from it... to build a template.  It felt a lot like writing a TextMate language grammar.  But that starts to stray on the ease of use.  The real problem was that the path template was not composed of <code>parts</code>, which makes sense but adds complexity.</p>
+
+<p>Is this strategy in tune with what you were thinking of?</p>

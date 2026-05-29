@@ -1,0 +1,111 @@
+## Tuesday, October 8, 2013
+
+J. Lim, R. Salakhutdinov and A. Torralba, Transfer Learning by Borrowing Examples for Multiclass Object Detection, NIPS, 2011.
+
+and optionally:
+
+K. Saenko, B. Kulis, M. Fritz and T. Darrell, Adapting Visual Category Models to New Domains, ECCV, 2010.
+
+Ian Endres, Vivek Srikumar, Ming-wei Chang, and Derek Hoiem, Learning Shared Body Plans. CVPR, 2012.
+
+1. The goal of this paper is to compensate for the lack of training data in some classes using data from other classes that have similar examples. They do this transfer on an example by example basis (reason about examples individually) but regularize at both the individual and class level. I think this group lasso regularization is helping avoid picking outlier examples that happened to occur on the right side of the decision boundary during the optimization. The paper extends this to include transformed examples and examples from other datasets. I'll post the pros and cons in separate posts to help start threads for more discussion.
+
+2. Pros 1. They make minimal assumptions about the type of classifier or image features used. They only need that the approach be able to write itself into a empirical risk minimization form. The details need to be reworked as far as the transformations are concerned (they use the latent update of the DPM to pick the transformation parameters from a discrete set).
+
+3. Pros 2. They are able to leverage multiple datasets in a way which beats naive concatenation of data. I think that this is really cool as it helps decentralize data collection. It gives further strength to their approach as it helps them argue that their method is of use even if people started collecting more data for all the categories. In other words, people should use their method when adding more data to a dataset rather than claim that adding data alone solves the problem.
+
+1. I disagree that borrowing is the "right" way to aggregate datasets, but only because it's difficult to say what we really want from these detectors. The authors' experiment (Table 4) demonstrates that borrowing from another dataset improves testing performance on the original dataset. This is distinct from improving testing performance on both datasets, as it was mentioned multiple times that PASCAL and SUN09 have very different distributions.
+
+This capability is definitely valuable, but I think it is a form of overfitting. I'm not saying that overfitting is bad, though. If you're training a detector for a tall robot, is there really a need for it to be able to recognize objects from low angles?
+
+2. I think overfitting might look more like this in robots: the robot perfectly recognizes the 20 objects in the room from any angle, but is completely clueless if a very similar object is shown to it in a different room, or if we try to get it to learn a 21st object.
+Coming back to the question of whether the algorithm is overfitting: if it is able to learn by borrowing examples from a dataset with a very different distribution and perform better on the original dataset, isn't that really an indication of its ability to generalize well?
+
+3. I think they mentioned somewhere that they specifically want to keep the bias of a dataset, so the mechanism is not really like merging datasets, but more like extending some dataset with similar images of what it already has, that is, keeping the dataset peculiarities.
+
+4. I agree with Srivatsan that the algorithm has the ability to generalize well and it doesn't look like it is overfitting. The authors are adding data in a very structured way that makes more intuitive sense than just throwing in hundreds of images into the dataset and hoping that it will improve the performance.
+
+5. I believe an algorithm generalizes well when you can train it on a dataset and expect it to perform well on other datasets. This seems redundant considering we are using disjoint test and training sets, but the key point is that both sets have similar underlying distributions. The experiment shows that training on dataset A with borrowed examples from B gives a boost when evaluating on A. This doesn't mean that it will boost performance on B.
+
+6. I think that the object detectors themselves are more general because they train on the borrowed images, which might not have the same peculiarities as the images in the original dataset. For the bookshelf example that the paper gives, it borrows from the shelf class which doesnt have the peculiarity of having books (and therefore a lot of vertical gradients). Because they are merging data from another dataset, I think the borrowed images are going to help generalize the object detector.
+
+7. The authors mention "we also note that borrowing similar examples tends to introduce some confusions between related object categories," and that "setting corresponding regularization parameters $\lambda_1$ and $\lambda_2$ to high enough values ... would amount to borrowing all examples, which would result in learning a 'generic' object detector." Summing this up, it seems like they are just purposefully getting confused between categories, but they do a good job of mixing together the right categories. I guess this is a little like when adults tell kids, "Zebra, it's like a horse, but with stripes."
+
+For some reason though, this borrowing method does not sit well with me. Maybe it's because I'm thinking back to the scene classification paper where they transformed all images to be as similar to the test image as possible, and then picked the 1NN. In that paper, their transformations were more complex than simple translation and affine, and many extra objects were hallucinated into the various scenes to get the images to match. My feeling is that this algorithm might start morphing images like crazy, and then the borrowed images would look like the original class, but slightly different. The "slightly different" part might end up hurting performance in the end.
+
+However, my worries are probably unnecessary, since the authors prove that they have high performance. I wonder what would happen if they allowed the extra transformations that the other paper I mentioned above used. I also wonder how much boost in performance this method offers when even more data is added in. My feeling is that this method, in general, will only offer a small boost in performance. Here, they're adding ~2%, and that seems small to me.
+
+4. Cons 1. They have cited past work which has tried to share data from entire classes (not on a per example basis but an entire class at once). They have not compared with these approaches in their experiments. I think this comparison is important because of the massive increase in the number of parameters when dealing with individual examples. They will terribly overfit to data without heavy regularization.
+
+Looks like there is more to it. They run only 1 iteration of their alternate minimization strategy to prevent adding too many examples. They also initialize the optimization in favor of not sharing. Are these tricks that save them from the perils of such a large parameter space? Is per example the right way to go or should we reason about groups of examples at a time. Will the per example reasoning scale to large datasets with 100,000 categories.
+
+1. I wonder why they limited their test to the top 100 classes of SUN09 by number of examples. This technique seems most useful in improving performance in the long tail of the dataset yet if you look at Figure 4b and 4c, they stop just as things are getting interesting. At what point does this plot get worse as the number of examples in a class continues to decrease? Is this a complexity issue, an overfitting issue on too few examples, what?
+
+2. That also bugged me. Where are the results on the tail end? It's clear that there is still that classic 1/f curve there, and the less common classes still tend to have just a dozen or so examples. I can imagine they get nonsense at a certain point. I wonder where that point is.
+
+-- Matt Klingensmith
+
+5. Cons 2. This approach is adding entire examples into the train set for a given class. This is made worse by them thresholding W at the end. This will reduce the ability to discriminate between these sharing classes (atleast in the case where no transformation is involved). Doesn't this defeat the purpose of hard mining. They test their approach and the baseline on a randomly sampled subset of negatives. This partially hides the loss in discrimination power which might actually be significant.
+
+The authors argue (without empirical results) that the confusion between similar looking classes is better than the existing confusion between totally unrelated objects. But we are solving one problem while aggravating another which we still don't know how to solve. Do we have to copy entire examples? Cant we solve both problems at the same time?
+
+Figure 4(a) says that the problem is far from solved by example transfer alone. Is this the right way forward?
+
+1. I would really have liked to see some statistics on the increase (and decrease) in confusion between classes. From the statistics collected on the pascal dataset (with dpm detectors) that we saw in class, it seems like confusion across visually similar looking classes is a more statistically significant problem than confusion between dissimilar classes. I think this point needed to be argued better than mentioned in passing. Without these statistics, I'm not convinced that borrowing is a good idea in general - rather than a short term hack we should use till we get bigger training sets for these problem classes.
+
+2. I guess the approached was intended to be a short-term hack. Looks like they wanted a method to manage the few-training-images problem while doing their research and came up with this. And as it grew more mature, they added affine-transformations and some ideas of where else it could be used :)
+
+3. I think the approach is well formulated (not hacky). A natural dataset will always have few training images for most of the object classes.
+
+But the broader question of example sharing vs parameter sharing or something else exists beyond the details of this paper. Are there reasons to favor example sharing over other approaches.
+
+4. I think the authors' view is valid, in that confusion between similar looking classes is definitely tolerable (usually). Though it might be statistically more significant, I would expect that it isn't functionally important to distinguish between classes that are visually very close. In any case object recognition doesn't have to be solved in one stage - a second layer of fine grained classification can always be used if it is really necessary to distinguish between a large van and a small bus.
+
+5. However, on the point of sharing of entire instances, I agree with Aravindh that it would be better to share mid-level representations. Sharing whole instances of object appearances doesn't seem to be really addressing the root of the problem and I believe it is somewhere in the middle levels that things start looking similar/dissimilar. Ideally if feature representations could be modeled into hierarchial layers (I have no clue how), maybe we might expect to see things like 'attributes' pop off at different levels. In that scenario, similar looking objects can share representations at the lower levels, but might start to diverge as we move up the hierarchy of feature representations.
+
+6. Confusion between similar classes seems to be a failing of semantic categories. It really is absurd to attempt to train a computer to differentiate chairs from couches. First, people can't do this consistently. Second, what would be the use of such a system?
+
+7. I think there is value in differentiating similar looking objects. If I confuse a wolf for a dog then things can go terribly wrong. If I confuse a snake for a rope then life is going to be much worse. I'm not arguing in favour of differentiating every noun from everything other noun but some discrimination is required for a real system.
+
+8. @Aravindh - Getting confused between large dogs and wolves or suspicious looking ropes and snakes is something that happens even to humans sometimes. Our perception usually resolves this by being cautious and assuming the worst (not that snakes and wolves can hurt robots though), which translates into associating attributes like 'dangerous' or 'poisnonous'. This isn't really a problem of discriminative learning - it can be partially solved by resolving context and partially by associating a higher bias towards objects that are associated with critical attributes such as the ones mentioned above.
+
+9. Whether we want to discriminate between similar categories is really a question of task. The distinction between sofa and armchair might be really important to a funiture-selling robot, whereas the difference between car and truck might not be as important.
+
+10. I have feeling that their proposed system could be more useful if it is applied to the attribute learning in the paper we read previously. Transferring entire object images from similar categories seems less convincing to me, but if somehow we can transfer similar attributes from other categories, the attribute classifier might perform better and overall help the object recognition. I think this is more similar to the way how human infer things by their experiences.
+
+11. I conjecture that humans are able to differentiate similar looking objects through logic and context (explicit reasoning in the prefrontal cortex in place of neurons firing in the ventral stream). But as they see more and more examples they integrate this differentiation capacity into the ventral stream itself. I think that discrmination is important but there are more ways to do it. The paper is, I feel, is comprimising on discrimination more that required though.
+
+6. Cons 3. The authors have ignored and therefore not compared with approaches that use parameter sharing as a way to provide statistical strength for rare classes. The parameter sharing approaches often learn a mid level representation that uses data from multiple classes - eg: fully connected two layer neural networks, deep neural networks, attribute based approach from Tuesday's class. This parameter sharing technique is apparently very different from the regularization based technique more commonly used in the papers cited by the authors. Both have the benefit of reducing the sample complexity - while this paper copies examples, the mid level features untangle the object manifold and make the feature space more separable leading to a reduced sample complexity.
+
+1. Yes, but you can not use a transformed image of category A to train models for category B. Something similar to your idea is mentioned in this paper (http://pub.ist.ac.at/~chl/papers/tommasi-accv2012.pdf) where they try to learn a shared parameter space and a dataset specific parameter space; though this is about transferring example from datasets for bias and not for different categories.. But you can imagine doing something like that..
+
+7. Comment 1. The authors fix w_i^c to be 1 for all examples i \in c. It will be interesting to see what the system does if these are allowed to change. The initialization can have these as 1 and the optimization could be allowed to change them. Can this discard bad training examples? or learn a fine grained concept which is a subset of the training data. Can this be used to sequentially learn mixture models?
+
+1. Wouldn't this just give you a degenerate solution where all the positive examples have their weights set to 0? Similarly, if you let the background example weights get set by the optimization, the risk over an empty set of examples is exactly 0.
+
+2. The group lasso constaint on w* is trying to force everything to share from everything. The risk term on the other hand is trying to not share from anything at all. If we set w to 0, then w* becomes 1 and the regularization penalty will become huge. That wont be the optimum after removing the non degeneracy constraints.
+
+8. In this paper, the authors present a novel technique of *borrowing* examples from one class and using them in another class for the purpose of detection. To do this, they learn a set of weights for each class on each other class which determines how well features from one class transfer to another. They do this using a simple regression technique. Then, borrowed examples are transformed into the "canonical" 2D poses of the class in question, and a classifier is trained on these images instead.
+
+Their results show much improvement over simpler detectors, especially for rare classes. They even show that they can borrow images from one dataset and use them in another.
+
+I think the biggest strength of this paper is the idea of *scoring* individual examples of a class based on how similar they are to another. I think this leads to a deeper understanding of the underlying visual structure of the classes, and how classes relate to one another. The fact that they get more useful classification rates is just a happy byproduct of this knowledge.
+
+I have some doubts about their transformations. Is aspect ratio + scale really good enough to represent useful transformations? Perhaps the technique could be extended to include the "label transformations" we looked at in class earlier.
+
+-- Matt Klingensmith
+
+9. The authors present their methodology for transfer learning between object classes. Its main difference from previous methods is that they learn both which classes and examples to borrow from. They formulate this learning process as learning the individual weights corresponding to "how much" to borrow an example.
+
+The intuition and predications of their methods are that information from other classes can help inform knowledge about the classes intending to be predicted. This doesn't strike me as particularly novel, and is more compensating for the fact that object detectors take a very narrow view of the visual world. They show augmentation of performance of object detectors using information from other
+classes.
+
+It seems like this boils down to instead of training a "car" detector, they train e.g. a "hopefully car, maybe bus, maybe van" detector. They mix information from other classes, despite the fact that other classes are "names". I think a more principled approach of information sharing utilizes attributes or parts. Again, their approach is compensating for the fact that object detectors alone often don't quite make sense in the first place, as there is so much more inter-class reasoning and information sharing needed to perceive a scene with any modicum of success. The only compelling argument for sharing classes between object detectors (in a world with much larger CV datasets) is that from certain viewpoints, objects from different classes can look nearly identical. (side view of couch can look like a side view of a chair)
+
+Their argument could've been supported if they included a matrix of weights across all classes. They write a verbal story that inevitably conforms to their own biased assumptions of what their method does, whereas a less biased full quantitative analysis would've been more convincing.
+
+10. I tend to think the term "borrowing" here in this paper can actually be called as "semi-supervised learning". Regarding what I've discussed in the last paper about different classes sharing visual similarity and the unbalancing inter-object-class similarity levels, this paper is one example that emphasizes and makes use of this point.
+
+The pros about this paper is that it presents an object detection method that is able to explore the power from other classes or even other datasets. In addition they also introduced certain deformation scheme for transformation to handle visual differences caused by viewing points in an organized way (parametric way).
+
+But my biggest concern about this paper is it is likely to further ag

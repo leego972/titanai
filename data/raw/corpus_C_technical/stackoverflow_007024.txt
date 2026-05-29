@@ -1,0 +1,72 @@
+Question: <p>I have a string that is html encoded: </p>
+
+<pre><code>&amp;lt;img class=&amp;quot;size-medium wp-image-113&amp;quot; 
+  style=&amp;quot;margin-left: 15px;&amp;quot; title=&amp;quot;su1&amp;quot; 
+  src=&amp;quot;http://blah.org/wp-content/uploads/2008/10/su1-300x194.jpg&amp;quot; 
+  alt=&amp;quot;&amp;quot; width=&amp;quot;300&amp;quot; height=&amp;quot;194&amp;quot; /&amp;gt;
+</code></pre>
+
+<p>I want to change that to:</p>
+
+<pre><code>&lt;img class="size-medium wp-image-113" style="margin-left: 15px;" 
+  title="su1" src="http://blah.org/wp-content/uploads/2008/10/su1-300x194.jpg" 
+  alt="" width="300" height="194" /&gt;
+</code></pre>
+
+<p>I want this to register as HTML so that it is rendered as an image by the browser instead of being displayed as text. </p>
+
+<p>I've found how to do this in C# but not in in Python. Can someone help me out?</p>
+
+<p>Thanks.</p>
+
+<p>Edit: Someone asked why my strings are stored like that. It's because I am using a web-scraping tool that "scans" a web-page and gets certain content from it. The tool (BeautifulSoup) returns the string in that format.</p>
+
+<h3>Related</h3>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/57708/convert-xml-html-entities-into-unicode-string-in-python">Convert XML/HTML Entities into Unicode String in Python</a></li>
+</ul>
+
+Answer: <p>Below is a python function that uses module <code>htmlentitydefs</code>.  It is not perfect.  The version of <code>htmlentitydefs</code> that I have is incomplete and it assumes that all entities decode to one codepoint which is wrong for entities like <code>&amp;NotEqualTilde;</code>:</p>
+
+<p><a href="http://www.w3.org/TR/html5/named-character-references.html" rel="nofollow">http://www.w3.org/TR/html5/named-character-references.html</a></p>
+
+<blockquote>
+<pre><code>NotEqualTilde;     U+02242 U+00338    âÌ¸
+</code></pre>
+</blockquote>
+
+<p>With those caveats though, here's the code.</p>
+
+<pre><code>def decodeHtmlText(html):
+    """
+    Given a string of HTML that would parse to a single text node,
+    return the text value of that node.
+    """
+    # Fast path for common case.
+    if html.find("&amp;") &lt; 0: return html
+    return re.sub(
+        '&amp;(?:#(?:x([0-9A-Fa-f]+)|([0-9]+))|([a-zA-Z0-9]+));',
+        _decode_html_entity,
+        html)
+
+def _decode_html_entity(match):
+    """
+    Regex replacer that expects hex digits in group 1, or
+    decimal digits in group 2, or a named entity in group 3.
+    """
+    hex_digits = match.group(1)  # '&amp;#10;' -&gt; unichr(10)
+    if hex_digits: return unichr(int(hex_digits, 16))
+    decimal_digits = match.group(2)  # '&amp;#x10;' -&gt; unichr(0x10)
+    if decimal_digits: return unichr(int(decimal_digits, 10))
+    name = match.group(3)  # name is 'lt' when '&amp;lt;' was matched.
+    if name:
+        decoding = (htmlentitydefs.name2codepoint.get(name)
+            # Treat &amp;GT; like &amp;gt;.
+            # This is wrong for &amp;Gt; and &amp;Lt; which HTML5 adopted from MathML.
+            # If htmlentitydefs included mappings for those entities,
+            # then this code will magically work.
+            or htmlentitydefs.name2codepoint.get(name.lower()))
+        if decoding is not None: return unichr(decoding)
+    return match.group(0)  # Treat "&amp;noSuchEntity;" as "&amp;noSuchEntity;"
+</code></pre>

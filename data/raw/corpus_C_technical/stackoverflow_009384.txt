@@ -1,0 +1,40 @@
+Question: <p>I'm using ctypes to load a DLL in Python.  This works great.</p>
+
+<p>Now we'd like to be able to reload that DLL at runtime.  </p>
+
+<p>The straightforward approach would seem to be:
+1. Unload DLL
+2. Load DLL</p>
+
+<p>Unfortunately I'm not sure what the correct way to unload the DLL is.</p>
+
+<p>_ctypes.FreeLibrary is available, but private.</p>
+
+<p>Is there some other way to unload the DLL?</p>
+
+Answer: <p>It is helpful to be able to unload the DLL so that you can rebuild the DLL without having to restart the session if you are using iPython or similar work flow. Working in windows I have only attempted to work with the windows DLL related methods.</p>
+
+<pre><code>REBUILD = True
+if REBUILD:
+  from subprocess import call
+  call('g++ -c -DBUILDING_EXAMPLE_DLL test.cpp')
+  call('g++ -shared -o test.dll test.o -Wl,--out-implib,test.a')
+
+import ctypes
+import numpy
+
+# Simplest way to load the DLL
+mydll = ctypes.cdll.LoadLibrary('test.dll')
+
+# Call a function in the DLL
+print mydll.test(10)
+
+# Unload the DLL so that it can be rebuilt
+libHandle = mydll._handle
+del mydll
+ctypes.windll.kernel32.FreeLibrary(libHandle)
+</code></pre>
+
+<p>I don't know much of the internals so I'm not really sure how clean this is. I think that deleting mydll releases the Python resources and the FreeLibrary call tells windows to free it. I had assumed that freeing with FreeLibary first would have produced problems so I saved a copy of the library handle and freed it in the order shown in the example.</p>
+
+<p>I based this method on <a href="http://stackoverflow.com/questions/13128995/ctypes-unload-dll">ctypes unload dll</a> which loaded the handle explicitly up front. The loading convention however does not work as cleanly as the simple "ctypes.cdll.LoadLibrary('test.dll')" so I opted for the method shown.</p>

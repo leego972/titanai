@@ -1,0 +1,102 @@
+Question: <p>I have inherited a django+fastcgi application which needs to be modified to perform a lengthy computation (up to half an hour or more). What I want to do is run the computation in the background and return a "your job has been started" -type response. While the process is running, further hits to the url should return "your job is still running" until the job finishes at which point the results of the job should be returned. Any subsequent hit on the url should return the cached result. </p>
+
+<p>I'm an utter novice at django and haven't done any significant web work in a decade so I don't know if there's a built-in way to do what I want. I've tried starting the process via subprocess.Popen(), and that works fine except for the fact it leaves a defunct entry in the process table. I need a clean solution that can remove temporary files and any traces of the process once it has finished.</p>
+
+<p>I've also experimented with fork() and threads and have yet to come up with a viable solution. Is there a canonical solution to what seems to me to be a pretty common use case? FWIW this will only be used on an internal server with very low traffic.</p>
+
+Answer: <p>I have to solve a similar problem now. It is not going to be a public site, but similarly, an internal server with low traffic.</p>
+
+<p>Technical constraints:</p>
+
+<ul>
+<li>all input data to the long running process can be supplied on its start</li>
+<li>long running process does not require user interaction (except for the initial input to start a process)</li>
+<li>the time of the computation is long enough so that the results cannot be served to the client in an immediate HTTP response</li>
+<li>some sort of feedback (sort of progress bar) from the long running process is required.</li>
+</ul>
+
+<p>Hence, we need at least two web âviewsâ: one to initiate the long running process, and the other, to monitor its status/collect the results.</p>
+
+<p>We also need some sort of interprocess communication: send user data from the <em>initiator</em> (the web server on http request) to the <em>long running process</em>, and then send its results to the <em>reciever</em> (again web server, driven by http requests). The former is easy, the latter is less obvious. Unlike in normal unix programming, the receiver is not known initially. The receiver may be a different process from the initiator, and it may start when the long running job is still in progress or is already finished. So the pipes do not work and we need some permamence of the results of the long running process.</p>
+
+<p>I see two possible solutions:</p>
+
+<ul>
+<li>dispatch launches of the long running processes to the long running job manager (this is probably what the above-mentioned django-queue-service is);</li>
+<li>save the results permanently, either in a file or in DB.</li>
+</ul>
+
+<p>I preferred to use temporary files and to remember their locaiton in the session data. I don't think it can be made more simple.</p>
+
+<p>A job script (this is the long running process), <code>myjob.py</code>:</p>
+
+<pre><code>import sys
+from time import sleep
+
+i = 0
+while i &lt; 1000:
+    print 'myjob:', i  
+    i=i+1
+    sleep(0.1)
+    sys.stdout.flush()
+</code></pre>
+
+<p>django <code>urls.py</code> mapping:</p>
+
+<pre><code>urlpatterns = patterns('',
+(r'^startjob/$', 'mysite.myapp.views.startjob'),
+(r'^showjob/$',  'mysite.myapp.views.showjob'),
+(r'^rmjob/$',    'mysite.myapp.views.rmjob'),
+)
+</code></pre>
+
+<p>django views:</p>
+
+<pre><code>from tempfile import mkstemp
+from os import fdopen,unlink,kill
+from subprocess import Popen
+import signal
+
+def startjob(request):
+     """Start a new long running process unless already started."""
+     if not request.session.has_key('job'):
+          # create a temporary file to save the resuls
+          outfd,outname=mkstemp()
+          request.session['jobfile']=outname
+          outfile=fdopen(outfd,'a+')
+          proc=Popen("python myjob.py",shell=True,stdout=outfile)
+          # remember pid to terminate the job later
+          request.session['job']=proc.pid
+     return HttpResponse('A &lt;a href="/showjob/"&gt;new job&lt;/a&gt; has started.')
+
+def showjob(request):
+     """Show the last result of the running job."""
+     if not request.session.has_key('job'):
+          return HttpResponse('Not running a job.'+\
+               '&lt;a href="/startjob/"&gt;Start a new one?&lt;/a&gt;')
+     else:
+          filename=request.session['jobfile']
+          results=open(filename)
+          lines=results.readlines()
+          try:
+               return HttpResponse(lines[-1]+\
+                         '&lt;p&gt;&lt;a href="/rmjob/"&gt;Terminate?&lt;/a&gt;')
+          except:
+               return HttpResponse('No results yet.'+\
+                         '&lt;p&gt;&lt;a href="/rmjob/"&gt;Terminate?&lt;/a&gt;')
+     return response
+
+def rmjob(request):
+     """Terminate the runining job."""
+     if request.session.has_key('job'):
+          job=request.session['job']
+          filename=request.session['jobfile']
+          try:
+               kill(job,signal.SIGKILL) # unix only
+               unlink(filename)
+          except OSError, e:
+               pass # probably the job has finished already
+          del request.session['job']
+          del request.session['jobfile']
+     return HttpResponseRedirect('/startjob/') # start a new one
+</code></pre>

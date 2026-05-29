@@ -1,0 +1,40 @@
+Question: <p>How can I find local IP addresses (i.e. 192.168.x.x or 10.0.x.x) in Python platform independently and using only the standard library?</p>
+
+Answer: <p>im using following module:</p>
+
+<pre><code>#!/usr/bin/python
+# module for getting the lan ip address of the computer
+
+import os
+import socket
+
+if os.name != "nt":
+    import fcntl
+    import struct
+    def get_interface_ip(ifname):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(fcntl.ioctl(
+                s.fileno(),
+                0x8915,  # SIOCGIFADDR
+                struct.pack('256s', bytes(ifname[:15], 'utf-8'))
+                # Python 2.7: remove the second argument for the bytes call
+            )[20:24])
+
+def get_lan_ip():
+    ip = socket.gethostbyname(socket.gethostname())
+    if ip.startswith("127.") and os.name != "nt":
+        interfaces = ["eth0","eth1","eth2","wlan0","wlan1","wifi0","ath0","ath1","ppp0"]
+        for ifname in interfaces:
+            try:
+                ip = get_interface_ip(ifname)
+                break;
+            except IOError:
+                pass
+    return ip
+</code></pre>
+
+<p>Tested with windows and linux (and doesnt require additional modules for those)
+intended for use on systems which are in a single IPv4 based LAN.</p>
+
+<p>The fixed list of interface names does not work for recent linux versions, which have adopted the systemd v197 change regarding predictable interface names as pointed out by <a href="https://stackoverflow.com/questions/166506/finding-local-ip-addresses-using-pythons-stdlib/1947766?noredirect=1#comment35654143_1947766">Alexander</a>.
+In such cases, you need to manually replace the list with the interface names on your system, or use another solution like <a href="http://alastairs-place.net/projects/netifaces/" rel="nofollow">netifaces</a>.</p>

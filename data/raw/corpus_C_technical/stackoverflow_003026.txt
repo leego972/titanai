@@ -1,0 +1,67 @@
+Question: <p>In python is it possible to get or set a logical directory (as opposed to an absolute one).</p>
+
+<p>For example if I have:</p>
+
+<pre><code>/real/path/to/dir
+</code></pre>
+
+<p>and I have</p>
+
+<pre><code>/linked/path/to/dir
+</code></pre>
+
+<p>linked to the same directory.</p>
+
+<p>using os.getcwd and os.chdir will always use the absolute path</p>
+
+<pre><code>&gt;&gt;&gt; import os
+&gt;&gt;&gt; os.chdir('/linked/path/to/dir')
+&gt;&gt;&gt; print os.getcwd()
+/real/path/to/dir
+</code></pre>
+
+<p>The only way I have found to get around this at all is to launch 'pwd' in another process and read the output. However, this only works until you call os.chdir for the first time.</p>
+
+Answer: <p>The underlying operational system / shell reports real paths to python. </p>
+
+<p>So, there really is no way around it, since <code>os.getcwd()</code> is a wrapped call to C Library <code>getcwd()</code> function.</p>
+
+<p>There are some workarounds in the spirit of the one that you already know which is launching <code>pwd</code>.</p>
+
+<p>Another one would involve using <code>os.environ['PWD']</code>. If that environmnent variable is set you can make some <code>getcwd</code> function that respects it.</p>
+
+<p>The solution below combines both:</p>
+
+<pre><code>import os
+from subprocess import Popen, PIPE
+
+class CwdKeeper(object):
+    def __init__(self):
+        self._cwd = os.environ.get("PWD")
+        if self._cwd is None: # no environment. fall back to calling pwd on shell
+           self._cwd = Popen('pwd', stdout=PIPE).communicate()[0].strip()
+        self._os_getcwd = os.getcwd
+        self._os_chdir = os.chdir
+
+    def chdir(self, path):
+        if not self._cwd:
+            return self._os_chdir(path)
+        p = os.path.normpath(os.path.join(self._cwd, path))
+        result = self._os_chdir(p)
+        self._cwd = p
+        os.environ["PWD"] = p
+        return result
+
+    def getcwd(self):
+        if not self._cwd:
+            return self._os_getcwd()
+        return self._cwd
+
+cwd = CwdKeeper()
+print cwd.getcwd()
+# use only cwd.chdir and cwd.getcwd from now on.    
+# monkeypatch os if you want:
+os.chdir = cwd.chdir
+os.getcwd = cwd.getcwd
+# now you can use os.chdir and os.getcwd as normal.
+</code></pre>

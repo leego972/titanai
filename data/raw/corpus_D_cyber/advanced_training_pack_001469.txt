@@ -1,0 +1,321 @@
+================================================================================
+TITAN AI — TRAINING PACK 044: SUPPLY CHAIN SECURITY
+SOLARWINDS/SUNBURST, XZ UTILS BACKDOOR, NPM/PYPI ATTACKS, SBOM, SLSA, SIGSTORE
+================================================================================
+
+================================================================================
+PART 1: SUPPLY CHAIN ATTACK TAXONOMY
+================================================================================
+
+--- TYPES OF SUPPLY CHAIN ATTACKS ---
+
+SOFTWARE BUILD PIPELINE ATTACKS:
+  Attacker compromises: CI/CD system, build server, source code repository.
+  Result: Malicious code injected into signed, legitimate software.
+  Distributed to: All customers trusting that software.
+  
+  Examples: SolarWinds SUNBURST (2020), CCleaner (2017), ASUS ShadowHammer (2019).
+  Scale advantage: One compromise → millions of downstream victims.
+
+OPEN SOURCE DEPENDENCY ATTACKS (Dependency Confusion / Typosquatting):
+  Attacker publishes: Malicious package to public registry (npm, PyPI, RubyGems).
+  Target: Developers who install the package.
+  
+  Typosquatting: "reqeusts" instead of "requests". Developer fat-fingers install command.
+  Dependency confusion: Internal package name "company-utils" uploaded publicly.
+    Private npm registry: Falls back to public if not found internally.
+    Public malicious "company-utils": Downloaded instead of internal version.
+
+HARDWARE SUPPLY CHAIN:
+  Compromise hardware at manufacturing or transit.
+  Bloomberg "Big Hack" (unconfirmed, disputed): Supermicro boards with implants.
+  NSA ANT catalog (leaked 2013): Hardware implants for routers, network gear.
+  COTTONMOUTH: USB hardware implant, RF exfiltration.
+
+VENDOR/THIRD-PARTY COMPROMISE:
+  Target vendor provides: Software, access, services to primary target.
+  Vendor compromise → primary target compromise through trusted relationship.
+
+================================================================================
+PART 2: SOLARWINDS SUNBURST — DEFINITIVE CASE STUDY
+================================================================================
+
+--- THE ATTACK CHAIN ---
+
+PHASE 1: SolarWinds Build System Compromise (Oct 2019 - Mar 2020)
+  Entry: Likely via compromised developer credentials or build server vulnerability.
+  
+  Initial probe: "Sunspot" malware placed on build server.
+  Sunspot's function: Monitor build process for SolarWinds Orion compilation.
+  When Orion source was being compiled: Sunspot replaced a specific source file.
+  The replaced file: SolarWinds.Orion.Core.BusinessLayer.dll
+  
+  SUNSPOT key behaviors:
+  - Monitored running processes for MsBuild.exe (Microsoft build tool)
+  - When detected: Wrote malicious SolarWinds.Orion.Core.BusinessLayer.cs
+  - After build: Restored original file (remove evidence of modification)
+  - The malicious code: Compiled into the legitimate, digitally-signed Orion DLL.
+
+PHASE 2: SUNBURST Backdoor in Orion Updates (Mar - Jun 2020)
+  Distribution: Orion software update (2019.4.5200.9083 and 2020.2.x).
+  Pushed to: ~18,000 SolarWinds customers who applied update.
+  
+  SUNBURST dormancy (anti-detection):
+  The backdoor slept for 12-14 days before first activation.
+  Why: Automated sandboxes typically analyze samples for minutes to hours.
+  12-14 days: Far exceeds any automated analysis window.
+  
+  SUNBURST victim selection:
+  NOT all 18,000 victims activated. Highly targeted.
+  First: Beacon to C2 (avsvmcloud.com) using DGA subdomain.
+  C2 response: Either "sleep" (most victims) or "activate" (high-value targets).
+  
+  DGA (Domain Generation Algorithm) for C2:
+  Generated subdomain = encoded victim information (organization name, domain).
+  Each unique beacon: Told operators which organization was checking in.
+  If organization not interesting: Sleep indefinitely (most of the 18,000).
+  If interesting: Receive real C2 communication.
+  
+  Domain fronting via Cloudflare:
+  DNS resolution: avsvmcloud.com → Cloudflare IP.
+  HTTP request: Host header = avsvmcloud.com, routed by Cloudflare.
+  Real server: Attacker-controlled. Cloudflare as trusted front.
+  Network observer: Sees traffic to Cloudflare. Appears normal.
+
+PHASE 3: Post-Exploitation (High-Value Targets Only)
+  Drop: TEARDROP (custom malware) or RAINDROP.
+  TEARDROP: Custom memory-only dropper. Loads Cobalt Strike Beacon.
+  RAINDROP: Similar, different obfuscation technique.
+  
+  Primary objective: Azure Active Directory / Microsoft 365 environments.
+  Technique: SAML token forgery ("Golden SAML").
+  
+  GOLDEN SAML:
+  Orion had: Read access to customer's AD FS (Active Directory Federation Services).
+  AD FS: Issues SAML tokens for Microsoft 365 / Azure access.
+  Compromised Orion server → Read AD FS signing certificate → Forge SAML tokens.
+  Forged tokens: Valid for ANY user in the tenant, including Global Admin.
+  No MFA bypass needed: SAML token = already authenticated identity.
+  
+  Impact on FireEye (discovered the attack): Red team tool source code stolen.
+  Impact on US Treasury, DoJ, Commerce, DHS, State Dept: Emails, documents accessed.
+
+DETECTION:
+  FireEye detected: Anomalous MFA bypass. Attacker registered a new MFA device for an existing account.
+  Orion indicator: SolarWinds.Orion.Core.BusinessLayer.dll process making unusual outbound connections.
+  Mandiant IOCs: avsvmcloud.com and its subdomains.
+  
+  CISA Emergency Directive 21-01: All agencies immediately disconnect Orion.
+  Microsoft: Seized avsvmcloud.com → Sinkholed. Stopped new beacons.
+
+ATTRIBUTION: APT29 (Cozy Bear) / Russia SVR. HIGH CONFIDENCE.
+Evidence: TTPs, infrastructure, timing, targets all consistent with APT29 historical behavior.
+
+================================================================================
+PART 3: XZ UTILS BACKDOOR — THE LONG CON
+================================================================================
+
+--- XZ CVE-2024-3094 ---
+
+DISCOVERY: Andres Freund (Microsoft engineer) noticed SSH login on Debian sid was 0.5 seconds slower than expected. Investigated. Found backdoor.
+
+TIMELINE (2.5+ YEAR OPERATION):
+  October 2021: GitHub account "Jia Tan" (JiaT75) created. First commit to xz-utils.
+  2021-2022: Built reputation. Helpful contributions. Gained maintainer trust.
+  2022: Pressure campaign (suspected coordination): Other accounts pressured legitimate maintainer (Lasse Collin) to "pass the torch" due to "burnout."
+  2023: Jia Tan became co-maintainer with commit access.
+  Early 2024: Jia Tan added backdoor in release 5.6.0 and 5.6.1.
+  March 29, 2024: Andres Freund discovered it. CVE-2024-3094 published.
+
+TECHNICAL MECHANISM:
+  The backdoor: Not in xz-utils C source code directly.
+  Hidden in: Test archive files (.xz files) in the repository. (Less reviewed than source.)
+  Build system: Specially crafted M4 macro in configure.ac. Extracted malicious object from test files during build.
+  
+  Activation: Only triggered if:
+  1. Package built with specific GCC version and linker flags (Debian/Ubuntu packaging build environment).
+  2. SYSTEMD present and linked against liblzma (xz's library).
+  3. Specifically: OpenSSH on distributions that patched sshd to use libsystemd → pulls in liblzma.
+  
+  Effect: The backdoor hooked into RSA key verification in OpenSSH.
+  Normally: SSH authenticates clients by verifying RSA public key signature.
+  With backdoor: Attacker's special ED448 public key hardcoded → authenticate as any user.
+  Alternative: Remote code execution by any user presenting the backdoor's private key.
+  
+  WHAT WOULD HAVE HAPPENED:
+  Debian sid and Fedora Rawhide (testing/bleeding-edge distributions) had 5.6.0/5.6.1.
+  Ubuntu 24.04 LTS was due to ship within days with the vulnerable version.
+  If reached stable releases: Hundreds of millions of servers worldwide with root-level backdoor in SSH.
+  
+  Discovered BEFORE reaching any stable distribution. Extremely close call.
+
+ATTRIBUTION: Suspected nation-state. Incredible patience (2.5 years). High sophistication.
+China, Russia most suspected. No confirmed attribution.
+
+LESSONS:
+  Open source trust: Reputation ≠ safety. Even long-term contributors can be adversaries.
+  Test files are code: Build system processes, test files, scripts all in threat model.
+  Reproducible builds: Essential for detecting tampering.
+  Slow down merges: Major maintainer changes require more scrutiny.
+
+================================================================================
+PART 4: NPM/PYPI DEPENDENCY ATTACKS
+================================================================================
+
+--- DEPENDENCY CONFUSION (ALEX BIRSAN 2021) ---
+
+DISCOVERY: Security researcher Alex Birsan earned $130,000+ in bug bounties demonstrating this.
+
+MECHANISM:
+  Many large companies use private npm registries for internal packages.
+  Example: Company X has internal package "@company/internal-utils" on private registry.
+  
+  When npm installs: First checks public registry. If package found there with HIGHER version: Installs public one.
+  Attack: Register "@company/internal-utils" on public npm with version 99.99.99.
+  Package contains: Reverse shell / exfiltration payload.
+  Any developer running npm install in that company's project: Installs attacker's package.
+  
+  Companies affected: Microsoft, Apple, PayPal, Shopify, Netflix, Yelp, Tesla (all paid bounties).
+  None were actually exfiltrated: Bug bounty program kept it benign.
+
+TYPOSQUATTING ATTACKS (real malicious):
+  "reqeusts" → Python requests (popular HTTP library).
+  "cokies" → cookies.
+  "python-dateutil" vs "python-dateutils" (extra s).
+  
+  Recent real attacks:
+  PyPI: "ctx" package (legitimate: 1.5M downloads) was compromised after domain expired.
+    New owner of domain → took control of PyPI publishing. Added credential-stealing code.
+  npm: "node-ipc" (supply chain attack by maintainer): Maintainer added geopolitical protest code.
+    Deleted files on Russian/Belarusian developer machines. Controversial "protestware."
+  "event-stream" (npm, 2018): Malicious code added targeting Copay Bitcoin wallet.
+
+GITHUB ACTIONS SUPPLY CHAIN:
+  Actions referenced as: uses: some-org/some-action@v1
+  If @v1 is a mutable git tag: Attacker compromises the action's repo, moves v1 tag to malicious commit.
+  Thousands of pipelines suddenly running malicious code.
+  
+  Fix: Reference by SHA (immutable): uses: some-org/some-action@abc123def456
+  Major attacks: 2024 series of popular GitHub Actions compromised via stale token attacks.
+
+SOLAR-WINDS STYLE PYPI/NPM ATTACK SCENARIO:
+  Attacker: Maintains a popular legitimate package for 2 years (builds reputation).
+  Release: Malicious version with CI/CD credential exfiltration.
+  Target: CI/CD pipelines that use the package → steal AWS/cloud secrets.
+  Scale: One malicious package version → thousands of companies affected.
+
+================================================================================
+PART 5: DEFENSES — SBOM, SLSA, SIGSTORE
+================================================================================
+
+--- SBOM (SOFTWARE BILL OF MATERIALS) ---
+
+WHAT: Machine-readable inventory of all components in software.
+FORMAT: SPDX (Linux Foundation), CycloneDX (OWASP).
+REQUIRED: US Executive Order 14028 (2021) mandates SBOM for software sold to US government.
+
+CYCLONEDX EXAMPLE:
+  {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.4",
+    "components": [
+      {
+        "type": "library",
+        "name": "requests",
+        "version": "2.28.1",
+        "purl": "pkg:pypi/requests@2.28.1",
+        "hashes": [
+          {"alg": "SHA-256", "content": "8fefa2a1a1365bf5520aac41836fbee479da67864514bdb821f31ce07ce65349"}
+        ],
+        "licenses": [{"id": "Apache-2.0"}]
+      }
+    ]
+  }
+
+SBOM GENERATION:
+  Python: syft (Anchore), cyclonedx-bom
+  Java: cyclonedx-maven-plugin
+  Node.js: @cyclonedx/cyclonedx-npm
+  Universal: trivy (Aqua), syft
+  
+  syft python-project/ -o cyclonedx-json > sbom.json
+  trivy fs . --format cyclonedx --output sbom.json
+
+SBOM + VULNERABILITY MATCHING:
+  Generate SBOM → Feed to VEX/vulnerability database → Find known vulns in components.
+  
+  grype sbom:sbom.json    # Anchore Grype: Match SBOM against CVE database
+  # Output: Each vulnerable component with CVE and severity.
+
+--- SLSA (SUPPLY CHAIN LEVELS FOR SOFTWARE ARTIFACTS) ---
+
+SLSA (pronounced "salsa"): Framework to protect software integrity from build to deployment.
+Levels: SLSA 1 → 2 → 3 (most secure). SLSA 4 was merged into SLSA 3 in v1.0.
+
+SLSA LEVEL 1 (basic):
+  Build: Scripted. Not manual. Reproducible.
+  Provenance: Documentation of how and where artifact was built.
+  Provenance format: SLSA standard. Machine-readable.
+
+SLSA LEVEL 2 (build service):
+  Build: Hosted on trustworthy CI/CD service (GitHub Actions, GitLab CI, Cloud Build).
+  Provenance: Signed by the CI/CD service. Verifiable.
+  Source: Version controlled.
+
+SLSA LEVEL 3 (hardened build):
+  Build: Isolated. No network access during build. Ephemeral environment.
+  Provenance: Non-forgeable. Even build-service admins cannot fake it.
+  Source: Verified, auditable. Two-party review for all changes.
+  
+GITHUB ACTIONS SLSA GENERATION:
+  - name: Generate SLSA provenance
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1
+    with:
+      base64-subjects: "${{ needs.build.outputs.hashes }}"
+  
+  # Verifier:
+  slsa-verifier verify-artifact artifact.tar.gz \
+    --provenance-path artifact.tar.gz.intoto.jsonl \
+    --source-uri github.com/owner/repo
+
+--- SIGSTORE — KEYLESS SIGNING ---
+
+PROBLEM: Traditional code signing requires managing private keys. Keys get compromised, stolen, leaked.
+
+SIGSTORE: Sign software artifacts using ephemeral keys tied to OIDC identity (GitHub, Google, Microsoft).
+No persistent private key: Key generated at signing time, used once, discarded.
+Audit log (Rekor): Transparency log. All signatures publicly logged and immutable.
+Verification: Any verifier can check: Was this artifact signed by someone with this GitHub identity?
+
+COSIGN (container image signing):
+  # Sign image (using GitHub Actions OIDC — no key needed):
+  cosign sign --yes ghcr.io/company/app:v1.0.0
+  # Cosign: Requests OIDC token from GitHub → gets short-lived signing cert from Fulcio CA.
+  # Signs image. Logs to Rekor. Cert (containing GitHub identity) embedded in signature.
+  
+  # Verify:
+  cosign verify ghcr.io/company/app:v1.0.0 \
+    --certificate-identity-regexp="https://github.com/company/app/.github/workflows/.*" \
+    --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+  
+  # Kubernetes admission: Block unsigned images with policy.
+  # Connaisseur, Kyverno, OPA Gatekeeper can enforce: Only signed images from trusted CI.
+
+SIGSTORE PYTHON/NPM SUPPORT:
+  PyPI: Sigstore-based signing gradually rolling out (PEP 458, PEP 480).
+  npm: Provenance attestations (npm 9.5+, GitHub Actions integration).
+  Result: Each published package has provenance record: "Built from commit X on GitHub Actions run Y."
+  Consumer: Verify package came from expected repo and CI run before installing.
+
+================================================================================
+END OF PACK 044: SUPPLY CHAIN SECURITY
+Total: Supply chain taxonomy (build pipeline/dependency/hardware/vendor), SolarWinds
+SUNBURST complete chain (Sunspot build monitor, 12-day dormancy, DGA domain fronting,
+Golden SAML ADFS technique, FireEye discovery), XZ Utils backdoor (2.5-year operation,
+technical mechanism via M4 macros/test archives, SSH RSA hook, near-miss on stable
+releases), dependency confusion (Birsan research, mechanism, all affected companies),
+typosquatting (ctx/node-ipc/event-stream real attacks), GitHub Actions supply chain
+attack vectors, SBOM (CycloneDX format, syft/trivy generation, grype vulnerability
+matching), SLSA framework (levels 1-3, GitHub Actions integration), Sigstore/cosign
+keyless signing (no persistent key, Rekor transparency log, Kubernetes enforcement).
+================================================================================

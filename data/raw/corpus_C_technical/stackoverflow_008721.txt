@@ -1,0 +1,55 @@
+Question: <p>I'm trying to make some types in Django that map to standard Django types.  The <a href="http://docs.djangoproject.com/en/dev/howto/custom-model-fields/#howto-custom-model-fields" rel="nofollow">custom model field documentation</a> goes into complicated cases; I just want to store a basic Django type from a class with a bunch of handy methods.</p>
+
+<p>For example, if I were storing playing cards, I want something like:</p>
+
+<pre><code>class Card(object):
+    """ A playing card.  """
+    def as_number(self):
+        """ returns a number from 1 (Ace of Clubs) and 52 (King of Spades)."""
+        return self.number + self.suit_rank() * 13
+    def __unicode(self): ...
+    def is_highest(self, other_cards, trump=None):...
+    def __init__(self, number, suit):  ...
+     ...
+</code></pre>
+
+<p>I want my models to have something like:</p>
+
+<pre><code>class my_game(models.Model):
+    ante = models.IntegerField()
+    bonus_card = Card()   # Really stored as an models.IntegerField()
+    ....
+</code></pre>
+
+<p>I'm expecting the answer will look like inheriting from the correct type, adding some specially named get/store fields for card, and renaming <strong>init</strong>().  Does anyone have sample code or better documentation?</p>
+
+Answer: <p>I'd do this with a subclass of Django's PositiveIntegerField:</p>
+
+<pre><code>from django.db import models
+
+class Card(object):
+    """The ``Card`` class you described."""
+    ...
+
+class CardField(models.PositiveIntegerField):
+    __metaclass__ = models.SubfieldBase
+
+    def get_db_prep_value(self, value):
+        """Return the ``int`` equivalent of ``value``."""
+        if value is None: return None
+        try:
+            int_value = value.as_number()
+        except AttributeError:
+            int_value = int(value)
+        return int_value
+
+    def to_python(self, value):
+        """Return the ``Card`` equivalent of ``value``."""
+        if value is None or isinstance(value, Card):
+            return value
+        return Card(int(value))
+</code></pre>
+
+<p>The <code>get_db_prep_value</code> method is responsible for converting <code>value</code> into something suitable for interacting with the database, in this case either an <code>int</code> or <code>None</code>.</p>
+
+<p>The <code>to_python</code> method does the reverse, converting <code>value</code> into a <code>Card</code>.  Just like before, you'll need to handle the possibility of <code>None</code> as a value.  Using the <code>SubfieldBase</code> ensures that <code>to_python</code> is called every time a value is assigned to the field.</p>

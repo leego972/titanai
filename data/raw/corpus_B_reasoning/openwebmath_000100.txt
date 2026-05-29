@@ -1,0 +1,213 @@
+# Contour integration, residues and precision of the poles
+
+I am trying to evaluate the contour integral of some functions. To have a concrete example, let's use $$f(z,s) = \frac{1+(4+2s)\, z}{z - \left( 9 + 35s + 24s^2 + 4s^3 \right) z^2 + 8z^3}$$
+
+f[z_, s_] := (1 + (4 + 2*s)*z)/(z - (9 + 35*s + 24*s^2 + 4*s^3)*z^2 + 8*z^3)
+
+
+and I want to evaluate
+
+$$\hat T(s) = \frac{1}{2\pi\mathrm{i}} \oint_{|z|=1} f(z,s)\, \mathrm dz$$
+
+for $\Re(s) > 0$. My goal would be to find an analytic expression for the integral.
+
+### Method 1: NIntegrate
+
+If I fix some value of $s$, say $s = 0.5 + 2\mathrm i$, I can of course evaluate the integral numerically:
+
+NIntegrate[1/(2*π)*f[E^(I*ϕ), 0.5 + 2*I]*E^(I*ϕ), {ϕ, 0, 2*π}]
+
+
+0.00415703 + 0.0498992 I
+
+I guess that this is the correct result, so this is what I'll try to get with analytic methods.
+
+### Method 2: Integrate
+
+Unfortunately, Integrate fails pretty hard:
+
+Integrate[1/(2*π*I)*f[E^(I*ϕ), s]*I*E^(I*ϕ), {ϕ, 0, 2*π}]
+
+
+1
+
+### Analyzing poles and residues
+
+I know that my functions have poles at $z_0=0$ and at $$z_{1,2} = \frac{1}{16} \left( 9 + 35s + 24s^2 + 4s^3 \mp \sqrt{-32 + \left( 9 + 35s + 24s^2 + 4s^3 \right)^2} \right) .$$
+
+sqrt = Sqrt[-32 + (9 + 35*s + 24*s^2 + 4*s^3)^2];
+pole1[s_] := Evaluate[1/16*(9 + 35*s + 24*s^2 + 4*s^3 - sqrt)];
+pole2[s_] := Evaluate[1/16*(9 + 35*s + 24*s^2 + 4*s^3 + sqrt)];
+Simplify@f[pole1[s], s]
+
+
+ComplexInfinity
+
+Simplify@f[pole2[s], s]
+
+
+ComplexInfinity
+
+I can use Residue to calculate the residues at these poles:
+
+Residue[f[z, s], {z, 0}]
+
+
+1
+
+N@pole1[0.5 + 2*I]
+
+
+-10.8696 + 11.5057 I
+
+Residue[f[z, s], {z, pole1[s]}]
+
+
+(some lengthy expression...)
+
+% /. s -> 0.5 + 2*I
+
+
+-0.00415703 - 0.0498992 I
+
+N@pole2[0.5 + 2*I]
+
+
+-0.0054233 - 0.00574071 I
+
+Residue[f[z, s], {z, pole2[s]}]
+
+
+(some lengthy expression...)
+
+% /. s -> 0.5 + 2*I
+
+
+-0.995843 + 0.0498992 I
+
+As you can see, Integrate only catches the pole at $z_0=0$. The pole $z_1$ is outside the contour, adding the residues at $z_0$ and $z_2$ gives the correct result.
+
+### Method 3: Residue Theorem
+
+To evaluate the integral, we should of course sum all residues of the poles inside the contour. In general, this will always be $z_0$ and one of $z_{1,2}$. Due to the branch cut of the square root in the definition of pole1 and pole2, these functions are however not continuous, and sometimes $z_1$ is the correct one to take and sometimes it is $z_2$.
+
+Now, I first tried to define
+
+hatT[s_] := Module[{pole},
+pole = If[Abs[pole1[s]] < Abs[pole2[s]], pole1[s], pole2[s]];
+Total[Residue[f[z, s], {z, #}] & /@ {0, pole}]]
+
+
+This behaves in a rather strange way:
+
+Chop@hatT[0.5 + 2*I]
+> 1.
+
+
+gives the wrong result, while
+
+N@hatT[1/2 + 2*I]
+> -0.0054233-0.00574071 I
+
+
+is correct.
+
+### Fixed?
+
+I figured out that the problem comes from the low precision of 0.5 + 2*I. The bad behavior can apparently be fixed by rationalizing the argument s:
+
+hatT[s_] := Module[{pole, rs},
+rs = Rationalize[s, 0];
+pole = If[Abs[pole1[rs]] < Abs[pole2[rs]], pole1[rs], pole2[rs]];
+Total[Residue[f[z, rs], {z, #}] & /@ {0, pole}]]
+
+
+### Questions
+
+Summarizing, my questions are:
+
+• Why does Integrate fail to see one of the poles? Is there maybe even a simple fix for that?
+• Is Rationalize[s, 0] the right thing to do? (It seems to work right now and I can also plot the function hatT[s], but the first time I tried it with Rationalize somehow the plotting did not work, which I can't reproduce any more now.)
+• Does someone have an idea on how to find an analytic expression for $\hat T(s)$?
+
+This is a quite easy task for Integrate with a few transformations, if f rationalized. ( Rationalize[s, 0]is optimal.)
+
+integrand = 1/(2*π)*f[E^(I*ϕ), 1/2 + 2*I]*E^(I*ϕ) // Simplify
+
+NIntegrate[integrand, {ϕ, 0, 2*π}]
+
+(*   0.00415703+ 0.0498992 I   *)
+
+ce = integrand // ExpToTrig //
+ComplexExpand[#, TargetFunctions -> {Re, Im}] &;
+
+{int = Integrate[ce, {ϕ, 0, 2*π}], int // N}
+
+(*   {1/2 - 1/2 Sqrt[83432339/85705131 - (5654752 I)/28568377],
+0.00415703+ 0.0498992 I}   *)
+
+
+Residue calculation
+
+sol = Solve[(Denominator[f[z, s]] /. s -> 1/2 + 2*I) == 0, z]
+
+(*   {{z -> 0}, {z -> 2/((-87 + 92 I) - Sqrt[-927 - 16008 I])}, {z ->
+1/16 ((-87 + 92 I) - Sqrt[-927 - 16008 I])}}   *)
+
+sol//N
+
+(*   {{z -> 0.}, {z -> -0.0054233 - 0.00574071 I}, {z -> -10.8696 +
+11.5057 I}}   *)
+
+{res =Residue[f[z, 1/2 + 2 I], {z, z /. sol[[1]]}] +
+Residue[f[z, 1/2 + 2 I], {z, z /. sol[[2]]}] // FullSimplify,res//N}
+
+(*   {1/2 - 1/2 Sqrt[83432339/85705131 - (5654752 I)/28568377],
+0.00415703+ 0.0498992 I}   *)
+
+
+Edit: Appendix to Method 3: Residue Theorem
+
+Developing general operator.
+
+sol = Solve[Denominator[f[z, s]] == 0, z];
+
+pole1[s_] := Evaluate[z /. sol[[2]]]
+
+pole2[s_] := Evaluate[z /. sol[[3]]]
+
+hatT[s_] := (rs = Rationalize[s, 0];
+pole =
+Which[Abs[pole1[rs]] < 1 && Abs[pole2[rs]] < 1, {pole1[rs],
+pole2[rs]},
+Abs[pole1[rs]] < 1 && Abs[pole2[rs]] > 1, {pole1[rs]},
+Abs[pole1[rs]] > 1 && Abs[pole2[rs]] < 1, {pole2[rs]}];
+{tt = Total[Residue[f[z, rs], {z, #}] & /@ {0, Sequence @@ pole}],
+N[tt]}) // FullSimplify
+
+
+Compare with integration.
+
+integrand[s_] := 1/(2*\[Pi])*f[E^(I*\[Phi]), s]*E^(I*\[Phi]) // Simplify
+
+ce[s_] := integrand[s] // ExpToTrig //
+ComplexExpand[#, TargetFunctions -> {Re, Im}] &;
+
+nint[s_] := NIntegrate[ce[s], {\[Phi], 0, 2*\[Pi]}]
+
+int[s_] := {ii =
+Integrate[ce[Rationalize[s, 0]], {\[Phi], 0, 2*\[Pi]}], ii // N}
+
+
+Test
+
+hatT[1/2 + 2 I]
+
+(*   {1/2 - 1/2 Sqrt[83432339/85705131 - (5654752 I)/28568377],
+0.00415703+ 0.0498992 I}   *)
+
+• If $s=1/2 + 2\mathrm i$ is plugged in, the // ExpToTrig // ComplexExpand is not needed, Integrate already works fine. However, using // ExpToTrig // ComplexExpand, Integrate seems to give an expression for general s (even though it is in a weird ConditionalExpression), so thank you! – Noiralef May 18 '18 at 19:26
+• Why did you write the second part about residue calculation in your answer? That's the same thing I was doing already, isn't it? – Noiralef May 18 '18 at 19:27
+• Yes, of course it is the same in a slightly different form, together with analytic solutions. It shows, exact solution can be quite simple, not a lengthy expression. – Akku14 May 18 '18 at 19:44
+• So... sorry, but the places where I wrote "lengthy expression", I didn't plug s=1/2+2I in yet. Are you saying that you can get simple expressions that hold for general s? – Noiralef May 19 '18 at 10:30
+• I changed the hatT[s_] a little bit and think, it workes. (Didn't regard the cases, where integration path is exactly on a singularity.) – Akku14 May 19 '18 at 17:22

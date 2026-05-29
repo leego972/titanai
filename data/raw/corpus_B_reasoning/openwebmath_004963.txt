@@ -1,0 +1,162 @@
+# @bind for macro component with custom class
+
+viachris
+27 5
+
+Hello,
+
+i have the following problem:
+
+I created a new macro component. It combines a textbox with a popup, that is always shown, when the textbox has focus.
+
+myMacro.zul:
+
+ <zk>
+<textbox id="textbox" value="${arg.value}" width="${empty arg.width ? '98%' : arg.width}"/>
+<popup id="popup" width="200px" />
+
+</zk>
+<!-- It is registered in language-addon -->
+
+
+For this Macro i created a HtmlMacroComponent class:
+
+@ComponentAnnotation("value:@ZKBIND(ACCESS=both,SAVE_EVENT=onEdited)")
+public class MyMacro extends HtmlMacroComponent {
+
+private static final long serialVersionUID = 1L;
+
+@Wire
+private Textbox textbox;
+
+@Wire
+private Popup popup;
+
+private Label label;
+
+public MyMacro() {
+label = new Label();
+setMacroURI("/zul/components/myMacro.zul");
+setStyle("display:block");
+afterCompose();
+popup.appendChild(label);
+}
+
+@Listen("onFocus=#textbox")
+public void textboxFocus() {
+label.setValue("some Text");
+popup.open(textbox, "end_before");
+}
+}
+
+
+In the .zul pages where i want to use the macro, i want to use @bind for a bean-field:
+
+somePage.zul:
+
+<myMacro value="@bind(vm.bean.field)" /> <!-- vm is the ViewModel Class -->
+
+
+The Bean is a straightforward JPA-Entity.
+
+My problem: the text i put into the textbox is not given to the bean (everything else works, the popup is shown and so on).
+
+As an alternative to @ComponentAnnotation i found this: http://zkfiddle.org/sample/6sleo1/2-macro-with-manual-reference (link)
+
+But it only works when using a macro component without a custom class. In my case i get a Property not found exception for the pojo.
+
+I can't use @ref because we don't have PE or EE license.
+
+Can someone help me?
+
+ZK version is 6.5.3.
+
+delete retag edit
+
+Sort by » oldest newest most voted
+
+chillworld
+5322 4 9
+https://github.com/chillw...
+
+Hey viachris,
+
+Your doing it quite good but you only make a few small mistakes.
+
+## First mistake :
+
+In the zul you have :
+
+<textbox id="textbox" value="\${arg.value}"
+
+
+Don't set the value there.(in the zul)
+What you are doing is only a just set the value once and nothing more.
+
+## Second mistake :
+
+In addition of the first mistake, the value has to go to the getter and setter of value. So what you need in the Java class is :
+
+public void setValue(String value) {
+textbox.setValue(value);
+}
+
+public String getValue() {
+return textbox.getValue();
+}
+
+@Listen("onChange=#textbox")
+public void textboxChange() {
+Events.postEvent("onEdited", this, textbox.getValue());
+}
+
+
+And normally this should work.
+
+## Edit for comment getting "bean.string" :
+
+Maybe it's possible through the binder or something.
+I have to look that up and try and error that.
+
+Easy solution should be :
+
+<myMacro value="@bind(vm.bean.field)" from="bean.field"/>
+
+
+And in the class you create a getter and setter like :
+
+private String from;
+
+public void setFrom(String from) {
+this.from = from;
+}
+
+public String getFrom() {
+return from;
+}
+
+
+It's surely not the most cleanest way but it's the only way I can say directly without testing some stuff.
+
+Greetz Chill.
+
+Thanks for the answer, but even with your suggested changes the content of the textbox is not given to the bean. bean.field is still empty.
+
+( 2015-03-26 07:09:20 +0800 )edit
+
+try this now
+
+( 2015-03-26 10:20:58 +0800 )edit
+
+Where do i get the 'value' from in the postEvent method?
+
+( 2015-03-26 15:24:44 +0800 )edit
+
+oh excuse me, textbox.getValue(), that's the problem of not having a fiddle and just write code here :)
+
+( 2015-03-26 16:26:48 +0800 )edit
+
+That's it! Thank you very much! This helpes me immensely :) Sadly i can't upvote because i don't have enough points... that's kind of silly...
+
+( 2015-03-27 13:37:28 +0800 )edit
+[hide preview]

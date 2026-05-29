@@ -1,0 +1,69 @@
+Question: <p>Suppose the following:</p>
+
+<pre><code>&gt;&gt;&gt;s = set([1, 2, 3])
+</code></pre>
+
+<p>How do I get a value (any value) out of s without doing s.pop()? I want to leave the item in the set until I am sure I can remove it - something I can only be sure of after an asynchronous call to another host.</p>
+
+<p>Quick and dirty:</p>
+
+<pre><code>&gt;&gt;&gt;elem = s.pop()
+&gt;&gt;&gt;s.add(elem)
+</code></pre>
+
+<p>But do you know of a better way? Ideally in constant time.</p>
+
+Answer: <p>Following @wr. post, I get similar results (for Python3.5)</p>
+
+<pre><code>from timeit import *
+
+stats = ["for i in range(1000): next(iter(s))",
+         "for i in range(1000): \n\tfor x in s: \n\t\tbreak",
+         "for i in range(1000): s.add(s.pop())"]
+
+for stat in stats:
+    t = Timer(stat, setup="s=set(range(100000))")
+    try:
+        print("Time for %s:\t %f"%(stat, t.timeit(number=1000)))
+    except:
+        t.print_exc()
+</code></pre>
+
+<p>Output:</p>
+
+<pre><code>Time for for i in range(1000): next(iter(s)):    0.205888
+Time for for i in range(1000): 
+    for x in s: 
+        break:                                   0.083397
+Time for for i in range(1000): s.add(s.pop()):   0.226570
+</code></pre>
+
+<p>However, when changing the underlying set (e.g. call to <code>remove()</code>) things go badly for the iterable examples (<code>for</code>, <code>iter</code>):</p>
+
+<pre><code>from timeit import *
+
+stats = ["while s:\n\ta = next(iter(s))\n\ts.remove(a)",
+         "while s:\n\tfor x in s: break\n\ts.remove(x)",
+         "while s:\n\tx=s.pop()\n\ts.add(x)\n\ts.remove(x)"]
+
+for stat in stats:
+    t = Timer(stat, setup="s=set(range(100000))")
+    try:
+        print("Time for %s:\t %f"%(stat, t.timeit(number=1000)))
+    except:
+        t.print_exc()
+</code></pre>
+
+<p>Results in:</p>
+
+<pre><code>Time for while s:
+    a = next(iter(s))
+    s.remove(a):             2.938494
+Time for while s:
+    for x in s: break
+    s.remove(x):             2.728367
+Time for while s:
+    x=s.pop()
+    s.add(x)
+    s.remove(x):             0.030272
+</code></pre>

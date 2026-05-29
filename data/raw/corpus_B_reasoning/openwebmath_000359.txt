@@ -1,0 +1,252 @@
+# Fraction of native contacts over a trajectory¶
+
+Here, we calculate the native contacts of a trajectory as a fraction of the native contacts in a given reference.
+
+Last executed: Sep 25, 2020 with MDAnalysis 1.0.0
+
+Last updated: June 29, 2020 with MDAnalysis 1.0.0
+
+Minimum version of MDAnalysis: 1.0.0
+
+Packages required:
+
+[1]:
+
+import MDAnalysis as mda
+from MDAnalysis.tests.datafiles import PSF, DCD
+from MDAnalysis.analysis import contacts
+
+import nglview as nv
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+%matplotlib inline
+
+
+The test files we will be working with here feature adenylate kinase (AdK), a phosophotransferase enzyme. ([BDPW09]) The trajectory DCD samples a transition from a closed to an open conformation.
+
+[2]:
+
+u = mda.Universe(PSF, DCD)
+
+
+## Background¶
+
+Residues can be determined to be in contact if atoms from the two residues are within a certain distance. Native contacts are those contacts that exist within a native state, as opposed to non-native contacts, which are formed along the path to a folded state or during the transition between two conformational states. MDAnalysis defines native contacts as those present in the reference structure (refgroup) given to the analysis.
+
+Proteins often have more than one native state. Calculating the fraction of native contacts within a protein over a simulation can give insight into transitions between states, or into folding and unfolding processes. MDAnalysis supports three metrics for determining contacts:
+
+## Defining the groups for contact analysis¶
+
+For the purposes of this tutorial, we define pseudo-salt bridges as contacts. A more appropriate quantity for studying the transition between two protein conformations may be the contacts formed by alpha-carbon atoms, as this will give us insight into the movements of the protein in terms of the secondary and tertiary structure. The Q1 vs Q2 contact analysis demonstrates an example using the alpha-carbon atoms.
+
+[3]:
+
+sel_basic = "(resname ARG LYS) and (name NH* NZ)"
+sel_acidic = "(resname ASP GLU) and (name OE* OD*)"
+acidic = u.select_atoms(sel_acidic)
+basic = u.select_atoms(sel_basic)
+
+
+## Hard cutoff with a single reference¶
+
+The 'hard_cut' or hard_cut_q() method uses a hard cutoff for determining native contacts. Two residues are in contact if the distance between them is lower than or equal to the distance in the reference structure.
+
+Below, we use the atomgroups in the universe at the current frame as a reference.
+
+[4]:
+
+ca1 = contacts.Contacts(u,
+select=(sel_acidic, sel_basic),
+refgroup=(acidic, basic),
+method='hard_cut').run()
+
+
+The results are available as a numpy array at ca1.timeseries. The first column is the frame, and the second is the fraction of contacts present in that frame.
+
+[5]:
+
+ca1_df = pd.DataFrame(ca1.timeseries,
+columns=['Frame',
+'Contacts from first frame'])
+
+[5]:
+
+Frame Contacts from first frame
+0 0.0 1.000000
+1 1.0 0.492754
+2 2.0 0.449275
+3 3.0 0.507246
+4 4.0 0.463768
+
+Note that the data is presented as fractions of the native contacts present in the reference configuration. In order to find the number of contacts present, multiply the data with the number of contacts in the reference configuration. Initial contact matrices are saved as pairwise arrays in ca1.initial_contacts.
+
+[6]:
+
+ca1.initial_contacts[0].shape
+
+[6]:
+
+(70, 44)
+
+
+You can sum this to work out the number of contacts in your reference, and apply that to the fractions of references in your timeseries data.
+
+[7]:
+
+n_ref = ca1.initial_contacts[0].sum()
+print('There are {} contacts in the reference.'.format(n_ref))
+
+There are 69 contacts in the reference.
+
+[8]:
+
+n_contacts = ca1.timeseries[:, 1] * n_ref
+print(n_contacts[:5])
+
+[69. 34. 31. 35. 32.]
+
+
+### Plotting¶
+
+You can plot directly from the dataframe, or use other tools such as seaborn. In this trajectory, the fraction of native contats drops immediately to under 50%, and fluctuates around 40% for the rest of the simulation. This means that the protein retains a structure where around 40% salt bridges in the reference remain within the distance of the reference. However, it is difficult to infer information on domain rearrangements and other large-scale movement, other than that the the protein never returns to a similar state as the initial frame.
+
+[9]:
+
+ca1_df.plot(x='Frame')
+plt.ylabel('Fraction of contacts')
+
+[9]:
+
+Text(0, 0.5, 'Fraction of contacts')
+
+
+Another metric that MDAnalysis supports is determining residues to be in contact if they are within a certain radius. This is similar to the hard cutoff metric, in that there is no potential. The difference is that a single radius is used as the cutoff for all contacts, rather than the distance between the residues in the reference. For a tutorial on similar contact analysis of residues within a cutoff, see Number of contacts within cutoff. That tutorial is for calculating the overall number or fraction of contacts, instead of the fraction of native contacts.
+
+You can choose this method by passing in the method name 'radius_cut', which uses the radius_cut_q(). The radius keyword specifies the distance used in ångström. No other arguments need to passed into kwargs.
+
+[10]:
+
+ca2 = contacts.Contacts(u, select=(sel_acidic, sel_basic),
+refgroup=(acidic, basic),
+
+
+### Plotting¶
+
+Again, we can plot over time. We can see that the fraction of native contacts from the first frame has a very different shape for the radius_cut method vs the hard_cut method. While the hard_cut metric tells us that >50% the native contacts never have equal or lower distance during the trajectory, as compared to the reference, the radius_cut analysis shows us that the fraction of contacts within 4.5 Å decreases gradually to 75% over the trajectory. We can infer that almost half the native contacts in the reference frame were closer than 4.5 Å. Moreover, the continuous decrease suggests that the protein may be unfolding, or a large-scale changes in conformation are occurring in such a way that the native salt bridges are not preserved or re-formed.
+
+[11]:
+
+ca2_df = pd.DataFrame(ca2.timeseries,
+columns=['Frame', 'Contacts from first frame'])
+ca2_df.plot(x='Frame')
+plt.ylabel('Fraction of contacts')
+
+[11]:
+
+Text(0, 0.5, 'Fraction of contacts')
+
+
+## Soft cutoff and multiple references¶
+
+### Multiple references¶
+
+refgroup can either be two contacting groups in a reference configuration, or a list of tuples of two contacting groups.
+
+Below we want to look at native contacts from the first frame, and the last frame. To do this, we create a new universe called ref with the same files (and therefore same data) as u. We need to do this so that the (acidic, basic) selections from u, which are assigned from the first frame, remain unchanged. ref is a different Universe so when we set it to its last frame (with index -1), it does not affect u or the previous selections. Now, when we re-select the atomgroups from ref with the selection string used in the hard-cutoff section, different contacts are selected to the contacts found in the first frame of u.
+
+[12]:
+
+ref = mda.Universe(PSF, DCD)
+
+ref.trajectory[-1]
+acidic_2 = ref.select_atoms(sel_acidic)
+basic_2 = ref.select_atoms(sel_basic)
+
+
+### Soft cutoff¶
+
+This time we will use the soft_cut_q algorithm to calculate contacts by setting method='soft_cut'. This method uses the soft potential below to determine if atoms are in contact:
+
+$Q(r, r_0) = \frac{1}{1 + e^{\beta (r - \lambda r_0)}}$
+
+$$r$$ is a distance array and $$r0$$ are the distances in the reference group. $$\beta$$ controls the softness of the switching function and $$\lambda$$ is the tolerance of the reference distance.
+
+Suggested values for $$\lambda$$ is 1.8 for all-atom simulations and 1.5 for coarse-grained simulations. The default value of $$\beta$$ is 5.0. To change these, pass kwargs to contacts.Contacts. We also pass in the contacts from the first frame ((acidic, basic)) and the last frame ((acidic_2, basic_2)) as two separate reference groups. This allows us to calculate the fraction of native contacts in the first frame and the fraction of native contacts in the last frame simultaneously.
+
+[13]:
+
+ca3 = contacts.Contacts(u, select=(sel_acidic, sel_basic),
+refgroup=[(acidic, basic), (acidic_2, basic_2)],
+method='soft_cut',
+kwargs={'beta': 5.0,
+'lambda_constant': 1.5}).run()
+
+
+Again, the first column of the data array in ca2.timeseries is the frame. The next columns of the array are fractions of native contacts with reference to the refgroups passed, in order.
+
+[14]:
+
+ca3_df = pd.DataFrame(ca3.timeseries,
+columns=['Frame',
+'Contacts from first frame',
+'Contacts from last frame'])
+
+[14]:
+
+Frame Contacts from first frame Contacts from last frame
+0 0.0 0.999094 0.719242
+1 1.0 0.984928 0.767501
+2 2.0 0.984544 0.788027
+3 3.0 0.970184 0.829219
+4 4.0 0.980425 0.833500
+
+### Plotting¶
+
+Again, we can see that the fraction of native contacts from the first frame has a very different shape for the soft_cut method vs the other methods. Like the radius_cut method, a gradual decrease in salt bridges is visible; unlike that plot, however, more than 80% native contacts are counted by 100 frames using this metric. By itself, this analysis might suggest that the protein is unfolding.
+
+More interesting is the fraction of native contacts from the last frame, which rises from ~70% to 100% over the simulation. This rise indicates that the protein is not unfolding, per se (where contacts from the last frame would be expected to rise much less); but instead, a rearrangement of the domains is occurring, where new contacts are formed in the final state.
+
+[15]:
+
+ca3_df.plot(x='Frame')
+
+[15]:
+
+<matplotlib.axes._subplots.AxesSubplot at 0x7ff2543ce280>
+
+
+Indeed, viewing the trajectory shows us that the enzyme transitions from a closed to open state.
+
+[16]:
+
+u.trajectory[0]  # set trajectory to first frame (closed)
+# make a new Universe with coordinates of first frame
+
+[17]:
+
+u.trajectory[-1]  # set trajectory to last frame (open)
+# make a new Universe with coordinates of last frame
+
+
+We can also plot the fraction of salt bridges from the first frame, over the fraction from the last frame, as a way to characterise the transition of the protein from closed to open.
+
+[18]:
+
+ca3_df.plot(x='Contacts from first frame',
+y='Contacts from last frame',
+legend=False)
+plt.ylabel('Contacts from last frame');
+
+
+## References¶
+
+[1] Oliver Beckstein, Elizabeth J. Denning, Juan R. Perilla, and Thomas B. Woolf. Zipping and Unzipping of Adenylate Kinase: Atomistic Insights into the Ensemble of Open↔Closed Transitions. Journal of Molecular Biology, 394(1):160–176, November 2009. 00107. URL: https://linkinghub.elsevier.com/retrieve/pii/S0022283609011164, doi:10.1016/j.jmb.2009.09.009.
+
+[2] R. B. Best, G. Hummer, and W. A. Eaton. Native contacts determine protein folding mechanisms in atomistic simulations. Proceedings of the National Academy of Sciences, 110(44):17874–17879, October 2013. 00259. URL: http://www.pnas.org/cgi/doi/10.1073/pnas.1311599110, doi:10.1073/pnas.1311599110.
+
+[3] Joel Franklin, Patrice Koehl, Sebastian Doniach, and Marc Delarue. MinActionPath: maximum likelihood trajectory for large-scale structural transitions in a coarse-grained locally harmonic energy landscape. Nucleic Acids Research, 35(suppl_2):W477–W482, July 2007. 00083. URL: https://academic.oup.com/nar/article-lookup/doi/10.1093/nar/gkm342, doi:10.1093/nar/gkm342.
+
+[4] Richard J. Gowers, Max Linke, Jonathan Barnoud, Tyler J. E. Reddy, Manuel N. Melo, Sean L. Seyler, Jan Domański, David L. Dotson, Sébastien Buchoux, Ian M. Kenney, and Oliver Beckstein. MDAnalysis: A Python Package for the Rapid Analysis of Molecular Dynamics Simulations. Proceedings of the 15th Python in Science Conference, pages 98–105, 2016. 00152. URL: https://conference.scipy.org/proceedings/scipy2016/oliver_beckstein.html, doi:10.25080/Majora-629e541a-00e.
+
+[5] Naveen Michaud-Agrawal, Elizabeth J. Denning, Thomas B. Woolf, and Oliver Beckstein. MDAnalysis: A toolkit for the analysis of molecular dynamics simulations. Journal of Computational Chemistry, 32(10):2319–2327, July 2011. 00778. URL: http://doi.wiley.com/10.1002/jcc.21787, doi:10.1002/jcc.21787.

@@ -1,0 +1,123 @@
+# Transform \sepfootnotecontent into an environment
+
+I am currently cleaning the code of a 1000-page book that contain hundreds of very long footnotes so I decided to move them into separate files using the sepfootnotes package. It’s easy to use:
+
+\sepfootnotecontent{label}{The content}
+...
+\sepfootnote{label}
+
+
+As I said, the footnotes are very long and the footnote file is hard to read. Using an environment would make it easier to parse:
+
+\begin{nbp}{label}
+The content
+\end{nbp}
+
+
+(“nbp” stands for “note de bas de page”, it’s a french document.)
+
+I found out that the environ package makes it easy to “turn” a command into an environment:
+
+\NewEnviron{nbp}[1]{\sepfootnotecontent{#1}{\BODY}}
+
+
+There is no error during the compilation but nothing appears in the footnote:
+
+\begin{nbp}{1}
+dolor sit amet.
+\end{nbp}
+Lorem ipsum\sepfootnote{1}
+
+
+Expected output:
+
+Here is a minimal working example:
+
+\documentclass{article}
+\usepackage{environ}
+\usepackage{sepfootnotes}
+
+\NewEnviron{nbp}[1]{\sepfootnotecontent{#1}{\BODY}}
+
+\begin{document}
+\sepfootnotecontent{works}{dolor sit amet.}
+\begin{nbp}{doesntwork}
+dolor sit amet.
+\end{nbp}
+Lorem ipsum\sepfootnote{works}\sepfootnote{doesntwork}
+\end{document}
+
+• Would be nice if there were a complete minimal example (or see here) to work with.... – jon Feb 15 '15 at 20:18
+• @jon Here is the MWE, after fighting with the minimal class that don’t recognize \sepfootnote :( – Zoxume Feb 16 '15 at 12:36
+• Oh yeah: don't use the minimal class for minimal examples. (Confusing, I realize, but that is not what it was designed for.) – jon Feb 16 '15 at 19:06
+
+No need to change the internals of sepfootnotes: an \aftergroup trickery is sufficient.
+
+\documentclass{article}
+\usepackage{environ}
+\usepackage{sepfootnotes}
+
+\NewEnviron{nbp}[1]{%
+\xdef\nbptemp{{#1}{\unexpanded\expandafter{\BODY}}}%
+\aftergroup\donpb
+}
+\newcommand{\donpb}{\expandafter\sepfootnotecontent\nbptemp}
+
+\begin{document}
+\sepfootnotecontent{works}{Dolor sit amet.}
+\begin{nbp}{doesntwork}
+Again dolor sit amet.
+\end{nbp}
+Lorem ipsum\sepfootnote{works}\sepfootnote{doesntwork}
+\end{document}
+
+
+Note: I compiled the file with a reduced \textheight just to have a smaller image.
+
+• Your answer is better because it doesn’t any extra packages. Thank you! – Zoxume Feb 25 '15 at 15:07
+
+There are two problems: the marco \sepfootnotecontent saves its contents locally which means it is forgotten after the environment ends. The second problem: the macro \BODY is saved as footnote content but what you really want is it the first expansion of \BODY and not the macro itself.
+
+With the help of the etoolbox package and its \patchcmd we can easily create a global version of the internal macro \sep@namedef:
+
+\let\sep@namegdef\sep@namedef
+\patchcmd\sep@namegdef{\@namedef}{\global\@namedef}{}{}
+
+
+Now we need a global equivalent of \sepfootnotecontent:
+
+% \gsepfootnoteenvcontent{<content>}{<id>}
+\newcommand\gsepfootnoteenvcontent[2]{\sep@namegdef{sepfoot}{#2}{#1}}
+
+
+Note the swap of the last two arguments: this makes it easier to expand the \BODY macro in the next step before passing it to \sep@namegdef.
+
+Last the environment where \BODY is expanded before it is passed to \gsepfootnoteenvcontent:
+
+\NewEnviron{nbp}[1]{\expandafter\gsepfootnoteenvcontent\expandafter{\BODY}{#1}}
+
+
+A full example:
+
+\documentclass{article}
+\usepackage{environ,etoolbox}
+\usepackage{sepfootnotes}
+
+\makeatletter
+% \gsepfootnoteenvcontent{<content>}{<id>}
+\newcommand\gsepfootnoteenvcontent[2]{\sep@namegdef{sepfoot}{#2}{#1}}
+\let\sep@namegdef\sep@namedef
+\patchcmd\sep@namegdef{\@namedef}{\global\@namedef}{}{}
+\makeatother
+
+\NewEnviron{nbp}[1]{\expandafter\gsepfootnoteenvcontent\expandafter{\BODY}{#1}}
+
+\begin{document}
+\sepfootnotecontent{works}{dolor sit amet.}
+\begin{nbp}{doesntwork}
+dolor sit amet.
+\end{nbp}
+
+Lorem ipsum\sepfootnote{works}\sepfootnote{doesntwork}
+
+\end{document}

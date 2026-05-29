@@ -1,0 +1,60 @@
+Question: <p>Is there a way to define a column (primary key) as a <a href="https://en.wikipedia.org/wiki/Universally_unique_identifier">UUID</a> in <a href="http://www.sqlalchemy.org/">SQLAlchemy</a> if using <a href="http://www.postgresql.org/">PostgreSQL</a> (Postgres)?</p>
+
+Answer: <p><a href="http://blog.sadphaeton.com/2009/01/19/sqlalchemy-recipeuuid-column.html" rel="nofollow">I wrote this</a> and the domain is gone but here's the guts....</p>
+
+<p>Regardless of how my colleagues who really care about proper database design feel about UUID's and GUIDs used for key fields. I often find I need to do it. I think it has some advantages over autoincrement that make it worth it.  </p>
+
+<p>I've been refining a UUID column type for the past few months and I think I've finally got it solid.</p>
+
+<pre><code>from sqlalchemy import types
+from sqlalchemy.dialects.mysql.base import MSBinary
+from sqlalchemy.schema import Column
+import uuid
+
+
+class UUID(types.TypeDecorator):
+    impl = MSBinary
+    def __init__(self):
+        self.impl.length = 16
+        types.TypeDecorator.__init__(self,length=self.impl.length)
+
+    def process_bind_param(self,value,dialect=None):
+        if value and isinstance(value,uuid.UUID):
+            return value.bytes
+        elif value and not isinstance(value,uuid.UUID):
+            raise ValueError,'value %s is not a valid uuid.UUID' % value
+        else:
+            return None
+
+    def process_result_value(self,value,dialect=None):
+        if value:
+            return uuid.UUID(bytes=value)
+        else:
+            return None
+
+    def is_mutable(self):
+        return False
+
+
+id_column_name = "id"
+
+def id_column():
+    import uuid
+    return Column(id_column_name,UUID(),primary_key=True,default=uuid.uuid4)
+
+# Usage
+my_table = Table('test',
+         metadata,
+         id_column(),
+         Column('parent_id',
+            UUID(),
+            ForeignKey(table_parent.c.id)))
+</code></pre>
+
+<p>I believe storing as binary(16 bytes) should end up being more efficient than the string representation(36 bytes?), And there seems to be some indication that indexing 16 byte blocks should be more efficient in mysql than strings. I wouldn't expect it to be worse anyway.</p>
+
+<p>One disadvantage I've found is that at least in phpymyadmin, you can't edit records because it implicitly tries to do some sort of character conversion for the "select * from table where id =..." and there's miscellaneous display issues.</p>
+
+<p>Other than that everything seems to work fine, and so I'm throwing it out there. Leave a comment if you see a glaring error with it. I welcome any suggestions for improving it.</p>
+
+<p>Unless I'm missing something the above solution will work if the underlying database has a UUID type. If it doesn't, you would likely get errors when the table is created. The solution I came up with I was targeting MSSqlServer originally and then went MySql in the end, so I think my solution is a little more flexible as it seems to work fine on mysql and sqlite. Haven't bothered checking postgres yet. </p>

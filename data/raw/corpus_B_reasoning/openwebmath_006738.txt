@@ -1,0 +1,83 @@
+# Is there a way to remove white margins when importing a pdf file?
+
+A workaround is to use pdfcrop separately (in the terminal) to crop the PDF file we want to import.
+
+However - is there a way to remove white margins when importing a PDF file from within the tex file?
+
+The two common packages to import PDF files are pdfpages or graphicx. Can I 'preprocess' a file for them with pdfcrop within tex file?
+
+• What do you mean by importing? Do you mean embedding a page or series of pages from a PDF in a Tex document? – Charles Stewart Dec 29 '13 at 14:05
+• I have a lot of plots saved separately as PDF files and now I would like to embed/import (I'm not sure what's the right phrase) them one by one into a Tex document. – tales Dec 29 '13 at 14:10
+• With shell-escape enabled you might be able to call pdfcrop from your TeX document. I don't know whether the cropping would be synchronous (good) or asynchronous (bad). – Ethan Bolker Dec 29 '13 at 14:54
+• Can't you just run pdfcrop on all the files first, e.g. with a for loop? Which operating system do you use? – Torbjørn T. Dec 29 '13 at 15:35
+• I use Ubuntu. Well, in principle I could run a loop first but I wanted to be able to crop the files on-the-go. Following Ethan's advice and enabling shell I can now use: \immediate\write18{pdfcrop charge_distribution.pdf tmp.pdf} \includegraphics[width=\textwidth]{tmp.pdf} Now I would like to try to create some kind of macro (or some similar structure, I am not that familiar with LaTeX yet) that would enable me to do that in a quicker way – tales Dec 29 '13 at 15:44
+
+A new command that works like \includegraphics, but crops the pdf image:
+
+\newcommand{\includeCroppedPdf}[2][]{%
+\immediate\write18{pdfcrop #2}%
+\includegraphics[#1]{#2-crop}}
+
+
+Remember: \write18 needs to be enabled. For most TeX distros set the --shell-escape flag when running latex/pdflatex etc.
+
+# Example
+
+\documentclass{article}
+
+\usepackage{graphicx}
+
+\newcommand{\includeCroppedPdf}[2][]{%
+\immediate\write18{pdfcrop #2}%
+\includegraphics[#1]{#2-crop}}
+
+\begin{document}
+\includeCroppedPdf[width=\textwidth]{test}
+\end{document}
+
+
+# Avoid cropping on every compile
+
+To avoid cropping on every document compilation, you could check if the cropped file already exists. (some checksum would be better)
+
+\documentclass{article}
+
+\usepackage{graphicx}
+
+\newcommand{\includeCroppedPdf}[2][]{%
+\IfFileExists{./#2-crop.pdf}{}{%
+\immediate\write18{pdfcrop #2 #2-crop.pdf}}%
+\includegraphics[#1]{#2-crop.pdf}}
+
+\begin{document}
+\includeCroppedPdf[width=\textwidth]{test}
+\end{document}
+
+
+# MD5 Checksum Example
+
+The Idea is to save the MD5 of the image and compare it on the next run. This requires the \pdf@filemdfivesum macro (only works with PDFLaTeX or LuaLaTeX). For XeLaTeX You could use \write18 with md5sum utility or do a file diff.
+
+\documentclass{article}
+
+\usepackage{graphicx}
+
+\usepackage{etoolbox}
+
+\makeatletter
+\newcommand{\includeCroppedPdf}[2][]{\begingroup%
+\edef\temp@mdfivesum{\pdf@filemdfivesum{#2.pdf}}%
+\ifcsstrequal{#2mdfivesum}{temp@mdfivesum}{}{%
+%file changed
+\immediate\write18{pdfcrop #2 #2-crop.pdf}}%
+\immediate\write\@auxout{\string\expandafter\string\gdef\string\csname\space #2mdfivesum\string\endcsname{\temp@mdfivesum}}%
+\includegraphics[#1]{#2-crop.pdf}\endgroup}
+\makeatother
+
+\begin{document}
+\includeCroppedPdf[width=\textwidth]{abc}
+\end{document}
+
+• Perfect, just what I've been working on, thank you – tales Dec 30 '13 at 1:46
+• @tales You're welcome! Just added a MD5 example that also might be useful. – someonr Dec 30 '13 at 2:13
+• Doesn't the pdfcrop package already do something like this? Actually, that just seems to give you the command which you use here, and the rpdfcrop command, I guess. – cfr Dec 30 '13 at 2:31

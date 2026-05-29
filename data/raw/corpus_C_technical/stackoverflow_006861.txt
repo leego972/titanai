@@ -1,0 +1,131 @@
+Question: <p>I'm trying to diff two strings to determine whether or not they solely vary in one numerical subset of the string structure; for example,</p>
+
+<pre><code>varies_in_single_number_field('foo7bar', 'foo123bar')
+# Returns True, because 7 != 123, and there's only one varying
+# number region between the two strings.
+</code></pre>
+
+<p>In Python I can use the <code>difflib</code> to accomplish this:</p>
+
+<pre><code>import difflib, doctest
+
+def varies_in_single_number_field(str1, str2):
+    """
+    A typical use case is as follows:
+        &gt;&gt;&gt; varies_in_single_number_field('foo7bar00', 'foo123bar00')
+        True
+
+    Numerical variation in two dimensions is no good:
+        &gt;&gt;&gt; varies_in_single_number_field('foo7bar00', 'foo123bar01')
+        False
+
+    Varying in a nonexistent field is okay:
+        &gt;&gt;&gt; varies_in_single_number_field('foobar00', 'foo123bar00')
+        True
+
+    Identical strings don't *vary* in any number field:
+        &gt;&gt;&gt; varies_in_single_number_field('foobar00', 'foobar00')
+        False
+    """
+    in_differing_substring = False
+    passed_differing_substring = False # There should be only one.
+    differ = difflib.Differ()
+    for letter_diff in differ.compare(str1, str2):
+        letter = letter_diff[2:]
+        if letter_diff.startswith(('-', '+')):
+            if passed_differing_substring: # Already saw a varying field.
+                return False
+            in_differing_substring = True
+            if not letter.isdigit(): return False # Non-digit diff character.
+        elif in_differing_substring: # Diff character not found - end of diff.
+            in_differing_substring = False
+            passed_differing_substring = True
+    return passed_differing_substring # No variation if no diff was passed.
+
+if __name__ == '__main__': doctest.testmod()
+</code></pre>
+
+<p>But I have no idea how to find something like <code>difflib</code> for C++. Alternative approaches welcome. :)</p>
+
+Answer: <p>@Evan Teran: looks like we did this in parallel -- I have a markedly less readable O(n) implementation:</p>
+
+<pre><code>#include &lt;cassert&gt;
+#include &lt;cctype&gt;
+#include &lt;string&gt;
+#include &lt;sstream&gt;
+#include &lt;iostream&gt;
+
+using namespace std;
+
+ostringstream debug;
+const bool DEBUG = true;
+
+bool varies_in_single_number_field(const string &amp;str1, const string &amp;str2) {
+    bool in_difference = false;
+    bool passed_difference = false;
+    string str1_digits, str2_digits;
+    size_t str1_iter = 0, str2_iter = 0;
+    while (str1_iter &lt; str1.size() &amp;&amp; str2_iter &lt; str2.size()) {
+        const char &amp;str1_char = str1.at(str1_iter);
+        const char &amp;str2_char = str2.at(str2_iter);
+        debug &lt;&lt; "str1: " &lt;&lt; str1_char &lt;&lt; "; str2: " &lt;&lt; str2_char &lt;&lt; endl;
+        if (str1_char == str2_char) {
+            if (in_difference) {
+                in_difference = false;
+                passed_difference = true;
+            }
+            ++str1_iter, ++str2_iter;
+            continue;
+        }
+        in_difference = true;
+        if (passed_difference) { /* Already passed a difference. */
+            debug &lt;&lt; "Already passed a difference." &lt;&lt; endl;
+            return false;
+        }
+        bool str1_char_is_digit = isdigit(str1_char);
+        bool str2_char_is_digit = isdigit(str2_char);
+        if (str1_char_is_digit &amp;&amp; !str2_char_is_digit) {
+            ++str1_iter;
+            str1_digits.push_back(str1_char);
+        } else if (!str1_char_is_digit &amp;&amp; str2_char_is_digit) {
+            ++str2_iter;
+            str2_digits.push_back(str2_char);
+        } else if (str1_char_is_digit &amp;&amp; str2_char_is_digit) {
+            ++str1_iter, ++str2_iter;
+            str1_digits.push_back(str1_char);
+            str2_digits.push_back(str2_char);
+        } else { /* Both are non-digits and they're different. */
+            return false;
+        }
+    }
+    if (in_difference) {
+        in_difference = false;
+        passed_difference = true;
+    }
+    string str1_remainder = str1.substr(str1_iter);
+    string str2_remainder = str2.substr(str2_iter);
+    debug &lt;&lt; "Got to exit point; passed difference: " &lt;&lt; passed_difference
+        &lt;&lt; "; str1 digits: " &lt;&lt; str1_digits
+        &lt;&lt; "; str2 digits: " &lt;&lt; str2_digits
+        &lt;&lt; "; str1 remainder: " &lt;&lt; str1_remainder
+        &lt;&lt; "; str2 remainder: " &lt;&lt; str2_remainder
+        &lt;&lt; endl;
+    return passed_difference
+        &amp;&amp; (str1_digits != str2_digits)
+        &amp;&amp; (str1_remainder == str2_remainder);
+}
+
+int main() {
+    assert(varies_in_single_number_field("foo7bar00", "foo123bar00") == true);
+    assert(varies_in_single_number_field("foo7bar00", "foo123bar01") == false);
+    assert(varies_in_single_number_field("foobar00", "foo123bar00") == true);
+    assert(varies_in_single_number_field("foobar00", "foobar00") == false);
+    assert(varies_in_single_number_field("foobar00", "foobaz00") == false);
+    assert(varies_in_single_number_field("foo00bar", "foo01barz") == false);
+    assert(varies_in_single_number_field("foo01barz", "foo00bar") == false);
+    if (DEBUG) {
+        cout &lt;&lt; debug.str();
+    }
+    return 0;
+}
+</code></pre>

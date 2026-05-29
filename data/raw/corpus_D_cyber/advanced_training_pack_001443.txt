@@ -1,0 +1,401 @@
+================================================================================
+TITAN AI — TRAINING PACK 018: NETWORK SECURITY — DEEP PROFESSIONAL GUIDE
+PROTOCOLS, ATTACKS, DETECTION, FIREWALL DESIGN, TRAFFIC ANALYSIS
+================================================================================
+
+================================================================================
+PART 1: TCP/IP DEEP DIVE FOR SECURITY PROFESSIONALS
+================================================================================
+
+--- THE TCP THREE-WAY HANDSHAKE AND ATTACKS ---
+
+NORMAL HANDSHAKE:
+  Client → Server: SYN (sequence number X)
+  Server → Client: SYN-ACK (sequence number Y, ack X+1)
+  Client → Server: ACK (ack Y+1)
+  Connection established.
+
+SYN FLOOD ATTACK:
+  Attacker sends thousands of SYN packets with spoofed source IPs.
+  Server allocates half-open connection state for each.
+  Server waits for ACK that never comes (fake source IP).
+  Server's backlog queue fills. Legitimate connections refused.
+  Classic DDoS at TCP layer.
+  
+  Defense:
+  1. SYN Cookies: Server doesn't allocate state on SYN.
+     Instead: Encode connection info in ISN (Initial Sequence Number).
+     When ACK arrives with valid cookie: Reconstruct connection.
+     No state stored for half-open connections. SYN flood has no effect.
+     Enable: sysctl net.ipv4.tcp_syncookies=1
+  
+  2. Rate limiting SYN packets at firewall:
+     iptables -A INPUT -p tcp --syn -m limit --limit 1/s --limit-burst 10 -j ACCEPT
+     iptables -A INPUT -p tcp --syn -j DROP
+  
+  3. SYN proxy (AWS Shield, Cloudflare):
+     Proxy terminates TCP, only forwards established connections to origin.
+     Origin never sees half-open connections.
+
+TCP SESSION HIJACKING:
+  If attacker can predict or observe sequence numbers: Inject packets into existing session.
+  Historical: Before randomized ISNs, sequence numbers were predictable.
+  Modern: Randomized ISNs make this very hard. Requires being on-path (MitM).
+  
+  In-path attack example: ARP poisoning to become MitM → observe seq numbers → inject.
+
+TCP RESET ATTACK:
+  Attacker sends RST packet with correct sequence number.
+  Both sides think connection was reset. Session terminates.
+  
+  Used by: The Great Firewall of China (injecting RST packets on connections to blocked content).
+  Defense: IPSec with authentication (forged packets fail authentication check).
+
+--- ICMP FOR SECURITY PROFESSIONALS ---
+
+NORMAL ICMP:
+  Type 8 (Echo Request) + Type 0 (Echo Reply) = ping
+  Type 3 (Destination Unreachable) = host/port/net not reachable
+  Type 11 (Time Exceeded) = TTL expired (used by traceroute)
+
+SECURITY-RELEVANT ICMP BEHAVIORS:
+  
+  ICMP Echo Replies without requests: Possible covert channel / exfiltration.
+  ICMP Timestamp (Type 13/14): OS fingerprinting (response timing reveals OS).
+  ICMP Redirect (Type 5): Tells hosts to use different router. Can be used for MitM.
+    Defense: Drop ICMP Redirects: sysctl net.ipv4.conf.all.accept_redirects=0
+  
+  ICMP TUNNELING:
+  Data hidden in ICMP payload fields. Bypasses firewalls that only check port/protocol.
+  Tool: icmptunnel, ptunnel
+  How: ping request payload = encoded command. Reply payload = encoded response.
+  
+  Detection:
+  - Ping with large payloads (>68 bytes unusual)
+  - High rate of ICMP traffic to single destination
+  - ICMP traffic to unexpected destinations (especially external)
+  - Payload entropy analysis (random data in ICMP payload = possible tunnel)
+
+--- DNS SECURITY — DEEP DIVE ---
+
+DNS RESOLUTION CHAIN:
+  Browser → OS resolver → Recursive resolver (ISP/8.8.8.8) → Root nameserver → TLD nameserver → Authoritative nameserver
+
+DNS CACHE POISONING (Kaminsky Attack):
+  Goal: Get recursive resolver to cache malicious IP for target domain.
+  
+  Attack:
+  1. Attacker sends DNS query for random subdomain: xyz.bank.com
+  2. This causes resolver to query bank.com's nameserver
+  3. While resolver waits: Attacker floods resolver with spoofed responses
+     → Claiming to be bank.com nameserver
+     → With attacker IP for bank.com
+  4. If spoofed response arrives before real one (with correct Transaction ID):
+     Resolver caches malicious mapping
+  
+  Kaminsky innovation: Query random subdomains (not bank.com directly).
+  Each random query = new opportunity to poison the CACHE for bank.com itself.
+  
+  Defense: DNSSEC (cryptographic signatures on DNS records).
+  Defense: Source port randomization (16-bit txid + 16-bit source port = 32-bit entropy).
+
+DNS OVER HTTPS (DoH):
+  Traditional DNS: Cleartext UDP port 53. ISP/attacker sees all your queries.
+  DoH: DNS queries inside HTTPS to 8.8.8.8 or 1.1.1.1. Encrypted.
+  
+  Security implication: Corporate firewalls that filter DNS (blocking malware C2 domains)
+  are bypassed when endpoints use DoH to bypass the corporate DNS resolver.
+  Some malware specifically uses DoH to evade DNS-based detection.
+  
+  Enterprise defense: Block outbound DoH at firewall.
+  Allow: Only corporate DNS resolver outbound on 53/853.
+  Block: Direct connections to 8.8.8.8:443, 1.1.1.1:443 (known DoH providers).
+
+DNS AS SECURITY INTELLIGENCE:
+  Every DNS query is a breadcrumb.
+  Monitor DNS for:
+  - DGA (Domain Generation Algorithm) domains: High entropy, random-looking
+    Detection: lexical analysis, entropy scoring
+    legit: "paypal.com" (entropy ~3.1)
+    DGA: "x8f2qn4k.info" (entropy ~3.8)
+  - NX domains: High rate of NXDOMAIN responses from a host = DGA beaconing
+  - New domains: Registered < 30 days ago = higher risk
+  - Unusual record types: TXT queries are rare for end users (used for DNS tunneling)
+  - TTL anomalies: Very low TTL (< 60s) = fast-flux (botnet C2 hiding behind rotating IPs)
+
+DNS TUNNELING DETECTION:
+  Data encoded in DNS queries: hostname = base64(data).attacker.com
+  Characteristics:
+  - Very long subdomains (> 52 chars)
+  - High query rate to single parent domain
+  - Many unique subdomains per parent
+  - Unusual query types (TXT, NULL, AAAA for tunneling)
+  
+  Detection rule (Suricata):
+  alert dns any any -> any 53 (
+    msg:"Possible DNS Tunneling - Long subdomain";
+    dns.query; content:"."; pcre:"/^[a-z0-9]{50,}\./";
+    threshold:type both, track by_src, count 10, seconds 60;
+    sid:1000001;
+  )
+
+================================================================================
+PART 2: NETWORK ATTACK TECHNIQUES
+================================================================================
+
+--- ARP POISONING AND MAN-IN-THE-MIDDLE ---
+
+ARP PROTOCOL:
+  IP address → MAC address translation (Layer 2 → Layer 3).
+  Question: "Who has 192.168.1.1? Tell 192.168.1.50"
+  Response: "192.168.1.1 is at AA:BB:CC:DD:EE:FF"
+  
+  No authentication. Anyone can send an ARP reply claiming any IP.
+
+ARP POISONING ATTACK:
+  Goal: Redirect traffic between Victim (192.168.1.50) and Gateway (192.168.1.1)
+  
+  Attack sends two sets of gratuitous ARP:
+  To Victim: "192.168.1.1 is at [Attacker's MAC]"
+  To Gateway: "192.168.1.50 is at [Attacker's MAC]"
+  
+  Now: All traffic Victim→Gateway and Gateway→Victim flows through Attacker.
+  Attacker enables IP forwarding: Traffic still reaches destination.
+  Attacker can: Read, modify, inject.
+  
+  Tool: arpspoof (dsniff), ettercap, Bettercap
+  Command:
+  arpspoof -i eth0 -t 192.168.1.50 192.168.1.1  # Poison victim
+  arpspoof -i eth0 -t 192.168.1.1 192.168.1.50  # Poison gateway (both directions)
+  echo 1 > /proc/sys/net/ipv4/ip_forward         # Forward traffic (don't drop it)
+
+DETECTION:
+  Arpwatch: Monitors ARP table changes. Alerts on IP/MAC binding changes.
+  Dynamic ARP Inspection (DAI): On managed switches. Validates ARP against DHCP snooping table.
+  XArp: GUI tool monitoring for ARP poisoning.
+  Suricata rule:
+  alert arp any any -> any any (
+    msg:"Possible ARP Cache Poisoning";
+    arp.opcode:2;  # ARP Reply
+    threshold:type both, track by_src, count 100, seconds 10;
+    sid:2000001;
+  )
+
+--- SSL STRIPPING ---
+
+CONCEPT: Downgrade HTTPS to HTTP. Intercept plaintext traffic.
+
+ATTACK FLOW (MITM required first — use ARP poisoning):
+  1. Client tries to connect to http://bank.com (before redirect to HTTPS)
+  2. MitM intercepts. Connects to https://bank.com on client's behalf.
+  3. MitM serves CLIENT only HTTP.
+  4. Client → MitM: HTTP plaintext. MitM → Bank: HTTPS encrypted.
+  
+  From client perspective: Receiving bank's content. URL shows http:// not https://.
+  Many users don't notice or don't check.
+  
+  Defense: HTTP Strict Transport Security (HSTS)
+  Server header: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  Browser: Remembers MUST use HTTPS for this domain for 1 year. Refuses HTTP.
+  Even if intercepted: Client will refuse to use HTTP. Attack fails.
+  Preload: Submit domain to browser HSTS preload list → HTTPS enforced even on first visit.
+
+--- VLAN HOPPING ---
+
+DOUBLE TAGGING:
+  VLANs separate network segments (VLAN 10 = servers, VLAN 20 = users).
+  Switch ports: Access mode (one VLAN) or Trunk mode (multiple VLANs, tagged).
+  
+  Attack: Send frames with TWO 802.1Q VLAN tags.
+  Outer tag = attacker's VLAN (10).
+  Inner tag = target VLAN (20).
+  
+  First switch: Strips outer tag (sees VLAN 10). Forwards on trunk.
+  Second switch: Sees inner tag (VLAN 20). Delivers to VLAN 20 hosts.
+  Traffic crossed VLAN boundary. No access from VLAN 10 to VLAN 20 normally.
+  
+  Defense:
+  - Change native VLAN from default VLAN 1 to unused VLAN (e.g., VLAN 999)
+  - Explicitly tag native VLAN on trunk ports
+  - Never put user devices on trunk ports
+
+SWITCH SPOOFING:
+  Access switches negotiate trunking automatically (DTP protocol).
+  Attacker sends DTP packets claiming to be a switch.
+  Target switch: Enables trunk mode. Attacker gets access to all VLANs.
+  
+  Defense:
+  switchport mode access                 # Force access mode (disable DTP)
+  switchport nonegotiate                 # Disable DTP entirely
+  
+  This should be standard config on ALL user-facing ports.
+
+================================================================================
+PART 3: FIREWALL ARCHITECTURE AND DESIGN
+================================================================================
+
+--- FIREWALL TYPES ---
+
+PACKET FILTER (stateless):
+  Inspects each packet independently. Source IP, dest IP, source port, dest port, protocol.
+  No concept of connection state.
+  
+  Problem: Must allow return traffic explicitly.
+  Allow outbound TCP: PERMIT tcp any any any 80
+  Must also allow inbound: PERMIT tcp any 80 any >1023 (return traffic)
+  Problem: This allows ANY packet from port 80 inbound, not just return traffic.
+  
+  Use: Routers (ACLs), simple screening. Not for perimeter security alone.
+
+STATEFUL FIREWALL:
+  Tracks connection state table (source IP:port, dest IP:port, protocol, state).
+  Automatically allows return traffic for established connections.
+  Blocks: Packets claiming to be return traffic but not matching any tracked connection.
+  
+  Example: SYN-ACK without prior SYN → blocked (possible spoofed attack).
+  
+  This is the standard enterprise firewall (Palo Alto, Cisco ASA, pfSense).
+
+NEXT-GENERATION FIREWALL (NGFW):
+  Adds to stateful:
+  - Application layer inspection (knows HTTP vs. Skype vs. BitTorrent on port 80)
+  - User identity (block Facebook for all but Marketing group)
+  - SSL inspection (decrypt, inspect, re-encrypt)
+  - IPS (inline threat detection, blocks malicious traffic)
+  - URL filtering (category-based web filtering)
+  - Sandboxing (submit unknown files, detonate, block if malicious)
+
+WAF (Web Application Firewall):
+  Layer 7, specifically for web traffic.
+  Understands HTTP: Headers, cookies, request body, query strings.
+  Blocks: SQLi, XSS, XXE, SSRF, path traversal, common exploit patterns.
+  
+  Rule sets:
+  OWASP CRS (Core Rule Set) — Open source, free, comprehensive.
+  AWS WAF Managed Rules — Maintained, updated for new CVEs.
+  Custom rules for your specific application behavior.
+  
+  Deployment modes:
+  Detection mode: Logs violations, doesn't block (start here, tune)
+  Prevention mode: Blocks violations (only after tuning reduces false positives)
+
+--- FIREWALL RULE DESIGN ---
+
+RULE ORDER MATTERS:
+  Rules evaluated top to bottom. First match wins.
+  Always: Most specific rules first, most general rules last.
+  Default deny at bottom: DENY ALL (implicit or explicit last rule).
+
+RULE WRITING PRINCIPLES:
+  1. Least privilege: Allow minimum required access. Nothing more.
+  2. State explicitly: Better to be verbose and clear than concise and ambiguous.
+  3. Document every rule: Creator, date, ticket number, business justification.
+  4. Review quarterly: Rules accumulate. Unused rules = attack surface.
+
+EXAMPLE SECURITY GROUP DESIGN (AWS VPC):
+  
+  Web Tier Security Group:
+  Inbound:
+    ALLOW 443/TCP from 0.0.0.0/0 (HTTPS from internet)
+    ALLOW 80/TCP from 0.0.0.0/0 (HTTP, redirect to HTTPS)
+    DENY ALL others
+  Outbound:
+    ALLOW 443/TCP to App-Tier-SG (HTTPS to application tier)
+    DENY ALL others
+  
+  App Tier Security Group:
+  Inbound:
+    ALLOW 8080/TCP from Web-Tier-SG ONLY (only web tier can reach app tier)
+    DENY ALL others
+  Outbound:
+    ALLOW 5432/TCP to DB-Tier-SG (PostgreSQL to DB tier)
+    ALLOW 443/TCP to 0.0.0.0/0 (HTTPS for external API calls)
+    DENY ALL others
+  
+  DB Tier Security Group:
+  Inbound:
+    ALLOW 5432/TCP from App-Tier-SG ONLY
+    DENY ALL others
+  Outbound:
+    DENY ALL (DB should never initiate outbound connections)
+  
+  This is defense in depth: Even if web tier is compromised:
+  Attacker can only reach app tier on port 8080.
+  From app tier: Only can reach DB on 5432.
+  Cannot: SSH to servers (no 22 allowed), cannot reach internet from DB tier.
+
+--- NETWORK MONITORING AND TRAFFIC ANALYSIS ---
+
+ZEEK (formerly Bro) — NETWORK SECURITY MONITOR:
+  Not an IDS. A network analysis framework.
+  Creates structured logs of every network connection.
+  Extracts: HTTP requests, DNS queries, TLS certificates, SSH connections, files, etc.
+  
+  Zeek logs most useful for security:
+  conn.log: Every TCP/UDP/ICMP connection
+    ts, uid, id.orig_h, id.orig_p, id.resp_h, id.resp_p, proto, duration, bytes
+  dns.log: Every DNS query and response
+  http.log: Every HTTP request (method, host, URI, user-agent, status)
+  ssl.log: Every TLS connection (certificate info, version, cipher)
+  files.log: Every file transferred (hash, mime type, source/destination)
+  x509.log: Certificate details for every TLS connection
+  
+  EXAMPLE DETECTION — DNS tunneling with Zeek:
+  # Query: Count unique subdomains per domain. High count = possible tunneling.
+  # In Zeek script:
+  event dns_request(c: connection, msg: dns_msg, query: string, qtype: count, qclass: count)
+      {
+      local parent = extract_hostname(query, 2);  # Get last 2 labels (domain.tld)
+      subdomain_count[parent] += 1;
+      
+      if (subdomain_count[parent] > 500)
+          NOTICE([$note=DNS_Tunneling, $msg=fmt("High subdomain count for %s: %d",
+                 parent, subdomain_count[parent])]);
+      }
+
+NETWORK BASELINING AND ANOMALY DETECTION:
+  Step 1: Capture 2-4 weeks of normal traffic. Establish baselines.
+  
+  Baselines to establish:
+  - Bytes transferred per hour (diurnal pattern — lower at night)
+  - Top source/destination IPs and their volumes
+  - DNS queries per hour per host
+  - Protocols in use (should be small list for most environments)
+  - Ports in use (most internal machines: 80, 443, 53, 389, 445)
+  - Geographic distribution of outbound connections
+  - New internal connections per hour (slow lateral movement: < 5)
+  
+  Alert triggers:
+  - Volume 3x above baseline for that time window
+  - New protocol not seen in baseline period
+  - Connection to country not seen in 90-day baseline
+  - Internal host connecting to 50+ unique IPs in 1 hour (scanning)
+  - DNS query volume 10x above baseline (exfiltration or DGA beaconing)
+
+NETWORK THREAT HUNTING QUERIES:
+  # Hosts with most unique external destinations (potential C2 scanning)
+  cat conn.log | zeek-cut id.orig_h id.resp_h | 
+    awk '!/^192\.168\.|10\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\./{print $1}' |
+    sort | uniq -c | sort -rn | head 20
+  
+  # Unusual ports with significant traffic (>1MB)
+  cat conn.log | zeek-cut id.resp_p proto orig_bytes | 
+    awk '$2=="tcp" && $3>1000000' | 
+    sort -k1,1n | uniq -c | sort -rn
+  
+  # Hosts making TLS connections with self-signed certs (possible C2)
+  cat ssl.log | zeek-cut id.orig_h id.resp_h id.resp_p validation_status |
+    grep "self signed"
+  
+  # Long connection durations (beaconing, tunnels)
+  cat conn.log | zeek-cut id.orig_h id.resp_h id.resp_p duration |
+    awk '$4 > 3600' | sort -k4,4rn  # Connections > 1 hour
+
+================================================================================
+END OF PACK 018: NETWORK SECURITY
+Total: TCP handshake attacks (SYN flood/hijacking/reset), ICMP security and tunneling,
+DNS (cache poisoning, DoH evasion, tunneling detection, DGA), ARP poisoning
+with detection, SSL stripping/HSTS defense, VLAN hopping/switch spoofing,
+firewall types (packet filter/stateful/NGFW/WAF), security group design,
+Zeek network monitoring, baselining, threat hunting queries.
+================================================================================

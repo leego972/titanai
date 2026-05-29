@@ -1,0 +1,626 @@
+# PARI C-library interface¶
+
+PARI C-library interface
+
+AUTHORS:
+
+• William Stein (2006-03-01): updated to work with PARI 2.2.12-beta
+• William Stein (2006-03-06): added newtonpoly
+• Justin Walker: contributed some of the function definitions
+• Gonzalo Tornaria: improvements to conversions; much better error handling.
+• Robert Bradshaw, Jeroen Demeyer, William Stein (2010-08-15): Upgrade to PARI 2.4.3 (#9343)
+• Jeroen Demeyer (2011-11-12): rewrite various conversion routines (#11611, #11854, #11952)
+• Peter Bruin (2013-11-17): split off this file from gen.pyx (#15185)
+
+EXAMPLES:
+
+sage: pari('5! + 10/x')
+(120*x + 10)/x
+sage: pari('intnum(x=0,13,sin(x)+sin(x^2) + x)')
+85.1885681951527
+sage: f = pari('x^3-1')
+sage: v = f.factor(); v
+[x - 1, 1; x^2 + x + 1, 1]
+sage: v[0]   # indexing is 0-based unlike in GP.
+[x - 1, x^2 + x + 1]~
+sage: v[1]
+[1, 1]~
+
+
+Arithmetic obeys the usual coercion rules:
+
+sage: type(pari(1) + 1)
+<type 'sage.libs.pari.gen.gen'>
+sage: type(1 + pari(1))
+<type 'sage.libs.pari.gen.gen'>
+
+
+GUIDE TO REAL PRECISION AND THE PARI LIBRARY
+
+The default real precision in communicating with the Pari library is the same as the default Sage real precision, which is 53 bits. Inexact Pari objects are therefore printed by default to 15 decimal digits (even if they are actually more precise).
+
+Default precision example (53 bits, 15 significant decimals):
+
+sage: a = pari(1.23); a
+1.23000000000000
+sage: a.sin()
+0.942488801931698
+
+
+Example with custom precision of 200 bits (60 significant decimals):
+
+sage: R = RealField(200)
+sage: a = pari(R(1.23)); a   # only 15 significant digits printed
+1.23000000000000
+sage: R(a)         # but the number is known to precision of 200 bits
+1.2300000000000000000000000000000000000000000000000000000000
+sage: a.sin()      # only 15 significant digits printed
+0.942488801931698
+sage: R(a.sin())   # but the number is known to precision of 200 bits
+0.94248880193169751002382356538924454146128740562765030213504
+
+
+It is possible to change the number of printed decimals:
+
+sage: R = RealField(200)    # 200 bits of precision in computations
+sage: old_prec = pari.set_real_precision(60)  # 60 decimals printed
+sage: a = pari(R(1.23)); a
+1.23000000000000000000000000000000000000000000000000000000000
+sage: a.sin()
+0.942488801931697510023823565389244541461287405627650302135038
+sage: pari.set_real_precision(old_prec)  # restore the default printing behavior
+60
+
+
+Unless otherwise indicated in the docstring, most Pari functions that return inexact objects use the precision of their arguments to decide the precision of the computation. However, if some of these arguments happen to be exact numbers (integers, rationals, etc.), an optional parameter indicates the precision (in bits) to which these arguments should be converted before the computation. If this precision parameter is missing, the default precision of 53 bits is used. The following first converts 2 into a real with 53-bit precision:
+
+sage: R = RealField()
+sage: R(pari(2).sin())
+0.909297426825682
+
+
+We can ask for a better precision using the optional parameter:
+
+sage: R = RealField(150)
+sage: R(pari(2).sin(precision=150))
+0.90929742682568169539601986591174484270225497
+
+
+Warning regarding conversions Sage - Pari - Sage: Some care must be taken when juggling inexact types back and forth between Sage and Pari. In theory, calling p=pari(s) creates a Pari object p with the same precision as s; in practice, the Pari library’s precision is word-based, so it will go up to the next word. For example, a default 53-bit Sage real s will be bumped up to 64 bits by adding bogus 11 bits. The function p.python() returns a Sage object with exactly the same precision as the Pari object p. So pari(s).python() is definitely not equal to s, since it has 64 bits of precision, including the bogus 11 bits. The correct way of avoiding this is to coerce pari(s).python() back into a domain with the right precision. This has to be done by the user (or by Sage functions that use Pari library functions in gen.pyx). For instance, if we want to use the Pari library to compute sqrt(pi) with a precision of 100 bits:
+
+sage: R = RealField(100)
+sage: s = R(pi); s
+3.1415926535897932384626433833
+sage: p = pari(s).sqrt()
+sage: x = p.python(); x  # wow, more digits than I expected!
+1.7724538509055160272981674833410973484
+sage: x.prec()           # has precision 'improved' from 100 to 128?
+128
+sage: x == RealField(128)(pi).sqrt()  # sadly, no!
+False
+sage: R(x)               # x should be brought back to precision 100
+1.7724538509055160272981674833
+sage: R(x) == s.sqrt()
+True
+
+
+Elliptic curves and precision: If you are working with elliptic curves and want to compute with a precision other than the default 53 bits, you should use the precision parameter of ellinit():
+
+sage: R = RealField(150)
+sage: e = pari([0,0,0,-82,0]).ellinit(precision=150)
+sage: eta1 = e.elleta()[0]
+sage: R(eta1)
+3.6054636014326520859158205642077267748102690
+
+
+Number fields and precision: TODO
+
+TESTS:
+
+Check that output from PARI’s print command is actually seen by Sage (ticket #9636):
+
+sage: pari('print("test")')
+test
+
+class sage.libs.pari.pari_instance.PariInstance
+
+Initialize the PARI system.
+
+INPUT:
+
+• size – long, the number of bytes for the initial PARI stack (see note below)
+• maxprime – unsigned long, upper limit on a precomputed prime number table (default: 500000)
+
+Note
+
+In Sage, the PARI stack is different than in GP or the PARI C library. In Sage, instead of the PARI stack holding the results of all computations, it only holds the results of an individual computation. Each time a new Python/PARI object is computed, it it copied to its own space in the Python heap, and the memory it occupied on the PARI stack is freed. Thus it is not necessary to make the stack very large. Also, unlike in PARI, if the stack does overflow, in most cases the PARI stack is automatically increased and the relevant step of the computation rerun.
+
+This design obviously involves some performance penalties over the way PARI works, but it scales much better and is far more robust for large projects.
+
+Note
+
+If you do not want prime numbers, put maxprime=2, but be careful because many PARI functions require this table. If you get the error message “not enough precomputed primes”, increase this parameter.
+
+allocatemem(s=0, silent=False)
+
+Change the PARI stack space to the given size (or double the current size if s is $$0$$).
+
+If $$s = 0$$ and insufficient memory is avaible to double, the PARI stack will be enlarged by a smaller amount. In any case, a MemoryError will be raised if the requested memory cannot be allocated.
+
+The PARI stack is never automatically shrunk. You can use the command pari.allocatemem(10^6) to reset the size to $$10^6$$, which is the default size at startup. Note that the results of computations using Sage’s PARI interface are copied to the Python heap, so they take up no space in the PARI stack. The PARI stack is cleared after every computation.
+
+It does no real harm to set this to a small value as the PARI stack will be automatically doubled when we run out of memory. However, it could make some calculations slower (since they have to be redone from the start after doubling the stack until the stack is big enough).
+
+INPUT:
+
+• s - an integer (default: 0). A non-zero argument should be the size in bytes of the new PARI stack. If $$s$$ is zero, try to double the current stack size.
+
+EXAMPLES:
+
+sage: pari.allocatemem(10^7)
+PARI stack size set to 10000000 bytes
+sage: pari.allocatemem()  # Double the current size
+PARI stack size set to 20000000 bytes
+sage: pari.stacksize()
+20000000
+sage: pari.allocatemem(10^6)
+PARI stack size set to 1000000 bytes
+
+
+The following computation will automatically increase the PARI stack size:
+
+sage: a = pari('2^100000000')
+
+
+a is now a Python variable on the Python heap and does not take up any space on the PARI stack. The PARI stack is still large because of the computation of a:
+
+sage: pari.stacksize()
+16000000
+sage: pari.allocatemem(10^6)
+PARI stack size set to 1000000 bytes
+sage: pari.stacksize()
+1000000
+
+
+TESTS:
+
+Do the same without using the string interface and starting from a very small stack size:
+
+sage: pari.allocatemem(1)
+PARI stack size set to 1024 bytes
+sage: a = pari(2)^100000000
+sage: pari.stacksize()
+16777216
+
+complex(re, im)
+
+Create a new complex number, initialized from re and im.
+
+debugstack()
+
+Print the internal PARI variables top (top of stack), avma (available memory address, think of this as the stack pointer), bot (bottom of stack).
+
+EXAMPLE:
+
+sage: pari.debugstack()  # random
+top =  0x60b2c60
+avma = 0x5875c38
+bot =  0x57295e0
+size = 1000000
+
+default(variable, value=None)
+double_to_gen(x)
+euler(precision=0)
+
+Return Euler’s constant to the requested real precision (in bits).
+
+EXAMPLES:
+
+sage: pari.euler()
+0.577215664901533
+sage: pari.euler(precision=100).python()
+0.577215664901532860606512090082...
+
+factorial(n)
+
+Return the factorial of the integer n as a PARI gen.
+
+EXAMPLES:
+
+sage: pari.factorial(0)
+1
+sage: pari.factorial(1)
+1
+sage: pari.factorial(5)
+120
+sage: pari.factorial(25)
+15511210043330985984000000
+
+get_debug_level()
+
+Set the debug PARI C library variable.
+
+get_real_precision()
+
+Returns the current PARI default real precision.
+
+This is used both for creation of new objects from strings and for printing. It is the number of digits IN DECIMAL in which real numbers are printed. It also determines the precision of objects created by parsing strings (e.g. pari(‘1.2’)), which is not the normal way of creating new pari objects in Sage. It has no effect on the precision of computations within the pari library.
+
+EXAMPLES:
+
+sage: pari.get_real_precision()
+15
+
+get_series_precision()
+getrand()
+
+Returns PARI’s current random number seed.
+
+OUTPUT:
+
+GEN of type t_VECSMALL
+
+EXAMPLES:
+
+sage: pari.setrand(50)
+sage: a = pari.getrand(); a
+Vecsmall([...])
+sage: pari.setrand(a)
+sage: a == pari.getrand()
+True
+
+init_primes(_M)
+
+Recompute the primes table including at least all primes up to M (but possibly more).
+
+EXAMPLES:
+
+sage: pari.init_primes(200000)
+
+
+We make sure that ticket #11741 has been fixed, and double check to make sure that diffptr has not been freed:
+
+sage: pari.init_primes(2^62)
+Traceback (most recent call last):
+...
+PariError: not enough memory                  # 64-bit
+OverflowError: long int too large to convert  # 32-bit
+sage: pari.init_primes(200000)
+
+matrix(m, n, entries=None)
+
+matrix(long m, long n, entries=None): Create and return the m x n PARI matrix with given list of entries.
+
+new_with_bits_prec(s, precision)
+
+pari.new_with_bits_prec(self, s, precision) creates s as a PARI gen with (at most) precision bits of precision.
+
+nth_prime(n)
+pari_version()
+pi(precision=0)
+
+Return the value of the constant pi to the requested real precision (in bits).
+
+EXAMPLES:
+
+sage: pari.pi()
+3.14159265358979
+sage: pari.pi(precision=100).python()
+3.1415926535897932384626433832...
+
+polcyclo(n, v=-1)
+
+polcyclo(n, v=x): cyclotomic polynomial of degree n, in variable v.
+
+EXAMPLES:
+
+sage: pari.polcyclo(8)
+x^4 + 1
+sage: pari.polcyclo(7, 'z')
+z^6 + z^5 + z^4 + z^3 + z^2 + z + 1
+sage: pari.polcyclo(1)
+x - 1
+
+polcyclo_eval(n, v)
+
+polcyclo_eval(n, v): value of the nth cyclotomic polynomial at value v.
+
+EXAMPLES:
+
+sage: pari.polcyclo_eval(8, 2)
+17
+sage: cyclotomic_polynomial(8)(2)
+17
+
+pollegendre(n, v=-1)
+
+pollegendre(n, v=x): Legendre polynomial of degree n (n C-integer), in variable v.
+
+EXAMPLES:
+
+sage: pari.pollegendre(7)
+429/16*x^7 - 693/16*x^5 + 315/16*x^3 - 35/16*x
+sage: pari.pollegendre(7, 'z')
+429/16*z^7 - 693/16*z^5 + 315/16*z^3 - 35/16*z
+sage: pari.pollegendre(0)
+1
+
+polsubcyclo(n, d, v=-1)
+
+polsubcyclo(n, d, v=x): return the pari list of polynomial(s) defining the sub-abelian extensions of degree $$d$$ of the cyclotomic field $$\QQ(\zeta_n)$$, where $$d$$ divides $$\phi(n)$$.
+
+EXAMPLES:
+
+sage: pari.polsubcyclo(8, 4)
+[x^4 + 1]
+sage: pari.polsubcyclo(8, 2, 'z')
+[z^2 - 2, z^2 + 1, z^2 + 2]
+sage: pari.polsubcyclo(8, 1)
+[x - 1]
+sage: pari.polsubcyclo(8, 3)
+[]
+
+poltchebi(n, v=-1)
+
+poltchebi(n, v=x): Chebyshev polynomial of the first kind of degree n, in variable v.
+
+EXAMPLES:
+
+sage: pari.poltchebi(7)
+64*x^7 - 112*x^5 + 56*x^3 - 7*x
+sage: pari.poltchebi(7, 'z')
+64*z^7 - 112*z^5 + 56*z^3 - 7*z
+sage: pari.poltchebi(0)
+1
+
+polzagier(n, m)
+prime_list(n)
+
+prime_list(n): returns list of the first n primes
+
+To extend the table of primes use pari.init_primes(M).
+
+INPUT:
+
+• n - C long
+
+OUTPUT:
+
+• gen - PARI list of first n primes
+
+EXAMPLES:
+
+sage: pari.prime_list(0)
+[]
+sage: pari.prime_list(-1)
+[]
+sage: pari.prime_list(3)
+[2, 3, 5]
+sage: pari.prime_list(10)
+[2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+sage: pari.prime_list(20)
+[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71]
+sage: len(pari.prime_list(1000))
+1000
+
+primes_up_to_n(n)
+
+Return the primes <= n as a pari list.
+
+EXAMPLES:
+
+sage: pari.primes_up_to_n(1)
+[]
+sage: pari.primes_up_to_n(20)
+[2, 3, 5, 7, 11, 13, 17, 19]
+
+
+Read a script from the named filename into the interpreter. The functions defined in the script are then available for use from Sage/PARI. The result of the last command in filename is returned.
+
+EXAMPLES:
+
+Create a gp file:
+
+sage: import tempfile
+sage: gpfile = tempfile.NamedTemporaryFile(mode="w")
+sage: gpfile.file.write("mysquare(n) = {\n")
+sage: gpfile.file.write("    n^2;\n")
+sage: gpfile.file.write("}\n")
+sage: gpfile.file.write("polcyclo(5)\n")
+sage: gpfile.file.flush()
+
+
+Read it in Sage, we get the result of the last line:
+
+sage: pari.read(gpfile.name)
+x^4 + x^3 + x^2 + x + 1
+
+
+Call the function defined in the gp file:
+
+sage: pari('mysquare(12)')
+144
+
+set_debug_level(level)
+
+Set the debug PARI C library variable.
+
+set_real_precision(n)
+
+Sets the PARI default real precision in decimal digits.
+
+This is used both for creation of new objects from strings and for printing. It is the number of digits IN DECIMAL in which real numbers are printed. It also determines the precision of objects created by parsing strings (e.g. pari(‘1.2’)), which is not the normal way of creating new pari objects in Sage. It has no effect on the precision of computations within the pari library.
+
+Returns the previous PARI real precision.
+
+EXAMPLES:
+
+sage: pari.set_real_precision(60)
+15
+sage: pari('1.2')
+1.20000000000000000000000000000000000000000000000000000000000
+sage: pari.set_real_precision(15)
+60
+
+set_series_precision(n)
+setrand(seed)
+
+Sets PARI’s current random number seed.
+
+INPUT:
+
+• seed – either a strictly positive integer or a GEN of type t_VECSMALL as output by getrand()
+
+This should not be called directly; instead, use Sage’s global random number seed handling in sage.misc.randstate and call current_randstate().set_seed_pari().
+
+EXAMPLES:
+
+sage: pari.setrand(50)
+sage: a = pari.getrand(); a
+Vecsmall([...])
+sage: pari.setrand(a)
+sage: a == pari.getrand()
+True
+
+
+TESTS:
+
+Check that invalid inputs are handled properly (#11825):
+
+sage: pari.setrand(0)
+Traceback (most recent call last):
+...
+PariError: incorrect type in setrand
+sage: pari.setrand("foobar")
+Traceback (most recent call last):
+...
+PariError: incorrect type in setrand
+
+stacksize()
+
+Returns the current size of the PARI stack, which is $$10^6$$ by default. However, the stack size is automatically doubled when needed. It can also be set directly using pari.allocatemem().
+
+EXAMPLES:
+
+sage: pari.stacksize()
+1000000
+
+vector(n, entries=None)
+
+vector(long n, entries=None): Create and return the length n PARI vector with given list of entries.
+
+EXAMPLES:
+
+sage: pari.vector(5, [1, 2, 5, 4, 3])
+[1, 2, 5, 4, 3]
+sage: pari.vector(2, [x, 1])
+[x, 1]
+sage: pari.vector(2, [x, 1, 5])
+Traceback (most recent call last):
+...
+IndexError: length of entries (=3) must equal n (=2)
+
+sage.libs.pari.pari_instance.prec_bits_to_dec(prec_in_bits)
+
+Convert from precision expressed in bits to precision expressed in decimal.
+
+EXAMPLES:
+
+sage: from sage.libs.pari.pari_instance import prec_bits_to_dec
+sage: prec_bits_to_dec(53)
+15
+sage: [(32*n, prec_bits_to_dec(32*n)) for n in range(1, 9)]
+[(32, 9),
+(64, 19),
+(96, 28),
+(128, 38),
+(160, 48),
+(192, 57),
+(224, 67),
+(256, 77)]
+
+sage.libs.pari.pari_instance.prec_bits_to_words(prec_in_bits)
+
+Convert from precision expressed in bits to pari real precision expressed in words. Note: this rounds up to the nearest word, adjusts for the two codewords of a pari real, and is architecture-dependent.
+
+EXAMPLES:
+
+sage: from sage.libs.pari.pari_instance import prec_bits_to_words
+sage: prec_bits_to_words(70)
+5   # 32-bit
+4   # 64-bit
+
+sage: [(32*n, prec_bits_to_words(32*n)) for n in range(1, 9)]
+[(32, 3), (64, 4), (96, 5), (128, 6), (160, 7), (192, 8), (224, 9), (256, 10)] # 32-bit
+[(32, 3), (64, 3), (96, 4), (128, 4), (160, 5), (192, 5), (224, 6), (256, 6)] # 64-bit
+
+sage.libs.pari.pari_instance.prec_dec_to_bits(prec_in_dec)
+
+Convert from precision expressed in decimal to precision expressed in bits.
+
+EXAMPLES:
+
+sage: from sage.libs.pari.pari_instance import prec_dec_to_bits
+sage: prec_dec_to_bits(15)
+49
+sage: [(n, prec_dec_to_bits(n)) for n in range(10, 100, 10)]
+[(10, 33),
+(20, 66),
+(30, 99),
+(40, 132),
+(50, 166),
+(60, 199),
+(70, 232),
+(80, 265),
+(90, 298)]
+
+sage.libs.pari.pari_instance.prec_dec_to_words(prec_in_dec)
+
+Convert from precision expressed in decimal to precision expressed in words. Note: this rounds up to the nearest word, adjusts for the two codewords of a pari real, and is architecture-dependent.
+
+EXAMPLES:
+
+sage: from sage.libs.pari.pari_instance import prec_dec_to_words
+sage: prec_dec_to_words(38)
+6   # 32-bit
+4   # 64-bit
+sage: [(n, prec_dec_to_words(n)) for n in range(10, 90, 10)]
+[(10, 4), (20, 5), (30, 6), (40, 7), (50, 8), (60, 9), (70, 10), (80, 11)] # 32-bit
+[(10, 3), (20, 4), (30, 4), (40, 5), (50, 5), (60, 6), (70, 6), (80, 7)] # 64-bit
+
+sage.libs.pari.pari_instance.prec_words_to_bits(prec_in_words)
+
+Convert from pari real precision expressed in words to precision expressed in bits. Note: this adjusts for the two codewords of a pari real, and is architecture-dependent.
+
+EXAMPLES:
+
+sage: from sage.libs.pari.pari_instance import prec_words_to_bits
+sage: prec_words_to_bits(10)
+256   # 32-bit
+512   # 64-bit
+sage: [(n, prec_words_to_bits(n)) for n in range(3, 10)]
+[(3, 32), (4, 64), (5, 96), (6, 128), (7, 160), (8, 192), (9, 224)]  # 32-bit
+[(3, 64), (4, 128), (5, 192), (6, 256), (7, 320), (8, 384), (9, 448)] # 64-bit
+
+sage.libs.pari.pari_instance.prec_words_to_dec(prec_in_words)
+
+Convert from precision expressed in words to precision expressed in decimal. Note: this adjusts for the two codewords of a pari real, and is architecture-dependent.
+
+EXAMPLES:
+
+sage: from sage.libs.pari.pari_instance import prec_words_to_dec
+sage: prec_words_to_dec(5)
+28   # 32-bit
+57   # 64-bit
+sage: [(n, prec_words_to_dec(n)) for n in range(3, 10)]
+[(3, 9), (4, 19), (5, 28), (6, 38), (7, 48), (8, 57), (9, 67)] # 32-bit
+[(3, 19), (4, 38), (5, 57), (6, 77), (7, 96), (8, 115), (9, 134)] # 64-bit
+
+
+#### Previous topic
+
+Sage interface to Cremona’s eclib library (also known as mwrank)
+
+#### Next topic
+
+Sage class for PARI’s GEN type

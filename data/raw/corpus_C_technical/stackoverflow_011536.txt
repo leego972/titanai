@@ -1,0 +1,113 @@
+Question: <p>Is it possible to have static class variables or methods in python? What syntax is required to do this?</p>
+
+Answer: <p>It is possible to have <code>static</code> class variables, but probably not worth the effort.</p>
+
+<p>Here's a proof-of-concept written in Python 3 -- if any of the exact details are wrong the code can be tweaked to match just about whatever you mean by a <code>static variable</code>:</p>
+
+<hr>
+
+<pre><code>class Static:
+    def __init__(self, value, doc=None):
+        self.deleted = False
+        self.value = value
+        self.__doc__ = doc
+    def __get__(self, inst, cls=None):
+        if self.deleted:
+            raise AttributeError('Attribute not set')
+        return self.value
+    def __set__(self, inst, value):
+        self.deleted = False
+        self.value = value
+    def __delete__(self, inst):
+        self.deleted = True
+
+class StaticType(type):
+    def __delattr__(cls, name):
+        obj = cls.__dict__.get(name)
+        if isinstance(obj, Static):
+            obj.__delete__(name)
+        else:
+            super(StaticType, cls).__delattr__(name)
+    def __getattribute__(cls, *args):
+        obj = super(StaticType, cls).__getattribute__(*args)
+        if isinstance(obj, Static):
+            obj = obj.__get__(cls, cls.__class__)
+        return obj
+    def __setattr__(cls, name, val):
+        # check if object already exists
+        obj = cls.__dict__.get(name)
+        if isinstance(obj, Static):
+            obj.__set__(name, val)
+        else:
+            super(StaticType, cls).__setattr__(name, val)
+</code></pre>
+
+<p>and in use:</p>
+
+<pre><code>class MyStatic(metaclass=StaticType):
+    """
+    Testing static vars
+    """
+    a = Static(9)
+    b = Static(12)
+    c = 3
+
+class YourStatic(MyStatic):
+    d = Static('woo hoo')
+    e = Static('doo wop')
+</code></pre>
+
+<p>and some tests:</p>
+
+<pre><code>ms1 = MyStatic()
+ms2 = MyStatic()
+ms3 = MyStatic()
+assert ms1.a == ms2.a == ms3.a == MyStatic.a
+assert ms1.b == ms2.b == ms3.b == MyStatic.b
+assert ms1.c == ms2.c == ms3.c == MyStatic.c
+ms1.a = 77
+assert ms1.a == ms2.a == ms3.a == MyStatic.a
+ms2.b = 99
+assert ms1.b == ms2.b == ms3.b == MyStatic.b
+MyStatic.a = 101
+assert ms1.a == ms2.a == ms3.a == MyStatic.a
+MyStatic.b = 139
+assert ms1.b == ms2.b == ms3.b == MyStatic.b
+del MyStatic.b
+for inst in (ms1, ms2, ms3):
+    try:
+        getattr(inst, 'b')
+    except AttributeError:
+        pass
+    else:
+        print('AttributeError not raised on %r' % attr)
+ms1.c = 13
+ms2.c = 17
+ms3.c = 19
+assert ms1.c == 13
+assert ms2.c == 17
+assert ms3.c == 19
+MyStatic.c = 43
+assert ms1.c == 13
+assert ms2.c == 17
+assert ms3.c == 19
+
+ys1 = YourStatic()
+ys2 = YourStatic()
+ys3 = YourStatic()
+MyStatic.b = 'burgler'
+assert ys1.a == ys2.a == ys3.a == YourStatic.a == MyStatic.a
+assert ys1.b == ys2.b == ys3.b == YourStatic.b == MyStatic.b
+assert ys1.d == ys2.d == ys3.d == YourStatic.d
+assert ys1.e == ys2.e == ys3.e == YourStatic.e
+ys1.a = 'blah'
+assert ys1.a == ys2.a == ys3.a == YourStatic.a == MyStatic.a
+ys2.b = 'kelp'
+assert ys1.b == ys2.b == ys3.b == YourStatic.b == MyStatic.b
+ys1.d = 'fee'
+assert ys1.d == ys2.d == ys3.d == YourStatic.d
+ys2.e = 'fie'
+assert ys1.e == ys2.e == ys3.e == YourStatic.e
+MyStatic.a = 'aargh'
+assert ys1.a == ys2.a == ys3.a == YourStatic.a == MyStatic.a
+</code></pre>

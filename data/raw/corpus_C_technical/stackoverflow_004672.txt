@@ -1,0 +1,80 @@
+Question: <p>What is the most elegant way to solve this:</p>
+
+<ul>
+<li>open a file for reading, but only if it is not already opened for writing</li>
+<li>open a file for writing, but only if it is not already opened for reading or writing</li>
+</ul>
+
+<p>The built-in functions work like this</p>
+
+<pre><code>&gt;&gt;&gt; path = r"c:\scr.txt"
+&gt;&gt;&gt; file1 = open(path, "w")
+&gt;&gt;&gt; print file1
+&lt;open file 'c:\scr.txt', mode 'w' at 0x019F88D8&gt;
+&gt;&gt;&gt; file2 = open(path, "w")
+&gt;&gt;&gt; print file2
+&lt;open file 'c:\scr.txt', mode 'w' at 0x02332188&gt;
+&gt;&gt;&gt; file1.write("111")
+&gt;&gt;&gt; file2.write("222")
+&gt;&gt;&gt; file1.close()
+</code></pre>
+
+<p>scr.txt now contains '111'.</p>
+
+<pre><code>&gt;&gt;&gt; file2.close()
+</code></pre>
+
+<p>scr.txt was overwritten and now contains '222' (on Windows, Python 2.4).</p>
+
+<p>The solution should work inside the same process (like in the example above) as well as when another process has opened the file.<br />
+It is preferred, if a crashing program will not keep the lock open.</p>
+
+Answer: <p>Here's a start on the win32 half of a portable implementation, that does not need a seperate locking mechanism.</p>
+
+<p>Requires the <a href="http://python.net/crew/mhammond/win32/" rel="nofollow">Python for Windows Extensions</a> to get down to the win32 api, but that's pretty much mandatory for python on windows already, and can alternatively be done with <a href="http://www.python.org/doc/lib/module-ctypes.html" rel="nofollow">ctypes</a>. The code could be adapted to expose more functionality if it's needed (such as allowing <code>FILE_SHARE_READ</code> rather than no sharing at all). See also the MSDN documentation for the <a href="http://msdn.microsoft.com/en-us/library/aa363858.aspx" rel="nofollow"><code>CreateFile</code></a> and <a href="http://msdn.microsoft.com/en-us/library/aa365747.aspx" rel="nofollow"><code>WriteFile</code></a> system calls, and the <a href="http://msdn.microsoft.com/en-us/library/aa363874.aspx" rel="nofollow">article on Creating and Opening Files</a>.</p>
+
+<p>As has been mentioned, you can use the standard <a href="http://www.python.org/doc/lib/module-fcntl.html" rel="nofollow">fcntl</a> module to implement the unix half of this, if required.</p>
+
+<pre><code>import winerror, pywintypes, win32file
+
+class LockError(StandardError):
+	pass
+
+class WriteLockedFile(object):
+	"""
+	Using win32 api to achieve something similar to file(path, 'wb')
+	Could be adapted to handle other modes as well.
+	"""
+	def __init__(self, path):
+		try:
+			self._handle = win32file.CreateFile(
+				path,
+				win32file.GENERIC_WRITE,
+				0,
+				None,
+				win32file.OPEN_ALWAYS,
+				win32file.FILE_ATTRIBUTE_NORMAL,
+				None)
+		except pywintypes.error, e:
+			if e[0] == winerror.ERROR_SHARING_VIOLATION:
+				raise LockError(e[2])
+			raise
+	def close(self):
+		self._handle.close()
+	def write(self, str):
+		win32file.WriteFile(self._handle, str)
+</code></pre>
+
+<p>Here's how your example from above behaves:</p>
+
+<pre><code>&gt;&gt;&gt; path = "C:\\scr.txt"
+&gt;&gt;&gt; file1 = WriteLockedFile(path)
+&gt;&gt;&gt; file2 = WriteLockedFile(path) #doctest: +IGNORE_EXCEPTION_DETAIL
+Traceback (most recent call last):
+	...
+LockError: ...
+&gt;&gt;&gt; file1.write("111")
+&gt;&gt;&gt; file1.close()
+&gt;&gt;&gt; print file(path).read()
+111
+</code></pre>

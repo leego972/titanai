@@ -1,0 +1,43 @@
+# Is there a faster way to calculate Abs[z]^2 numerically?
+
+Here I'm not interested in accuracy (see 13614) but rather in raw speed. You'd think that for a complex machine-precision number z, calculating Abs[z]^2 should be faster than calculating Abs[z] because the latter requires a square root whereas the former does not. Yet it's not so:
+
+s = RandomVariate[NormalDistribution[], {10^7, 2}].{1, I};
+DeveloperPackedArrayQ[s]
+(* True *)
+Abs[s]^2; // AbsoluteTiming // First
+(* 0.083337 *)
+Abs[s]; // AbsoluteTiming // First
+(* 0.033179 *)
+
+This indicates that Abs[z]^2 is really calculated by summing the squares of real and imaginary parts, taking a square root (for Abs[z]), and then re-squaring (for Abs[z]^2).
+
+Is there a faster way to compute Abs[z]^2? Is there a hidden equivalent to the GSL's gsl_complex_abs2 function? The source code of this GSL function is simply to return Re[z]^2+Im[z]^2; no fancy tricks.
+
+• Here's an even slower way: (Re[#]^2 + Im[#]^2) & /@ s. And even slower still: Total[ReIm[#]^2] & /@ s – bill s May 10 '19 at 14:24
+
+There's InternalAbsSquare:
+
+s = RandomVariate[NormalDistribution[], {10^7, 2}].{1, I};
+foo = InternalAbsSquare[s]; // AbsoluteTiming // First
+murf = Abs[s]^2; // AbsoluteTiming // First
+(*
+0.022909
+0.063441
+*)
+
+foo == murf
+(*  True  *)
+• Ah yes precisely what I was looking for, many thanks Michael! Is there a repository of such tricks? – Roman May 10 '19 at 14:25
+• @Roman I was just looking. I thought there was a post about useful Internal functions, but I couldn't find it just now. The context contains some useful numerical functions like Log1p and Expm1. StatisticsLibrary also contains some nice, well-programmed functions. – Michael E2 May 10 '19 at 14:31
+• – Chris K May 10 '19 at 14:31
+• @ChrisK That must be it! Thanks. – Michael E2 May 10 '19 at 14:32
+• @CATrevillian I would have thought it was in the MKL (Intel Math Kernel Library), but I didn't find it there. I guess I don't know. – Michael E2 May 11 '19 at 3:10
+
+for v5.2, s Conjugate[s] is fast too, ref the pic:
+
+• On my computer, Re[s*Conjugate[s]] is about five to ten times slower than InternalAbsSquare[s]. What is your \$Version and what CPU do you have? – Roman Jul 8 '20 at 12:27
+• Hi, people here generally like users to post code as Mathematica code instead of just images or TeX, so they can copy-paste it. It makes it convenient for them and more likely they will engage with your posts. You may find this meta Q&A helpful. -- BTW, have you seen RandomVariate[NormalDistribution[], {10^7, 2}]? It's much faster on my machine. Ditto for RandomComplex[]. – Michael E2 Jul 8 '20 at 12:48
+• @Roman Re[] is unnecessary, though it's very fast. My version is very old, it's v5.2. So there's no InternalAbsSquare[]. – infoage Jul 8 '20 at 18:14
+• @MichaelE2 Thanks, man. My version is v5.2. This code is so simple that I had no motivation to paste text version at that moment. Sorry. – infoage Jul 8 '20 at 18:18
+• Maybe it's worth adding the version info to your answer. It turns out that I don't have the Statistics`NormalDistribution package (in V12.1.1), I suppose because it's been replaced by top-level statistics functions some versions ago. – Michael E2 Jul 8 '20 at 19:08

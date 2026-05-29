@@ -1,0 +1,60 @@
+Home » Posts tagged "innodb"
+
+## EnterpriseDB 打算推出的 zheap，想要解 VACUUM 問題...
+
+PostgreSQL 與 InnoDB 都是透過 MVCC 的概念實做 transaction 之間的互動，但兩者實際的作法不太一樣。其中帶來一個明顯的差異就是 PostgreSQL 需要 VACUUM。這點在同一篇作者八年前 (2011) 的文章就有提過兩者的差異以及優缺點：「MySQL vs. PostgreSQL, Part 2: VACUUM vs. Purge」。
+
+`UPDATE` 時，InnoDB 會把新資料寫到表格內，然後把可能會被 rollback 的舊資料放到表格外：
+
+In InnoDB, only the most recent version of an updated row is retained in the table itself. Old versions of updated rows are moved to the rollback segment, while deleted row versions are left in place and marked for future cleanup. Thus, purge must get rid of any deleted rows from the table itself, and clear out any old versions of updated rows from the rollback segment.
+
+All the information necessary to find the deleted records that might need to be purged is also written to the rollback segment, so it's quite easy to find the rows that need to be cleaned out; and the old versions of the updated records are all in the rollback segment itself, so those are easy to find, too.
+
+PostgreSQL takes a completely different approach. There is no rollback tablespace, or anything similar. When a row is updated, the old version is left in place; the new version is simply written into the table along with it.
+
+Lacking a centralized record of what must be purged, PostgreSQL's VACUUM has historically needed to scan the entire table to look for records that might require cleanup.
+
+That brings me to the design which EnterpriseDB is proposing. We are working to build a new table storage format for PostgreSQL, which we’re calling zheap. In a zheap, whenever possible, we handle an UPDATE by moving the old row version to an undo log, and putting the new row version in the place previously occupied by the old one. If the transaction aborts, we retrieve the old row version from undo and put it back in the original location; if a concurrent transaction needs to see the old row version, it can find it in undo. Of course, this doesn’t work when the block is full and the row is getting wider, and there are some other problem cases as well, but it covers many useful cases. In the typical case, therefore, even bulk updates do not force a zheap to grow. Instead, the undo grows. When a transaction commits, all row versions that will become dead are in the undo, not the zheap.
+
+## InnoDB 的 MVCC 繁忙時的效能問題
+
+Facebook 上看到 Percona 的人修正了 InnoDB 的 MVCC 在繁忙時會有 $O(n^2)$ 的效能問題：
+
+MySQL 官方的 bug tracking system 是「InnoDB's MVCC has O(N^2) behaviors」這個，可以看到給的重製範例是在 transaction 內大量塞 `INSERT` 進去後，另外一個 transaction 使用 secondary index 就會受到影響。
+
+## Percona 比較 MySQL 與 MariaDB 預設值的差異
+
+Percona 的人花了些時間整理 MySQL 5.7 與 MariaDB 10.2 在預設值上的差異：「MySQL and MariaDB Default Configuration Differences」。
+
+## Facebook 把 InnoDB 換成 MyRocks 的計畫
+
+Facebook 已經大量導入全 Flash 的環境，於是現在 InnoDB (Compressed) 的情況類似於這樣：
+
+## InnoDB 與 MyRocks 之間的取捨
+
+MyRocks 的主要作者 Mark Callaghan 整理了一篇關於大台機器下，資料可以放到記憶體內的效能比較：「In-memory sysbench, a larger server and contention - part 1」。
+
+## MySQL 上不同 Isolation Level 對效能的影響
+
+the default value for innodb_purge_threads, which is 4, can cause too much mutex contention and a loss in QPS on small servers. For sysbench update-only I lose 25% of updates/second with 5.7.17 and 15% with 8.0.1 when going from innodb_purge_threads=1 to =4.
+
+## MySQL 上 Replication 的方案
+
+Percona 的人整理了一篇關於 Replication 的方案 (以及 NDB，不過這邊就先偷偷跳過去...)，雖然標題寫的是 High Availability：「The MySQL High Availability Landscape in 2017 (The Elders)」。
+
+## MySQL 總算要拔掉 mysql_query_cache 了
+
+Although MySQL Query Cache was meant to improve performance, it has serious scalability issues and it can easily become a severe bottleneck.
+
+We also agree with Rene’s conclusion, that caching provides the greatest benefit when it is moved closer to the client:
+
+## InnoDB redo log 大小對效能的影響
+
+tl;dr - conclusions specific to my test
+
+1. A larger redo log improves throughput
+2. A larger redo log helps more with slower storage than with faster storage because page writeback is more of a bottleneck with slower storage and a larger redo log reduces writeback.
+3. A larger redo log can help more when the working set is cached because there are no stalls from storage reads and storage writes are more likely to be a bottleneck.
+4. InnoDB in MySQL 5.7.17 is much faster than 5.6.35 in all cases except IO-bound + fast SSD
+
+The results above show average throughput and that hides a lot of interesting behavior. We expect throughput over time to not suffer from variance -- for both InnoDB and for MyRocks. For many of the results below there is a lot of variance (jitter).

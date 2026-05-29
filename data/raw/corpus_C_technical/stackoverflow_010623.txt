@@ -1,0 +1,122 @@
+Question: <p>I'm mainly a C# developer, but I'm currently working on a project in Python.</p>
+
+<p>How can I represent the equivalent of an Enum in Python?  </p>
+
+Answer: <p>I use a metaclass to implement an enumeration (in my thought, it is a const). Here is the code:</p>
+
+<pre><code>class ConstMeta(type):
+    '''
+    Metaclass for some class that store constants
+    '''
+    def __init__(cls, name, bases, dct):
+        '''
+        init class instance
+        '''
+        def static_attrs():
+            '''
+            @rtype: (static_attrs, static_val_set)
+            @return: Static attributes in dict format and static value set
+            '''
+            import types
+            attrs = {}
+            val_set = set()
+            #Maybe more
+            filter_names = set(['__doc__', '__init__', '__metaclass__', '__module__', '__main__'])
+            for key, value in dct.iteritems():
+                if type(value) != types.FunctionType and key not in filter_names:
+                    if len(value) != 2:
+                        raise NotImplementedError('not support for values that is not 2 elements!')
+                    #Check value[0] duplication.
+                    if value[0] not in val_set:
+                        val_set.add(value[0])
+                    else:
+                        raise KeyError("%s 's key: %s is duplicated!" % (dict([(key, value)]), value[0]))
+                    attrs[key] = value
+            return attrs, val_set
+
+        attrs, val_set = static_attrs()
+        #Set STATIC_ATTRS to class instance so that can reuse
+        setattr(cls, 'STATIC_ATTRS', attrs)
+        setattr(cls, 'static_val_set', val_set)
+        super(ConstMeta, cls).__init__(name, bases, dct)
+
+    def __getattribute__(cls, name):
+        '''
+        Rewrite the special function so as to get correct attribute value
+        '''
+        static_attrs = object.__getattribute__(cls, 'STATIC_ATTRS')
+        if name in static_attrs:
+            return static_attrs[name][0]
+        return object.__getattribute__(cls, name)
+
+    def static_values(cls):
+        '''
+        Put values in static attribute into a list, use the function to validate value.
+        @return: Set of values
+        '''
+        return cls.static_val_set
+
+    def __getitem__(cls, key):
+        '''
+        Rewrite to make syntax SomeConstClass[key] works, and return desc string of related static value.
+        @return: Desc string of related static value
+        '''
+        for k, v in cls.STATIC_ATTRS.iteritems():
+            if v[0] == key:
+                return v[1]
+        raise KeyError('Key: %s does not exists in %s !' % (str(key), repr(cls)))
+
+
+class Const(object):
+    '''
+    Base class for constant class.
+
+    @usage:
+
+    Definition: (must inherit from Const class!
+        &gt;&gt;&gt; class SomeConst(Const):
+        &gt;&gt;&gt;   STATUS_NAME_1 = (1, 'desc for the status1')
+        &gt;&gt;&gt;   STATUS_NAME_2 = (2, 'desc for the status2')
+
+    Invoke(base upper SomeConst class):
+    1) SomeConst.STATUS_NAME_1 returns 1
+    2) SomeConst[1] returns 'desc for the status1'
+    3) SomeConst.STATIC_ATTRS returns {'STATUS_NAME_1': (1, 'desc for the status1'), 'STATUS_NAME_2': (2, 'desc for the status2')}
+    4) SomeConst.static_values() returns set([1, 2])
+
+    Attention:
+    SomeCosnt's value 1, 2 can not be duplicated!
+    If WrongConst is like this, it will raise KeyError:
+    class WrongConst(Const):
+        STATUS_NAME_1 = (1, 'desc for the status1')
+        STATUS_NAME_2 = (1, 'desc for the status2')
+    '''
+    __metaclass__ = ConstMeta
+##################################################################
+#Const Base Class ends
+##################################################################
+
+
+def main():
+    class STATUS(Const):
+        ERROR = (-3, '??')
+        OK = (0, '??')
+
+    print STATUS.ERROR
+    print STATUS.static_values()
+    print STATUS.STATIC_ATTRS
+
+    #Usage sample:
+    user_input = 1
+    #Validate input:
+    print user_input in STATUS.static_values()
+    #Template render like:
+    print '&lt;select&gt;'
+    for key, value in STATUS.STATIC_ATTRS.items():
+        print '&lt;option value="%s"&gt;%s&lt;/option&gt;' % (value[0], value[1])
+    print '&lt;/select&gt;'
+
+
+if __name__ == '__main__':
+    main()
+</code></pre>

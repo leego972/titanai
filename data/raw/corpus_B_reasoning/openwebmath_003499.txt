@@ -1,0 +1,90 @@
+# how does the parallel radix sort work?
+
+I'm currently learning computer science, and there is a slide of notes brief described the parallel radix sort under data parallelism.
+
+number 101 110 011 001 111 (1st bit)
+order    2   1   3   4   5 (new order)
+number 110 101 011 001 111 (2nd bit)
+order    3   1   4   2   5 (new order)
+number 101 001 110 011 111 (3rd bit)
+order    3   1   4   2   5 (new order)
+number 001 011 101 110 111
+
+
+I roughly know how to sort it from lecturer's explanation, but how is it related to parallel computing to increase the performance?
+
+It turns out that within each round of radix sort, we can take advantage of parallelism. We need to reorder the keys (in a stable manner) according to the relevant bit. The simplest to do this in parallel would be as follows:
+
+/* perform one round of radix-sort on the given input
+* sequence, returning a new sequence reordered according
+* to the kth bit */
+front = filter(input, kth bit is zero)
+back = filter(input, kth bit is one)
+return concatenate(front, back)
+
+
+In this approach, on each round, we "filter" the sequence twice. The first filter selects the subsequence of elements whose kth bit is zero. The second filter similarly selects the elements whose kth bit is one. We then complete the round by returning the concatenation of these two sequences. Here's a trace of your small example:
+
+round 0:
+input = [101, 110, 011, 001, 111]
+front = [110]
+back = [101, 011, 001, 111]
+
+round 1:
+input = [110, 101, 011, 001, 111]
+front = [101, 001]
+back = [110, 011, 111]
+
+round 2:
+input = [101, 001, 110, 011, 111]
+front = [001, 011]
+back = [101, 110, 111]
+
+round 3:
+input = [001, 011, 101, 110, 111]
+(done)
+
+
+Now all we have to do is explain how to do filter and concatenate in parallel. Assuming sequences are just implemented as arrays, concatenate is pretty simple. All we have to do is allocate an output array of the appropriate size and then, in parallel, write all the elements out to this new array:
+
+function concatenate(a, b):
+n = length(a)
+m = length(b)
+result = allocate(n+m)
+for i from 0 to n+m do in parallel:
+if i < n:
+result[i] = a[i]
+else:
+result[i] = b[i-n]
+return result
+
+
+Implementing filter in parallel is not so immediately obvious. The basic idea which is typically used in practice is to do a parallel prefix sum to count, at each position, how many elements satisfy the predicate preceding that position. This gives you the index of each surviving element of the output, so that in parallel you can write them into an output array.
+
+With this implementation, you can do each round of radix sort in $O(n)$ work and $O(\log n)$ parallel time. This gives you a work-efficient radix sort with total work $O(wn)$ and parallel time $O(w \log(n))$, assuming a bit width of $w$. In practice, you would want to optimize this implementation to not allocate too many intermediate arrays, and to hopefully only make a single "pass" over the input on each round.
+
+There are many ways to do it. The following approach allows to fairly split work between many cores. I believe that it's used even in GPU implementations of radix sort, such as ones provided by Boost.Compute and CUDA Thrust.
+
+I describe here one pass of LSD radix sort that distributes data into R buckets:
+
+• First stage: split input block into K parts, where K is number of cores sharing the work. Each core builds histogram for one part of data, counting how many elements from this part of data should go into each bucket: Cnt[part][bucket]++
+• Second stage: Wait till all cores finished the stage one, and then compute partial sums over counts, thus revealing an initial index of each bucket for every part of data. This is sequential algorithm.
+• Third stage: each core again process its own part of data, sending each element into position determined by Cnt[part][bucket]
+
+In pseudocode the entire pass looks like:
+
+parallel_for part in 0..K-1
+for i in indexes(part)
+bucket = compute_bucket(a[i])
+Cnt[part][bucket]++
+
+base = 0
+for bucket in 0..R-1
+for part in 0..K-1
+Cnt[part][bucket] += base
+base = Cnt[part][bucket]
+
+parallel_for part in 0..K-1
+for i in indexes(part)
+bucket = compute_bucket(a[i])
+out[Cnt[part][bucket]++] = a[i]

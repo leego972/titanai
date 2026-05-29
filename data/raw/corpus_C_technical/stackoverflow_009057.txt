@@ -1,0 +1,70 @@
+Question: <p>This is a follow-up to a <a href="http://stackoverflow.com/questions/347109/how-do-i-concisely-implement-multiple-similar-unit-tests-in-the-python-unittest">previous question</a> of mine.</p>
+
+<p>In the previous question, methods were explored to implement what was essentially the same test over an entire family of functions, ensuring testing did not stop at the first function that failed.</p>
+
+<p>My preferred solution used a metaclass to dynamically insert the tests into a unittest.TestCase. Unfortunately, nose does not pick this up because nose statically scans for test cases.</p>
+
+<p>How do I get nose to discover and run such a TestCase? Please refer <a href="http://stackoverflow.com/questions/347109/how-do-i-concisely-implement-multiple-similar-unit-tests-in-the-python-unittest#347175">here</a> for an example of the TestCase in question.</p>
+
+Answer: <p>Nose does not scan for tests statically, so you <em>can</em> use metaclass magic to make tests that Nose finds.</p>
+
+<p>The hard part is that standard metaclass techniques don't set the func_name attribute correctly, which is what Nose looks for when checking whether methods on your class are tests.</p>
+
+<p>Here's a simple metaclass. It looks through the func dict and adds a new method for every method it finds, asserting that the method it found has a docstring. These new synthetic methods are given the names <code>"test_%d" %i</code>.</p>
+
+<pre><code>import new
+from inspect import isfunction, getdoc
+
+class Meta(type):
+    def __new__(cls, name, bases, dct):
+
+        newdct = dct.copy()
+        for i, (k, v) in enumerate(filter(lambda e: isfunction(e[1]), dct.items())):
+            def m(self, func):
+                assert getdoc(func) is not None
+
+            fname = 'test_%d' % i
+            newdct[fname] = new.function(m.func_code, globals(), fname,
+                (v,), m.func_closure)
+
+        return super(Meta, cls).__new__(cls, 'Test_'+name, bases, newdct)
+</code></pre>
+
+<p>Now, let's create a new class that uses this metaclass</p>
+
+<pre><code>class Foo(object):
+    __metaclass__ = Meta
+
+    def greeter(self):
+        "sdf"
+        print 'Hello World'
+
+    def greeter_no_docstring(self):
+        pass
+</code></pre>
+
+<p>At runtime, <code>Foo</code> will actually be named <code>Test_Foo</code> and will have <code>greeter</code>, <code>greeter_no_docstring</code>, <code>test_1</code> and <code>test_2</code> as its methods. When I run <code>nosetests</code> on this file, here's the output:</p>
+
+<pre><code>$ nosetests -v test.py
+test.Test_Foo.test_0 ... FAIL
+test.Test_Foo.test_1 ... ok
+
+======================================================================
+FAIL: test.Test_Foo.test_0
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Library/Frameworks/EPD64.framework/Versions/7.3/lib/python2.7/site-packages/nose/case.py", line 197, in runTest
+    self.test(*self.arg)
+  File "/Users/rmcgibbo/Desktop/test.py", line 10, in m
+    assert getdoc(func) is not None
+AssertionError
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.002s
+
+FAILED (failures=1)
+</code></pre>
+
+<p>This metaclass isn't really useful as is, but if you instead use the <code>Meta</code> not as a proper metaclass, but as more of a functional metaclass (i.e. takes a class as an argument and returns a new class, one that's renamed so that nose will find it), then it <em>is</em> useful. I've used this approach to automatically test that the docstrings adhere to the Numpy standard as part of a nose test suite.</p>
+
+<p>Also, I've had a lot of trouble getting proper closure working with new.function, which is why this code uses <code>m(self, func)</code> where <code>func</code> is made to be a default argument. It would be more natural to use a closure over <code>value</code>, but that doesn't seem to work.</p>

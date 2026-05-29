@@ -1,0 +1,195 @@
+# Checking for balanced parentheses
+
+I wrote a method to check if each parenthesis in a string is closed. It should take into account the order in which a parenthesis is presented, e.g. "hello)goodbye(" should return false even though there are an equal number of opening and closing parentheses. My method is as follows:
+
+def balance(chars: List[Char]): Boolean = {
+def findNextParen(chars: List[Char]): List[Char] = {
+return chars.dropWhile(char => char != ')' && char != '(')
+}
+
+def findClosingParen(chars: List[Char]): List[Char] = {
+val nextParen = findNextParen(chars)
+if(nextParen.isEmpty) {
+nextParen
+} else if(nextParen.head == '(') {
+findClosingParen(findClosingParen(nextParen.tail).tail)
+}
+else {
+nextParen
+}
+}
+val nextParen = findNextParen(chars)
+
+if(nextParen.isEmpty) {
+true
+} else if(nextParen.head == ')') {
+false
+} else if(findClosingParen(nextParen.tail).isEmpty) {
+false
+} else balance(findClosingParen(nextParen.tail).tail)
+}
+
+
+is there a way to make this more Scala-y? I pretty much feel like I wrote Java code and compiled it with a Scala compiler.
+
+There is a lot of awkward near-repetition between the findClosingParen() helper and the balance() function itself. Arguably, the findClosingParen() function is misleadingly named, as it does more than that.
+
+Another problem is that findClosingParen() is not tail-call recursive.
+
+Here is a simpler approach that avoids both of those problems:
+
+def balance(chars:List[Char], level:Int=0): Boolean = {
+if (level < 0) return false;
+
+val nextParen = chars.dropWhile(char => char != ')' && char != '(')
+if (nextParen.isEmpty) {
+level == 0
+} else if (nextParen.head == '(') {
+balance(nextParen.tail, level + 1)
+} else {
+balance(nextParen.tail, level - 1)
+}
+}
+
+• The balance function should not expose the level. That is a purely internal implementation feature, so you at least need an internal function to handle the recursion. Exposing that implementation detail is not good. – itsbruce Dec 28 '14 at 13:08
+• Ahh that is way more elegant than my solution. Thanks. – ThomYorkkke Dec 28 '14 at 15:20
+• The code is a little more terse but actually makes things worse (in terms of both elegance and idiomatic Scala) by exposing an internal state variable as an externally visible parameter. The if...else if...else if... chain should go as well. – itsbruce Dec 31 '14 at 2:06
+
+Possibly the most egregiously non-Scala thing in your code is the if...else if...else if...else chain. Those are a bad smell in any language, particularly OO ones or functional languages with pattern matching. Scala is both. That really has to go.
+
+Folding is the most efficient and functional way to solve this, but that's a more advanced subject for somebody who is new to Scala and FP. Here is a simple recursive solution which illustrates the clarity of pattern matching:
+
+def balance(chars: List[Char]): Boolean = {
+def go(cs: List[Char], level: Int): Boolean = cs match {
+case Nil => level == 0
+case ')' :: _ if level < 1 => false
+case ')' :: xs => go(xs, level - 1)
+case '(' :: xs => go(xs, level + 1)
+case _ :: xs => go(xs, level)
+}
+go(chars, 0)
+}
+
+
+This should show how much pattern matching simplifies a recursive procedure. Each match defines one of the possible states and the appropriate action.
+
+Because I used pattern matching in this way
+
+1. It is clear that I have comprehensively covered the possible range of states (OK, I haven't dealt with Null but this is Scala - don't use Null).
+2. The corresponding actions are simple and the small differences between each one easy to see.
+
+Compare this with the complexity, lack of clarity and fragility of your if...else if chain. It is hard to compare your different conditions, hard to see if you have been comprehensive and nothing about an if chain even compels you to be testing related conditions - you can have anything in each condition.
+
+This is a naive example but it is a good place to start. That said, Ben's is the best answer.
+
+There is a very small amount of code duplication in this version. The final three pattern matches do the same thing with only a minor change to the input parameters. In such a small, easy to read set of code this is really not a sin (and addressing that would make the function structure more complex and less clear). Replacing the recursion with a fold, however, would remove the duplication, because the fold would take care of the repeated application of the function,which could be reduced to a simple closure adjusting the level.
+
+• It is fully tail recursive optimisable, unlike your code (again, the pattern matching makes this easy to see, where the if chain does not)
+• Adding a @tailrec annotation is good practice in such Scala code
+• It uses an inner function for recursion rather than exposing internal state (unlike your accepted answer).
+• Sorry for the late response, but that was comprehensive and really helpful. Thanks a lot. – ThomYorkkke Jan 20 '15 at 3:01
+• No problem. Can add a fold example if you have not figured that out for yourself yet. – itsbruce Jan 20 '15 at 11:45
+
+There are two levels to the problem: Computer Science and Idiomatic Programming.
+
+## Computer Science
+
+The simplest structure for matching parentheses is a pushdown automaton. Pushdown automata consist of three parts:
+
+1. An input string.
+2. A stack
+3. A dispatch table.
+
+The psuedo-code for parentheses matching:
+
+// Automaton accepts on empty string.
+// Throws an error if automaton reaches a dead state.
+// Otherwise returns "Success: Parentheses match".
+
+List stack = {}
+Char[] = input_string
+Int index = 0
+Int stop = length(input_string)
+
+Function dispatch(char)
+case char = '('
+push_stack(char)
+dispatch(next_char())
+
+case char = ')'
+pop_stack(char)
+dispatch(next_char())
+
+else dispatch(next_char())
+
+Function push_stack(char) =
+stack = append(char, stack)
+
+Function pop_stack(char) =
+if stack = {}
+then error("unbalanced ')' in input")
+else stack = rest(stack)
+
+Function next_char()
+char = input_string[index]
+index = index + 1
+if index = stop
+then finalize()
+
+Function finalize()
+if stack = {}
+then "Success: Parentheses match"
+else error("unbalanced '(' in input string")
+
+Main
+dispatch(input_string[index]
+
+
+## Semi-Idiomatic Scala
+
+The first thing to accept is that regardless of how idiomatic the code, the underlying computer science must be expressed. Due to its design as a transition path from Java's traditional imperative style, Scala allows for programming that falls in between purely functional and entirely imperative.
+
+A simplifying abstraction (used in the question's code) is to reduce the stack data structure to a single integer, then pushStack and popStack become:
+
+ stack +=  1
+stack += -1
+
+
+respectively, if we allow mutation. For example, non-idiomatic Scala might use mutable state to express the stack:
+
+ def nonIdiomaticScala (chars: List[Char]): String = {
+if(chars.isEmpty) "Success: the parentheses match"
+var stack = 0      //
+
+def dispatcher(c: Char) =
+c match {
+case '(' =>  stack += 1
+case ')' =>  stack += -1
+case _   =>  stack
+}
+
+def loop(list: List[Char]) : String = {
+if (list.isEmpty) stack == 0 //evaluates to Boolean
+else {
+if(stack < 0) "Oh No, They Don't match"
+else
+loop(list.tail)
+}
+}
+
+loop(chars)
+}
+
+
+## Idiomatic Scala
+
+The big idioms:
+
+1. Avoiding explicit mutation.
+2. Pattern Matching.
+3. Folding rather than looping over the string.
+4. Lambdas rather than named functions.
+
+Since this problem is homework for Martin Ordersky's Functional Programming in Scala course both on Coursera and École Polytechnique Fédérale de Lausanne, implementing the last two idioms should remain an exercise.
+
+• why "last two" only? need we not implement the first two? – thetrystero Oct 2 '15 at 2:14

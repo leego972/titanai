@@ -1,0 +1,60 @@
+# Approximately evenly-spaced subsequence
+
+Suppose you have $$n$$ time series data where the times are in arithmetic series with difference $$d$$, and suppose further that some of the data are missing at random (say, $$p=.30$$). Now suppose you want to find an approximately evenly-spaced subsequence of length $$l$$ of your data, with common difference approximately $$k > d$$ and $$k$$ not necessarily a multiple of $$d$$.
+
+I feel like I ought to be able to formulate this as an integer program - specifically, a boolean program where the variable $$a$$ is a vector of size $$n$$ where $$a_i = 1$$ if $$a_i$$ is in the subsequence, $$0$$ otherwise, and $$a^T \mathbf{1} = l$$.
+
+The information that the original sequence is an arithmetic series with missing data could be discarded, since the problem it seems ought to have an approximate solution for an arbitrary sequence.
+
+The solution may also depend on how you enforce the objective that the subsequence is approximately evenly spaced. Does anyone know if this problem has been studied before?
+
+• Out of curiosity, do you have a practical application for this? May 28, 2021 at 14:06
+• Thank you for the detailed reply. I am training a deep vision time series model where the time series has missing data, at random. The model takes advantage of regular spacing of its input time series. The question is then how to get a regularly spaced subsequence from the portion of the time series that is available, which subsequence I would then feed to the model. May 28, 2021 at 16:49
+
+I have never encountered a problem like this in literature, but here is one possible way of formulating the problem as a MIP. Notation:
+
+• $$n$$: length of the number series
+• $$l$$: desired length of the subsequence
+• $$q_i$$: number at position $$i$$ in the original number series ($$i \in I = \{1,\ldots,n\}$$)
+• $$r_j$$: number at position $$j$$ in the subsequence ($$j \in J = \{1,\ldots,l\}$$)
+
+We will need the following binary variables:
+
+• $$x_{i,j} \in \{0,1\}$$: 1 if and only if $$q_i = r_j$$
+
+Using this notation, we can express that a number in the sequence can correspond to at most one number in the subsequence:
+
+1. $$\sum_{j \in J}(x_{i,j}) \leq 1 \: \: \forall i \in I$$
+
+Furthermore, each position in the subsequence needs to correspond to exactly one number in the original sequence:
+
+1. $$\sum_{i \in I}(x_{i,j}) = 1 \: \: \forall j \in J$$
+
+We also want that the numbers are in the correct sequence, i.e. $$r_j \le r_{j+1}$$. Using our $$x$$ variables, we can express that quite easily. For all $$j \in \{1,\ldots,l-1\}$$:
+
+1. $$\sum_{i \in I}(x_{i,j} \cdot q_i) <= \sum_{i \in I}(x_{i,j+1} \cdot q_i)$$
+
+Now, this defines the problem, but the objective is still missing and depends on how you define "approximately evenly-spaced". A simple interpretation would be to minimize the difference between the two consecutive numbers with the largest and the two consecutive numbers with the smallest gap. For this purpose we could introduce a continuous variable $$y_1$$ which would be greater or equal to the gap between the numbers that are the furthest apart and a second continuous variable $$y_2$$ which would be smaller or equal to the difference between the two numbers that are closest. Using these two variables we can add the following two constraints for every $$j \in \{1,\ldots,l-1\}$$:
+
+1. $$\sum_{i \in I}(x_{i,j+1}\cdot q_i) - \sum_{i \in I}(x_{i,j}\cdot q_i) \leq y_1)$$
+2. $$\sum_{i \in I}(x_{i,j+1}\cdot q_i) - \sum_{i \in I}(x_{i,j}\cdot q_i) \geq y_2)$$
+
+We could then minimize $$y_1 - y_2$$. If this is 0, we have an evenly spaced sequence.
+
+We can visually verify whether this is giving a good result:
+
+Example 1:
+
+Example 2:
+
+The first example doesn't look great, the second one however is perfect, as the red markers (subsequence) are evenly spaced.
+
+The problem with the first sequence is that it is indeed not possible that $$y_1 - y_2$$ is lower than 20, but visually, this example isn't pleasing, since the highest gap is twice as big as the lowest gap.
+
+A visually much more pleasant result is achieved if we are maximizing $$y_2$$ instead. Just like before, the difference between the largest gap and the lowest gap is 20, however, the largest gap is 140 and lowest is 120, which means that these differences appear almost identical.
+
+Example 1a (maximizing $$y_2$$):
+
+It seems like what you really want to minimize is the relative difference between $$y_2$$ and $$y_1$$ or the variance of the differences. However, there is a problem with that since MIP technology is limited to linear functions. However, I think maximizing $$y_2$$ (or possibly a linear combination of $$y_2$$ and $$y_1$$), e.g. $$y_2-0.01y_1$$ will do something very similar.
+
+Whether this approach is useful in practice depends entirely on your actual numbers (size of $$n$$, size of $$l$$ in comparison to $$n$$). Alternatively, a heuristic approach, or maybe constraint programming (with a very similar formulation as this MIP model), which would allow you to use non-linear objectives, should also be good.

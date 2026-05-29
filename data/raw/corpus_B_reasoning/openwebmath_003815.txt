@@ -1,0 +1,145 @@
+# Gas station without pumps
+
+## 2014 March 5
+
+### Sixteenth day: Arduino demo
+
+Filed under: freshman design seminar,Pressure gauge — gasstationwithoutpumps @ 20:57
+Tags: , , , , , ,
+
+Today’s class in the freshman design seminar went well. I started by returning the drafts of the design reports and giving some generic feedback. I realized on reading the reports that I had not given a good explanation of what I meant by describing the components of the system—two of the groups had given me long parts lists on the first page of their reports, something that would only really be appropriate in an appendix. I explained that what I wanted was what the main blocks in the block diagram were, and that they should use the block diagram to organize their report, writing a page for each block. I also suggested that they use the block diagram to partition the project among the group members, with each group member working on a different component, then getting back together to reconcile any discrepancies. Note that this is much more like real engineering group work than the usual K–12 group project, which is usually done most efficiently by turning the whole project over to the most competent member of the group.
+
+After the feedback on design reports, I offered the students a chance to get a demo of building an Arduino program with sensing and motor control. This was a completely extemporaneous demo—I had gathered a number of possibly useful components, but had not tested anything ahead of time nor even figured out what order to do the demo in.  I asked the students if they wanted me to start with sensing or control—they asked for the motor control first.
+
+I started by pulling a motor out of box of motors I had gotten when the elementary school my wife works at cleaned out their closets.  I told the students that I had no idea what the spec of the motor were, but since it came from an elementary school, it probably ran on 3v batteries.  I tested the motor by hooking it up first to the 3.3v, then to the 5v power on my Arduino Uno.  It spun just fine on 3.3v, but squealed a bit on 5v, so we decided to run it on 3.3v.
+
+I then pulled out the Sainsmart 4-relay board that I had bought some time ago but never used.  I explained how a relay worked, what single-pole double-throw meant, and normally open (NO) and normally closed (NC) contacts. I used the board unpowered with the NC contacts to spin the motor, then moved the wire over to the NO contacts to turn the motor off.  I then hooked up power to the board and tried connecting input IN1 to power to activate the relay.  Nothing happened. I then tried connecting IN1 to ground, and the relay clicked and the motor spun.  The inputs to the Sainsmart board are active low, which I explained to the students (though I did not use the terminology “active low”—perhaps I should have).  I did make a point of establishing that the relay provides very good isolation between the control logic and the circuitry being controlled—you can hook up AC power from the walls to the relay contacts without interfering with the logic circuitry.
+
+Having established that the relay worked, the next step was to get the class (as a group) to write an Arduino program to control the motor using the relay. With me taking notes on the whiteboard, they quickly came up with the pinMode command for the setup, the digitalWrite and delay for the loop, and with only a tiny bit of prompting with a second digitalWrite and delay to turn the motor back off.  They even realized the need to have different delays for the on and off, so we could tell whether we had the polarity right on the control.  Here is the program we came up with:
+
+#define RELAY_PIN (3)
+
+void setup()
+{   pinMode(RELAY_PIN, OUTPUT);
+}
+
+void loop()
+{
+digitalWrite(RELAY_PIN,LOW); // turn motor ON via relay (or off via transistor)
+delay(1000);  // on for 1 second
+digitalWrite(RELAY_PIN,HIGH); // turn motor OFF via relay (or on via transistor)
+delay(3000); // off for 3 seconds
+}
+
+
+I typed the code in and downloaded it to the Arduino Uno, and it worked as expected.  (It would be nice if the Arduino IDE would allow me to increase the font size, like almost every other program I use, so that students could have read the projection of what I was typing better.)
+
+I then offered the students a choice of going on to sensing or looking at pulse-width modulation for proportional control.  They wanted PWM. I explained why PWM is not really doable with relays (the relays are too slow, and chattering them would wear them out after a while.  I did not have the specs on the relay handy, but I just looked up the specs for the SRD-05VDC-SL-C relays on the board: They have a mechanical life of 10,000,000 cycles, but an electrical life of only 100,000 cycles.  The relay takes about 7msec to make a contact and about 3msec to break a contact, so they can’t be operated much faster than about 60 times a second, which could wear them out in as little as half an hour.
+
+So instead of a relay, I suggested an nFET (Field-Effect Transistor). I gave them a circuit with one side of the motor connected to 3.3V, the other to the drain of an nFET, with the source connected to ground.  I explained that the voltage between the gate and the source (VGS) controlled whether the transistor was on or off, and that putting 5v on the gate would turn it on fairly well. I then got out an AOI518 nFET and stuck it in my breadboard, explaining the orientation to allow using the other holes to connect to the source, gate, and drain.
+
+I mentioned that different FETs have the order of the pins different, so one has to look up the pinout on data sheet. I pulled up the AOI518 data sheet, which has on the first page “RDS(ON) (at VGS = 4.5V) < 11.9mΩ”. I explained that if we were putting a whole amp through the FET (we’re not doing anywhere near that much current), the voltage drop would be 11.9mV, so the power dissipated in the transistor would be only 11.9mW, not enough to get it warm. I mentioned that more current would result in more power being dissipated (I2R), and that the FETs could get quite warm. I passed around my other breadboard which has six melted holes from FETs getting quite hot when I was trying to debug the class-D amplifier design. The students were surprised that the FETs still worked after getting that hot (I must admit that I was also).
+
+I hooked up the AOI518 nFET using double-headed male header pins and female jumper cables, and the motor alternated on for 3 seconds, off for one second. We now had the transistor controlling the motor, so it was time to switch to PWM. I went to the Arduino reference page and looked around for PWM, finding it on analogWrite(). I clicked that link and we looked at the page, seeing that analog Write was like digitalWrite, except that we could put in a value from 0 to 255 that controlled what fraction of the time the pin was high.
+
+I edited the code, changing the first digitalWrite() to analogWrite(nFET_GATE_PIN, 255), and commenting out the rest of the loop. We downloaded that, and it turned the motor on, as expected. I then tried writing 128, which still turned the motor on, but perhaps not as strongly (hard to tell with no load). Writing 50 resulted in the motor not starting. Writing 100 let the motor run if I started it by hand, but wouldn’t start the motor from a dead stop. I used this opportunity to point out that controlling the motor was not linear—1/5th didn’t run at 1/5th speed, but wouldn’t run the motor at all.
+
+Next we switched over to doing sensors (with only 10 minutes left in the class). I got out the pressure sensor and instrumentation amp from the circuits course and hooked it up. The screwdriver I had packed in the box had too large a blade for the 0.1″ screw terminals, but luckily the tiny screwdriver on my Swiss Army knife (tucked away in the corkscrew) was small enough. After hooking up the pressure sensor to A0, I downloaded the Arduino Data Logger to the Uno, and started it from a terminal window. I set the triggering to every 100msec (which probably should be the default for the data logger), the input to A0, and convert to volts. I then demoed the pressure sensor by blowing into or sucking on the plastic tube hooked up to the sensor. With the low-gain output from the amplifier, the output swung about 0.5 v either way from the 2.5v center. Moving the A0 wire over to the high-gain output of the amplifier gave a more visible signal. I also turned off the “convert to volts” to show the students the values actually read by the Arduino (511 and 512, the middle of the range from 0 to 1023).
+
+Because the class was over at that point, I offered to stay for another 10 minutes to show them how to use the pressure sensor to control the motor. One or two students had other classes to run to, but most stayed. I then wrote a program that would normally have the motor off, but would turn it full on if I got the pressure reading up to 512+255 and would turn it on partway (using PWM) between 512 and 512+255. I made several typos when entering the program (including messing up the braces and putting in an extraneous semicolon), but on the third compilation it downloaded successfully and controlled the motor as expected.
+
+One student asked why the motor was off when I wasn’t blowing into the tube, so I explained about 512 being the pressure reading when nothing was happening (neither blowing into the tube nor sucking on it). I changed the zero point for the motor to a pressure reading of 300, so that the motor was normally most of the way on, but could be turned off by sucking on the tube. Here is the program we ended up with
+
+#define nFET_GATE_PIN (3)
+
+void setup()
+{   pinMode(nFET_GATE_PIN, OUTPUT);
+pinMode(A0, INPUT);
+}
+
+void loop()
+{ int pressure;
+if (pressure < 300)
+{    digitalWrite(nFET_GATE_PIN,LOW);  // turn motor off
+}
+else
+{   if (pressure>300+255)
+{ digitalWrite(nFET_GATE_PIN,HIGH);  // turn motor on full
+}
+else
+{    analogWrite(nFET_GATE_PIN,pressure-300); // turn motor partway on
+}
+}
+}
+
+
+Note: this code is not an example of brilliant programming style. I can see several things that I would have done differently if I had had time to think about the code, but for this blog it is more useful to show the actual artifact that was developed in the demo, even if it makes me cringe a little.
+
+Overall, I thought that the demo went well, despite being completely extemporaneous. Running over by 10 minutes might have been avoidable, but only by omitting something useful (like the feedback on the design reports). The demo itself lasted about 70 minutes, making the whole class run 80 minutes instead of 70. I think I compressed the demo about as much as was feasible for the level the students were at.
+
+Based on how the students developed the first motor-control program quickly in class, I think that some of them are beginning to get some of the main ideas of programming: explicit instructions and sequential ordering. Because we were out of time by the point I got to using conditionals, I did not get a chance to probe their understanding there.
+
+## 2014 February 22
+
+### Diode-connected nFET characterisitics
+
+Filed under: Circuits course,Data acquisition — gasstationwithoutpumps @ 19:20
+Tags: , , , ,
+
+Test circuit for determining I-vs-V curves for a diode-connected nFET. The shunt resistor R2 was chosen from 0.5Ω to 680kΩ, and R3 was selected to keep E23 above 0 (0.5Ω to 150Ω).
+
+In More mess in the the FET modeling lab, I showed I-vs-V plots for NTD5867NL nFETs, both with a fixed power supply and load resistor, and diode connected (Vgs=Vds).  But this year, the NTD5867NL FETs were not available from Digikey, so we are getting AOI518 nFETs instead.  I decided to try characterizing these with the KL25Z board.  If I power the test off the KL25Z board’s 3.3v supply, I can take fairly high currents, as the board uses a NCP1117ST33T3G LDO regulator, which can the spec sheet claims can deliver up to 1A (800mA, if we limit the dropout to 1.2v). I’m only limited by the USB current limit (500mA), to keep the laptop from shutting off the USB port.
+
+I used essentially the same circuit for testing a diode-connected AOI518 nFET as I used for testing the Schottky diodes, but I did not put a capacitor across the FET.  (Well, initially I left the 4.7µF capacitor there, but I was noticing changing values that looked like RC charging when I was testing at small currents, so I removed the capacitor.)
+
+Because the 3.3v supply droops if too much current is taken from it, I used the internal 1V bandgap reference to determine the scaling of the analog-to-digital converter on each reading.  The voltage VDS is (E20-E21)/(BANDGAP), and the current IDS is (E22-E23)/(R2*BANDGAP).
+
+Voltage vs current for diode-connected nFET. The model that fits the data (above 1µA) is that of subthreshold conduction, even when the current is over 100mA. (click to embiggen)
+
+I get a very good fit to the data (above 1µA) with the subthreshold conduction model (essentially the same as a junction diode, but using n VT instead of VT, where n is determined by the size and shape of the FET).  The value of n for this FET seems to be around 830mV/26mV = 32. The circuit models I’ve seen on the web seem to claim that I should be using a saturation-current model for a diode-connected FET, but that model doesn’t fit the data at all.
+
+There is a very clear thermal shift in the curve for the high-current tests.  As the transistor warms up the current increases for a given voltage.  This is equivalent to the threshold voltage Vthr dropping with temperature.  This is consistent with the data sheet, which shows a lower threshold voltage but higher on-resistance (at 10A) at 125° C than at 25° C.
+
+I’m not seeing any evidence of the weird negative resistance that I saw on the NTD5867NL nFETs. (I tried checking the NTD5867NL nFET with the same testing setup as for the AOI518, and it definitely still shows weird behavior between 10 and 30 mA.)
+
+Because large nFETs are often used to switch inductive loads (motors, loudspeakers, inductors in switching regulators, …), they incorporate a “flyback” diode in the FET.  Normally, this diode is back-biased and does not conduct, but if an inductive load needs a current and there are no transistors that are on to provide the current, the diode conducts and keeps the output voltage from going too far below ground.
+
+nMOS and pMOS transistors with flyback diodes. If both transistors are off, but the inductor L1 still wants current, it has to come through one of the flyback diodes D1 or D2. They keep the output voltage from going too far outside the rails.
+
+I characterized the flyback diode on the AOI518 nFET the same way as before, now connecting the gate and the source to the higher voltage, and the drain to the lower voltage.
+
+Below about 0.66 V, the flyback diode has a fairly normal exponential current with voltage, but above that it seems to have a linear relationship between current and voltage, with a dynamic resistance of about 180mΩ.
+click to embiggen
+
+The red points with the 0.5Ω shunt go up to an amp, which warms the FET enough to change its characteristics—the lower set of points are the warmer set.
+
+I can also use the measurements of the flyback diode with the ½Ω shunt to characterize the LDO voltage regulator on the Freedom KL25Z board:
+
+For currents up to 400mA, the LDO voltage regulator behaves like a 3.332 V source in series with a 55mΩ resistor.
+click to embiggen
+
+The data sheet claims that there should only be a 10mV drop in voltage for an 800mA current, and I’m seeing a 290mV drop.  The extra drop is not from the LDO misbehaving, but from the USB voltage dropping—one is only supposed to take up to 500mA from a USB supply and the MacBook Pro apparently has a soft knee at 500mA, rather than an abrupt shutoff.  I suspect that if I took the full amp for very long, the laptop would shut down the USB port, as it does if the USB 5V is accidentally shorted.
+
+## 2013 March 2
+
+### Rethinking the power-amp lab yet again
+
+Filed under: Circuits course — gasstationwithoutpumps @ 14:05
+Tags: , ,
+
+In Rethinking the power-amp lab again, I described the failure of my class-D power amp on Thursday afternoon, and the dilemma I faced in whether to revise the lab or cut it from the course.  Some of the students favored cutting it (they’re hitting end-of-quarter crunch time), but I know that they would not learn any of the material that lab is intended to help them understand without actually doing the lab.  Also, if I had one less lab report to evaluate them on, I’d probably have to add a final exam, which I don’t think they would like any better.
+
+So Thursday night I woke up around 3 a.m. and thought about ways to salvage the power-amp lab.  First, I had to figure out what differences there were between the circuit I had working at home, and the same board, with slightly different power-supply options in the lab on campus.  The only real difference was the voltages for the power-amp stage (the comparator and power FETs).  At home, I was using a 6.6V power supply—the same one I was using for the pre-amp stage, so that the FET sources were at 0V and 6.6V (and the loudspeaker had a DC bias that is undesirable).  On campus, the preamp had a +6V supply, and the comparator and FET sources were at ±4V, but I wanted to be able to go to ±7V or even ±9v.
+
+I came up with some ideas for potential solutions.
+
+1. The first was a fairly trivial one: just have them use a single 6V power-supply the way I had, and not worry about the DC offset to the loudspeaker. I don’t like this solution very much, because it doesn’t provide much power to the speaker (about 0.5W), and has that DC bias.
+2. A minor variant of the first idea is to add a large series capacitor to the loudspeaker.  Our big electrolytics are 470µF, and we’d have high-pass filtering with a corner frequency of about 66Hz, which is ok for the small speakers (whose resonant frequency is around 155Hz.  The 16V limit for the electrolytic capacitor is no problem, since the pre-amp using an MCP6004 chip shouldn’t really be run with more than 6V.
+3. Another minor variant eliminates the series capacitor by using a ±3V supply, with the preamp powered from -3V and +3v.  This has the advantage of eliminating the need for a virtual ground in the pre-amp, as well as powering the loudspeaker cleanly.  But we are still limited to 0.5W.
+4. The second major solution was to change the output stage from having a simple cMOS inverter (with the pFET and nFET gates connected together) to using a separate comparator to drive each of the FET gates.  By changing the pull-up resistors on the open-collector outputs of the comparators, I could adjust the rise and fall rates.  By using a very small pull-up, the voltage would rise rapidly, fall slowly, and not get very low.  By using a larger pull-up, the voltage would fall rapidly, rise slowly, and get quite low.  Since I don’t want the nFET and pFET on at the same time, I want to turn the FETs off quickly, but on slower, so that one is off before the other turns one.  That lead me to a design with a large pull-up resistor for the nFET gate and a small one for the pFET gate.  (“Large” and “small” are relative terms here—mine were within a factor of 10 of each other, since they are constrained by how much current the comparator can sink and by how fast we want the gate voltages to change.
+
+On Friday morning, I went into the lab and tried out potential solutions 1, 3, and 4.  (Since we have a dual supply handy there is no reason not to use it.)
+
+Since solution 1 is essentially identical to what I had debugged at home (but with a 6V supply instead of a 6.6V supply) it worked fine.  Splitting the supply into a +3V and a -3V supply with the loudspeaker connected to the middle eliminated the DC bias on the speaker without changing anything  else, so it worked fine also.
+
+It took me a while to debug the design with the separated compar

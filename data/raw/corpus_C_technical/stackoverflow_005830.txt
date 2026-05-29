@@ -1,0 +1,96 @@
+Question: <p>What is the use of the <code>yield</code> keyword in Python? What does it do?</p>
+
+<p>For example, I'm trying to understand this code<sup><strong>1</strong></sup>:</p>
+
+<pre><code>def _get_child_candidates(self, distance, min_dist, max_dist):
+    if self._leftchild and distance - max_dist &lt; self._median:
+        yield self._leftchild
+    if self._rightchild and distance + max_dist &gt;= self._median:
+        yield self._rightchild  
+</code></pre>
+
+<p>And this is the caller:</p>
+
+<pre><code>result, candidates = list(), [self]
+while candidates:
+    node = candidates.pop()
+    distance = node._get_dist(obj)
+    if distance &lt;= max_dist and distance &gt;= min_dist:
+        result.extend(node._values)
+    candidates.extend(node._get_child_candidates(distance, min_dist, max_dist))
+return result
+</code></pre>
+
+<p>What happens when the method <code>_get_child_candidates</code> is called?
+A list is returned? A single element is returned? Is it called again? When will subsequent calls stop?</p>
+
+<hr>
+
+<p><sub>
+1. The code comes from Jochen Schulz (jrschulz), who made a great Python library for metric spaces. This is the link to the complete source: <a href="http://well-adjusted.de/~jrschulz/mspace/">Module mspace</a>.</sub></p>
+
+Answer: <h2>Shortcut to <a href="http://en.wikipedia.org/wiki/Grok">Grokking</a> <code>yield</code></h2>
+
+<p>When you see a function with <code>yield</code> statements, apply this easy trick to understand what will happen:</p>
+
+<ol>
+<li>Insert a line <code>result = []</code> at the start of the function.</li>
+<li>Replace each <code>yield expr</code> with <code>result.append(expr)</code>.</li>
+<li>Insert a line <code>return result</code> at the bottom of the function.</li>
+<li>Yay - no more <code>yield</code> statements! Read and figure out code.</li>
+<li>Compare function to original definition.</li>
+</ol>
+
+<p>This trick may give you an idea of the logic behind the function, but what actually happens with <code>yield</code> is significantly different that what happens in the list based approach. In many cases the yield approach will be a lot more memory efficient and faster too. In other cases this trick will get you stuck in an infinite loop, even though the original function works just fine. Read on to learn more...</p>
+
+<h2>Don't confuse your Iterables, Iterators and Generators</h2>
+
+<p>First, the <strong>iterator protocol</strong> - when you write</p>
+
+<pre><code>for x in mylist:
+    ...loop body...
+</code></pre>
+
+<p>Python performs the following two steps:</p>
+
+<ol>
+<li><p>Gets an iterator for <code>mylist</code>:</p>
+
+<p>Call <code>iter(mylist)</code> -> this returns an object with a <code>next()</code> method (or <code>__next__()</code> in Python 3).</p>
+
+<p>[This is the step most people forget to tell you about]</p></li>
+<li><p>Uses the iterator to loop over items:</p>
+
+<p>Keep calling the <code>next()</code> method on the iterator returned from step 1. The return value from <code>next()</code> is assigned to <code>x</code> and the loop body is executed. If an exception <code>StopIteration</code> is raised from within <code>next()</code>, it means there are no more values in the iterator and the loop is exited.</p></li>
+</ol>
+
+<p>The truth is Python performs the above two steps anytime it wants to <em>loop over</em> the contents of an object - so it could be a for loop, but it could also be code like <code>otherlist.extend(mylist)</code> (where <code>otherlist</code> is a Python list).</p>
+
+<p>Here <code>mylist</code> is an <em>iterable</em> because it implements the iterator protocol. In a user defined class, you can implement the <code>__iter__()</code> method to make instances of your class iterable. This method should return an <em>iterator</em>. An iterator is an object with a <code>next()</code> method. It is possible to implement both <code>__iter__()</code> and <code>next()</code> on the same class, and have <code>__iter__()</code> return <code>self</code>. This will work for simple cases, but not when you want two iterators looping over the same object at the same time.</p>
+
+<p>So that's the iterator protocol, many objects implement this protocol:</p>
+
+<ol>
+<li>Built-in lists, dictionaries, tuples, sets, files.</li>
+<li>User defined classes that implement <code>__iter__()</code>.</li>
+<li>Generators.</li>
+</ol>
+
+<p>Note that a <code>for</code> loop doesn't know what kind of object it's dealing with - it just follows the iterator protocol, and is happy to get item after item as it calls <code>next()</code>. Built-in lists return their items one by one, dictionaries return the <em>keys</em> one by one, files return the <em>lines</em> one by one, etc. And generators return... well that's where <code>yield</code> comes in:</p>
+
+<pre><code>def f123():
+    yield 1
+    yield 2
+    yield 3
+
+for item in f123():
+    print item
+</code></pre>
+
+<p>Instead of <code>yield</code> statements, if you had three <code>return</code> statements in <code>f123()</code> only the first would get executed, and the function would exit. But <code>f123()</code> is no ordinary function. When <code>f123()</code> is called, it <em>does not</em> return any of the values in the yield statements! It returns a generator object. Also, the function does not really exit - it goes into a suspended state. When the <code>for</code> loop tries to loop over the generator object, the function resumes from its suspended state at the very next line after the <code>yield</code> it previously returned from, executes the next line of code, in this case a <code>yield</code> statement, and returns that as the next item. This happens until the function exits, at which point the generator raises <code>StopIteration</code>, and the loop exits. </p>
+
+<p>So the generator object is sort of like an adapter - at one end it exhibits the iterator protocol, by exposing <code>__iter__()</code> and <code>next()</code> methods to keep the <code>for</code> loop happy. At the other end however, it runs the function just enough to get the next value out of it, and puts it back in suspended mode.</p>
+
+<h2>Why Use Generators?</h2>
+
+<p>Usually you can write code that doesn't use generators but implements the same logic. One option is to use the temporary list 'trick' I mentioned before. That will not work in all cases, for e.g. if you have infinite loops, or it may make inefficient use of memory when you have a really long list. The other approach is to implement a new iterable class <code>SomethingIter</code> that keeps state in instance members and performs the next logical step in it's <code>next()</code> (or <code>__next__()</code> in Python 3) method. Depending on the logic, the code inside the <code>next()</code> method may end up looking very complex and be prone to bugs. Here generators provide a clean and easy solution.</p>

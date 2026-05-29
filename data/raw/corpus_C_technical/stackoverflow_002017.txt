@@ -1,0 +1,76 @@
+Question: <p>I have a class:</p>
+
+<pre><code>class MyClass:
+def __init__(self, foo):
+    if foo != 1:
+        raise Error("foo is not equal to 1!")
+</code></pre>
+
+<p>and a unit test that is supposed to make sure the incorrect arg passed to the constructor properly raises an error:</p>
+
+<pre><code>def testInsufficientArgs(self):
+    foo = 0
+    self.assertRaises((Error), myClass = MyClass(Error, foo))
+</code></pre>
+
+<p>But I get...</p>
+
+<pre><code>NameError: global name 'Error' is not defined
+</code></pre>
+
+<p>Why? Where should I be defining this Error object? I thought it was built-in as a default exception type, no?</p>
+
+Answer: <p>'Error' in this example could be any exception object. I think perhaps you have read a code example that used it as a metasyntatic placeholder to mean, "The Appropriate Exception Class".</p>
+
+<p>The baseclass of all exceptions is called 'Exception', and most of its subclasses are descriptive names of the type of error involved, such as 'OSError', 'ValueError', 'NameError', 'TypeError'.</p>
+
+<p>In this case, the appropriate error is 'ValueError' (the value of foo was wrong, therefore a ValueError). I would recommend replacing 'Error' with 'ValueError' in your script.</p>
+
+<p>Here is a complete version of the code you are trying to write, I'm duplicating everything because you have a weird keyword argument in your original example that you seem to be conflating with an assignment, and I'm using the 'failUnless' function name because that's the non-aliased name of the function:</p>
+
+<pre><code>class MyClass:
+    def __init__(self, foo):
+        if foo != 1:
+            raise ValueError("foo is not equal to 1!")
+
+import unittest
+class TestFoo(unittest.TestCase):
+    def testInsufficientArgs(self):
+        foo = 0
+        self.failUnlessRaises(ValueError, MyClass, foo)
+
+if __name__ == '__main__':
+    unittest.main()
+</code></pre>
+
+<p>The output is:</p>
+
+<pre><code>.
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK
+</code></pre>
+
+<p>There is a flaw in the unit testing library 'unittest' that other unit testing frameworks fix. You'll note that it is impossible to gain access to the exception object from the calling context. If you want to fix this, you'll have to redefine that method in a subclass of UnitTest:</p>
+
+<p>This is an example of it in use:</p>
+
+<pre><code>class TestFoo(unittest.TestCase):
+    def failUnlessRaises(self, excClass, callableObj, *args, **kwargs):
+        try:
+            callableObj(*args, **kwargs)
+        except excClass, excObj:
+            return excObj # Actually return the exception object
+        else:
+            if hasattr(excClass,'__name__'): excName = excClass.__name__
+            else: excName = str(excClass)
+            raise self.failureException, "%s not raised" % excName
+
+    def testInsufficientArgs(self):
+        foo = 0
+        excObj = self.failUnlessRaises(ValueError, MyClass, foo)
+        self.failUnlessEqual(excObj[0], 'foo is not equal to 1!')
+</code></pre>
+
+<p>I have copied the failUnlessRaises function from unittest.py from python2.5 and modified it slightly.</p>

@@ -1,0 +1,64 @@
+Question: <p>I was put in a position today in which I needed to enumerate all possible combinations of jagged list. For instance, a naive approach would be:</p>
+
+<pre><code>for a in [1,2,3]:
+    for b in [4,5,6,7,8,9]:
+        for c in [1,2]:
+            yield (a,b,c)
+</code></pre>
+
+<p>This is functional, but not general in terms of the number of lists that can be used. Here is a more generalized approach:</p>
+
+<pre><code>from numpy import zeros, array, nonzero, max
+
+make_subset = lambda x,y: [x[i][j] for i,j in enumerate(y)]
+
+def combinations(items):
+    num_items = [len(i) - 1 for i in items]
+    state = zeros(len(items), dtype=int)
+    finished = array(num_items, dtype=int)
+    yield grab_items(items, state)
+    while True:
+        if state[-1] != num_items[-1]:
+            state[-1] += 1
+            yield make_subset(items, state)
+        else:
+            incrementable = nonzero(state != finished)[0]
+            if not len(incrementable):
+                raise StopIteration
+            rightmost = max(incrementable)
+            state[rightmost] += 1
+            state[rightmost+1:] = 0
+            yield make_subset(items, state)
+</code></pre>
+
+<p>Any recommendations on a better approach or reasons against the above approach?</p>
+
+Answer: <p>The naive approach can be written more compactly as a generator expression:</p>
+
+<pre><code>((a,b,c) for a in [1,2,3] for b in [4,5,6,7,8,9] for c in [1,2])
+</code></pre>
+
+<p>The general approach can be written much more simply using a recursive function:</p>
+
+<pre><code>def combinations(*seqs):
+  if not seqs: return (item for item in ())
+  first, rest = seqs[0], seqs[1:]
+  if not rest: return ((item,) for item in first)
+  return ((item,) + items for item in first for items in combinations(*rest))
+</code></pre>
+
+<p>Sample usage:</p>
+
+<pre><code>&gt;&gt;&gt; for pair in combinations('abc', [1,2,3]):
+...   print pair
+... 
+('a', 1)
+('a', 2)
+('a', 3)
+('b', 1)
+('b', 2)
+('b', 3)
+('c', 1)
+('c', 2)
+('c', 3)
+</code></pre>

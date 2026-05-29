@@ -1,0 +1,99 @@
+Question: <p>I want to override access to one variable in a class, but return all others normally.  How do I accomplish this with <code>__getattribute__</code>?</p>
+
+<p>I tried the following (which should also illustrate what I'm trying to do) but I get a recursion error:</p>
+
+<pre><code>class D(object):
+    def __init__(self):
+        self.test=20
+        self.test2=21
+    def __getattribute__(self,name):
+        if name=='test':
+            return 0.
+        else:
+            return self.__dict__[name]
+
+&gt;&gt;&gt; print D().test
+0.0
+&gt;&gt;&gt; print D().test2
+...
+RuntimeError: maximum recursion depth exceeded in cmp
+</code></pre>
+
+Answer: <p><strong>Best Practice</strong></p>
+
+<p>The proper way to programmatically control access to a single attribute is with <a href="https://docs.python.org/library/functions.html#property" rel="nofollow"><code>property</code></a>. Class <code>D</code> should be written as follows (with the setter and deleter optionally to replicate apparent intended behavior):</p>
+
+<pre><code>class D(object):
+    def __init__(self):
+        self.test2=21
+
+    @property
+    def test(self):
+        return 0.
+
+    @test.setter
+    def test(self, value):
+        '''dummy function to avoid AttributeError on setting property'''
+
+    @test.deleter
+    def test(self):
+        '''dummy function to avoid AttributeError on deleting property'''
+</code></pre>
+
+<p>And usage:</p>
+
+<pre><code>&gt;&gt;&gt; o = D()
+&gt;&gt;&gt; o.test
+0.0
+&gt;&gt;&gt; o.test = 'foo'
+&gt;&gt;&gt; o.test
+0.0
+&gt;&gt;&gt; del o.test
+&gt;&gt;&gt; o.test
+0.0
+</code></pre>
+
+<p><strong>Options for <code>__getattribute__</code></strong></p>
+
+<p>If you insist on using the <code>__getattribute__</code> (really only best when you need to control access to <em>all</em> attributes) you can either call <code>__getattr__</code> (which, if <code>__getattribute__</code> is defined, <a href="https://docs.python.org/reference/datamodel.html#more-attribute-access-for-new-style-classes" rel="nofollow">isn't called unless <code>__getattribute__</code> calls it</a>) or call the parent class's <code>__getattribute__</code> with <a href="https://docs.python.org/library/functions.html#super" rel="nofollow"><code>super</code></a>, i.e.:</p>
+
+<pre><code>class D(object):
+    def __init__(self):
+        self.test=20
+        self.test2=21
+    def __getattribute__(self,name):
+        if name=='test':
+            return 0.
+        else:
+            return self.__getattr__(name)
+</code></pre>
+
+<p>or</p>
+
+<pre><code>class D(object):
+    def __init__(self):
+        self.test=20
+        self.test2=21
+    def __getattribute__(self,name):
+        if name=='test':
+            return 0.
+        else:
+            return super(D, self).__getattribute__(name)
+</code></pre>
+
+<p>And both will behave like this (with an error on a repeated deletion):</p>
+
+<pre><code>&gt;&gt;&gt; o = D()
+&gt;&gt;&gt; o.test = 'foo'
+&gt;&gt;&gt; o.test
+0.0
+&gt;&gt;&gt; del o.test
+&gt;&gt;&gt; o.test
+0.0
+&gt;&gt;&gt; del o.test
+
+Traceback (most recent call last):
+  File "&lt;pyshell#216&gt;", line 1, in &lt;module&gt;
+    del o.test
+AttributeError: test
+</code></pre>

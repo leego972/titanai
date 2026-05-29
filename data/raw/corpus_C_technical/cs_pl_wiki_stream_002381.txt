@@ -1,0 +1,79 @@
+# Compiler Description Language
+
+Compiler Description Language (CDL) is a programming language based on affix grammars. It is very similar to Backus–Naur form (BNF) notation. It was designed for the development of compilers. It is very limited in its capabilities and control flow, and intentionally so. The benefits of these limitations are twofold.
+
+On the one hand, they  make possible the sophisticated data and control flow analysis used by the CDL2 optimizers resulting in extremely efficient code. The other benefit is that they foster a highly verbose naming convention. This, in turn, leads to programs that are, to a great extent, self-documenting.
+
+The language looks a bit like Prolog (this is not surprising since both languages arose at about the same time out of work on affix grammars). However, as opposed to Prolog, control flow in CDL is deterministically based on success/failure, i.e., no other alternatives are tried when the current one succeeds.  This idea is also used in parsing expression grammars.
+
+CDL3 is the third version of the CDL language, significantly different from the previous two versions.
+
+Design 
+
+The original version, designed by Cornelis H. A. Koster at the University of Nijmegen, which emerged in 1971, had a rather unusual concept: it had no core. A typical programming language source is translated to machine instructions or canned sequences of those instructions. Those represent the core, the most basic abstractions that the given language supports. Such primitives can be the additions of numbers, copying variables to each other, and so on. CDL1 lacks such a core. It is the responsibility of the programmer to provide the primitive operations in a form that can then be turned into machine instructions by means of an assembler or a compiler for a traditional language. The CDL1 language itself has no concept of primitives, no concept of data types apart from the machine word (an abstract unit of storage - not necessarily a real machine word as such). The evaluation rules are rather similar to the Backus–Naur form syntax descriptions; in fact, writing a parser for a language described in BNF is rather simple in CDL1.
+
+Basically, the language consists of rules. A rule can either succeed or fail. A rule consists of alternatives that are sequences of other rule invocations. A rule succeeds if any of its alternatives succeed; these are tried in sequence. An alternative succeeds if all of its rule invocations succeed. The language provides operators to create evaluation loops without recursion (although this is not strictly necessary in CDL2 as the optimizer achieves the same effect) and some shortcuts to increase the efficiency of the otherwise recursive evaluation, but the basic concept is as above. Apart from the obvious application in context-free grammar parsing, CDL is also well suited to control applications since a lot of control applications are essentially deeply nested if-then rules.
+
+Each CDL1 rule, while being evaluated, can act on data, which is of unspecified type. Ideally, the data should not be changed unless the rule is successful (no side effects on failure). This causes problems as although this rule may succeed, the rule invoking it might still fail, in which case the data change should not take effect. It is fairly easy (albeit memory intensive) to assure the above behavior if all the data is dynamically allocated on a stack. However, it is rather hard when there's static data, which is often the case. The CDL2 compiler is able to flag the possible violations thanks to the requirement that the direction of parameters (input, output, input-output) and the type of rules (can fail: test, predicate; cannot fail: function, action; can have a side effect: predicate, action; cannot have a side effect: test, function) must be specified by the programmer.
+
+As the rule evaluation is based on calling simpler and simpler rules, at the bottom, there should be some primitive rules that do the actual work. That is where CDL1 is very surprising: it does not have those primitives. You have to provide those rules yourself. If you need addition in your program, you have to create a rule with two input parameters and one output parameter, and the output is set to be the sum of the two inputs by your code. The CDL compiler uses your code as strings (there are conventions on how to refer to the input and output variables) and simply emits it as needed. If you describe your adding rule using assembly, you will need an assembler to translate the CDL compiler's output into the machine code. If you describe all the primitive rules (macros in CDL terminology) in Pascal or C, then you need a Pascal or C compiler to run after the CDL compiler. This lack of core primitives can be very painful when you have to write a snippet of code, even for the simplest machine instruction operation. However, on the other hand, it gives you great flexibility in implementing esoteric, abstract primitives acting on exotic abstract objects (the 'machine word' in CDL is more like 'unit of data storage, with no reference to the kind of data stored there). Additionally, large projects made use of carefully crafted libraries of primitives. These were then replicated for each target architecture and OS allowing the production of highly efficient code for all.
+
+To get a feel for the language, here is a small code fragment adapted from the CDL2 manual:
+
+ACTION quicksort + >from + >to -p -q:
+  less+from+to, split+from+to+p+q,
+    quicksort+from+q, quicksort+p+to;
+  +.
+
+ACTION split + >i + >j + p> + q> -m:
+  make+p+i, make+q+j, add+i+j+m, halve+m,
+    (again: move up+j+p+m, move down+i+q+m,
+       (less+p+q, swap item+p+q, incr+p, decr+q, *again;
+        less+p+m, swap item+p+m, incr+p;
+        less+m+q, swap item+q+m, decr+q;
+        +)).
+
+FUNCTION move up + >j + >p> + >m:
+  less+j+p;
+  smaller item+m+p;
+  incr+p, *.
+
+FUNCTION move down + >i + >q> + >m:
+  less+q+j;
+  smaller item+q+m;
+  decr+q, *.
+
+TEST less+>a+>b:=a"<"b.
+FUNCTION make+a>+>b:=a"="b.
+FUNCTION add+>a+>b+sum>:=sum"="a"+"b.
+FUNCTION halve+>a>:=a"/=2".
+FUNCTION incr+>a>:=a"++".
+FUNCTION decr+>a>:=a"--".
+
+TEST smaller item+>i+>j:="items["i"]<items["j"]".
+ACTION swap items+>i+>j-t:=t"=items["i"];items["i"]=items["j"];items["j"]="t.
+The primitive operations are here defined in terms of Java (or C). This is not a complete program; we must define the Java array items elsewhere.
+
+CDL2, which appeared in 1976, kept the principles of CDL1 but made the language suitable for large projects. It introduced modules, enforced data-change-only-on-success, and extended the capabilities of the language somewhat. The optimizers in the CDL2 compiler and especially in the CDL2 Laboratory (an IDE for CDL2) were world-class and not just for their time. One feature of the CDL2 Laboratory optimizer is almost unique: it can perform optimizations across compilation units, i.e., treating the entire program as a single compilation.
+
+CDL3 is a more recent language. It gave up the open-ended feature of the previous CDL versions, and it provides primitives to basic arithmetic and storage access. The extremely puritan syntax of the earlier CDL versions (the number of keywords and symbols both run in single digits) has also been relaxed. Some basic concepts are now expressed in syntax rather than explicit semantics. In addition, data types have been introduced to the language.
+
+Use 
+
+The commercial mbp Cobol (a Cobol compiler for the PC) as well as the MProlog system (an industrial-strength Prolog implementation that ran on numerous architectures (IBM mainframe, VAX, PDP-11, Intel 8086, etc.) and OS-s (DOS/OS/CMS/BS2000, VMS/Unix, DOS/Windows/OS2)). The latter, in particular, is testimony to CDL2's portability.
+
+While most programs written with CDL have been compilers, there is at least one commercial GUI application that was developed and maintained in CDL. This application was a dental image acquisition application now owned by DEXIS. A dental office management system was also once developed in CDL.
+
+The software for the Mephisto III chess computer was written with CDL2.
+
+References
+
+Further reading 
+ A book about the CDL1 / CDL2 language
+ The description of CDL3
+ Bedő Árpád: Programkészítési Módszerek; Közgazdasági és Jogi Könyvkiadó, 1979. 
+
+Parser generators
+Compiler construction
+Formal languages
+Compiler theory

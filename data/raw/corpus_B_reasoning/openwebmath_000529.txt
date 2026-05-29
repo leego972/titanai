@@ -1,0 +1,64 @@
+# Compressive sensing: numerical generation of RIP matrices
+
+The restricted isometry property (RIP) states that: $$(1-\delta_K)||x||_2^2 \le ||A x||_2^2 \le (1+\delta_K)||x||_2^2$$ for any $K$-sparse vector $x$ of length $N$. The corresponding restricted isometry constant is $\delta_K$, $0 < \delta_K < 1$.
+
+I would like to perform a numerical experiment based this expression to produce a RIP-compliant matrix $A$ (Matlab code is supplied below). The matrix is constructed with Gaussian-distributed RV's (zero mean, variance $1/\sqrt{M}$). Having specified $N$ and $K$, the number of measurements $M$ is obtained with $M \geq K \log(N/K)$. This is a hit-or-miss procedure, I let the code run until the isometry constant falls between zero and one. Is this the proper way to generate $A$? Am I missing anything? Further analysis on $A$ (eigenvalues, etc.) doesn't seem to behave properly...
+
+function [delta] = RIP_numerical(n,s)
+
+% delta: restricted isometry constant; n: # columns; s: sparsity
+
+% choose m (# measurements/rows) based on measurement criterion
+
+m = ceil(s*log(n/s))
+
+flag = 0; incr = 0; % initialize computing parameters
+
+while flag ~= 1  % run until condition met
+
+incr = incr + 1
+% generate random, m x n normalized matrix N(0,1/m)
+A = (1/sqrt(m))*randn(m,n);
+sumA = sum(A);
+for k = 1:n
+A(:,k) = A(:,k)/sum(A(:,k));
+end
+
+% generate vector of length n, sparsity k
+x = zeros(n,1);
+list = randperm(n);
+for l = 1:s
+x(list(l))= randn;
+end
+
+y = A*x;    % obtain measurements
+
+norm_x = norm(x,2);  % l_2 norms
+norm_y = norm(y,2);
+
+delta = 1-(norm_y^2/norm_x^2);  % look at lower bound
+
+if (delta >0 & delta < 1) % condition met; save vars and kick out of routine.
+flag = 1
+save('RIP_config.mat', 'A','x','n','m','s');
+end
+end
+
+
+You can't prove RIP through numerical exploration of all possible cases. If you are interested in numerical analysis I suggest to use Coherence instead, however Coherence is not as strong condition as RIP. Note that RIP is a tool which is used for Mathematical proofs. I explain how to check for RIP, in case your are interested. As I said Coherence is a weaker condition in comparison with RIP, however, it is numerically feasible to check. Coherence of matrix A (which is sensing matrix multiplied in sparsity basis) is defined as below:
+
+where $a_i, a_j$ are columns of matrix A, and $u_A$ is coherence factor. Its computational complexity is of $O(n^2)$ which in many cases is feasible. For checking coherence, you simply need to compute the given type of correlation between each two different columns of A matrix and among those values chose the max. Based on Welsh Inequality we'll have:
+
+In CS sampling $M<<N$, so the above relation simplifies to $u_A>sqrt(1/M)$, therefore, to satisfy RIP using coherence, number of measurements ($M$) must be of order of $O(K^2)$ where $k$ is number of non-zeros. This number of measurements is so greater than $Klog(N/K)$.
+
+Another conditions instead of RIP, is stRIP which is much much simpler to prove.
+
+Ref: [A.Amini,"Deterministic Compressed Sensing" PhD Thesis, Sharif University of Technology, Iran, 2011]
+
+Unfortunately, you cannot test for RIP this way. You calculate delta for one random s-sparse vector. The RIP condition must hold for all possible such vectors. In principle you can calculate it via the singular value decomposition, but you will have to do so for all possible sub-matrices of $A$ with $K$ or fewer columns from the original $A$. Evidently, this quickly becomes an insanely large and computationally intractable number of combinations for all but the very smallest (and practically irrelevant) matrices. Testing the RIP of a particular matrix $A$ is hopeless (I have tried - just to get a feel of what it would take).
+
+If you are interested in a measure you can realistically calculate, have a look at the coherence of $A$.
+
+In my opinion, the RIP is not that useful a measure in practice. For example, have a look at Donoho & Tanner, Precise Undersampling Theorems. Figure 6a illustrates the so-called phase transition performance implied by the RIP compared to the one they derive in said paper. The polytope-based phase transition derived in the paper far more accurately reflects the practical performance you are going to experience with compressed sensing reconstruction.
+
+• While the mutual coherence is much easier to calculate, the bounds it leads to are very pessimistic. Mudjat Cetin has looked at developing other measures based on mutual coherence. I don't have the references handy right now. – David Apr 15 '16 at 23:05

@@ -1,0 +1,41 @@
+# Optimization algorithm selection for 3 variable integer
+
+I have a cost function: $f(x,y,z) \rightarrow \mathbb{R}$
+
+• it is very expensive to evaluate
+• $x,y,z \in \mathbb{Z}$
+• 0 < x < 10
+• 0 < y < 30
+• 0 < z < 100
+• I thought it was convex, not sure now based on @Brian's commentary.
+• $f$ can only be evaluated at integers ( I pondered trying to evaluate at real's but it would be fairly insanely difficult to try & the result would be totally bogus).
+• $f$ is smooth but only at the integer values. So the gradient could only be computed using re-evaluating $f$ at intervals - but again that's really expensive.
+
+I'm looking for suggestions on algorithms, and libraries ( C++ preferred, C acceptable ).
+
+I've spent a couple of days trying to brush up on the topics, but its pretty dense. I've been looking at COIN-OR, specifically OSI, but I can't seem to figure out how to formulate my problem into the API. I've also looked at EasyLocal++, but haven't really dug in yet.
+
+• If $f$ can only be evaluated at points where $x$, $y$, and $z$ are integer, then it isn't a differentiable function and isn't smooth. It's also not convex (since the definition of a convex function involves a function defined on a convex set, and the set of integer points in the box isn't a convex set.) Branch and bound approaches that depend on solving a continuous relaxation of the problem aren't going to work, because you can't evaluate that continuous relaxation of the problem. – Brian Borchers May 12 '13 at 4:16
+• An interpolated response surface will approximate the function and will get you derivative information for algorithms that require once (or twice) continuously differentiable functions. Is the interpolant meaningful if it doesn't make sense to evaluate the function at noninteger values? What about the result would make it bogus? Even derivative-free optimization methods generally assume that $f$ is at least Lipschitz continuous, if not differentiable, and assume that derivative information is unavailable, not that it doesn't exist at all (even in a generalized gradient sense). – Geoff Oxberry May 12 '13 at 22:43
+• I was under the impression ( aparently wrongly ) that that $f$ was convex if its result was convex - not the input set. I have visualized the input set - its a fairly nice 3D grid with some corners missing. – Zac May 13 '13 at 6:16
+• I can evaluate one example of the set $x,y,z$, but there are many such sets. Evaluating the full permutation of one set of $x,y,z$ takes ~2 minutes. I need to be able to evaluate hundreds of different sets of $x,y,z$ in a matter of seconds. I could go massively parallel, but I'd rather do it smarter. – Zac May 13 '13 at 6:20
+
+You haven't said whether $f$ can be evaluated at points where $x$, $y$, and $z$ are real numbers within the specified ranges that aren't integers. If this makes no sense, than the function isn't actually convex. You also haven't said whether $f$ is smooth (e.g. is it twice continuously differentiable?)
+
+Conventional gradient based optimization algorithms will typically require quite a few function evaluations (e.g. for line searches) as well as requiring the gradient of $f$ (which can be approximated by finite differences, but that implies even more function evaluations.) If the function is convex but not smooth, and you can't describe the non-smoothness in more detail, then these algorithms aren't appropriate anyway.
+
+For a low dimensional problem with very expensive (or noisy) function evaluations, its often a good choice to use a "response surface method" to build a regression model of the function, minimize over the simple (e.g. quadratic)function that you've built using regression, and then (as many times as you can afford) narrow your search and build a new regression model.
+
+Can you afford to do 27 function evaluations at $x=0, 5, 10$, $y=0, 15, 30$, and $z=0, 50, 100$? That should be enough to construct a first quadratic model of the response surface.
+
+• I'd suggest rounding off to the nearest integers the minimum of the response surface or simply trying all of the nearby integer points. Actually running branch and bound to prove optimality of your solution is probably impractical. – Brian Borchers May 11 '13 at 19:38
+• The idea of the 'response surface' is really interesting. I think i'm going to try evaluating $f$ a whole bunch of times and regressing a simple version of it that is cheap to evaluate. – Zac May 12 '13 at 4:02
+• How expensive is it to evaluate $f$ at a given point? Does it take minutes? hours? days? How many total function evaluations can you afford to perform? – Brian Borchers May 12 '13 at 4:18
+
+The convexity of $f$ (over the continuous relaxation of the domain) does not matter as far as choosing the outermost solver: you will need a branch-and-bound algorithm if you choose to solve your problem deterministically because you have binary decision variables. I presume $f$ is nonlinear? If that is the case, you will need an MINLP solver like Bonmin. The convexity of $f$ will help in solving lower bounding problems; if you relax all of the binary variables to continuous variables, you should be able to find a lower bound on your solution with a nonlinear programming solver like IPOPT. Feasible solutions will give you an upper bound. I'll see if I can dig around to find a good online reference about branch-and-bound algorithms in integer programming. You could also solve the nonlinear problems using derivative-free methods, to save on function evaluations.
+
+If $f$ is linear, you'll probably want to use something like CBC, which is a branch-and-cut framework (similar in spirit to branch-and-bound). However, given that $f$ is expensive to evaluate, I doubt it is linear.
+
+These methods don't lend themselves to problems with expensive function evaluations. Are you willing to give up some some accuracy in the solution for a faster algorithm, and if so, how much?
+
+• I am willing to give up accuracy for a faster algorithm. Lots in fact. – Zac May 12 '13 at 4:14

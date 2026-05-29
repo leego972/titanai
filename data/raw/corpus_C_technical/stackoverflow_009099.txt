@@ -1,0 +1,116 @@
+Question: <p>How do I connect to Gmail and determine which messages have attachments?  I then want to download each attachment, printing out the Subject: and From: for each message as I process it.</p>
+
+Answer: <p>Here's something I wrote to download my bank statements in <a href="http://groovy.codehaus.org/" rel="nofollow">Groovy</a> (dynamic language for the Java Platform).</p>
+
+<pre><code>import javax.mail.*
+import java.util.Properties
+
+String  gmailServer
+int gmailPort
+def user, password, LIMIT
+def inboxFolder, root, StartDate, EndDate
+
+
+//    Downloads all attachments from a gmail mail box as per some criteria
+//    to a specific folder
+//    Based on code from
+//    http://agileice.blogspot.com/2008/10/using-groovy-to-connect-to-gmail.html
+//    http://stackoverflow.com/questions/155504/download-mail-attachment-with-java
+//
+//    Requires: 
+//        java mail jars in the class path (mail.jar and activation.jar)
+//        openssl, with gmail certificate added to java keystore (see agileice blog)
+//        
+//    further improvement: maybe findAll could be used to filter messages
+//    subject could be added as another criteria
+////////////////////// &lt;CONFIGURATION&gt; //////////////////////
+// Maximm number of emails to access in case parameter range is too high
+LIMIT = 10000
+
+// gmail credentials
+gmailServer = "imap.gmail.com"
+gmailPort = 993
+
+user = "gmailuser@gmail.com"
+password = "gmailpassword"
+
+// gmail label, or "INBOX" for inbox
+inboxFolder = "finance"
+
+// local file system where the attachment files need to be stored
+root = "D:\\AttachmentStore" 
+
+// date range dd-mm-yyyy
+StartDate= "31-12-2009"
+EndDate = "1-6-2010" 
+////////////////////// &lt;/CONFIGURATION&gt; //////////////////////
+
+StartDate = Date.parse("dd-MM-yyyy", StartDate)
+EndDate = Date.parse("dd-MM-yyyy", EndDate)
+
+Properties props = new Properties();
+props.setProperty("mail.store.protocol", "imaps");
+props.setProperty("mail.imaps.host", gmailServer);
+props.setProperty("mail.imaps.port", gmailPort.toString());
+props.setProperty("mail.imaps.partialfetch", "false");
+
+def session = javax.mail.Session.getDefaultInstance(props,null)
+def store = session.getStore("imaps")
+
+store.connect(gmailServer, user, password)
+
+int i = 0;
+def folder = store.getFolder(inboxFolder)
+
+folder.open(Folder.READ_ONLY)
+
+for(def msg : folder.messages) {
+
+     //if (msg.subject?.contains("bank Statement"))
+     println "[$i] From: ${msg.from} Subject: ${msg.subject} -- Received: ${msg.receivedDate}"
+
+     if (msg.receivedDate &lt;  StartDate || msg.receivedDate &gt; EndDate) {
+         println "Ignoring due to date range"
+         continue
+     }
+
+
+     if (msg.content instanceof Multipart) {
+         Multipart mp = (Multipart)msg.content;
+
+         for (int j=0; j &lt; mp.count; j++) {
+
+             Part part = mp.getBodyPart(j);
+
+             println " ---- ${part.fileName} ---- ${part.disposition}"
+
+             if (part.disposition?.equalsIgnoreCase(Part.ATTACHMENT)) {
+
+                 if (part.content) {
+
+                     def name = msg.receivedDate.format("yyyy_MM_dd") + " " + part.fileName
+                     println "Saving file to $name"
+
+                     def f = new File(root, name)
+
+                     //f &lt;&lt; part.content
+                     try {
+                         if (!f.exists())
+                             f &lt;&lt; part.content
+                     }
+                     catch (Exception e) {
+                         println "*** Error *** $e" 
+                     }
+                 }
+                 else {
+                    println "NO Content Found!!"
+                 }
+             }
+         }
+     }
+
+     if (i++ &gt; LIMIT)
+         break;
+
+}
+</code></pre>

@@ -1,0 +1,88 @@
+Question: <p>Is there any example code of a <a href="http://www.python.org/">cpython</a> (not IronPython) client which can call Windows Communication Foundation (WCF) service?</p>
+
+Answer: <p>Just to help someone to access WCF SOAP 1.2 service with WS-Addressing using suds.
+Main problem is to inject action name in every message.</p>
+
+<p>This example for python 3 and suds port <a href="https://bitbucket.org/jurko/suds" rel="nofollow">https://bitbucket.org/jurko/suds</a>.</p>
+
+<p>Example uses custom authentification based on HTTP headers, i leave it as is.</p>
+
+<p>TODO: Automatically get api_direct_url from WSDL (at now it is hard coded).</p>
+
+<pre><code>from suds.plugin import MessagePlugin
+from suds.sax.text import Text
+from suds.wsse import Security, UsernameToken
+from suds.sax.element import Element
+from suds.sax.attribute import Attribute
+from suds.xsd.sxbasic import Import
+
+api_username = 'some'
+api_password = 'none'
+
+class api(object):
+    api_direct_url = 'some/mex'
+    api_url = 'some.svc?singleWsdl|Wsdl'
+
+    NS_WSA = ('wsa', 'http://www.w3.org/2005/08/addressing')
+
+    _client_instance = None
+    @property
+    def client(self):
+        if self._client_instance:
+            return self._client_instance
+        from suds.bindings import binding
+        binding.envns = ('SOAP-ENV', 'http://www.w3.org/2003/05/soap-envelope')
+
+        api_inst = self
+        class _WSAPlugin(MessagePlugin):
+            def marshalled(self, context):
+                api_inst._marshalled_message(context)
+
+        self._client_instance = Client(self.api_url,
+                             plugins=[_WSAPlugin()],
+                             headers={'Content-Type': 'application/soap+xml',
+                                      'login':api_username,
+                                      'password': api_password}
+                             )
+        headers = []
+        headers.append(Element('To', ns=self.NS_WSA).setText(self.api_direct_url))
+        headers.append(Element('Action', ns=self.NS_WSA).setText('Blank'))
+        self._client_instance.set_options(soapheaders=headers)
+
+        cache = self._client_instance.options.cache
+        cache.setduration(days=10)
+        return self._client_instance
+
+    def _marshalled_message(self, context):
+        def _children(r):
+            if hasattr(r, 'children'):
+                for c in r.children:
+                    yield from _children(c)
+                    yield c
+        for el in _children(context.envelope):
+            if el.name == 'Action':
+                el.text = Text(self._current_action)
+                return
+
+    _current_action = None
+    def _invoke(self, method, *args):
+        try:
+            self._current_action = method.method.soap.action.strip('"')
+            return method(*args)
+        finally:
+            self._current_action = None
+
+    def GetRequestTypes(self):
+        return self._invoke(self.client.service.GetRequestTypes)[0]
+
+    def GetTemplateByRequestType(self, request_type_id):
+        js = self._invoke(self.client.service.GetTemplateByRequestType, request_type_id)
+        return json.loads(js)
+
+    def GetRequestStatus(self, request_guid):
+        return self._invoke(self.client.service.GetRequestStatus, request_guid)
+
+    def SendRequest(self, request_type_id, request_json):
+        r = json.dumps(request_json, ensure_ascii=False)
+        return self._invoke(self.client.service.SendRequest, request_type_id, r)
+</code></pre>

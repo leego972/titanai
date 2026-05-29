@@ -1,0 +1,158 @@
+Question: <p>Say I have the following in my <code>models.py</code>:</p>
+
+<pre><code>class Company(models.Model):
+   name = ...
+
+class Rate(models.Model):
+   company = models.ForeignKey(Company)
+   name = ...
+
+class Client(models.Model):
+   name = ...
+   company = models.ForeignKey(Company)
+   base_rate = models.ForeignKey(Rate)
+</code></pre>
+
+<p>I.e. there are multiple <code>Companies</code>, each having a range of <code>Rates</code> and <code>Clients</code>.  Each <code>Client</code> should have a base <code>Rate</code> that is chosen from it's parent <code>Company's Rates</code>, not another <code>Company's Rates</code>.</p>
+
+<p>When creating a form for adding a <code>Client</code>, I would like to remove the <code>Company</code> choices (as that has already been selected via an "Add Client" button on the <code>Company</code> page) and limit the <code>Rate</code> choices to that <code>Company</code> as well.</p>
+
+<p>How do I go about this in Django 1.0?  </p>
+
+<p>My current <code>forms.py</code> file is just boilerplate at the moment:</p>
+
+<pre><code>from models import *
+from django.forms import ModelForm
+
+class ClientForm(ModelForm):
+    class Meta:
+        model = Client
+</code></pre>
+
+<p>And the <code>views.py</code> is also basic:</p>
+
+<pre><code>from django.shortcuts import render_to_response, get_object_or_404
+from models import *
+from forms import *
+
+def addclient(request, company_id):
+    the_company = get_object_or_404(Company, id=company_id)
+
+    if request.POST:
+    	form = ClientForm(request.POST)
+    	if form.is_valid():
+    		form.save()
+    		return HttpResponseRedirect(the_company.get_clients_url())
+    else:
+    	form = ClientForm()
+
+    return render_to_response('addclient.html', {'form': form, 'the_company':the_company})
+</code></pre>
+
+<p>In Django 0.96 I was able to hack this in by doing something like the following before rendering the template:</p>
+
+<pre><code>manipulator.fields[0].choices = [(r.id,r.name) for r in Rate.objects.filter(company_id=the_company.id)]
+</code></pre>
+
+<p><a href="http://docs.djangoproject.com/en/dev/ref/models/fields/#django.db.models.ForeignKey.limit_choices_to"><code>ForeignKey.limit_choices_to</code></a> seems promising but I don't know how to pass in <code>the_company.id</code> and I'm not clear if that will work outside the Admin interface anyway.</p>
+
+<p>Thanks.  (This seems like a pretty basic request but if I should redesign something I'm open to suggestions.)</p>
+
+Answer: <p>This is simple, and works with Django 1.4:</p>
+
+<pre><code>class ClientAdminForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super(ClientAdminForm, self).__init__(*args, **kwargs)
+        # access object through self.instance...
+        self.fields['base_rate'].queryset = Rate.objects.filter(company=self.instance.company)
+
+class ClientAdmin(admin.ModelAdmin):
+    form = ClientAdminForm
+    ....
+</code></pre>
+
+<p>You don't need to specify this in a form class, but can do it directly in the ModelAdmin, as Django already includes this built-in method on the ModelAdmin (from the docs):</p>
+
+<pre><code>ModelAdmin.formfield_for_foreignkey(self, db_field, request, **kwargs)Â¶
+'''The formfield_for_foreignkey method on a ModelAdmin allows you to 
+   override the default formfield for a foreign keys field. For example, 
+   to return a subset of objects for this foreign key field based on the
+   user:'''
+
+class MyModelAdmin(admin.ModelAdmin):
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "car":
+            kwargs["queryset"] = Car.objects.filter(owner=request.user)
+        return super(MyModelAdmin, self).formfield_for_foreignkey(db_field, request, **kwargs)
+</code></pre>
+
+<p>An even niftier way to do this (for example in creating a front-end admin interface that users can access) is to subclass the ModelAdmin and then alter the methods below.  The net result is a user interface that ONLY shows them content that is related to them, while allowing you (a super-user) to see everything.</p>
+
+<p>I've overridden four methods, the first two make it impossible for a user to delete anything, and it also removes the delete buttons from the admin site.  </p>
+
+<p>The third override filters any query that contains a reference to (in the example 'user' or 'porcupine' (just as an illustration).  </p>
+
+<p>The last override filters any foreignkey field in the model to filter the choices available the same as the basic queryset.  </p>
+
+<p>In this way, you can present an easy to manage front-facing admin site that allows users to mess with their own objects, and you don't have to remember to type in the specific ModelAdmin filters we talked about above.  </p>
+
+<pre><code>class FrontEndAdmin(models.ModelAdmin):
+    def __init__(self, model, admin_site):
+        self.model = model
+        self.opts = model._meta
+        self.admin_site = admin_site
+        super(FrontEndAdmin, self).__init__(model, admin_site)
+</code></pre>
+
+<p>remove 'delete' buttons:</p>
+
+<pre><code>    def get_actions(self, request):
+        actions = super(FrontEndAdmin, self).get_actions(request)
+        if 'delete_selected' in actions:
+            del actions['delete_selected']
+        return actions
+</code></pre>
+
+<p>prevents delete permission</p>
+
+<pre><code>    def has_delete_permission(self, request, obj=None):
+        return False
+</code></pre>
+
+<p>filters objects that can be viewed on the admin site:</p>
+
+<pre><code>    def get_queryset(self, request):
+        if request.user.is_superuser:
+            try:
+                qs = self.model.objects.all()
+            except AttributeError:
+                qs = self.model._default_manager.get_queryset()
+            return qs
+
+        else:
+            try:
+                qs = self.model.objects.all()
+            except AttributeError:
+                qs = self.model._default_manager.get_queryset()
+
+            if hasattr(self.model, âuserâ):
+                return qs.filter(user=request.user)
+            if hasattr(self.model, âporcupineâ):
+                return qs.filter(porcupine=request.user.porcupine)
+            else:
+                return qs
+</code></pre>
+
+<p>filters choices for all foreignkey fields on the admin site:</p>
+
+<pre><code>    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if request.employee.is_superuser:
+            return super(FrontEndAdmin, self).formfield_for_foreignkey(db_field, request, **kwargs)
+
+        else:
+            if hasattr(db_field.rel.to, 'user'):
+                kwargs["queryset"] = db_field.rel.to.objects.filter(user=request.user)
+            if hasattr(db_field.rel.to, 'porcupine'):
+                kwargs["queryset"] = db_field.rel.to.objects.filter(porcupine=request.user.porcupine)
+            return super(ModelAdminFront, self).formfield_for_foreignkey(db_field, request, **kwargs)
+</code></pre>

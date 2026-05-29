@@ -1,0 +1,38 @@
+Question: <p>I have a python script that is a http-server: <a href="http://paste2.org/p/89701" rel="nofollow">http://paste2.org/p/89701</a>, when benchmarking it against ApacheBench (ab) with a concurrency level (-c switch) that is lower then or equal to the value i specified in the socket.listen()-call in the sourcecode everything works fine, but as soon as put the concurrency level in apache bench above the value in the socket.listen()-call performance drops through the floor, some example:</p>
+
+<ul>
+<li>socket.listen(<strong>10</strong>) and ab -n 50 -c <strong>10</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>1200req/s</strong></li>
+<li>socket.listen(<strong>10</strong>) and ab -n 50 -c <strong>11</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>40req/s</strong></li>
+<li>socket.listen(<strong>100</strong>) and ab -n 5000 -c <strong>100</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>1000req/s</strong></li>
+<li>socket.listen(<strong>100</strong>) and ab -n 5000 -c <strong>101</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>32req/s</strong></li>
+</ul>
+
+<p>Nothing changes in the code between the two calls, I canât figure out what is wrong - been at this problem for one day now. Also note that: The multiplexing version of the same code (I wrote to compare to the threaded version) works FINE no matter what socket.listen() is set to or what the concurrency (-c switch) in apache is set to.</p>
+
+<p><em>I've spent a day on IRC/python docs, posted on comp.lang.python and on my blog - I can't find ANYONE that even has an idea what could be wrong. Help me!</em></p>
+
+Answer: <p>I found <a href="http://www.mail-archive.com/dev@tomcat.apache.org/msg22589.html" rel="nofollow">this article</a> on backlog on tomcat / java which gives an interesting insight in the backlog:</p>
+
+<blockquote>
+  <p>for example, if all threads are busy
+  in java handling requests, the kernel
+  will handle SYN and TCP handshakes
+  until its backlog is full. when the
+  backlog is full, it will simply drop
+  future SYN requests. it will not send
+  a RST, ie causing "Connection refused"
+  on the client, instead the client will
+  assume the package was lost and
+  retransmit the SYN. hopefully, the
+  backlog queue will have cleared up by
+  then.</p>
+</blockquote>
+
+<p>As I interpret it, by asking ab to create more simultaneous connection than your
+socket is configured to handle packets get dropped, not refused, and I do not know
+how ab handles that. It may be that it retransmits the SYN, but possibly after waiting
+a while. This may even be specced somewhere (TCP protocol?).</p>
+
+<p>As said, I do not know but I hope this hints at the cause. </p>
+
+<p>Good luck!</p>

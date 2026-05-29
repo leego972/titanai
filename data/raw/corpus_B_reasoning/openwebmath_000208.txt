@@ -1,0 +1,84 @@
+# set the context to run dissolve_degenerate from the python shell
+
+I've downloaded some 3d models of a city with a ton of topologic errors. I am trying to fix some iterating through the objects and running dissolve_degenerate. But when calling the function I get a Runtime error : RuntimeError: Operator bpy.ops.mesh.dissolve_degenerate.poll() failed, context is incorrect. I see this a fairly common problem for Blender neophites like me, but despite looking to several examples of "context incorrect" I can't figure out how fix this problem. Can somebody tell me how to set the right context to call dissolve_degenerate from the python shell?
+
+# deselect all objects
+bpy.ops.object.select_all(action='DESELECT')
+
+for i,o in enumerate(bpy.data.objects):
+
+if o.type == 'MESH':
+
+o.select_set(True)
+bpy.ops.object.editmode_toggle()
+
+dim_min = min(o.dimensions)
+# the following line throws an error
+bpy.ops.mesh.dissolve_degenerate(threshold=dim_min/100)
+o.select_set(False)
+print(o.name)
+if i>10:
+break
+
+
+With bmesh
+
+Started out as a comment on answer, ended up as another answer.
+
+• Can do the above with bmesh without any need to select or switch mode.
+• Loop over all objects in scene, find all the unique meshes, and list their objects.
+• For each mesh, run the degenerate dissolve bmesh operator. The mesh dimension is gained from its bounding box (local coordinates), not its dimension which is object coordinates and involves scale. (Else if scale > 100 will remove all geo)
+
+Test script, run in object mode.
+
+import bpy
+from collections import defaultdict
+from mathutils import Vector
+
+import bmesh
+context = bpy.context
+scene = context.scene
+
+# meshes in scene
+def mesh_dim(ob):
+bbox = [Vector(b) for b in ob.bound_box]
+return (
+bbox[6] - bbox[0]
+)
+
+meshes = defaultdict(list)
+for o in scene.objects:
+if o.type != 'MESH':
+continue
+meshes[o.data].append(o)
+
+bm = bmesh.new()
+for m, obs in meshes.items():
+bm.from_mesh(m)
+bmesh.ops.dissolve_degenerate(
+bm,
+dist=min(mesh_dim(obs[0])) / 100,
+edges=bm.edges,
+)
+bm.to_mesh(m)
+m.update()
+bm.clear()
+
+
+one solution is to put twice editmode_toggle in the loop, otherwise it every alternative iteration is going into object mode, which is incompatible with dissolve_degenerate
+
+# deselect all objects
+bpy.ops.object.select_all(action='DESELECT')
+
+for i,o in enumerate(bpy.data.objects):
+
+if o.type == 'MESH':
+
+o.select_set(True)
+bpy.ops.object.editmode_toggle()
+
+dim_min = min(o.dimensions)
+bpy.ops.mesh.dissolve_degenerate(threshold=dim_min/100)
+
+o.select_set(False)
+bpy.ops.object.editmode_toggle()

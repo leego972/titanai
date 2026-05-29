@@ -1,0 +1,51 @@
+Question: <p>In C++ you can disable a function in parent's class by declaring it as private in the child class. How can this be done in Python? I.E. How can I hide parent's function from child's public interface?</p>
+
+Answer: <p>kurosch's method of solving the problem isn't quite correct, because you can still use <code>b.foo</code> without getting an <code>AttributeError</code>. If you don't invoke the function, no error occurs. Here are two ways that I can think to do this:</p>
+
+<pre><code>import doctest
+
+class Foo(object):
+    """
+    &gt;&gt;&gt; Foo().foo()
+    foo
+    """
+    def foo(self): print 'foo'
+    def fu(self): print 'fu'
+
+class Bar(object):
+    """
+    &gt;&gt;&gt; b = Bar()
+    &gt;&gt;&gt; b.foo()
+    Traceback (most recent call last):
+    ...
+    AttributeError
+    &gt;&gt;&gt; hasattr(b, 'foo')
+    False
+    &gt;&gt;&gt; hasattr(b, 'fu')
+    True
+    """
+    def __init__(self): self._wrapped = Foo()
+
+    def __getattr__(self, attr_name):
+        if attr_name == 'foo': raise AttributeError
+        return getattr(self._wrapped, attr_name)
+
+class Baz(Foo):
+    """
+    &gt;&gt;&gt; b = Baz()
+    &gt;&gt;&gt; b.foo() # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+    ...
+    AttributeError...
+    &gt;&gt;&gt; hasattr(b, 'foo')
+    False
+    &gt;&gt;&gt; hasattr(b, 'fu')
+    True
+    """
+    foo = property()
+
+if __name__ == '__main__':
+    doctest.testmod()
+</code></pre>
+
+<p>Bar uses the "wrap" pattern to restrict access to the wrapped object. <a href="http://www.aleax.it/gdd_pydp.pdf">Martelli has a good talk</a> dealing with this. Baz uses <a href="http://docs.python.org/library/functions.html?highlight=property#property">the property built-in</a> to implement the descriptor protocol for the attribute to override.</p>

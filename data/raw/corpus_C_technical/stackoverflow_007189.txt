@@ -1,0 +1,193 @@
+Question: <p>What's the easiest way to use a linked list in python? In scheme, a linked list is defined simply by <code>'(1 2 3 4 5)</code>. Python's lists, <code>[1, 2, 3, 4, 5]</code>, and tuples, <code>(1, 2, 3, 4, 5)</code>, are not, in fact, linked lists, and linked lists have some nice properties such as constant-time concatenation, and being able to reference separate parts of them. Make them immutable and they are really easy to work with!</p>
+
+Answer: <p>Here's a slightly more complex version of a linked list class, with a similar interface to python's sequence types (ie. supports indexing, slicing, concatenation with arbitrary sequences etc).  It should have O(1) prepend, doesn't copy data unless it needs to and can be used pretty interchangably with tuples.</p>
+
+<p>It won't be as space or time efficient as lisp cons cells, as python classes are obviously a bit more heavyweight (You could improve things slightly with "<code>__slots__ = '_head','_tail'</code>" to reduce memory usage).  It will have the desired big O performance characteristics however.</p>
+
+<p>Example of usage:</p>
+
+<pre><code>&gt;&gt;&gt; l = LinkedList([1,2,3,4])
+&gt;&gt;&gt; l
+LinkedList([1, 2, 3, 4])
+&gt;&gt;&gt; l.head, l.tail
+(1, LinkedList([2, 3, 4]))
+
+# Prepending is O(1) and can be done with:
+LinkedList.cons(0, l)
+LinkedList([0, 1, 2, 3, 4])
+# Or prepending arbitrary sequences (Still no copy of l performed):
+[-1,0] + l
+LinkedList([-1, 0, 1, 2, 3, 4])
+
+# Normal list indexing and slice operations can be performed.
+# Again, no copy is made unless needed.
+&gt;&gt;&gt; l[1], l[-1], l[2:]
+(2, 4, LinkedList([3, 4]))
+&gt;&gt;&gt; assert l[2:] is l.next.next
+
+# For cases where the slice stops before the end, or uses a
+# non-contiguous range, we do need to create a copy.  However
+# this should be transparent to the user.
+&gt;&gt;&gt; LinkedList(range(100))[-10::2]
+LinkedList([90, 92, 94, 96, 98])
+</code></pre>
+
+<p>Implementation:</p>
+
+<pre><code>import itertools
+
+class LinkedList(object):
+    """Immutable linked list class."""
+
+    def __new__(cls, l=[]):
+        if isinstance(l, LinkedList): return l # Immutable, so no copy needed.
+        i = iter(l)
+        try:
+            head = i.next()
+        except StopIteration:
+            return cls.EmptyList   # Return empty list singleton.
+
+        tail = LinkedList(i)
+
+        obj = super(LinkedList, cls).__new__(cls)
+        obj._head = head
+        obj._tail = tail
+        return obj
+
+    @classmethod
+    def cons(cls, head, tail):
+        ll =  cls([head])
+        if not isinstance(tail, cls):
+            tail = cls(tail)
+        ll._tail = tail
+        return ll
+
+    # head and tail are not modifiable
+    @property  
+    def head(self): return self._head
+
+    @property
+    def tail(self): return self._tail
+
+    def __nonzero__(self): return True
+
+    def __len__(self):
+        return sum(1 for _ in self)
+
+    def __add__(self, other):
+        other = LinkedList(other)
+
+        if not self: return other   # () + l = l
+        start=l = LinkedList(iter(self))  # Create copy, as we'll mutate
+
+        while l:
+            if not l._tail: # Last element?
+                l._tail = other
+                break
+            l = l._tail
+        return start
+
+    def __radd__(self, other):
+        return LinkedList(other) + self
+
+    def __iter__(self):
+        x=self
+        while x:
+            yield x.head
+            x=x.tail
+
+    def __getitem__(self, idx):
+        """Get item at specified index"""
+        if isinstance(idx, slice):
+            # Special case: Avoid constructing a new list, or performing O(n) length 
+            # calculation for slices like l[3:].  Since we're immutable, just return
+            # the appropriate node. This becomes O(start) rather than O(n).
+            # We can't do this for  more complicated slices however (eg [l:4]
+            start = idx.start or 0
+            if (start &gt;= 0) and (idx.stop is None) and (idx.step is None or idx.step == 1):
+                no_copy_needed=True
+            else:
+                length = len(self)  # Need to calc length.
+                start, stop, step = idx.indices(length)
+                no_copy_needed = (stop == length) and (step == 1)
+
+            if no_copy_needed:
+                l = self
+                for i in range(start): 
+                    if not l: break # End of list.
+                    l=l.tail
+                return l
+            else:
+                # We need to construct a new list.
+                if step &lt; 1:  # Need to instantiate list to deal with -ve step
+                    return LinkedList(list(self)[start:stop:step])
+                else:
+                    return LinkedList(itertools.islice(iter(self), start, stop, step))
+        else:       
+            # Non-slice index.
+            if idx &lt; 0: idx = len(self)+idx
+            if not self: raise IndexError("list index out of range")
+            if idx == 0: return self.head
+            return self.tail[idx-1]
+
+    def __mul__(self, n):
+        if n &lt;= 0: return Nil
+        l=self
+        for i in range(n-1): l += self
+        return l
+    def __rmul__(self, n): return self * n
+
+    # Ideally we should compute the has ourselves rather than construct
+    # a temporary tuple as below.  I haven't impemented this here
+    def __hash__(self): return hash(tuple(self))
+
+    def __eq__(self, other): return self._cmp(other) == 0
+    def __ne__(self, other): return not self == other
+    def __lt__(self, other): return self._cmp(other) &lt; 0
+    def __gt__(self, other): return self._cmp(other) &gt; 0
+    def __le__(self, other): return self._cmp(other) &lt;= 0
+    def __ge__(self, other): return self._cmp(other) &gt;= 0
+
+    def _cmp(self, other):
+        """Acts as cmp(): -1 for self&lt;other, 0 for equal, 1 for greater"""
+        if not isinstance(other, LinkedList):
+            return cmp(LinkedList,type(other))  # Arbitrary ordering.
+
+        A, B = iter(self), iter(other)
+        for a,b in itertools.izip(A,B):
+           if a&lt;b: return -1
+           elif a &gt; b: return 1
+
+        try:
+            A.next()
+            return 1  # a has more items.
+        except StopIteration: pass
+
+        try:
+            B.next()
+            return -1  # b has more items.
+        except StopIteration: pass
+
+        return 0  # Lists are equal
+
+    def __repr__(self):
+        return "LinkedList([%s])" % ', '.join(map(repr,self))
+
+class EmptyList(LinkedList):
+    """A singleton representing an empty list."""
+    def __new__(cls):
+        return object.__new__(cls)
+
+    def __iter__(self): return iter([])
+    def __nonzero__(self): return False
+
+    @property
+    def head(self): raise IndexError("End of list")
+
+    @property
+    def tail(self): raise IndexError("End of list")
+
+# Create EmptyList singleton
+LinkedList.EmptyList = EmptyList()
+del EmptyList
+</code></pre>

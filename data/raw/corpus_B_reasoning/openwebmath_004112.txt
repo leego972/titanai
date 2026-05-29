@@ -1,0 +1,142 @@
+# Geocoding in Geopandas¶
+
+It is possible to do geocoding in Geopandas using its integrated functionalities of geopy. Geopandas has a function called geocode() that can geocode a list of addresses (strings) and return a GeoDataFrame containing the resulting point objects in geometry column.
+
+Nice, isn’t it! Let’s try this out.
+
+We will geocode addresses stored in a text file called addresses.txt. The addresses are located in the Helsinki Region in Southern Finland.
+
+The first rows of the data look like this:
+
+id;addr
+1000;Itämerenkatu 14, 00101 Helsinki, Finland
+1001;Kampinkuja 1, 00100 Helsinki, Finland
+1002;Kaivokatu 8, 00101 Helsinki, Finland
+1003;Hermannin rantatie 1, 00580 Helsinki, Finland
+
+
+We have an id for each row and an address on column addr.
+
+• Let’s first read the data into a Pandas DataFrame using the read_csv() -function:
+[1]:
+
+# Import necessary modules
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+
+# Filepath
+
+
+• Let’s check that we imported the file correctly:
+[2]:
+
+len(data)
+
+[2]:
+
+34
+
+[3]:
+
+data.head()
+
+[3]:
+
+0 1000 Itämerenkatu 14, 00101 Helsinki, Finland
+1 1001 Kampinkuja 1, 00100 Helsinki, Finland
+2 1002 Kaivokatu 8, 00101 Helsinki, Finland
+3 1003 Hermannin rantatie 1, 00580 Helsinki, Finland
+4 1005 Tyynenmerenkatu 9, 00220 Helsinki, Finland
+
+Now we have our data in a Pandas DataFrame and we can geocode our addresses using the geopandas geocoding function. geopandas.tools.geocode uses geopy package in the background.
+
+• Let’s import the geocoding function and geocode the addresses (column addr) using Nominatim.
+• Remember to provide a custom string (name of your application) in the user_agent parameter.
+• If needed, you can add the timeout-parameter which specifies how many seconds we will wait for a response from the service.
+[4]:
+
+# Import the geocoding tool
+from geopandas.tools import geocode
+
+# Geocode addresses using Nominatim. Remember to provide a custom "application name" in the user_agent parameter!
+geo = geocode(data['addr'], provider='nominatim', user_agent='autogis_xx', timeout=4)
+
+[5]:
+
+geo.head()
+
+[5]:
+
+0 Ruoholahti, 14, Itämerenkatu, Ruoholahti, Läns... POINT (24.9155624 60.1632015)
+1 Kamppi, 1, Kampinkuja, Kamppi, Eteläinen suurp... POINT (24.9316914 60.1690222)
+2 Bangkok9, 8, Kaivokatu, Keskusta, Kluuvi, Etel... POINT (24.9416849 60.1699637)
+3 Hermannin rantatie, Kyläsaari, Hermanni, Helsi... POINT (24.9719335 60.1969965)
+4 Hesburger, 9, Tyynenmerenkatu, Jätkäsaari, Län... POINT (24.9216003 60.1566475)
+
+And Voilà! As a result we have a GeoDataFrame that contains our original address and a ‘geometry’ column containing Shapely Point -objects that we can use for exporting the addresses to a Shapefile for example. However, the id column is not there. Thus, we need to join the information from data into our new GeoDataFrame geo, thus making a Table Join.
+
+Rate-limiting
+
+When geocoding a large dataframe, you might encounter an error when geocoding. In case you get a time out error, try first using the timeout parameter as we did above (allow the service a bit more time to respond). In case of Too Many Requests error, you have hit the rate-limit of the service, and you should slow down your requests. To our convenience, GeoPy provides additional tools for taking into account rate limits in geocoding services. This script adapts the usage of GeoPy RateLimiter to our input data:
+
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+from shapely.geometry import Point
+
+# Initiate geocoder
+geolocator = Nominatim(user_agent='autogis_xx')
+
+# Create a geopy rate limiter:
+geocode_with_delay = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+
+# Apply the geocoder with delay using the rate limiter:
+
+# Get point coordinates from the GeoPy location object on each row:
+data["coords"] = data['temp'].apply(lambda loc: tuple(loc.point) if loc else None)
+
+# Create shapely point objects to geometry column:
+data["geometry"] = data["coords"].apply(Point)
+
+
+All in all, remember that Nominatim is not meant for super heavy use.
+
+## Table join¶
+
+Table joins in pandas
+
+For a comprehensive overview of different ways of combining DataFrames and Series based on set theory, have a look at pandas documentation about merge, join and concatenate.
+
+Table joins are really common procedures when doing GIS analyses. As you might remember from our earlier lessons, combining data from different tables based on common key attribute can be done easily in Pandas/Geopandas using the .merge() -function. We used this approach in the geo-python course exercise 6.
+
+However, sometimes it is useful to join two tables together based on the index of those DataFrames. In such case, we assume that there is same number of records in our DataFrames and that the order of the records should be the same in both DataFrames. In fact, now we have such a situation as we are geocoding our addresses where the order of the geocoded addresses in geo DataFrame is the same as in our original data DataFrame.
+
+Hence, we can join those tables together with join() -function which merges the two DataFrames together based on index by default.
+
+[6]:
+
+join = geo.join(data)
+
+[6]:
+
+0 Ruoholahti, 14, Itämerenkatu, Ruoholahti, Läns... POINT (24.9155624 60.1632015) 1000 Itämerenkatu 14, 00101 Helsinki, Finland
+1 Kamppi, 1, Kampinkuja, Kamppi, Eteläinen suurp... POINT (24.9316914 60.1690222) 1001 Kampinkuja 1, 00100 Helsinki, Finland
+2 Bangkok9, 8, Kaivokatu, Keskusta, Kluuvi, Etel... POINT (24.9416849 60.1699637) 1002 Kaivokatu 8, 00101 Helsinki, Finland
+3 Hermannin rantatie, Kyläsaari, Hermanni, Helsi... POINT (24.9719335 60.1969965) 1003 Hermannin rantatie 1, 00580 Helsinki, Finland
+4 Hesburger, 9, Tyynenmerenkatu, Jätkäsaari, Län... POINT (24.9216003 60.1566475) 1005 Tyynenmerenkatu 9, 00220 Helsinki, Finland
+• Let’s also check the data type of our new join table.
+[7]:
+
+type(join)
+
+[7]:
+
+geopandas.geodataframe.GeoDataFrame
+
+
+As a result we have a new GeoDataFrame called join where we now have all original columns plus a new column for geometry. Note! If you would do the join the other way around, i.e. data.join(geo), the output would be a pandas DataFrame, not a GeoDataFrame!
+
+• Now it is easy to save our address points into a Shapefile
+[8]:
+
+# Output file path

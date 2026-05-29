@@ -1,0 +1,102 @@
+# How to find the rank of a sudoku without row reduction
+
+Furthermore, is a sudoku always of full rank? When is it full rank and when is it not? I realized these questions are quite out there and there may not be any meaningful answer to this.
+
+• It is definitely possible for a $4\times4$ "sudoku" to either have full rank or not. For example, $\left(\begin{matrix} 1 & 2 & 3 & 4 \\ 4 & 3 & 2 & 1 \\ 3 & 4 & 1 & 2 \\ 2 & 1 & 4 & 3 \end{matrix}\right)$ has rank 3, while $\left(\begin{matrix} 1 & 2 & 3 & 4 \\ 3 & 4 & 2 & 1 \\ 4 & 3 & 1 & 2 \\ 2 & 1 & 4 & 3 \end{matrix}\right)$ has rank 4. I would assume the same is likely true of actual $9\times9$ sudoku matrices... – Micah Feb 27 '18 at 5:06
+• I suspect a sudoku is of full rank iff it has a unique solution. – Moriarty Feb 27 '18 at 5:23
+• @Moriarty: A filled $9\times9$ matrix according to the sudoku rules and without empty cells is a unique solution. I looked at this example and found both alternative solutions to have rank $9$. – Axel Kemper Feb 27 '18 at 18:58
+• @AxelKemper how did come upon the proof in your first sentence? – L to the V Feb 28 '18 at 2:58
+• A sudoku puzzle is a partially filled grid or board. Unique solution means that there is only one way to fill the empty cells and reach the solution as completely filled grid. As the rank can only be computed for a complete grid matrix, a grid without empty cells represents a unique solution. The link in my comment above shows a solution which can be transformed into another solution by swapping four cells. But I still would call each of these solutions unique. – Axel Kemper Feb 28 '18 at 8:13
+
+Using the MiniZinc constraint solver and Chuffed as solver back-end, I found the following rank $8$ sudoku:
+
+9 1 6  2 7 4  5 3 8
+2 7 5  8 6 3  4 9 1
+8 4 3  5 1 9  6 2 7
+
+6 2 9  1 3 7  8 5 4
+4 5 1  6 2 8  9 7 3
+7 3 8  4 9 5  2 1 6
+
+3 8 7  9 5 6  1 4 2
+1 9 4  7 8 2  3 6 5
+5 6 2  3 4 1  7 8 9
+
+Another rank 8 solution found using the MiniZinc G12 lazyfd solver back-end:
+
+3 2 1  7 5 6  8 9 4
+4 7 9  2 1 8  3 5 6
+8 6 5  9 4 3  2 1 7
+
+5 3 2  1 6 9  4 7 8
+1 9 8  3 7 4  5 6 2
+7 4 6  8 2 5  1 3 9
+
+2 5 4  6 9 1  7 8 3
+9 1 3  4 8 7  6 2 5
+6 8 7  5 3 2  9 4 1
+
+My model (based on this example):
+
+int: s = 3;
+int: n = s*s;
+set of int: S = 1..s;
+set of int: N = 1..n;
+
+%  sudoku board is a n x n = s² x s² matrix:
+array[N, N] of var N: puzzle;
+
+%  column multipliers for full-rank determination
+%  extra small range chosen to speed-up search
+int: CMDIM = 1;
+array[N] of var -CMDIM .. CMDIM: colMults;
+
+include "alldifferent.mzn";
+
+% All cells in a row, in a column, and in a subsquare are different.
+constraint
+forall(i in N)( alldifferent(j in N)( puzzle[i,j] ))
+/\
+forall(j in N)( alldifferent(i in N)( puzzle[i,j] ))
+/\
+forall(i, j in S)
+( alldifferent(p,q in S)( puzzle[s*(i-1)+p, s*(j-1)+q] ));
+
+%  additional constraint to enforce non-full rank for puzzle matrix
+%  Iff a linear combination of columns sums up to the null column,
+%  we don't have full rank
+constraint forall(j in N) (
+0 = sum([colMults[i] * puzzle[j, i] | i in N])
+);
+
+%  exclude trivial solution with all-zero mutipliers
+constraint exists([colMults[i] != 0 | i in N]);
+
+solve satisfy;
+
+function string: it(bool: cond, string: yes_s) =
+if cond then yes_s else "" endif;
+
+function string: ite(bool: cond, string: yes_s, string :no_s) =
+if cond then yes_s else no_s endif;
+
+output [ "sudoku:\n" ] ++
+[ show(puzzle[i,j]) ++
+if j = n then
+ite(i mod s = 0 /\ i < n, "\n\n", "\n")
+else
+ite(j mod s = 0, "  ", " ")
+endif
+| i,j in N ] ++
+["\n rank {"] ++
+[ it(j = 1, "{") ++
+show(puzzle[i,j]) ++
+it(j < n, ",") ++
+it(j == n, "}") ++
+it((j == n) /\ (i < n), ",")
+| i,j in N ] ++
+["}"] ++
+["\nColumn Multipliers: "] ++
+[show(colMults[i]) ++ " " | i in N];
+• What's the highest or lowest rank you e found? – L to the V Feb 27 '18 at 16:44
+• No rank below 8 yet. Most 9x9 sudokus certainly have full rank 9. – Axel Kemper Feb 27 '18 at 16:54

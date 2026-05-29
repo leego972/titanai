@@ -1,0 +1,40 @@
+QuantLib Python: why is the NPV different? NPV(0.1,[0,110]) should be 100, not 99.53
+
+I am trying to learn QuantLib for Python. Further to my previous question on the syntax for CashFlows.npv(), now that I understand how the syntax works, I have a question on why the output differs from what I'd expect (which is why I think a separate question is justified).
+
+In my toy example, my cashflows are zero on 15-Jan-2001 and 110 on 15-Jan-2002. If I discount them at 10%, I'd expect the pv to be 100, but I get 99.53211. Why? What am I missing? That would imply that 384 days have gone by, not 365. Those are not leap years. I have tried with act/365 and 30/360: they both give the same result, which is not 100.
+
+import QuantLib as ql
+d1 = ql.Date(15,1,2001)
+ql.Settings.instance().setEvaluationDate(d1)
+cfs = [ql.SimpleCashFlow(0, d1),
+ql.SimpleCashFlow(110, d1 + 365)]
+
+calc_date = d1
+risk_free_rate = 0.1
+curve_act_365 = ql.YieldTermStructureHandle(
+ql.FlatForward(calc_date, risk_free_rate, ql.Actual365Fixed()))
+
+pv_act_365 = ql.CashFlows.npv(cfs, curve_act_365, True)
+
+curve_30_360 = ql.YieldTermStructureHandle(
+ql.FlatForward(calc_date, risk_free_rate, ql.Thirty360()))
+
+pv_30_360 = ql.CashFlows.npv(cfs, curve_30_360, True)
+
+
+By default, QuantLib expects a continuously compounded rate in the FlatForward constructor.
+
+So the PV you are getting is basically:
+
+from math import exp
+print(110 * exp(-0.1))
+
+
+If you define your curve with an annually compounded rate like so:
+
+curve_30_360 = ql.YieldTermStructureHandle(
+ql.FlatForward(calc_date, risk_free_rate, ql.Thirty360(), ql.Compounded, ql.Annual))
+
+
+You will get 100.

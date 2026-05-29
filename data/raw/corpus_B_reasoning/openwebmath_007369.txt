@@ -1,0 +1,191 @@
+# Brute-force Hash Cracker
+
+I made a hash cracker in Python (for purely educational purposes), but it's really slow (~120 seconds for a 4 character string). How could I speed it up?
+
+Current optimizations and explanations:
+
+• Closures in CharSet.get_advance: These are faster than attribute lookups.
+• iter in PasswordCracker.crack: This moves the loop into C.
+• CharSet.next as an array.array: Faster than a dict.
+
+Possible future optimizations:
+
+• advance is kind of slow, but I'm not sure how to speed it up.
+
+Code:
+
+import hashlib
+from string import printable
+from time import time
+import itertools
+from array import array
+
+ENCODING = "ascii" # utf-8 for unicode support
+
+class CharSet():
+def __init__(self, chars):
+chars = to_bytes(chars)
+self.chars = set(chars)
+self.first = chars[0]
+self.last = chars[-1]
+self.next = array("B", [0] * 256)
+for char, next_char in zip(chars, chars[1:]):
+self.next[char] = next_char
+
+def update_chars(self, new_chars):
+new_chars = to_bytes(new_chars)
+new_chars = set(new_chars) - self.chars
+if new_chars: # if theres anything new
+self.chars |= new_chars
+new_chars = list(new_chars)
+self.next[self.last] = new_chars[0]
+self.last = new_chars[-1]
+for char, next_char in zip(new_chars, new_chars[1:]):
+self.next[char] = next_char
+
+first = self.first
+last = self.last
+next_ = self.next
+for ind, byte in enumerate(arr):
+if byte == last:
+arr[ind] = first
+else:
+arr[ind] = next_[byte]
+return hash_(arr)
+
+arr.append(first)
+return hash_(arr)
+
+def __init__(self, hash_, chars=None):
+self.hash = hash_
+if chars is None:
+chars = printable
+self.char_set = CharSet(chars)
+
+def update_chars(self, string):
+self.char_set.update_chars(string)
+
+def crack(self, hashed):
+arr = bytearray()
+pass
+return arr
+
+def to_bytes(string):
+if isinstance(string, str):
+return bytearray(string, ENCODING)
+elif isinstance(string, (bytes, bytearray)):
+return string
+else:
+raise TypeError(f"Cannot convert {string} to bytes")
+
+def get_hasher(hash_):
+def hasher(bytes):
+return hash_(bytes).digest()
+
+return hasher
+
+md5 = get_hasher(hashlib.md5)
+
+start = time()
+end = time()
+print(f"Time: {end - start} seconds.")
+
+
+Profiling results (with password "pww"):
+
+      1333313 function calls in 1.500 seconds
+
+Ordered by: standard name
+
+ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+1    0.000    0.000    1.500    1.500 <string>:1(<module>)
+1    0.000    0.000    0.000    0.000 main.py:31(get_advance)
+333326    0.394    0.000    1.376    0.000 main.py:35(advance)
+1    0.124    0.124    1.500    1.500 main.py:58(crack)
+333326    0.311    0.000    0.982    0.000 main.py:74(hasher)
+333326    0.265    0.000    0.265    0.000 {built-in method _hashlib.openssl_md5}
+1    0.000    0.000    1.500    1.500 {built-in method builtins.exec}
+1    0.000    0.000    0.000    0.000 {built-in method builtins.iter}
+3    0.000    0.000    0.000    0.000 {method 'append' of 'bytearray' objects}
+333326    0.405    0.000    0.405    0.000 {method 'digest' of '_hashlib.HASH' objects}
+
+
+Profiling results (with password "pwww", extra "w"):
+
+         133333314 function calls in 190.800 seconds
+
+Ordered by: standard name
+
+ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+1    0.000    0.000  190.799  190.799 <string>:1(<module>)
+1    0.000    0.000    0.000    0.000 main.py:31(get_advance)
+33333326   65.652    0.000  169.782    0.000 main.py:35(advance)
+1   21.017   21.017  190.799  190.799 main.py:58(crack)
+33333326   40.640    0.000  104.130    0.000 main.py:74(hasher)
+33333326   27.957    0.000   27.957    0.000 {built-in method _hashlib.openssl_md5}
+1    0.000    0.000  190.800  190.800 {built-in method builtins.exec}
+1    0.000    0.000    0.000    0.000 {built-in method builtins.iter}
+4    0.000    0.000    0.000    0.000 {method 'append' of 'bytearray' objects}
+33333326   35.533    0.000   35.533    0.000 {method 'digest' of '_hashlib.HASH' objects}
+1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+
+• Did you try profiling the code to see where are the bottlenecks? Probably cProfile can do Feb 18, 2018 at 23:55
+• @romeu Yep, I profiled it. I'll edit in the results. Feb 18, 2018 at 23:56
+• Seems the advance function is the one eating the biggest part of the time, I'd take a look at the for statement, the way you buildit make take some time to enumerate a bytearray millions of times.. Feb 19, 2018 at 1:19
+• @romeu I dunno, enumerate seems pretty cheap. Just ran some tests, and it's only about 25% of the time. Feb 19, 2018 at 2:19
+• Speculative, but you might be able to use something like itertools.chain( map(lambda byte: next_[byte], itertools.takewhile(lambda byte: byte != last, arr)), (first,) ) to speed up advance? Feb 19, 2018 at 19:34
+
+## Using the Right Tool for the Job
+
+It's easy problem to code but difficult to solve by computer. Better use low level-language like c.
+
+You don't need create passwords manually, better use itertools library.
+
+from hashlib import md5
+from time import time
+from string import printable
+from itertools import product, count
+
+chars = [c.encode(encoding) for c in printable]
+for length in count(start=1):
+for pwd in product(chars, repeat=length):
+yield b''.join(pwd)
+
+def crack(search_hash, encoding):
+if md5(pwd).digest() == search_hash:
+return pwd.decode(encoding)
+
+if __name__ == "__main__":
+encoding = 'ascii'  # utf-8 for unicode support
+
+start = time()
+end = time()
+print(f"Time: {end - start} seconds.")
+
+
+## Imports
+
+Usually the best option is from x import y, but here you can reduce cache
+
+# import hashlib # usually bad one
+# from hashlib import md5 # usually best one
+from _md5 import md5  # ugly hack but speed up
+
+• Hey @vaeta, could you back up some times for cracking 3 or 4 characters passwords? in order to compare to original solution? Mar 4, 2018 at 17:50
+• @a-romeu I get for 'pwww' about 15s (itertools version) vs 35s (original one) on my terminal. From my point of view, simpler code is more important than speed up. Imho python is wrong tool for this task. Mar 4, 2018 at 18:07
+
+I understand this is for learning purposes, and you are interested in the performance of this specific implementation. Otherwise I would tell you that computing the hashes each time might be a tiny bit slower than storing them.
+
+Would it not be faster to generate the list of possible passwords first? Parallelism and overengineering might make this part slower, I am 99.9% sure, but it would set you up for some nice parallelism for the rest of it.
+
+from itertools import product
+passwords = product(printable, repeat = 4)
+
+
+For me. with range(0,255) instead of printable takes 1.5 seconds.
+
+Then you could use pool.map in multiprocessing.dummy to take you the rest of the way -> generate + check the hashes. (see https://stackoverflow.com/a/28463266/8695782| for reference, I think for the hash generation and checking part parallelism might help). I for one would prefer going towards a lookup-type structure, I want O(1) on retrieval, after generation/storage+reloading.
+
+I can understand why learning purposes might make you not want to store the "rainbow table" and limit memory usage, but remember that when it comes to performance, there will always be speed vs space trade-offs. And speaking of space, why all 255 characters, at least exclude some of the control characters. You can benchmark your code vs https://gizmodo.com/over-560-million-passwords-discovered-by-security-resea-1795254560
+
+• I missed chars = printable :) sorry, I updated my answer to take this into account :) Mar 3, 2018 at 20:37

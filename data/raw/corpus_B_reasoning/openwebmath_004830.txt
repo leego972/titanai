@@ -1,0 +1,445 @@
+# user_parameters.C¶
+
+The pipeline has a default parameter file called cwb_parameters.C which contains the list of needed variables for the analysis set at a certain value. The user can modify some of these values adding them in the config/user_parameters.C file. We report here all the variable contained in the cwb_parameters.C file, the user can change each of them accordingly to his/her preferences.
+
+To obtain complete list of parameters with default setting:
+
+root -b -l \$cWB_PARAMETERS_FILE
+cwb[0] cWB::config cfg;            // creates the config object
+cwb[1] cfg.Import();               // import parameter from CINT
+cwb[2] cfg.Print();                // print the default parameters
+
+
+This is the complete file:
+
+We divide the file in different sections for simplicity:
+
+ Analysis Type of analysis (1G/2G : 1G is obsolete, not supported) Detectors How to include detectors Wavelet TF transformation how to define wavelet decomposition level Conditioning Parameters for Regression Cluster thresholds Pixels and Cluster selection Wave Packet parameters Pixels Selection & Reconstruction Job settings Time segments definition Production parameters Typical parameter for background Simulation parameters Typical parameter for simulation (MDC) Data manipulating Change frame data (amplitude and time shift) Regulator Likelihood regolators Sky settings How to define the sky grid CED parameters Parameters for CED generation Files list How to include frame and DQ files Plugin How to include Plugins Output settings Decide what information to store in the final root files Working directories Set up of working dir
+
+## Analysis¶
+
+char analysis[8]="2G";   // 2G analysis (1G is obsolete, not supported)
+bool online=false;       // true/false -> online/offline
+char search = 'r';       // see description below
+
+• analysis:
+
+Setting first generation detector (1G) or second generation detector (2G) analysis. 1G is obsolete, not more supported
+
+• online:
+
+Defining if the analysis is ONLINE or not
+
+• cfg_search:
+
+putting a letter define search constrains on waveform polarization.
+
+//   r - un-modeled
+//   i - iota - wave (no dispersion correction)
+//   p - Psi - wave
+// l,s - linear
+// c,g - circular
+// e,b - elliptical (no dispersion correction)
+// low/upper case search (like 'i'/'I') & optim=false - standard MRA
+// low case search (like 'i')           & optim=true  - extract PCs from a single resolution
+// upper case (like 'I')                & optim=true  - standard single resolution analysis
+
+
+## Detectors¶
+
+List of detectors including in the network.
+cWB already contained complete information about a set of existing or possible future detectors:
+• L1: 4km Livingston
+• H1: 4km Hanford
+• H2: 2km Hanford (working until S6 run)
+• V1: 3km Virgo
+• I1: Indian
+• K1: KAGRA
+
+Moreover, it is possible to define a not included detector specifying the position on the Earth and the arms direction.
+
+int  nIFO = 3;           // size of network starting with first detector ifo[]
+char refIFO[4] = "L1";   // reference IFO
+
+char ifo[NIFO_MAX][8];
+for(int i=6;i<NIFO_MAX;i++) strcpy(ifo[i],""); // ifo[] can be redefined by user
+
+detectorParams detParms[NIFO_MAX];
+detectorParams _detParms = {"",0.,0.,0.,0,0.,0.,0.};
+for(int i=0;i<NIFO_MAX;i++) detParms[i] = _detParms;
+
+• nIFO
+
+Number of detectors in the network, this number should be less than IFO_MAX=8.
+
+• refIFO
+
+A detector is used as reference for the search in the sky grid. This detectors is never shifted.
+
+• ifo
+
+List of detectors already included in the library. If the user has to redefine a detector, can leave this blank void.
+
+• detParms
+
+List of detectors defined by the user, the internal parameters are:
+
+• Name
+• Latitude [degrees]
+• Longitude [degree]
+• Altitude [m]
+• Angle of x arm respect to the North
+• Angle of y arm respect to the North
+
+Example:
+
+nIFO = 2;
+strcpy(ifo[0],"L1");
+strcpy(ifo[1],"");
+detParms[1] = {"I1", 14.4,      76.4,    0.0, 0, (+135+0.0    ),    0, ( +45+0.0    )},   // I1
+
+
+## Wavelet TF transformation¶
+
+Wavelet decomposition transforms data from time domain to Time-Frequency (TF) domain. Original information are stored in TF pixels which can have various TF resolutions DF and DT, such as DF*DT=0.5 The TF resolutions are decided by the wavelet decomposition levels used and the sample rate in time domain. For instance, with a sample rate R and level N we have:
+
+• DF = (R/2)/2^N
+• DT = 2^N/R
+
+cWB combines the amplitude TF pixels from multiple TF decomposition levels.
+
+The parameters are:
+
+size_t inRate= 16384;    // input data rate
+double fResample = 0.;   // if zero resampling is not applied  (SK: this parameter may be absolete)
+
+int levelR   = 2;        // resampling level   (SK: absolete because of new parameter fsample)
+int l_low    = 3;        // low frequency resolution level
+int l_high   = 8;        // high frequency resolution level
+
+
+For 2G analysis:
+
+char   wdmXTalk[1024] = "wdmXTalk/OverlapCatalog_Lev_8_16_32_64_128_256_iNu_4_Prec_10.bin";
+// catalog of WDM cross-talk coefficients
+
+• inRate
+Sample rate of input data for all detectors.
+fResample
+If different from zero, the input data are resample to this new sample rate before starting any decomposition
+levelR
+Resapling level. It uses wavelet decomposition to downsample data from starting rate to the desired rate. Using wavelet decomposition, levelR is decided according to the formula above.
+low
+This is the minimum decomposition level used in the analysis.
+high
+This is the maximum level decomposition analysis.
+wdmTalk
+for WDM transform, this file containes the information how to apply time shift in TF decomposition.
+
+Example: With the default number, starting from a sample rate of 16384 Hz, the levelR make a dowsample to 4096 Hz. Low and high have respectively TF resolutions of DF/DT = 2ms/256Hz and 62.5ms/8Hz.
+
+## Conditioning¶
+
+The conditioning step removes the persistent lines and apply the whitening procedure. For 2G analysis, the line removal is obtained using the Regression algorithm. The whitening procedure uses the whiteWindow and whiteStride parameters, see whitened procedure.
+
+int levelD   = 8;          // decomposition level
+
+double whiteWindow = 60.;  // [sec] time window dT. if = 0 - dT=T, where T is segment duration
+double whiteStride = 20.;  // [sec] noise sampling time stride
+
+• levelD
+At this decomposition level the pipeline applied the regression algorithm and the whitening procedure.
+
+## Cluster thresholds¶
+
+double x2or  = 1.5;      // 2 OR threshold
+double netRHO= 3.5;      // threshold on rho
+double netCC = 0.5;      // threshold on network correlation
+
+double bpp   = 0.0001;   // probability for pixel selection
+double Acore = sqrt(2);  // threshold for selection of core pixels
+double Tgap  = 0.05;     // time gap between clusters (sec)
+double Fgap  = 128.;     // frequency gap between clusters (Hz)
+double TFgap =  6.;      // threshold on the time-frequency separation between two pixels
+
+double fLow  = 64.;      // low frequency of the search
+double fHigh = 2048.;    // high frequency of the search
+
+• netRHO:
+Cluster are selected in production stage if rho is bigger than netRHO
+• netCC:
+Cluster are selected in production stage if rho is bigger than netCC
+• bpp: Black Pixel Probability
+Fraction of most energetic pixels selected from the TF map to construct events
+• Acore:
+Threshold used to select the core pixels (in units of sigma) in the supercluster, likelihood stages.
+• Tgap and Fgap
+Maximum gaps between two different TF pixels at the same decomposition level that can be considered for an unique event
+• TFgap
+Threshold on the time-frequency separation between two pixels
+• fLow and fHigh
+Boundary frequency limits for the analysis. Note: This limits are considered directly in the TF decomposition, so the pipeline chooses the nearest frequencies to these values according to the decomposition level
+
+## Wave Packet parameters¶
+
+Pixels Selection & Reconstruction (see The WDM packets)
+
+Select pixel pattern used to produce the energy max maps for pixel’s selection
+// patterns: "/" - ring-up, "\" - ring-down, "|" - delta, "-" line, "*" - single
+
+pattern =  0 - "*"   1-pixel  standard search
+pattern =  1 - "3|"  3-pixels vertical packet (delta)
+pattern =  2 - "3-"  3-pixels horizontal packet (line)
+pattern =  3 - "3/"  3-pixels diagonal packet (ring-up)
+pattern =  4 - "3\"  3-pixels anti-diagonal packet (ring-down)
+pattern =  5 - "5/"  5-pixels diagonal packet (ring-up)
+pattern =  6 - "5\"  5-pixels anti-diagonal packet (ring-down)
+pattern =  7 - "3+"  5-pixels plus packet (plus)
+pattern =  8 - "3x"  5-pixels cross packet (cross)
+pattern =  9 - "9p"  9-pixels square packet (box)
+pattern = else - "*" 1-pixel  packet (single)
+
+Select the reconstruction method
+pattern==0                   Standard Search : std-pixel    selection + likelihood2G
+pattern!=0 && pattern<0      Mixed    Search : packet-pixel selection + likelihood2G
+pattern!=0 && pattern>0      Packed   Search : packet-pixel selection + likelihoodWP
+
+
+## Job settings¶
+
+This section sets the time length for the jobs (see also How job segments are created).
+
+// segments
+int    runID = 0;        // run number, set in the production job
+double segLen     = 600.;  // Segment length [sec]
+double segMLS     = 300.;  // Minimum Segment Length after DQ_CAT1 [sec]
+double segTHR     = 30.;   // Minimum Segment Length after DQ_CAT2 [sec]
+double segEdge    = 8.;    // wavelet boundary offset [sec]
+
+• runID
+job number to be analysed. This parameters is auotmatically overwritten when using condor submission (see cwb_condor) and cwb_inet command
+• segLen [s]
+is the typical and maximum job length. This is the only possible lenght is super lags are used. (For super-lags see Production parameters)
+• segMLS [s]
+is the minimum job lenght in seconds. It could happens that after application of Data Quality it is not possible to have a continous period of lenght segLen, so the pipeline consider the remaining period if this has a lenght bigger than segMLS. This means that job could have segMLS < lenght < segLen.
+• segTHR [s]
+is the minimum period of each job that survives after DQ_CAT2 application . This means that, if a job of 600 s, has a period of CAT2 less than segTHR, it is discarded from the analysis. If segTHR = 0, this check is disabled.
+• segEdge [s]
+is a scratch period used by the pipeline for the wavelet decomposition. For each job the first and last segEdge seconds are not considered for the trigger selection.
+
+## Production parameters¶
+
+Production stage consists of time shifting data for each detectors so that reconstructed events are surely due to detectors noise and not gravitational waves.
+cWB can perform two shifts type: the first inside the job segment: the second between different jobs segments. We call the first case as lag shifts and the second case as super-lags shift.
+In lag case, the pipeline perform circular shifts on the data of a job. Suppose that a job has a lenght T, the pipeline can perform shifts of step ts, which a maximum number of shifts M such as M*ts <= T.
+
+Even if shifts are performed circularly, no data are loss, and shifting the detector A respect to B of the time K, is the same as shifting detector B of the time -K respect to A. So, considering N detectors composing the network, the number of possible lag shifts are (N-1)*M for each job. For N>2 case, the algorithm can perform two different ways:
+
+• shifts only the first detector respect to the other (inadvisable);
+• randomly choose from the list of available shifts a subset that are used in the analysis according to user definition. Randomization algorithm depends only on the detector number and the maximum possible shift.
+
+It is possible to write in a text file the lag list applied. The lags are stored with a progressive number which identifies univocally the lags. The lags parameters are:
+
+• lagSize
+
+Lags numbers used (for Simulation stage should be set to 1)
+
+• lagStep
+
+Time step for the shifts
+
+• lagOff
+
+Progressive number of the lag list from which starting to select the subset.
+
+• lagMax
+
+Maximum Allowable shift. If lagMax=0, than only the first detector is shifted, and the maximum allowable shift is given by lagSize parameter. If lagMax > 0 better to chech if lagMax*lagStep < T, otherwise could be possible to loose some lags.
+
+• lagMode
+
+Possibility to write (w)/read (r) the lag list to/from a file.
+
+• lagFile
+
+File name which can be written/read according to the previous parameter. If lagMode=w and lagFile=NULL no file is written. If lagMode=r and tlagFile=NULL the pipeline returns an error
+
+• lagSite
+
+This parameter is a pointer to a size_t array and it is used to declare the detectors with the same site location like H1H2. This information is used by the built-in lag generator to associate the same lags to the detectors which are in the same site. If detectors are all in different sites the default value must be used (lagSite=NULL)
+
+Example : L1H1H2V1
+
+lagSite = new size_t[4];
+lagSite[0]=0; lagSite[1]=1; lagSite[2]=1; lagSite[3]=2;
+
+• shifts
+
+Array for each detector which the possibilty to apply a constant circular shifts to the detectors (storically, no more used)
+
+• mlagStep
+
+To limit computational load, it is possible to cicle over the lagSize number of lags in subsets of size equal to mlagStep instead of all the lags together. This reduce computational load and increase computational time.
+
+Examples :
+
+2 detectors L1,H1 : 351 standard built-in lags (include zero lag)
+
+lagSize    = 351;     // number of lags
+lagStep    = 1.;      // time interval between lags = 1 sec
+lagOff     = 0;       // start from lag=0, include zero lag
+lagMax     = 0;       // standard lags
+
+the output lag list is :
+
+lag          ifoL1         ifoH1
+0        0.00000       0.00000
+1        1.00000       0.00000
+2        2.00000       0.00000
+...      .........       .......
+350      350.00000       0.00000
+
+note : values ifoDX are in secs
+
+3 detectors L1,H1,V1 : 350 random built-in lags (exclude zero lag)
+
+lagSize    = 351;     // number of lags
+lagStep    = 1.;      // time interval between lags = 1 sec
+lagOff     = 1;       // start from lag=1, exclude zero lag
+lagMax     = 300;     // random lags : max lag = 300
+
+the output lag list is :
+
+lag          ifoL1         ifoH1         ifoV1
+1      158.00000     223.00000       0.00000
+2        0.00000     195.00000     236.00000
+3       28.00000       0.00000     179.00000
+...      .........       .......     '''''''''
+350      283.00000       0.00000     142.00000
+
+note : values ifoDX are in secs
+
+3 detectors L1,H1,V1 : load 201 custom lags from file
+
+lagSize    = 201;     // number of lags
+lagOff     = 0;       // start from lag=1
+lagMax     = 300;     // random lags : max lag = 300
+
+lagFile = new char[1024];
+strcpy(lagFile,"custom_lagss_list.txt"); // lag file list name
+lagMode[0] = 'r';                // read mode
+
+an example of input lag list is :
+
+0       0       0       0
+1       0       1       200
+2       0       200     1
+3       0       3       198
+...     ...     ...     ...
+200     0       2       199
+
+note : all values must be integers
+lags must in the range [0:lagMax]
+
+
+In the super-lags case, the pipeline consider data of each detectors belonging to different segments, so shifted of a time multiple of T. In this way we can increase easily the number of time lags because it allows to make shifts between data bigger than T (expecially when having two detectors). Once selected different segments the standard circular lags shifts are applied as the different segments would be the same one. The meaning of the parameter are similar to the one of lags case, but here the values are in segments and not in seconds as for the previous case.
+
+A detailed description of the slag configuration parameters is here :
+• cWB::Toolbox::getSlagList
+
+Examples :
+
+use standard segment
+
+slagSize   = 0;     // Standard Segments : segments are not shifted, only lags are applied
+// segments length is variable and it is selected in the range [segMSL:segLen]
+
+3 detectors L1,H1,V1 : select 4 built-in slags
+
+slagSize   = 4;     // number of super lags
+slagMin    = 0;     // select the minimum available slag distance : slagMin must be <= slagMax
+slagMax    = 3;     // select the maximum available slag distance
+slagOff    = 0;     // start from the first slag in the list
+
+the output slag list is :
+
+SLAG         ifo[0]        ifo[1]        ifo[2]
+0             0             0             0
+1             0             1            -1
+2             0            -1             1
+3             0             2             1
+
+3 detectors L1,H1,V1 : load 4 custom slags from file
+
+slagSize   = 4;     // number of super lags
+slagOff    = 0;     // start from the first slag in the list
+
+slagFile = new char[1024];
+strcpy(slagFile,"custom_slags_list.txt"); // slag file list name
+
+an example of input slag list is :
+
+1            0               -4              4
+2            0                4             -4
+3            0               -8              8
+4            0                8             -8
+
+note : all values must be integers
+
+
+## Simulation parameters¶
+
+Simulation stage allows to test efficiency detection of the pipeline. It consists on injecting simulated waveforms (MDC) on the detector data. Once chosen the simulation stage, the pipeline make the analysis only around the injection times (and not all the segments) to reduce computational load.
+Waveforms are injected at different amplitudes, each amplitude is repeated for each waveform at the same time, such repeating the analysis for each factor.
+int simulation = 0;        // 1 for simulation, 0 for production
+double iwindow = 5.;       // analysis time window for injections (Range = Tinj +/- gap/2)
+int nfactor=0;             // number of strain factors
+double factors[100];       // array of strain factors
+char injectionList[1024]="";
+
+• simulation
+variable that sets the simulation stage: 1=simulation, 0=production If sets to 2 it sets injections at constant network SNR over the sky, instead of hrss.
+• gap
+time windows around the time injection that is analysed (+- gap).
+• nfactor - factors
+list of factors which differ according to the value of simulation.
+1. amplitude factors to be multiplied ot the hrss written in the injectionList.
+2. network SNR (waveform is rescaled according to these values).
+3. time shift applied to the waveforms
+4. progressive number referring to the multiple trials for injection volume distribution
+• injectionList
+path of file containing all the information about inections (waveform type, amplitude, source directions, detector arrival times, …)
+
+## Data manipulating¶
+
+It is possible to apply constant shifts and/or uniform amplitude modifications on detectors data. Here are the parameters that allow to do these things:
+
+• Calibration
+
+double dcCal[NIFO_MAX];
+for(int i=0;i<NIFO_MAX;i++) dcCal[i] = 1.0;
+
+
+Possibility to apply constant modifications on data amplitudes. Different factors can be applied to different detectors. The data are modified in this way: output = dcCal * input. This allows to threat eventual calibration corrections on the detectors.
+
+• Time shift
+
+double dataShift[NIFO_MAX];
+for(int i=0;i<NIFO_MAX;i++) dataShift[i] = 0.;
+
+
+Possibility to apply constant time shifts to data. These shifts are made in seconds, and allows to make shifts of several days or years, see How to apply a time shift to the input MDC and noise frame files .
+
+• MDC time shift
+
+// use this parameter to shift in time the injections (sec)
+// use {0,0,0} to set mdc_shift to 0
+// if {-1,0,0} the shift is automatically selected
+// {startMDC, stopMDC, offset}
+// see description in the method cWB::Toolbox::getMDCShift
+mdcshift mdc_shift = {0, 0, 0};
+
+
+Possibility to apply constant time shifts to injections (MDC). These shifts are made in seconds. This allows to increase statistics for efficiency curve running more simulation jobs, see How to apply a time shift to the input MDC and noise frame files .
+
+## Regulator¶

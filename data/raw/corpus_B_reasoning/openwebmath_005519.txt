@@ -1,0 +1,266 @@
+# Get all monotonic sublists from a list
+
+So, i recently wrote code that can count the number of monotonic items (increasing, decreasing and constant). For an input such as x = [1,2,3,3,2,0] The provided example was:
+
+1. Increasing: [1,2], [2,3], [1,2,3]
+2. Constant: [3,3]
+3. Decreasing: [3,2], [2,0], [3,2,0]
+
+
+So, i broke the problem into two steps, firstly just getting all biggest monotonic sequences, and then finding all sub-lists within those sequences. During the process it seemed to me that things started getting rather long and i was surprised by how "big" the whole thing seemed by the end of it. I was wondering if there are any tricks i missed or steps i could have done better. Also looking for tips on code readability as well. Code starts below:
+
+x = [1,2,3,3,2,0]
+prev = x[0]
+curr = x[1] #keep track of two items together during iteration, previous and current
+result = {"increasing": [],
+"equal": [],
+"decreasing": [],
+}
+
+def two_item_relation(prev, curr): #compare two items in list, results in what is effectively a 3 way flag
+if prev < curr:
+return "increasing"
+elif prev == curr:
+return "equal"
+else:
+return "decreasing"
+
+prev_state = two_item_relation(prev, curr) #keep track of previous state
+result[prev_state].append([prev]) #handle first item of list
+
+x_shifted = iter(x)
+next(x_shifted) #x_shifted is now similar to x[1:]
+
+for curr in x_shifted:
+curr_state = two_item_relation(prev, curr)
+if prev_state == curr_state: #compare if current and previous states were same.
+result[curr_state][-1].append(curr)
+else: #states were different. aka a change in trend
+result[curr_state].append([])
+result[curr_state][-1].extend([prev, curr])
+prev = curr
+prev_state = curr_state
+
+def all_subcombinations(lst): #given a list, get all "sublists" using sliding windows
+if len(lst) < 3:
+return [lst]
+else:
+result = []
+for i in range(2, len(lst) + 1):
+for j in range(len(lst) - i + 1):
+result.extend([lst[j:j + i]])
+return result
+
+print(" all Outputs ")
+result_all_combinations = {}
+
+for k, v in result.items():
+result_all_combinations[k] = []
+for item in v:
+result_all_combinations[k].extend(all_subcombinations(item))
+
+print(result_all_combinations)
+#Output:
+{'increasing': [[1, 2], [2, 3], [1, 2, 3]],
+'equal': [[3, 3]],
+'decreasing': [[3, 2], [2, 0], [3, 2, 0]]}
+
+
+Organize
+
+I believe you would do well to restructure your code. You have two functions, why not write one more, and then separate your testing from your actual code?
+
+if __name__ == '__main__':
+x = [1,2,3,3,2,0]
+
+result = find_monotone_sequences(x)  # Wrap your code in this function
+
+print(" all Outputs ")
+result_all_combinations = {}
+
+for k, v in result.items():
+result_all_combinations[k] = []
+for item in v:
+result_all_combinations[k].extend(all_subcombinations(item))
+
+print(result_all_combinations)
+#Output:
+#{'increasing': [[1, 2], [2, 3], [1, 2, 3]],
+# 'equal': [[3, 3]],
+# 'decreasing': [[3, 2], [2, 0], [3, 2, 0]]}
+
+
+Use collections.defaultdict
+
+Next, take advantage of some built-in features:
+
+result = {"increasing": [],
+"equal": [],
+"decreasing": [],
+}
+
+
+This is a dictionary where every value defaults to an empty list. Another word for that is a collections.defaultdict:
+
+from collections import defaultdict
+
+result = defaultdict(list)  # Note: no parens after list - passing in function
+
+
+Now you don't have to provide the explicit names and values!
+
+Next, you should take advantage of the iterator you are already creating!
+
+prev = x[0]
+curr = x[1] #keep track of two items together during iteration, previous and current
+
+prev_state = two_item_relation(prev, curr) #keep track of previous state
+result[prev_state].append([prev]) #handle first item of list
+
+x_shifted = iter(x)
+next(x_shifted) #x_shifted is now similar to x[1:]
+
+
+Instead of accessing x[0] and x[1], why not use the iterator?
+
+xiter = iter(x)
+prev = next(xiter)
+curr = next(xiter)
+prev_state = two_item_relation(prev, curr) #keep track of previous state
+result[prev_state].append([prev]) #handle first item of list
+
+for curr in xiter:
+# etc...
+
+
+Recognize patterns in your code (use itertools!)
+
+Finally, I'd like to point out the behavior of your main loop:
+
+for curr in x_shifted:
+curr_state = two_item_relation(prev, curr)
+if prev_state == curr_state: #compare if current and previous states were same.
+result[curr_state][-1].append(curr)
+else: #states were different. aka a change in trend
+result[curr_state].append([])
+result[curr_state][-1].extend([prev, curr])
+prev = curr
+prev_state = curr_state
+
+
+This loops over the input values, comparing each value with the prior one, and determines a 'state'. Depending on the state, the input values are broken into groups corresponding to the state.
+
+Or: the input sequence is grouped by the computed state.
+
+It turns out there's an app for that: itertools.groupby will take a sequence and a key function, and break the sequence into groups according to the values taken on by the key!
+
+This means your can rewrite your code into a simple processing loop that computes the state and associates it with the values (except the initial member, of course). Furthermore, if you investigate the recipes section of the itertools module, you will find a function named pairwise that allows a sequence to be processed in pairs:
+
+def pairwise(iterable):
+"s -> (s0,s1), (s1,s2), (s2, s3), ..."
+a, b = tee(iterable)
+next(b, None)
+return zip(a, b)
+
+
+seq = x  # x is not a very good name
+relations = [(two_item_relation(*pair), *pair) for pair in pairwise(seq)]
+
+
+There is still the matter of the special treatment of the first value, but you can do it with the values all in hand.
+
+(If you're just learning Python, the *pair syntax "flattens" the pair in place. It is equivalent to writing: pair[0], pair[1] where-ever *pair is seen. Thus relation(*pair) is like relation(pair[0], pair[1]).)
+
+• Thanks a ton, this was super helpful! The grouper thing is something i am not sure i understand enough to apply just yet im afraid, but will see. A Question about tee, does it create a copy of the list in memory? – Paritosh Singh Feb 11 at 17:19
+• tee duplicates the iterator, not the sequence being iterated. If you want to copy a list, try b = a[:] for that. – Austin Hastings Feb 11 at 17:56
+• perfect, ty. in this case, i wanted to ensure i didn't make an unnecessary copy, it was why i avoided slicing in the first place. – Paritosh Singh Feb 11 at 18:03
+
+A few changes:
+
+Strings shouldn't be used here for keeping track of comparison results. Strings are prone to being typo'd, and may lead to unexpected results (like indexing result causing KeyErrors at runtime). I'd take a page from Java (and other languages) and use -1, 0 and 1 to indicate the results of a comparison. You can see it being used in an answer here. I'd make the following changes:
+
+result = {1: [], # Increasing
+0: [], # Equal
+-1: [] # Decreasing
+}
+
+def two_item_relation(prev, curr):
+if prev < curr:
+return 1
+elif prev == curr:
+return 0
+else:
+return -1
+
+
+It's much harder to mistype -1 than it is, for example, "decreasing".
+
+If you really wanted Strings for pretty printing purposes (like for your output at the bottom), you could maintain a dictionary mapping comparison numbers to strings:
+
+pp_result = {1: "Increasing",
+0: "Equal",
+-1: "Decreasing"
+}
+
+
+The point is that you shouldn't use easily mistyped things as keys unless necessary.
+
+Strings also may be slower to compare, and may take more memory, but hash caching and String interning may negate those problems in some cases.
+
+You could also write that function as something like:
+
+def two_item_relation(prev, curr):
+return 1 if prev < curr else \
+0 if prev == curr else \
+-1
+
+
+But I'm probably going to get yelled at for even bringing that up. Conditional expressions/ternaries are nice in many cases when you want to conditionally return one or another thing, but they get a little murky as soon as you're using them to decide between three different things. It's especially bad here because this pretty much needs to be split over a few lines, which necessitates the use of line continuation characters, which are a little noisy.
+
+I'm bringing it up in case you're unaware of conditional expressions, not because I'm necessarily suggesting their use here.
+
+You could use enums as well:
+
+from enum import Enum
+
+class Compare_Result(Enum):
+INCREASING = 1
+EQUAL = 0
+DECREASING = -1
+
+def two_item_relation(prev, curr):
+if prev < curr:
+return Compare_Result.INCREASING
+elif prev == curr:
+return Compare_Result.EQUAL
+else:
+return Compare_Result.DECREASING
+
+
+This has the benefit that it makes it obvious what each result actually means. They also prints out semi-nicely, so the "pretty-printing map" may not be as necessary:
+
+>>> str(Compare_Result.INCREASING)
+'Compare_Result.INCREASING'
+
+>>> repr(Compare_Result.INCREASING)
+'<Compare_Result.INCREASING: 1>'
+
+
+And, if you do typo a name (which is harder to do since IDEs can autocomplete Compare_Result.), it will fail outright with an error:
+
+>>> Compare_Result.INCRESING
+
+Traceback (most recent call last):
+File "<pyshell#5>", line 1, in <module>
+Compare_Result.INCRESING
+File "C:\Users\slomi\AppData\Local\Programs\Python\Python36-32\lib\enum.py", line 324, in __getattr__
+raise AttributeError(name) from None
+AttributeError: INCRESING
+
+
+Unfortunately though, this error does not happen immediately like it does in other languages. The faulty code needs to actually be interpreted before the error is caught. This seems to make enums less useful in Python than in languages like Java or C++, but it's still less error-prone than using Strings or Numbers.
+
+Honestly, I'm too tired right now to comment on the algorithm, but hopefully this was helpful.
+
+• Thanks a lot. I am used to making booleans for flags, but i couldn't think of a good alternative to a 3 way flag on my own. really like using the ints for keys but a mapping for pretty printing the outputs. – Paritosh Singh Feb 11 at 17:18
+• @ParitoshSingh No problem. Note though, numbers are a simple solution, but they still aren't ideal. They don't carry any information about what they mean. I did a quick dive into using Enums, and edited an example of their use into the bottom of my answer. It's worth a look since they offer an even better solution. – Carcigenicate Feb 11 at 17:34

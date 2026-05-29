@@ -1,0 +1,397 @@
+================================================================================
+TITAN AI — TRAINING PACK 037: POST-QUANTUM CRYPTOGRAPHY
+QUANTUM THREAT MODEL, NIST ALGORITHMS, MIGRATION STRATEGIES, HYBRID APPROACHES
+================================================================================
+
+================================================================================
+PART 1: THE QUANTUM THREAT TO CLASSICAL CRYPTOGRAPHY
+================================================================================
+
+--- WHY QUANTUM COMPUTING BREAKS CURRENT CRYPTO ---
+
+SHOR'S ALGORITHM (1994):
+  Runs on a quantum computer.
+  Efficiently factors large integers (breaks RSA).
+  Efficiently solves discrete logarithm (breaks ECC, DH, DSA).
+  
+  Classical computer: Factor 2048-bit number → longer than age of universe.
+  Quantum computer with ~4000 logical qubits: Factor 2048-bit number → hours.
+  
+  IMPACT: ALL asymmetric cryptography based on factoring or DLP is broken.
+  RSA (all key sizes), ECC, ECDH, ECDSA, DHE → All insecure against Cryptographically Relevant Quantum Computer (CRQC).
+  
+  Timeline for CRQC: NSA and NIST estimate 2030-2040. Possibly earlier with rapid advances.
+  IBM roadmap: 100,000 qubit system targeted by 2033. But: Logical vs physical qubits gap is critical.
+
+GROVER'S ALGORITHM (1996):
+  Provides quadratic speedup for searching unsorted databases.
+  Breaks symmetric crypto by HALVING effective key size.
+  
+  AES-128 against Grover: Equivalent to AES-64 classical security. NOT sufficient.
+  AES-256 against Grover: Equivalent to AES-128 classical security. STILL SUFFICIENT.
+  SHA-256 against Grover: Equivalent to SHA-128. Still adequate for most uses.
+  SHA-384: Equivalent to SHA-192. Recommended for quantum-resistant hashing.
+  
+  IMPACT: Double your symmetric key sizes. AES-256 instead of AES-128. SHA-384 instead of SHA-256.
+  Symmetric and hash algorithms: Not broken, just weakened. Fixable with key size increases.
+
+--- HARVEST NOW, DECRYPT LATER (HNDL) ---
+
+CRITICAL THREAT:
+  Adversaries (nation-states) collect encrypted traffic TODAY.
+  Store it: Massive archive of encrypted government, military, diplomatic communications.
+  Wait: Until CRQC available (10-20 years).
+  Decrypt: All historically collected traffic retrospectively.
+  
+  This means: Any long-lived secret communicated TODAY over classical asymmetric crypto
+  is at risk if it's still sensitive in 10-20 years.
+  
+  Most at risk:
+  - Government classified communications
+  - Long-term trade secrets / IP
+  - Health records (decades of sensitivity)
+  - Nuclear/military secrets (infinite sensitivity)
+  - Long-term financial secrets
+  
+  NSA CNSA 2.0 (2022): Mandates post-quantum algorithms by 2030 for NSS (National Security Systems).
+  NIST: Finalized first post-quantum standards August 2024 (FIPS 203, 204, 205).
+
+================================================================================
+PART 2: NIST POST-QUANTUM CRYPTOGRAPHY STANDARDS (2024)
+================================================================================
+
+--- FIPS 203: ML-KEM (CRYSTALS-KYBER) ---
+
+TYPE: Key Encapsulation Mechanism (KEM). For key exchange / public key encryption.
+REPLACES: RSA-KEM, ECDH, ECIES.
+BASIS: Module Learning With Errors (MLWE) problem. Lattice-based.
+QUANTUM RESISTANCE: Based on hardness of MLWE. No efficient quantum algorithm known.
+
+PARAMETER SETS:
+  ML-KEM-512:  Security level 1 (equivalent to AES-128). Smallest, fastest. Not recommended for HNDL.
+  ML-KEM-768:  Security level 3 (equivalent to AES-192). NIST recommended for most uses.
+  ML-KEM-1024: Security level 5 (equivalent to AES-256). Maximum security. Use for HNDL scenarios.
+
+KEY AND CIPHERTEXT SIZES (ML-KEM-768):
+  Public key:  1184 bytes
+  Private key: 2400 bytes
+  Ciphertext:  1088 bytes
+  Shared secret: 32 bytes
+  
+  Compare to ECDH P-256:
+  Public key: 64 bytes
+  Private key: 32 bytes
+  
+  Tradeoff: Larger keys/ciphertexts for quantum resistance.
+  Network impact: TLS handshake larger. Manageable.
+
+OPERATION:
+  KeyGen(): Generate (pk, sk) pair.
+  Encaps(pk): Generate (ciphertext, shared_secret). Sender runs this.
+  Decaps(sk, ciphertext): Recover shared_secret. Receiver runs this.
+  
+  Use in TLS:
+  Client: Encaps with server's public key → sends ciphertext, gets shared secret.
+  Server: Decaps with private key → gets same shared secret.
+  Both: Derive session keys from shared secret.
+
+--- FIPS 204: ML-DSA (CRYSTALS-DILITHIUM) ---
+
+TYPE: Digital Signature Algorithm.
+REPLACES: RSA signatures, ECDSA, EdDSA.
+BASIS: Module Learning With Errors + Module Short Integer Solution (MSIS).
+
+PARAMETER SETS:
+  ML-DSA-44: Security level 2 (~AES-128 range).
+  ML-DSA-65: Security level 3 (~AES-192). General purpose.
+  ML-DSA-87: Security level 5 (~AES-256). Maximum security.
+
+KEY AND SIGNATURE SIZES (ML-DSA-65):
+  Public key: 1952 bytes
+  Private key: 4000 bytes
+  Signature: 3293 bytes
+  
+  Compare to ECDSA P-256:
+  Public key: 64 bytes
+  Private key: 32 bytes
+  Signature: 64 bytes
+  
+  Significant size increase. For software signatures, firmware updates, TLS certs: Manageable.
+  For constrained protocols with strict size limits: May need ML-DSA-44.
+
+--- FIPS 205: SLH-DSA (SPHINCS+) ---
+
+TYPE: Stateless hash-based digital signature.
+REPLACES: RSA signatures, ECDSA (as backup/alternative to ML-DSA).
+BASIS: Hash functions only. Different mathematical foundation from lattice-based.
+CONSERVATIVE: If lattice assumptions are broken, hash-based is still safe.
+
+PARAMETER SETS:
+  SLH-DSA-SHA2-128f: Fast variant. Smaller signatures, larger keys.
+  SLH-DSA-SHA2-128s: Smaller signatures, slower signing.
+  SLH-DSA-SHA2-256f/s: Maximum security variants.
+
+SIZES (SLH-DSA-SHA2-128f):
+  Public key: 32 bytes (very small)
+  Private key: 64 bytes (very small)
+  Signature: 17,088 bytes (large)
+  
+  Use case: When very small keys are needed but large signatures are acceptable.
+  PKI root certificates: Small key, infrequent signatures. Good fit.
+  High-frequency signing: Large signatures problematic. Use ML-DSA instead.
+
+--- BONUS: HQC AND STATEFUL HASH-BASED (XMSS/LMS) ---
+
+HQC: Under NIST evaluation as backup to ML-KEM. Different mathematical basis (codes).
+  If lattice-based algorithms (ML-KEM, ML-DSA) are broken: HQC is the backup.
+  NIST process: HQC selected for standardization (FIPS 206 expected 2025).
+
+XMSS/LMS (Stateful hash-based signatures):
+  Already standardized: NIST SP 800-208 (2020).
+  Stateful: Must track which keys have been used. Complex to deploy.
+  Use case: Firmware signing, code signing (one direction, controlled environment).
+  IoT/embedded: XMSS for secure boot (sign once, verify many times).
+
+================================================================================
+PART 3: HYBRID CRYPTOGRAPHY
+================================================================================
+
+--- HYBRID APPROACH — THE RECOMMENDED MIGRATION PATH ---
+
+HYBRID: Combine classical and post-quantum algorithm.
+Result: Secure against both classical attacks AND quantum attacks.
+
+Why hybrid:
+1. Post-quantum algorithms are new. Not yet as battle-tested as RSA/ECDH.
+2. If a PQC algorithm has an unknown weakness: Classical component still protects.
+3. "Belt and suspenders": Both must be broken for adversary to succeed.
+
+HYBRID KEM CONSTRUCTION:
+  Shared_secret = KDF(classical_ss || pqc_ss || context)
+  
+  Where:
+  classical_ss: ECDH-P384 or X25519 shared secret.
+  pqc_ss: ML-KEM-768 shared secret.
+  context: Domain separation string.
+  KDF: HKDF-SHA384 or SHA3-256.
+  
+  Implementation:
+  // TLS 1.3 with hybrid key exchange (X25519 + ML-KEM-768)
+  // Draft RFC: draft-ietf-tls-hybrid-design
+  // IANA code point: 0x11EB (X25519MLKEM768)
+  
+  Browser support: Chrome 131+ (enabled), Firefox in progress, Edge 131+.
+  Server: OpenSSL 3.2+ with OQS provider, BoringSSL (Google), Go 1.23+.
+
+HYBRID TLS IMPLEMENTATION (Python with oqs-provider):
+  from oqs import KeyEncapsulation
+  from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+  from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+  from cryptography.hazmat.primitives import hashes
+  
+  # Classical component
+  classical_private = X25519PrivateKey.generate()
+  classical_public = classical_private.public_key()
+  
+  # Post-quantum component (ML-KEM-768)
+  kem = KeyEncapsulation("ML-KEM-768")
+  pqc_public = kem.generate_keypair()
+  
+  # --- On sender side ---
+  # Classical: ECDH
+  classical_ss = classical_private.exchange(peer_classical_public)
+  
+  # PQC: Encapsulate
+  ciphertext, pqc_ss = kem_peer.encap_secret(peer_pqc_public)
+  
+  # Combine: Both must be secure
+  combined_secret = HKDF(
+      algorithm=hashes.SHA384(),
+      length=32,
+      salt=None,
+      info=b"hybrid-kem-v1"
+  ).derive(classical_ss + pqc_ss)
+  
+  # combined_secret: Secure if EITHER classical OR PQC remains unbroken
+
+HYBRID SIGNATURES:
+  Certificates with both ECDSA and ML-DSA signatures.
+  Verifier supports PQC: Uses ML-DSA signature.
+  Legacy verifier: Uses ECDSA signature.
+  Both must be forged to accept invalid certificate.
+  
+  Implementation: Composite X.509 certificates (IETF draft-ounsworth-pq-composite-sigs).
+
+================================================================================
+PART 4: CRYPTOGRAPHIC AGILITY AND MIGRATION
+================================================================================
+
+--- CRYPTO-AGILE ARCHITECTURE ---
+
+CRYPTO AGILITY: Design systems so cryptographic algorithms can be swapped without redesign.
+
+ANTI-PATTERN (crypto-hardcoded):
+  def encrypt(plaintext):
+      return AES_128_CBC_encrypt(plaintext, key)  # Hardcoded: AES-128-CBC
+  # When AES-128 is insufficient: Must rewrite all callers.
+
+PATTERN (crypto-agile):
+  ENCRYPTION_ALGORITHM = os.environ.get("ENCRYPTION_ALG", "AES-256-GCM")
+  KEY_SIZE = int(os.environ.get("KEY_SIZE", "256"))
+  
+  def encrypt(plaintext, algorithm=ENCRYPTION_ALGORITHM):
+      if algorithm == "AES-256-GCM":
+          return aes_256_gcm_encrypt(plaintext, key)
+      elif algorithm == "ChaCha20-Poly1305":
+          return chacha20_poly1305_encrypt(plaintext, key)
+      else:
+          raise ValueError(f"Unknown algorithm: {algorithm}")
+  
+  # Migration: Change environment variable. No code changes.
+
+ALGORITHM NEGOTIATION IN PROTOCOLS:
+  TLS: ClientHello lists supported cipher suites. Server selects.
+  To add PQC: Add ML-KEM-768+X25519 hybrid to supported_groups.
+  Old servers: Ignore new entry, fall back to ECDH.
+  New servers: Use hybrid. Both sides protected.
+
+--- MIGRATION INVENTORY ---
+
+Step 1: Cryptographic discovery (asset inventory of crypto usage):
+  Where does the organization use cryptography?
+  - TLS (all external and internal HTTPS)
+  - Code signing certificates
+  - S/MIME email certificates
+  - VPN (IPsec/TLS)
+  - SSH server host keys
+  - JWT signing
+  - Database encryption (at-rest)
+  - HSM operations
+  - PKI (CA infrastructure)
+  - API authentication (client certificates)
+  - Software update mechanisms
+  - IoT device certificates
+  
+  Tools: Cryptosense Analyzer, Venafi TLS Protect, AWS Certificate Manager inventory.
+
+Step 2: Prioritize by risk:
+  Highest: Long-lived secrets, sensitive data, national security.
+  HNDL risk: External-facing TLS (harvested today, decrypted in 10 years).
+  Medium: Internal services, short-lived certificates.
+  Lower: Session tokens, short-lived data.
+
+Step 3: Algorithm mapping:
+  For each use: What replaces it?
+  RSA-2048 (TLS KEM) → X25519 + ML-KEM-768 hybrid
+  ECDSA-P256 (TLS cert signing) → ML-DSA-65 (or hybrid ECDSA+ML-DSA)
+  RSA-2048 (code signing) → ML-DSA-65 or SLH-DSA-SHA2-128f
+  AES-128 → AES-256
+  SHA-256 → SHA-384
+
+Step 4: Vendor/library readiness assessment:
+  OpenSSL: 3.5 (2025) adds ML-KEM, ML-DSA natively.
+  BoringSSL: ML-KEM support since early 2024.
+  AWS KMS: ML-KEM planned 2025.
+  HSM vendors: Check roadmap for PQC support.
+  Let's Encrypt: No PQC certs yet. Watch for rollout.
+
+Step 5: Deploy hybrid → then transition to pure PQC:
+  Phase 1 (now-2027): Deploy hybrid. Protect against HNDL. Compatible with legacy.
+  Phase 2 (2027-2030): Drop classical component from hybrid where feasible.
+  Phase 3 (2030+): Pure PQC everywhere per NIST/NSA mandate.
+
+--- QUANTUM KEY DISTRIBUTION (QKD) ---
+
+QKD: Use quantum mechanics itself to distribute encryption keys.
+Physics guarantees: Any interception disturbs the quantum state. Detectable.
+
+BB84 protocol:
+  Alice encodes bits in photon polarization (random basis: rectilinear or diagonal).
+  Bob measures each photon (randomly choosing basis).
+  After transmission: Public discussion of which bases were used.
+  Where bases matched: Those bits form the shared key.
+  Interception: Eavesdropper must measure photons (collapses quantum state, introduces errors).
+  Error rate check: If error rate above threshold → Transmission intercepted → Discard + retry.
+  
+  Limitations:
+  - Distance limited: ~100km without quantum repeaters. (Quantum repeaters: active research area.)
+  - Expensive: Specialized hardware. Not practical for general internet.
+  - Authentication channel still needed: QKD solves key distribution, not authentication.
+  - Nation-state use: China's quantum satellite network. Some financial firms in Japan/Europe.
+  
+  NOT a replacement for PQC: QKD solves a different problem in a different threat model.
+  PQC: Software, deployed on existing internet infrastructure, scalable.
+  QKD: Hardware, dedicated links, not scalable to general internet.
+  Both: Part of long-term quantum-secure strategy.
+
+================================================================================
+PART 5: PERFORMANCE AND PRACTICAL CONSIDERATIONS
+================================================================================
+
+--- BENCHMARKS AND TRADEOFFS ---
+
+TLS HANDSHAKE OVERHEAD (approximate, varies by hardware):
+
+X25519 (current):
+  KeyGen:     10 μs
+  Keyx:       15 μs
+  Public key: 32 bytes
+  
+ML-KEM-768:
+  KeyGen:     20 μs
+  Encaps:     25 μs
+  Decaps:     22 μs
+  Public key: 1184 bytes
+  Ciphertext: 1088 bytes
+  
+X25519 + ML-KEM-768 Hybrid:
+  Total:     ~60 μs (sum of both + combination)
+  Extra bytes in handshake: ~2200 bytes
+  
+Impact on TLS: Extra ~2KB in ClientHello/ServerHello. One extra round-trip if buffers small.
+Overall: TLS handshake increases ~5-10ms on high-latency links. Acceptable for most use cases.
+Mitigation: TLS session resumption eliminates repeat handshake overhead.
+
+SIGNATURE OVERHEAD:
+
+ECDSA-P256:
+  Sign: 50 μs | Verify: 100 μs | Signature: 64 bytes
+
+ML-DSA-65:
+  Sign: 280 μs | Verify: 90 μs | Signature: 3293 bytes
+  Signing slower. Verification comparable. Signature much larger.
+
+SLH-DSA-SHA2-128f:
+  Sign: 10,000 μs (slow) | Verify: 2,500 μs | Signature: 17,088 bytes (very large)
+  Significant overhead. Use only where appropriate (root CA certificates, infrequent signing).
+
+PKI CERTIFICATE SIZE IMPACT:
+  Current certificate with ECDSA-P256: ~1KB.
+  Certificate with ML-DSA-65: ~5-8KB (signature + larger public key).
+  Certificate chain with 3 ML-DSA-65 certs: ~18KB.
+  
+  Impact: HTTPS page load: Certificate chain in TLS handshake larger.
+  Mitigation: Compress certificate chains. OCSP stapling. Certificate compression (RFC 8879).
+
+CONSTRAINED ENVIRONMENTS (IoT, embedded):
+  Limited CPU: Lattice operations are compute-intensive.
+  Limited RAM: Large key/ciphertext sizes need more memory.
+  Limited bandwidth: Larger messages impact battery life.
+  
+  Solutions:
+  ML-KEM-512 (smallest variant) for extremely constrained.
+  SLH-DSA for signing where keys must be tiny (32 bytes).
+  Hardware acceleration: Upcoming microcontrollers with PQC hardware support.
+  NXP, STMicroelectronics: PQC hardware acceleration in roadmap.
+
+================================================================================
+END OF PACK 037: POST-QUANTUM CRYPTOGRAPHY
+Total: Shor's algorithm breaking RSA/ECC, Grover's halving symmetric security,
+Harvest-Now-Decrypt-Later threat with NSA CNSA 2.0, NIST standards FIPS 203/204/205
+(ML-KEM/ML-DSA/SLH-DSA with full parameter sets and key sizes), HQC backup, hybrid
+KEM construction (X25519+ML-KEM-768 with Python implementation), hybrid TLS browser
+support, composite X.509 certificates, crypto agility design pattern, 5-step migration
+methodology (discovery/prioritization/algorithm mapping/vendor readiness/deployment),
+QKD (BB84 protocol, limitations, comparison to PQC), performance benchmarks (TLS
+handshake overhead, signature sizes, IoT constraints).
+================================================================================

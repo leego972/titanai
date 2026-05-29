@@ -1,0 +1,41 @@
+Question: <p>I'm trying to use svnmerge.py to merge some files.  Under the hood it uses python, and when I use it I get an error - "The system cannot find the file specified".  Colleagues at work are running the same version of svnmerge.py, and of python (2.5.2, specifically r252:60911) without an issue.</p>
+
+<p>I found <a href="http://www.nabble.com/problem-under-some-windows-desktop-td15868057.html" rel="nofollow">this link</a>, which describes my problem.  Trying what was outlined there, I confirmed Python could find svn (it's in my path):</p>
+
+<pre>
+P:\>python 
+Python 2.5.2 (r252:60911, Feb 21 2008, 13:11:45) [MSC v.1310 32 bit (Intel)] on win32 
+Type "help", "copyright", "credits" or "license" for more information. 
+>>> import os 
+>>> i,k = os.popen4("svn --version") 
+>>> i.close() 
+>>> k.readline() 
+'svn, version 1.4.2 (r22196)\n' 
+</pre>
+
+<p>Looking at the svnmerge.py code, though, I noticed for python versions 2.4 and higher it was following a different execution path.  Rather than invoking
+os.popen4() it uses subprocess.Popen().  Trying that reproduces the error:</p>
+
+<pre>
+C:\>python
+Python 2.5.2 (r252:60911, Feb 21 2008, 13:11:45) [MSC v.1310 32 bit (Intel)] on win32 Type "help", "copyright", "credits" or "license" for more information.
+>>> import subprocess
+>>> p = subprocess.Popen("svn --version", stdout=subprocess.PIPE, 
+>>> close_fds=False, stderr=subprocess.PIPE)
+Traceback (most recent call last):
+  File "", line 1, in 
+  File "C:\Python25\lib\subprocess.py", line 594, in __init__
+    errread, errwrite)
+  File "C:\Python25\lib\subprocess.py", line 816, in _execute_child
+    startupinfo)
+WindowsError: [Error 2] The system cannot find the file specified
+>>>
+</pre>
+
+<p>For now, I've commented out the 2.4-and-higher specific code, but I'd like to find a proper solution.</p>
+
+<p>If it's not obvious, I'm a complete python newbie, but google hasn't helped.  Any pointers?</p>
+
+Answer: <p>It's a bug, see the <a href="http://docs.python.org/lib/node528.html" rel="nofollow">documentation of <code>subprocess.Popen</code></a>. There either needs to be a <code>"shell=True</code>" option, or the first argument needs to be a sequence <code>['svn', '--version']</code>. As it is now, <code>Popen</code> is looking for an executable named, literally, "svn --version" which it doesn't find.</p>
+
+<p>I don't know why it would work for your colleagues though, if they are running the same OS and version of Python... FWIW it gives me the same error message on a mac, and either of the two ways I gave fixes it.</p>

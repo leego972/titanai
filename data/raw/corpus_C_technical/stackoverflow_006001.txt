@@ -1,0 +1,57 @@
+Question: <p>So, when playing with the development I can just set <code>settings.DEBUG</code> to <code>True</code> and if an error occures I can see it nicely formatted, with good stack trace and request information.</p>
+
+<p>But on kind of production site I'd rather use <code>DEBUG=False</code> and show visitors some standard error 500 page with information that I'm working on fixing this bug at this moment ;)<br />
+At the same time I'd like to have some way of logging all those information (stack trace and request info) to a file on my server - so I can just output it to my console and watch errors scroll, email the log to me every hour or something like this.</p>
+
+<p>What logging solutions would you recomend for a django-site, that would meet those simple requirements? I have the application running as <code>fcgi</code> server and I'm using apache web server as frontend (although thinking of going to lighttpd).</p>
+
+Answer: <p>Some time has passed since EMP's most helpful code submission. I just now implemented it, and while thrashing around with some manage.py option, to try to chase down a bug, I got a deprecation warning to the effect that with my current version of Django (1.5.?) a require_debug_false filter is now needed for the mail_admins handler.</p>
+
+<p>Here is the revised code:</p>
+
+<pre><code>LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+         'require_debug_false': {
+             '()': 'django.utils.log.RequireDebugFalse'
+         }
+     },
+    'handlers': {
+        # Include the default Django email handler for errors
+        # This is what you'd get without configuring logging at all.
+        'mail_admins': {
+            'class': 'django.utils.log.AdminEmailHandler',
+            'level': 'ERROR',
+            'filters': ['require_debug_false'],
+             # But the emails are plain text by default - HTML is nicer
+            'include_html': True,
+        },
+        # Log to a text file that can be rotated by logrotate
+        'logfile': {
+            'class': 'logging.handlers.WatchedFileHandler',
+            'filename': '/home/username/public_html/djangoprojectname/logfilename.log'
+        },
+    },
+    'loggers': {
+        # Again, default Django configuration to email unhandled exceptions
+        'django.request': {
+            'handlers': ['mail_admins'],
+            'level': 'ERROR',
+            'propagate': True,
+        },
+        # Might as well log any errors anywhere else in Django
+        'django': {
+            'handlers': ['logfile'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        # Your own app - this assumes all your logger names start with "myapp."
+        'myapp': {
+            'handlers': ['logfile'],
+            'level': 'DEBUG', # Or maybe INFO or WARNING
+            'propagate': False
+        },
+    },
+}
+</code></pre>

@@ -1,0 +1,147 @@
+In the exercise you need to provide implementation of single-threaded TaskScheduler class with the following signatures:
+
+TaskScheduler {
+
+int getPriority()
+
+void execute()
+
+
+where Task object is considered interruptible if it implements Interruptible interface.
+
+Now I have to consider the below 4 requirements also in developing the class:
+
+Define classes, write a test or vice versa.
+
+2. executeAllByPriority()
+
+3. executeAllByPriorityWithUninterruptableFirst()
+
+4. Bonus
+
+Keeping these above 4 points in consideration I have coded the below program. Please advise whether it is the correct approach.
+
+public class MultiThreadedTaskScheduler  {
+
+AtomicInteger priorityCounter = new AtomicInteger(-1);
+
+private static final PriorityComparator PRIORITY_COMPARATOR = new PriorityComparator();
+
+}
+
+public void executeAllByPriority(){
+executorService.submit(new Runnable() {
+@Override
+public void run() {
+}
+}
+});
+
+}
+
+}
+
+}
+
+public void executeAllByPriorityWithUnInterruptableFirst(){
+executorService.submit(new Runnable() {
+@Override
+public void run() {
+} else {
+}
+}
+
+}
+}
+});
+
+}
+
+@Override
+protected void finalize() throws Throwable {
+super.finalize();
+executorService.shutdown();
+}
+
+}
+
+
+Let's get cracking ;) Nitpick first:
+
+• Indentation / Spacing:
+Your indentation and spacing aren't fully consistent. It would be beneficial to use an IDE's autoformatting options.
+
+Okay, now that that's out of the way, let's get to the real beef:
+
+AtomicInteger priorityCounter = new AtomicInteger(-1);
+
+
+This is only used in your executeMethod. And there it's used "wrongly". You're trying to burden the executeMethod with the additional responsibility of checking whether the task you have at hand should be executed now, or not:
+
+if (task.getPriority() > priorityCounter.get()){
+}
+
+
+This is not good especially since you fail your if-condition silently. Enqueueing a lower-priority task to the queue does not execute the task and doesn't tell you about that.
+
+That's a big problem and unnecessary. You can completely remove all the stuff in this method, that's got to do with priorityCounter. What remains is task.execute() and that can stand on it's own.
+
+private ExecutorService executorService = Executors.newFixedThreadPool(10);
+
+
+I don't like this one for multiple reasons:
+
+1. It isn't final.
+2. You're not using anything anywhere near 10 threads.
+
+If you want to do it "right" you should move all your executorService.submit()-calls directly around the respective task.execute()-calls. Right now you only ever submit two runnables to this 10-thread pool. That's a waste of threads ;)
+
+private PriorityQueue<Task> taskQueue;
+
+
+Again this could just as well be made final, you could even initialize this eagerly, since the static PRIORITY_COMPARATOR is available anyways ;)
+
+for (Task task : taskQueue) {
+/* stuff in here */
+}
+
+
+First thing I thought when seeing this: "This doesn't respect priority, right?" While that's not true, I personally find the following much more obvious:
+
+while (taskQueue.peek() != null) {
+/* stuff in here */
+}
+
+
+Moving swiftly on to one of the last points I want to make:
+
+if (task instanceof Interruptible && ((Interruptible) task).isInterrupted()) {
+
+
+Your requirements nowhere state, that only interrupted Interruptibles are to be executed later. Assuming you didn't have the definition of Interruptible given, I had suspected it to be a marker-interface. I'd shorten the code to:
+
+if (task instanceof Interruptible) {
+
+
+Almost finished:
+
+executorService.submit(new Runnable() {
+@Override
+public void run() {
+/* real stuff here */
+}
+});
+
+
+If you have java 8 available I highly recommend converting this boilerplate to a lambda-expression:
+
+ executorService.submit(() -> { /*code here */ });
+
+
+One thing about references and shuting down, if I may:
+
+Overriding finalize to shutdown your executor isn't recommended. This answer on SO gives nice impressions.
+
+What you should do instead is implement AutoCloseable and shut down the executor when overriding the close-method
+
+And last but not least:

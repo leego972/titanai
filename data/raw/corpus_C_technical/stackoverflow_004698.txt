@@ -1,0 +1,62 @@
+Question: <p>Building on <a href="http://stackoverflow.com/questions/1476/how-do-you-express-binary-literals-in-python#13107">How Do You Express Binary Literals in Python</a>, I was thinking about sensible, intuitive ways to do that Programming 101 chestnut of displaying integers in base-2 form.  This is the best I came up with, but I'd like to replace it with a better algorithm, or at least one that should have screaming-fast performance.  </p>
+
+<pre><code>def num_bin(N, places=8):
+    def bit_at_p(N, p):
+        ''' find the bit at place p for number n '''
+        two_p = 1 &lt;&lt; p   # 2 ^ p, using bitshift, will have exactly one
+                         # bit set, at place p
+        x = N &amp; two_p    # binary composition, will be one where *both* numbers
+                         # have a 1 at that bit.  this can only happen 
+                         # at position p.  will yield  two_p if  N has a 1 at 
+                         # bit p
+        return int(x &gt; 0)
+
+    bits =  ( bit_at_p(N,x) for x in xrange(places))
+    return "".join( (str(x) for x in bits) )
+
+    # or, more consisely 
+    # return "".join([str(int((N &amp; 1 &lt;&lt; x)&gt;0)) for x in xrange(places)])
+</code></pre>
+
+Answer: <p>For best efficiency, you generally want to process more than a single bit at a time.
+You can use a simple method to get a fixed width binary representation. eg.</p>
+
+<pre><code>def _bin(x, width):
+    return ''.join(str((x&gt;&gt;i)&amp;1) for i in xrange(width-1,-1,-1))
+</code></pre>
+
+<p>_bin(x, 8) will now give a zero padded representation of x's lower 8 bits.  This can be used to build a lookup table, allowing your converter to process 8 bits at a time (or more if you want to devote the memory to it).</p>
+
+<pre><code>_conv_table = [_bin(x,8) for x in range(256)]
+</code></pre>
+
+<p>Then you can use this in your real function, stripping off leading zeroes when returning it.  I've also added handling for signed numbers, as without it you will get an infinite loop (Negative integers conceptually have an infinite number of set sign bits.)</p>
+
+<pre><code>def bin(x):
+    if x == 0: 
+        return '0' #Special case: Don't strip leading zero if no other digits
+    elif x &lt; 0:
+        sign='-'
+        x*=-1
+    else:
+        sign = ''
+    l=[]
+    while x:
+        l.append(_conv_table[x &amp; 0xff])
+        x &gt;&gt;= 8
+    return sign + ''.join(reversed(l)).lstrip("0")
+</code></pre>
+
+<p>[Edit] Changed code to handle signed integers.<br />
+[Edit2] Here are some timing figures of the various solutions.  bin is the function above, constantin_bin is from <a href="http://stackoverflow.com/questions/187273/base-2-binary-representation-using-python#189579">Constantin's answer</a> and num_bin is the original version.  Out of curiosity, I also tried a 16 bit lookup table variant of the above (bin16 below), and tried out Python3's builtin bin() function.  All timings were for 100000 runs using an 01010101 bit pattern.</p>
+
+<pre><code>Num Bits:              8       16       32       64      128      256
+---------------------------------------------------------------------
+bin                0.544    0.586    0.744    1.942    1.854    3.357 
+bin16              0.542    0.494    0.592    0.773    1.150    1.886
+constantin_bin     2.238    3.803    7.794   17.869   34.636   94.799
+num_bin            3.712    5.693   12.086   32.566   67.523  128.565
+Python3's bin      0.079    0.045    0.062    0.069    0.212    0.201
+</code></pre>
+
+<p>As you can see, when processing long values using large chunks really pays off, but nothing beats the low-level C code of python3's builtin (which bizarrely seems consistently faster at 256 bits than 128!).  Using a 16 bit lookup table improves things, but probably isn't worth it unless you really need it, as it uses up a large chunk of memory, and can introduce a small but noticalbe startup delay to precompute the table.</p>

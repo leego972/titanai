@@ -1,0 +1,37 @@
+Question: <p>If you are relying on an implementation of Python that has a Global Interpreter Lock (i.e. CPython) and writing multithreaded code, do you really need locks at all?</p>
+
+<p>If the GIL doesn't allow multiple instructions to be executed in parallel, wouldn't shared data be unnecessary to protect?</p>
+
+<p>sorry if this is a dumb question, but it is something I have always wondered about Python on multi-processor/core machines.  </p>
+
+<p>same thing would apply to any other language implementation that has a GIL.</p>
+
+Answer: <p>Locks are still needed. I will try explaining why they are needed.</p>
+
+<p>Any operation/instruction is executed in the interpreter. GIL ensures that interpreter is held by a single thread at <strong>a particular instant of time</strong>. And your program with multiple threads works in a single interpreter. At any particular instant of time, this interpreter is held by a single thread. It means that only thread which is holding the interpreter is <strong>running</strong> at any instant of time.</p>
+
+<p>Suppose there are two threads,say t1 and t2, and both want to execute two instructions which is reading the value of a global variable and incrementing it.</p>
+
+<pre><code>#increment value
+global var
+read_var = var
+var = read_var + 1
+</code></pre>
+
+<p>As put above, GIL only ensures that two threads can't execute an instruction simultaneously, which means both threads can't execute <code>read_var = var</code> at any particular instant of time. But they can execute instruction one after another and you can still have problem. Consider this situation:</p>
+
+<ul>
+<li>Suppose read_var is 0.</li>
+<li>GIL is held by thread t1.</li>
+<li>t1 executes <code>read_var = var</code>. So, read_var in t1 is 0. GIL will only ensure that this read operation will not be executed for any other thread at this instant.</li>
+<li>GIL is given to thread t2.</li>
+<li>t2 executes <code>read_var = var</code>. But read_var is still 0. So, read_var in t2 is 0.</li>
+<li>GIL is given to t1.</li>
+<li>t1 executes <code>var = read_var+1</code> and var becomes 1.</li>
+<li>GIL is given to t2.</li>
+<li>t2 thinks read_var=0, because that's what it read.</li>
+<li>t2 executes <code>var = read_var+1</code> and var becomes 1.</li>
+<li>Our expectation was that <code>var</code> should become 2.</li>
+<li>So, a lock must be used to keep both reading and incrementing as an atomic operation.</li>
+<li>Will Harris' answer explains it through a code example.</li>
+</ul>

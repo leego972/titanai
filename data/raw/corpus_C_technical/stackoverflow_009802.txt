@@ -1,0 +1,46 @@
+Question: <p>The best I can come up with for now is this monstrosity:</p>
+
+<pre><code>&gt;&gt;&gt; datetime.utcnow() \
+...   .replace(tzinfo=pytz.UTC) \
+...   .astimezone(pytz.timezone("Australia/Melbourne")) \
+...   .replace(hour=0,minute=0,second=0,microsecond=0) \
+...   .astimezone(pytz.UTC) \
+...   .replace(tzinfo=None)
+datetime.datetime(2008, 12, 16, 13, 0)
+</code></pre>
+
+<p>I.e., in English, get the current time (in UTC), convert it to some other timezone, set the time to midnight, then convert back to UTC.</p>
+
+<p>I'm not just using now() or localtime() as that would use the server's timezone, not the user's timezone.</p>
+
+<p>I can't help feeling I'm missing something, any ideas?</p>
+
+Answer: <p><a href="http://stackoverflow.com/a/381788/4279">@hop's answer</a> is wrong on the day of transition from Daylight Saving Time (DST) e.g., Apr 1, 2012. To fix it <a href="http://pytz.sourceforge.net/#localized-times-and-date-arithmetic"><code>tz.localize()</code></a> could be used:</p>
+
+<pre><code>tz = pytz.timezone("Australia/Melbourne")
+today = datetime.now(tz).date()
+midnight = tz.localize(datetime.combine(today, time(0, 0)), is_dst=None)
+utc_dt = midnight.astimezone(pytz.utc)        
+</code></pre>
+
+<p>The same with comments:</p>
+
+<pre><code>#!/usr/bin/env python
+from datetime import datetime, time
+import pytz # pip instal pytz
+
+tz = pytz.timezone("Australia/Melbourne") # choose timezone
+
+# 1. get correct date for the midnight using given timezone.
+today = datetime.now(tz).date()
+
+# 2. get midnight in the correct timezone (taking into account DST)
+#NOTE: tzinfo=None and tz.localize()
+# assert that there is no dst transition at midnight (`is_dst=None`)
+midnight = tz.localize(datetime.combine(today, time(0, 0)), is_dst=None)
+
+# 3. convert to UTC (no need to call `utc.normalize()` due to UTC has no 
+#    DST transitions)
+fmt = '%Y-%m-%d %H:%M:%S %Z%z'
+print midnight.astimezone(pytz.utc).strftime(fmt)
+</code></pre>

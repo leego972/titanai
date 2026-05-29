@@ -1,0 +1,135 @@
+Question: <p>I've read that it is possible to add a method to an existing object (e.g. not in the class definition) in <strong>Python</strong>, I think this is called <em>Monkey Patching</em> (or in some cases <em>Duck Punching</em>). I understand that it's not always a good decision to do so. But, how might one do this?</p>
+
+<p><strong>UPDATE 8/04/2008 00:21:01 EST:</strong></p>
+
+<p><a href="http://stackoverflow.com/a/982">That</a> looks like a good answer John Downey, I tried it but it appears that it ends up being not a <em>true</em> method.</p>
+
+<p>Your example defines the new patch function with an argument of <strong><code>self</code></strong>, but if you write actual code that way, the now patched class method asks for an argument named <code>self</code> (it doesn't automagically recognize it as the object to which it is supposed to bind, which is what would happen if defined within the class definition), meaning you have to call <strong><code>class.patch(obj)</code></strong> instead of just <strong><code>class.patch()</code></strong> if you want the same functionality as a <em>true</em> method.</p>
+
+<p><strong>It looks like Python isn't really treating it as a method, but more just as a variable which happens to be a function</strong> (and as such is callable).  Is there any way to attach an actual method to a class?</p>
+
+<p>Oh, and Ryan, <a href="http://pypi.python.org/pypi/monkey">that</a> isn't exactly what I was looking for (it isn't a builtin functionality), but it is quite cool nonetheless.</p>
+
+Answer: <p>Consolidating Jason Pratt's and the community wiki answers, with a look at the results of different methods of binding:</p>
+
+<p>Especially note how adding the binding function as a class method <em>works</em>, but the referencing scope is incorrect.</p>
+
+<pre><code>#!/usr/bin/python -u
+import types
+import inspect
+
+## dynamically adding methods to a unique instance of a class
+
+
+# get a list of a class's method type attributes
+def listattr(c):
+    for m in [(n, v) for n, v in inspect.getmembers(c, inspect.ismethod) if isinstance(v,types.MethodType)]:
+        print m[0], m[1]
+
+# externally bind a function as a method of an instance of a class
+def ADDMETHOD(c, method, name):
+    c.__dict__[name] = types.MethodType(method, c)
+
+class C():
+    r = 10 # class attribute variable to test bound scope
+
+    def __init__(self):
+        pass
+
+    #internally bind a function as a method of self's class -- note that this one has issues!
+    def addmethod(self, method, name):
+        self.__dict__[name] = types.MethodType( method, self.__class__ )
+
+    # predfined function to compare with
+    def f0(self, x):
+        print 'f0\tx = %d\tr = %d' % ( x, self.r)
+
+a = C() # created before modified instnace
+b = C() # modified instnace
+
+
+def f1(self, x): # bind internally
+    print 'f1\tx = %d\tr = %d' % ( x, self.r )
+def f2( self, x): # add to class instance's .__dict__ as method type
+    print 'f2\tx = %d\tr = %d' % ( x, self.r )
+def f3( self, x): # assign to class as method type
+    print 'f3\tx = %d\tr = %d' % ( x, self.r )
+def f4( self, x): # add to class instance's .__dict__ using a general function
+    print 'f4\tx = %d\tr = %d' % ( x, self.r )
+
+
+b.addmethod(f1, 'f1')
+b.__dict__['f2'] = types.MethodType( f2, b)
+b.f3 = types.MethodType( f3, b)
+ADDMETHOD(b, f4, 'f4')
+
+
+b.f0(0) # OUT: f0   x = 0   r = 10
+b.f1(1) # OUT: f1   x = 1   r = 10
+b.f2(2) # OUT: f2   x = 2   r = 10
+b.f3(3) # OUT: f3   x = 3   r = 10
+b.f4(4) # OUT: f4   x = 4   r = 10
+
+
+k = 2
+print 'changing b.r from {0} to {1}'.format(b.r, k)
+b.r = k
+print 'new b.r = {0}'.format(b.r)
+
+b.f0(0) # OUT: f0   x = 0   r = 2
+b.f1(1) # OUT: f1   x = 1   r = 10  !!!!!!!!!
+b.f2(2) # OUT: f2   x = 2   r = 2
+b.f3(3) # OUT: f3   x = 3   r = 2
+b.f4(4) # OUT: f4   x = 4   r = 2
+
+c = C() # created after modifying instance
+
+# let's have a look at each instance's method type attributes
+print '\nattributes of a:'
+listattr(a)
+# OUT:
+# attributes of a:
+# __init__ &lt;bound method C.__init__ of &lt;__main__.C instance at 0x000000000230FD88&gt;&gt;
+# addmethod &lt;bound method C.addmethod of &lt;__main__.C instance at 0x000000000230FD88&gt;&gt;
+# f0 &lt;bound method C.f0 of &lt;__main__.C instance at 0x000000000230FD88&gt;&gt;
+
+print '\nattributes of b:'
+listattr(b)
+# OUT:
+# attributes of b:
+# __init__ &lt;bound method C.__init__ of &lt;__main__.C instance at 0x000000000230FE08&gt;&gt;
+# addmethod &lt;bound method C.addmethod of &lt;__main__.C instance at 0x000000000230FE08&gt;&gt;
+# f0 &lt;bound method C.f0 of &lt;__main__.C instance at 0x000000000230FE08&gt;&gt;
+# f1 &lt;bound method ?.f1 of &lt;class __main__.C at 0x000000000237AB28&gt;&gt;
+# f2 &lt;bound method ?.f2 of &lt;__main__.C instance at 0x000000000230FE08&gt;&gt;
+# f3 &lt;bound method ?.f3 of &lt;__main__.C instance at 0x000000000230FE08&gt;&gt;
+# f4 &lt;bound method ?.f4 of &lt;__main__.C instance at 0x000000000230FE08&gt;&gt;
+
+print '\nattributes of c:'
+listattr(c)
+# OUT:
+# attributes of c:
+# __init__ &lt;bound method C.__init__ of &lt;__main__.C instance at 0x0000000002313108&gt;&gt;
+# addmethod &lt;bound method C.addmethod of &lt;__main__.C instance at 0x0000000002313108&gt;&gt;
+# f0 &lt;bound method C.f0 of &lt;__main__.C instance at 0x0000000002313108&gt;&gt;
+</code></pre>
+
+<p>Personally, I prefer the external ADDMETHOD function route, as it allows me to dynamically assign new method names within an iterator as well.</p>
+
+<pre><code>def y(self, x):
+    pass
+d = C()
+for i in range(1,5):
+    ADDMETHOD(d, y, 'f%d' % i)
+print '\nattributes of d:'
+listattr(d)
+# OUT:
+# attributes of d:
+# __init__ &lt;bound method C.__init__ of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+# addmethod &lt;bound method C.addmethod of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+# f0 &lt;bound method C.f0 of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+# f1 &lt;bound method ?.y of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+# f2 &lt;bound method ?.y of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+# f3 &lt;bound method ?.y of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+# f4 &lt;bound method ?.y of &lt;__main__.C instance at 0x0000000002303508&gt;&gt;
+</code></pre>

@@ -1,0 +1,57 @@
+Question: <p>(ClientCookie is a module for (automatic) cookie-handling: <a href="http://wwwsearch.sourceforge.net/ClientCookie" rel="nofollow">http://wwwsearch.sourceforge.net/ClientCookie</a>)</p>
+
+<pre><code># I encode the data I'll be sending:
+data = urllib.urlencode({'username': 'mandark', 'password': 'deedee'})
+
+# And I send it and read the page:
+page = ClientCookie.urlopen('http://www.forum.com/ucp.php?mode=login', data)
+output = page.read()
+</code></pre>
+
+<p>The script doesn't log in, but rather seems to get redirected back to the same login page asking it for a username and password. What am I doing wrong?</p>
+
+<p>Any help would be greatly appreciated! Thanks!</p>
+
+Answer: <p>Have you tried fetching the login page first?</p>
+
+<p>I would suggest using <a href="https://addons.mozilla.org/en-US/firefox/addon/966" rel="nofollow">Tamper Data</a> to have a peek at exactly what's being sent when you request the login page and then log in normally using a web browser from a fresh start, with no initial cookies in place, so that your script can replicate it exactly.</p>
+
+<p>That's the approach I used when writing the following, extracted from a script which needs to login to an Invision Power Board forum, using cookielib and urllib2 - you may find it useful as a reference.</p>
+
+<pre><code>import cookielib
+import logging
+import sys
+import urllib
+import urllib2
+
+cookies = cookielib.LWPCookieJar()
+opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookies))
+urllib2.install_opener(opener)
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 5.0; en-GB; rv:1.8.1.12) Gecko/20080201 Firefox/2.0.0.12',
+    'Accept': 'text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
+    'Accept-Language': 'en-gb,en;q=0.5',
+    'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+}
+
+# Fetch the login page to set initial cookies
+urllib2.urlopen(urllib2.Request('http://www.rllmukforum.com/index.php?act=Login&amp;CODE=00', None, headers))
+
+# Login so we can access the Off Topic forum
+login_headers = headers.copy()
+login_headers.update({
+    'Referer': 'http://www.rllmukforum.com/index.php?act=Login&amp;CODE=00',
+    'Content-Type': 'application/x-www-form-urlencoded',
+})
+html = urllib2.urlopen(urllib2.Request('http://www.rllmukforum.com/index.php?act=Login&amp;CODE=01',
+                                       urllib.urlencode({
+                                           'referer': 'http://www.rllmukforum.com/index.php?',
+                                           'UserName': RLLMUK_USERNAME,
+                                           'PassWord': RLLMUK_PASSWORD,
+                                       }),
+                                       login_headers)).read()
+if 'The following errors were found' in html:
+    logging.error('RLLMUK login failed')
+    logging.info(html)
+    sys.exit(1)
+</code></pre>

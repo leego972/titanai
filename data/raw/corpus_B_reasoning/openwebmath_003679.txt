@@ -1,0 +1,114 @@
+# Using pm.Data to predict on two inputs for sample_posterior_predictive; why is there no change in the results?
+
+Hi,
+
+I’m having some issues understanding how to add new unseen data into my model, to see how it would effect my posterior.
+
+I’ve looked at these posts (here, here but I still have not been able to understand what I’m doing wrong.
+
+Hopefully this explanation will be enough to understand what the issue is.
+
+Below I have created some data:
+
+variation A ~ N(10, 3) and B ~ N(20, 3)
+
+After I sample the first time, I wanted to see how the posterior would look when I add some new unseen data pm.set_data({"vid": [1] * 3, "val": [10000] * 3}). Basically I’m saying, what if we added 3 observations for variation B but with the observed ‘vals’ of 10000. Which, knowing out data generating process, should create quite quite different results.
+
+However, when I look at the ‘predictions’ of my idata (image below) I cannot see any of the updated values? I can see there are 3 observations added but not any values associated with them. I would expect the values of the posterior to be much higher than the mean values of 10 and 20, but it just looks like the predictions are exactly the same.
+
+My hypothesis is because I’m using another pm.Data class for the indexes in vid to separate the two variations. However I’m not sure how this would effect the outcome.
+
+Thanks for taking a look at this and hopefully this is just a simple error on my side.
+
+import arviz as az
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import pandas as pd
+import pymc3 as pm
+import theano.tensor as tt
+
+print(f"Running on PyMC3 v{pm.__version__}")
+az.style.use("arviz-darkgrid")
+pal = sns.color_palette("Set2")
+pd.set_option('display.float_format', lambda x: '%.3f' % x)
+#%%
+
+def generate_data(n, m1, m2, sd):
+variation = np.random.binomial(1, .5, n)
+name = np.where(variation == 0, 'A', 'B')
+val = np.where(variation == 0, np.random.normal(m1, sd, n), np.random.normal(m2, sd, n))
+
+return {
+'variation': variation,
+'name': name,
+'val': val
+}
+
+df = pd.DataFrame(generate_data(1000, 10, 20, 3))
+
+#%%
+
+var_idx, variations = pd.factorize(df['name'])
+coords = {'variations': variations}
+
+with pm.Model(coords=coords) as model:
+
+var_id = pm.intX(pm.Data("vid", var_idx))
+val = pm.intX(pm.Data('val', df["val"]))
+
+mu = pm.Normal('mu', 15, 3, dims='variations')
+sd = pm.Exponential('sd', 3)
+
+mu_var = mu[var_id]
+
+y = pm.Normal("y", mu=mu_var, sd=sd, observed=val)
+
+trace = pm.sample(draws=2000, tune=1000, chains=2, target_accept=.90)
+posterior_predictive = pm.sample_posterior_predictive(trace)
+prior = pm.sample_prior_predictive()
+
+idata_pymc3 = az.from_pymc3(
+trace,
+prior=prior,
+posterior_predictive=posterior_predictive,
+)
+
+az.plot_trace(idata_pymc3);
+
+az.summary(idata_pymc3)
+
+with model:
+# Switch out the observations and use sample_posterior_predictive to predict
+pm.set_data({"vid": [1] * 3, "val": [10000] * 3})
+posterior_predictive = pm.sample_posterior_predictive(trace, random_seed=1075)
+az.from_pymc3_predictions(
+posterior_predictive,
+idata_orig=idata_pymc3,
+inplace=True,
+)
+
+idata_pymc3
+
+
+It looks like you are confusing the posterior predictive with the posterior. val are the observations, so changing them has no effect on posterior predictive sampling. sample_posterior_predictive uses the samples from the posterior p(\theta|y) to sample from the posterior predictive p(\tilde{y}|y) = \int p(\tilde{y}|\theta) p(\theta|y) d\theta. Changing var_idx does have an effect though. It defines which of the mus in mu are to be used. By setting it to 1, all 3 “predictions” will use mu[1] to draw values from y.
+
+Both posts you linked are regressions, where the mean of y is defined by a beta * X kind of operation, so changing the values of X allows to interpolate or extrapolate and generate predictions from the posterior, but note that none of them are modifying the observed variables. If you want to condition on different observations you need to pm.sample again to find the new posterior.
+
+1 Like
+
+Hi @OriolAbril,
+
+Thank you for a great explanation! I see where I made the confusion, and the inclusion of the formulas for posterior and posterior predictive were quite helpful.
+
+Just as follow up, you mentioned If you want to condition on different observations you need to pm.sample again to find the new posterior. Does that mean if I pass in new observed variables using the same model the sampling starts over as if there was no previous sampling, or the new observed variables are simply updating the previous values from the first sample?
+
+Thank you again.
+
+The sampler would start over. Therefore you should include both old and new observations. There is no simple solution to do incremental updating in mcmc, but there are some less than perfect options such as using kennel density estimation as described in here: Updating priors — PyMC3 3.10.0 documentation
+
+If speed is not an issue it’s better to just fit the model with the larger dataset.
+
+2 Likes
+
+Ah this is quite helpful. Thanks @ricardoV94 !

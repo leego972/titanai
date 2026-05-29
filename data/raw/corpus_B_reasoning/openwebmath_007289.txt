@@ -1,0 +1,104 @@
+# Adding private key into iOS Keychain
+
+I am trying to add a private key into the iOS keychain. The certificate (public key) works fine but the private key refuses... I am totally confused why the following code does not work.
+
+First I am checking if the current key (=key in case of that the Keychain is a key/value store) is 'free' in the Keychain. Then I am going to add the private key.
+
+CFStringRef labelstring = CFStringCreateWithCString(NULL, [key cStringUsingEncoding:NSUTF8StringEncoding], kCFStringEncodingUTF8);
+
+NSArray* keys = [NSArray arrayWithObjects:(__bridge id)kSecClass,kSecAttrLabel,kSecReturnData,kSecAttrAccessible,nil];
+NSArray* values = [NSArray arrayWithObjects:(__bridge id)kSecClassKey,labelstring,kCFBooleanTrue,kSecAttrAccessibleWhenUnlocked,nil];
+NSMutableDictionary* searchdict = [NSMutableDictionary dictionaryWithObjects:values forKeys:keys];
+
+CFRelease(labelstring);
+
+NSMutableDictionary *query = searchdict;
+
+CFTypeRef item = NULL;
+OSStatus error = SecItemCopyMatching((__bridge_retained CFDictionaryRef) query, &item);
+
+if (error)
+{
+NSLog(@"Error: %ld (statuscode)", error);
+}
+
+if(error != errSecItemNotFound)
+{
+SecItemDelete((__bridge_retained CFDictionaryRef) query);
+}
+
+[query setObject:(id)data forKey:(__bridge id)kSecValueData];
+
+OSStatus status = SecItemAdd((__bridge_retained CFDictionaryRef) query, &item);
+
+if(status)
+{
+NSLog(@"Keychain error occured: %ld (statuscode)", status);
+return NO;
+}
+
+
+The debug output is the following:
+
+2012-07-26 15:33:03.772 App[15529:1b03] Error: -25300 (statuscode)
+2012-07-26 15:33:11.195 App[15529:1b03] Keychain error occured: -25299 (statuscode)
+
+
+The first error code -25300 represents errSecItemNotFound. So there is no value stored for this key. Then, when I try to add the private key into the Keychain I get -25299 which means errSecDuplicateItem. I do not understand this. Why is this happening?
+
+Does anyone have a clue or hint on this?
+
+Apple's error codes:
+
+errSecSuccess                = 0,       /* No error. */
+errSecUnimplemented          = -4,      /* Function or operation not implemented. */
+errSecParam                  = -50,     /* One or more parameters passed to a function where not valid. */
+errSecAllocate               = -108,    /* Failed to allocate memory. */
+errSecNotAvailable           = -25291,  /* No keychain is available. You may need to restart your computer. */
+errSecDuplicateItem          = -25299,  /* The specified item already exists in the keychain. */
+errSecItemNotFound           = -25300,  /* The specified item could not be found in the keychain. */
+errSecInteractionNotAllowed  = -25308,  /* User interaction is not allowed. */
+errSecDecode                 = -26275,  /* Unable to decode the provided data. */
+errSecAuthFailed             = -25293,  /* The user name or passphrase you entered is not correct. */
+
+
+Update #1: I've figured out that it works only for the first time. Even when data and key is different, after the first time stored into the keychain I cannot store further keys.
+
+-
+I'm facing the exact same issue. First key added using SecItemAdd without a problem, then any consecutive call to SecItemAdd fails with errSecDuplicateItem although despite SecItemCopyMatching returning errSecItemNotFound. Have you found a solution to this yet? –  100grams Jan 8 '13 at 10:47
+
+The following code worked for me:
+
+NSMutableDictionary *query = [[NSMutableDictionary alloc] init];
+[query setObject:(id)kSecClassKey forKey:(id)kSecClass];
+[query setObject:(id)kSecAttrAccessibleWhenUnlocked forKey:(id)kSecAttrAccessible];
+[query setObject:[NSNumber numberWithBool:YES] forKey:(id)kSecReturnData];
+
+[query setObject:(id)key forKey:(id)kSecAttrApplicationTag];
+
+//removing item if it exists
+SecItemDelete((CFDictionaryRef)query);
+
+//setting data (private key)
+[query setObject:(id)data forKey:(id)kSecValueData];
+
+CFTypeRef persistKey; OSStatus status = SecItemAdd((CFDictionaryRef)query, &persistKey);
+
+if(status) {
+NSLog(@"Keychain error occured: %ld (statuscode)", status);
+return NO;
+}
+
+-
+It is bad practice to delete a Keychain item only to add an item with the same info back. I don't recall the specific reason why, but I believe it may cause conflicts when attempting to do so. –  Joey Apr 12 '14 at 6:01
+I talked to an Apple employee who works on the Keychain at last years WWDC and he told me that in fact they don't offer another way to achieve this by now but they have a private API for that which they'll release soon... –  Chris Apr 13 '14 at 7:55
+I don't know what you mean Chris. I had the same problem and was able to fix my code to correctly find the existing item. My problem was I was defining it to be syncable over iCloud when adding it, but didn't include that in the query when searching, so it couldn't find a match. I did not have to delete and add it again. –  Joey Apr 13 '14 at 8:14
+can this be used for converting String to SecKeyRef? –  Turowicz Sep 25 '14 at 15:55
+@Joey It is bad practice especially on OSX because the user may have moved the key to a different keychain (you can have hundreds of these if you like) and when you delete and recreate it, it always is recreated in the default keychain and then the user has to move it again. It is bad practice on iOS and OS X as any access control set by the system/user or any extra data added from other apps (if the item is shared, which is possible) is lost that way. –  Mecki Oct 9 '14 at 15:20
+
+Sorry but I'll never be able to debug your code. Apple provides some sample code (KeychainItemWrapper) which lets you save one string (I recall). Its a big help dealing with the key chain. There is a gist on the web that is a modified version of that class, but saves and restores a dictionary (archived as a data object, which is what the Apple code does to the string). This lets you save multiple items in one interface to the keychain. The gist is here Keychain for NSDictioanary/data
+
+-
+Thanks, but it need to be stored as kSecClassKey (and the corresponding certificate as kSecClassCertificate). I know Apple provides this sample code for storing user credentials (but only strings) into the keychain. Considering, that one wants to verify a certificate or use the additional protection of the kSecClassKey it cannot get stored using the approach from Apple's sample code or your link. However, I think I have found a solution but have to verify this before I post it here. –  Chris Jul 27 '12 at 5:41
+In my experience, the keychain wrapper does not allow multiple items to be saved to the same keychain group. This caused some major frustation but a solution can be found here: stackoverflow.com/questions/11055731/… –  rob Sep 27 '12 at 16:02
+That's funny - since I'm doing it with a dictionary in my app and saving email, password, and another bit of context related to the user. But I modified Apple's code a bit not a lot though - you can see it in the link in my answer. This is working code that's in thousands of phones now (not millions :-( ) –  David H Sep 27 '12 at 16:53

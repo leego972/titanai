@@ -1,0 +1,253 @@
+- | | My book on MSBuild and Team Build | Archives and Categories Saturday, September 21, 2013
+
+# How to extend the web publish process without modifying project contents
+
+When automating web publishing for Visual Studio projects in many cases your first step will be to create a publish profile for the project in VS. There are many cases in which you cannot, or would not like to do this. In this post I’ll show you how you can take an existing project and use an MSBuild file to drive the publish process. In that I’ll also show how you can extend the publish process without modifying either the project or any of its contents.
+
+Before we get too far into this, if you are not familiar with how to publish your VS web projects from the command line you can read our docs at ttp://www.asp.net/mvc/tutorials/deployment/visual-studio-web-deployment/command-line-deployment.
+
+When you publish a project from the command line using a publish profile you typically use the syntax below.
+
+msbuild .\MyProject.csproj /p:VisualStudioVersion=11.0 /p:DeployOnBuild=true /p:PublishProfile=<profile-name-or-path>
+
+
+In this snippet we are passing in a handful of properties. VisualStudioVersion dictates which version of MSBuild targets are used during the build. See http://sedodream.com/2012/08/19/VisualStudioProjectCompatabilityAndVisualStudioVersion.aspx for more details on that. DeployOnBuild=true injects the publish process at the end of build. PublishProfile can either be the name of a publish profile which the project contains or it can be the full path to a publish profile. We will use PublishProfile with that second option, the full path.
+
+So we need to pass in the full path to a publish profile, which typically is a .pubxml file. A publish profile is just an MSBuild file. When you pass in PublishProfile and DeployOnBuild=true, then the publish profile is Imported into the build/publish process. It will supply the publish properties needed to perform the publish.
+
+Let’s see how that works. I have a sample project, MySite, which does not have any publish profiles created for it. I have created a publish profile, ToFileSys.pubxml, in another folder that will be used though. The contents of that file are below.
+
+ToFileSys.pubxml
+
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<PropertyGroup>
+<WebPublishMethod>FileSystem</WebPublishMethod>
+<ExcludeApp_Data>False</ExcludeApp_Data>
+<publishUrl>C:\temp\Publish\01</publishUrl>
+<DeleteExistingFiles>False</DeleteExistingFiles>
+</PropertyGroup>
+</Project>
+
+
+This publish profile will publish to a local folder. I just created this file in VS with a different project and then just copied it to the folder that I needed, and removed properties which are only used for the inside of VS experience. We can publish the MySite project using this profile with the command below.
+
+msbuild MySite.csproj
+/p:VisualStudioVersion=11.0
+/p:DeployOnBuild=true
+/p:PublishProfile=C:\data\my-code\publish-samples\publish-injection\build\ToFileSys.pubxml
+
+
+When you execute this the file specified in PublishProfile will be included into the build process.
+
+### Taking it up a level
+
+Now let’s see how we can take this to the next level by having a single script that will be used to publish more than one project using this technique.
+
+In the sample files (which you can find links for at the end of the post). I have a solution with two web projects, MySite and MyOtherSite. Neither of these projects have any publish profiles created. I have created a script which will build/publish these projects which you can find at build\publish.proj in the samples. The contents of the file are shown below.
+
+publish.proj
+
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="BuildProjects">
+<!--
+This file is used in two ways.
+1. Drive the build and publish process
+2. It is used by the publish process during the build of MySite to configure/extend publish
+Note: 1. Is kicked off by the use on the cmd line/build server. 2. Is invoked by this script itself.
+This file is injected into the publish process via the PublishProfile property.
+-->
+<PropertyGroup>
+<VisualStudioVersion Condition=" '$(VisualStudioVersion)'=='' ">11.0</VisualStudioVersion> <Configuration Condition=" '$(Configuration)'=='' ">Release</Configuration>
+<!-- Location for build output of the project -->
+<OutputRoot Condition=" '$(OutputRoot)'=='' ">$(MSBuildThisFileDirectory)..\BuildOutput\</OutputRoot>
+<!-- Root for the publish output -->
+<PublishFolder Condition=" '$(PublishFolder)'==''">C:\temp\Publish\Output\</PublishFolder> </PropertyGroup> <ItemGroup> <ProjectsToBuild Include="$(MSBuildThisFileDirectory)..\MySite\MySite.csproj">
+VisualStudioVersion=$(VisualStudioVersion); Configuration=$(Configuration);
+OutputPath=$(OutputRoot); WebPublishMethod=FileSystem; publishUrl=$(PublishFolder)MySite\;
+DeployOnBuild=true;
+DeployTarget=WebPublish;
+PublishProfile=$(MSBuildThisFileFullPath) </AdditionalProperties> </ProjectsToBuild> <ProjectsToBuild Include="$(MSBuildThisFileDirectory)..\MyOtherSite\MyOtherSite.csproj">
+VisualStudioVersion=$(VisualStudioVersion); Configuration=$(Configuration);
+OutputPath=$(OutputRoot); WebPublishMethod=FileSystem; publishUrl=$(PublishFolder)MyOtherSite\;
+DeployOnBuild=true;
+DeployTarget=WebPublish;
+PublishProfile=$(MSBuildThisFileFullPath) </AdditionalProperties> </ProjectsToBuild> </ItemGroup> <Target Name="BuildProjects"> <MSBuild Projects="@(ProjectsToBuild)" /> </Target> <!-- *************************************************************************************** The targets below will be called during the publish process. These targets are injected into the publish process for each web project. These targets will not have access to any new values for properties/items from the targets above this. *************************************************************************************** --> <Target Name="AfterWebPublish" AfterTargets="WebPublish"> <Message Text="Inside AfterWebPublish" Importance="high"/> </Target> </Project>  This file is pretty simple, it declares some properties which will be used for the build/publish process. Then it declares the projects to be built with an item list named ProjectsToBuild. When declaring ProjectsToBuild I use the AdditionalProperties metadata to specify MSBuild properties to be used during the build process for each project. Let’s take a closer look at those properties. <AdditionalProperties> VisualStudioVersion=$(VisualStudioVersion);
+Configuration=$(Configuration); OutputPath=$(OutputRoot);
+WebPublishMethod=FileSystem;
+publishUrl=$(PublishFolder)MySite\; DeployOnBuild=true; DeployTarget=WebPublish; PublishProfile=$(MSBuildThisFileFullPath)
+
+
+I’ll explain all the properties now. VisualStudioVersion, Configuration and OutputPath are all used for the build process. The other properties are related to publishing. If you want to publish from the file system those properties (WebPublishMethod, publishUrl, DeployOnBuild, and DeployTarget) must be set. The most important property there is PublishProfile.
+
+PublishProfile is set to $(MSBuildThisFileFullPath) which is the full path to publish.proj. This will instruct the build process of that project to import publish.proj when its build/publish process is started. It’s important to note that a “new instance” of the file will be imported. What that means is that the imported version of publish.proj won’t have access to any dynamic properties/items created in publish.proj. The reason why PublishProfile is specified there is so that we can extend the publish process from within publish.proj itself. publish.proj has a target, AfterWebPublish, which will be executed after each project is executed. Let’s see how this works. We can execute the publish process with the command below. msbuild .\build\publish.proj /p:VisualStudioVersion=11.0  After executing this command the tail end of the result is shown in the image below. In the image above you can see that the MyOtherSite project is being publish to the specified location in publish.proj and the AfterWebPublish target is executed as well. In this post we’ve seen how we can use an MSBuild file as a publish profile, and how to extend the publish process using that same file. You can download the samples at https://dl.dropboxusercontent.com/u/40134810/blog/publish-injection.zip. You can find the latest version in my publish-samples repository at publish-injection. Sayed Ibrahim Hashimi | http://msbuildbook.com | @SayedIHashimi msbuild | Visual Studio | Visual Studio 2012 | web | Web Publishing Pipeline Saturday, September 21, 2013 7:57:03 PM (GMT Daylight Time, UTC+01:00) | Wednesday, June 05, 2013 # How to publish a VS web project with a .publishSettings file The easiest way to publish a Visual Studio web project from the command line is to follow the steps below. 1. Open VS 2. Right click on the Web project and select Publish 3. Import your .publishSettings file (or manually configure the settings) 4. Save the profile (i.e. .pubxml file) 5. From the command line publish with the command line passing in PublishProfile For more details on this you can see ASP.NET Command Line Deployment. This is pretty simple and very easy, but it does require that you manually create the .pubxml file. In some cases you’d just like to download the .publishsettings file from your hosting provider and use that from the command line. This post will show you how to do this. In order to achieve the goal we will need to extend the build/publish process. There are two simple ways to do this; 1. Place a .wpp.targets file in the same directory as the web project or 2. Pass an additional property indicating the location of the .wpp.targets file. I’ll first go over the technique where you place the file directly inside of the directory where the project is. After that I’ll show you how to use this file from a well known location. One way to do this is to create a .wpp.targets file. This .wpp.targets file will be imported into the build/publish process automatically. This .targets file will enable us to pass in PublishSettingsFile as an MSBuild property. It will then read the .publishsettings file and output the properties needed to execute the publish process. ### .wpp.targets in the project directory Let’s take a look at the .targets file and then we will discuss it’s contents. Below you will find the contents of the full file. <?xml version="1.0" encoding="utf-8"?> <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"> <!-- When using this file you must supply /p:PublishSettingsFile as a parameter and /p:DeployOnBuild=true --> <PropertyGroup Condition=" Exists('$(PublishSettingsFile)')">
+<!-- These must be declared outside of a Target because they impact the Import Project flow -->
+<WebPublishMethod>MSDeploy</WebPublishMethod>
+<DeployTarget>WebPublish</DeployTarget>
+
+<PipelineDependsOn>
+GetPublishPropertiesFromPublishSettings;
+$(PipelineDependsOn); </PipelineDependsOn> </PropertyGroup> <Target Name="GetPublishPropertiesFromPublishSettings" BeforeTargets="Build" Condition=" Exists('$(PublishSettingsFile)')">
+<PropertyGroup>
+<_BaseQuery>/publishData/publishProfile[@publishMethod='MSDeploy'][1]/</_BaseQuery>
+<!-- This value is not in the .publishSettings file and needs to be specified, it can be overridden with a cmd line parameter -->
+<!-- If you are using the Remote Agent then specify this as RemoteAgent -->
+<MSDeployPublishMethod>WMSVC</MSDeployPublishMethod>
+</PropertyGroup>
+
+<ItemGroup>
+<_MSDeployXPath Include="WebPublishMethod">
+<Query>$(_BaseQuery)@publishMethod</Query> </_MSDeployXPath> <_MSDeployXPath Include="MSDeployServiceURL"> <Query>$(_BaseQuery)@publishUrl</Query>
+</_MSDeployXPath>
+
+<_MSDeployXPath Include="SiteUrlToLaunchAfterPublish">
+<Query>$(_BaseQuery)@destinationAppUrl</Query> </_MSDeployXPath> <_MSDeployXPath Include="DeployIisAppPath"> <Query>$(_BaseQuery)@msdeploySite</Query>
+</_MSDeployXPath>
+
+<Query>$(_BaseQuery)@userName</Query> </_MSDeployXPath> <_MSDeployXPath Include="Password"> <Query>$(_BaseQuery)@userPWD</Query>
+</_MSDeployXPath>
+</ItemGroup>
+
+<XmlPeek XmlInputPath="$(PublishSettingsFile)" Query="%(_MSDeployXPath.Query)" Condition=" Exists('$(PublishSettingsFile)')">
+</XmlPeek>
+</Target>
+</Project>
+
+
+You can place this file in the root of your project (next to the .csproj/.vbproj file) with the name {ProjectName}.wpp.targets.
+
+This .targets file is pretty simple. It defines a couple properties and a single target, GetPublishPropertiesFromPublishSettings. In order to publish your project from the command line you would execute the command below.
+
+msbuild.exe MyProject /p:VisualStudioVersion=11.0 /p:DeployOnBuild=true /p:PublishSettingsFile=<path-to-.publishsettings>
+
+
+Here is some info on the properties that are being passed in.
+
+The VisualStudioVersion property indicates that we are using the VS 2012 targets. More info on this at http://sedodream.com/2012/08/19/VisualStudioProjectCompatabilityAndVisualStudioVersion.aspx.
+
+DeployOnBuild, when true it indicates that we want to publish the project. This is the same property that you would normally pass in.
+
+PublishSettingsFile, this is a new property which the .targets file recognizes. It should be set to the path of the .publishSettings file.
+
+The properties at the top of the .targets file (WebPublishMethod and DeployTarget) indicate what type of publish operation is happening. The default values for those are MSDeploy and WebPublish respectively. You shouldn’t need to change those, but if you do you can pass them in on the command line.
+
+The GetPublishPropertiesFromPublishSettings target uses the XmlPeek task to read the .publishsettings file. It then emits the properties required for publishing.
+
+OK this is great an all, but it still requires that an additional file (the .wpp.targets file) be placed in the directory of project. It is possible to avoid this as well. Let’s move to that
+
+### .wpp.targets from a well known location
+
+If you’d like to avoid having to place the .wpp.targets file in the directory of the project you can easily do this. Place the file in a well known location and then execute the same msbuild.exe call adding an additional property. See the full command below.
+
+msbuild.exe MyProject /p:VisualStudioVersion=11.0 /p:DeployOnBuild=true /p:PublishSettingsFile=<path-to-.publishsettings> /p:WebPublishPipelineCustomizeTargetFile=<path-to.targets-file>
+
+
+Once you do this you no longer need to create the Publish Profile in VS if you want to publish from the command line with a .publishsettings file.
+
+FYI you can find the complete sample at https://github.com/sayedihashimi/publish-samples/tree/master/PubWithPublishSettings.
+
+Sayed Ibrahim Hashimi | http://msbuildbook.com | @SayedIHashimi
+
+msbuild | web | Web Publishing Pipeline Wednesday, June 05, 2013 6:01:34 PM (GMT Daylight Time, UTC+01:00)       |
+Thursday, May 09, 2013
+
+# Book published and now in stock!
+
+I’m happy to say that my Supplement to Inside the Microsoft Build Engine book (co-author William Bartholomew) has now been published. In fact it’s already in stock and ready to be shipped by Amazon.com.
+
+This book is a small addition (118 pages) to the previous book, Inside the Microsoft Build Engine 2nd edition. It has a small price too, MSRP is $12.99 but it’s selling on Amazon.com for$8.99! In this book we cover the updates to MSBuild, Team Build and Web Publishing in Visual Studio 2012. The foreword was written by Scott Hanselman, and you can read the entire foreword online.
+
+Check out how thin the supplement is in comparison to the 2nd edition #ThinIsIn.
+
+If you already own the 2nd edition then you’ll love this update.
+
+Chapter 1: What's new in MSBuild
+
+1. Visual Studio project compatibility between 2010 and 2012
+3. NuGet
+5. Cookbook
+##### Chapter 2: What's new in Team Build 2012
+1. Installation
+2. Team Foundation Service
+3. User interface (UI) enhancements
+4. Visual Studio Test Runner
+5. Pausing build definitions
+6. Batching
+7. Logging
+8. Windows Workflow Foundation 4.5
+9. Cookbook
+##### Chapter 3: What's new in Web Publishing
+1. Overview of the new Publish Web Dialog
+2. Building web packages
+3. Publish profiles
+4. Database publishing support
+5. Profile-specific web.config transforms
+6. Cookbook
+
+The book has been available in e-book form for a few weeks. Just long enough for us to get our first review. It was 5 stars :).
+
+Please let us know what you think of this book!
+
+Sayed Ibrahim Hashimi | http://msbuildbook.com | @SayedIHashimi
+
+msbuild | MSDeploy | Team Build | web | Web Publishing Pipeline Thursday, May 09, 2013 6:33:20 AM (GMT Daylight Time, UTC+01:00)       |
+Wednesday, March 06, 2013
+
+# How to publish one web project from a solution
+
+Today on twitter @nunofcosta asked me roughly the question “How do I publish one web project from a solution that contains many?
+
+The issue that he is running into is that he is building from the command line and passing the following properties to msbuild.exe.
+
+    /p:DeployOnBuild=true
+/p:PublishProfile='siteone - Web Deploy'
+
+
+When you pass these properties to msbuild.exe they are known as global properties. These properties are difficult to override and are passed to every project that is built. Because of this if you have a solution with multiple web projects, when each web project is built it is passed in the same set of properties. Because of this when each project is built the publish process for that project will start and it will expect to find a file named siteone – Web Deploy.pubxml in the folder Properties\PublishProfiles\. If the file doesn’t exist the operation may fail.
+
+Note: If you are interested in using this technique for an orchestrated publish see my comments at http://stackoverflow.com/a/14231729/105999 before doing so.
+
+So how can we resolve this?
+
+Let’s take a look at a sample (see links below). I have a solution, PublishOnlyOne, with the following projects.
+
+1. ProjA
+2. ProjB
+
+ProjA has a publish profile named ‘siteone – Web Deploy’, ProjB does not. When trying to publish this you may try the following command line.
+
+    msbuild.exe PublishOnlyOne.sln /p:DeployOnBuild=true /p:PublishProfile=’siteone – Web Deploy’ /p:Password=%password%
+
+
+See publish-sln.cmd in the samples.
+
+If you do this, when its time for ProjB to build it will fail because there’s no siteone – Web Deploy profile for that project. Because of this, we cannot pass DeployOnBuild. Instead here is what we need to do.
+
+1. Edit ProjA.csproj to define another property which will conditionally set DeployOnBuild
+2. From the command line pass in that property
+
+I edited ProjA and added the following property group before the Import statements in the .csproj file.
+
+<PropertyGroup>
+<DeployOnBuild Condition=" '$(DeployProjA)'!='' ">$(DeployProjA)</DeployOnBuild>
+</PropertyGroup>
+
+
+Here you can see that DeployOnBuild is set to whatever value DeployProjA is as long as it’s not empty. Now the revised command is:
+
+    msbuild.exe PublishOnlyOne.sln /p:DeployProjA=true /p:PublishProfile=’siteone – Web Deploy’ /p:Password=%password%
+
+
+Here instead of passing DeployOnBuild, I pass in DeployProjA which will then set DeployOnBuild. Since DeployOnBuild wasn’t passed to ProjB it will not attempt to publish.
+
+You can find the complete sample at https://github.com/sayedihashimi/sayed-samples/tree/master/PublishOnlyOne.
+
+Sayed Ibrahim Hashimi | @SayedIHashimi | http://msbuildbook.com/
+
+MSDeploy | web | Web Deployment Tool | Web Development | Web Publishing Pipeline Wednesday, March 06, 2013 2:48:41 AM (GMT Standard Time, UTC+00:00)       |
+Sunday, January 06, 2013
+
+# Command line web project publishing
+
+With the release of VS2012 we have improved the command line publish experience. We’ve also made all the web publish related features available for VS2010 users in the Azure SDK.
+
+The easies way to publish a project from the command li

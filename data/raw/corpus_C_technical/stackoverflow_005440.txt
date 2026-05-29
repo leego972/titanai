@@ -1,0 +1,61 @@
+Question: <p>Can you add new statements (like <code>print</code>, <code>raise</code>, <code>with</code>) to Python's syntax?</p>
+
+<p>Say, to allow..</p>
+
+<pre><code>mystatement "Something"
+</code></pre>
+
+<p>Or,</p>
+
+<pre><code>new_if True:
+    print "example"
+</code></pre>
+
+<p>Not so much if you <em>should</em>, but rather if it's possible (short of modifying the python interpreters code)</p>
+
+Answer: <p>Here's a very simple but crappy way to add new statements, <em>in interpretive mode only</em>. I'm using it for little 1-letter commands for editing gene annotations using only sys.displayhook, but just so I could answer this question I added sys.excepthook for the syntax errors as well. The latter is really ugly, fetching the raw code from the readline buffer. The benefit is, it's trivially easy to add new statements this way.</p>
+
+<pre><code>
+jcomeau@intrepid:~/$ cat demo.py; ./demo.py
+#!/usr/bin/python -i
+'load everything needed under "package", such as package.common.normalize()'
+import os, sys, readline, traceback
+if __name__ == '__main__':
+    class t:
+        @staticmethod
+        def localfunction(*args):
+            print 'this is a test'
+            if args:
+                print 'ignoring %s' % repr(args)
+
+    def displayhook(whatever):
+        if hasattr(whatever, 'localfunction'):
+            return whatever.localfunction()
+        else:
+            print whatever
+
+    def excepthook(exctype, value, tb):
+        if exctype is SyntaxError:
+            index = readline.get_current_history_length()
+            item = readline.get_history_item(index)
+            command = item.split()
+            print 'command:', command
+            if len(command[0]) == 1:
+                try:
+                    eval(command[0]).localfunction(*command[1:])
+                except:
+                    traceback.print_exception(exctype, value, tb)
+        else:
+            traceback.print_exception(exctype, value, tb)
+
+    sys.displayhook = displayhook
+    sys.excepthook = excepthook
+>>> t
+this is a test
+>>> t t
+command: ['t', 't']
+this is a test
+ignoring ('t',)
+>>> ^D
+
+</code></pre>

@@ -1,0 +1,57 @@
+Question: <p>I have a base class with a property which (the get method) I want to overwrite in the subclass. My first thought was something like:</p>
+
+<pre><code>class Foo(object):
+    def _get_age(self):
+        return 11
+
+    age = property(_get_age)
+
+
+class Bar(Foo):
+    def _get_age(self):
+        return 44
+</code></pre>
+
+<p>This does not work (subclass bar.age returns 11). I found a solution with an lambda expression which works:</p>
+
+<pre><code>age = property(lambda self: self._get_age())
+</code></pre>
+
+<p>So is this the right solution for using properties and overwrite them in a subclass, or are there other preferred ways to do this?</p>
+
+Answer: <p>I ran into problems setting a property in a parent class from a child class. The following workround extends a property of a parent but does so by calling the _set_age method of the parent directly. Wrinkled should always be correct. It is a little javathonic though.</p>
+
+<pre><code>import threading
+
+
+class Foo(object):
+    def __init__(self):
+        self._age = 0
+
+    def _get_age(self):
+        return self._age
+
+    def _set_age(self, age):
+        self._age = age
+
+    age = property(_get_age, _set_age)
+
+
+class ThreadsafeFoo(Foo):
+
+    def __init__(self):
+        super(ThreadsafeFoo, self).__init__()
+        self.__lock = threading.Lock()
+        self.wrinkled = False
+
+    def _get_age(self):
+        with self.__lock:
+             return super(ThreadsafeFoo, self).age
+
+    def _set_age(self, value):
+        with self.__lock:
+            self.wrinkled = True if value &gt; 40 else False
+            super(ThreadsafeFoo, self)._set_age(value)
+
+    age = property(_get_age, _set_age)
+</code></pre>

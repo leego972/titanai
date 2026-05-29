@@ -1,0 +1,190 @@
+# Resource Managing Graph (RMG)
+
+A frame graph and resource manager on top of MarpII
+
+Siebencorgie published on
+5 min, 901 words
+
+Categories: Vulkan
+
+Remember this one: The poor man's render graph? The goal was to simplify creating custom renderers using AsyncCompute and other nice buzzwords. It actually worked pretty nice for small renderers, but I was wrong about one part. Specifically this one:
+
+I decided against a blackbox-like graph (where all data is managed by the graph). The main advantage of this more transparent type is, that the developer can choose for instance to write some parts by hand and only let the graph handle common work. Or the other way around: Hand optimize critical paths and let the graph only handle swapchain image submission and async compute.
+
+Turns out this freedom is actually pretty inconvenient. While it's nice* to let something else do the scheduling, you still have to create all the resources, and think about when they are used. This leads to creating manual double buffers through out your code etc. All the time setting the correct usage flags, thinking about vk::ImageLayout etc.
+
+This is the reason why I set out to create the second iteration called Resource Managing Graph or RMG. The idea is to inherit scheduling from the old implementation, but wrap everything into a blackbox that manages all the resources. The user only gets handels to the data without.
+
+To use RMG you have to do two things:
+
+1. Implement the Task trait
+
+I used the occasion to change queue handling a bit. Since you don't have to think about queues anymore, you only specify the type of queue needed for each task. This shrinks down the recording step to the following:
+
+// Recording buffer update, a simulation step, buffer copy (to the forward renderer),
+// rendering and finaly swapchain present.
+rmg.record(window_extent(&window))
+.unwrap()
+.unwrap()
+.unwrap()
+.unwrap()
+.unwrap()
+.execute()
+.unwrap();
+
+
+Registering data for a task is now done through a Registry which collects all data dependencies for a task. Apart from that scheduling is pretty much the same.
+
+Creating an image now is as easy as this:
+
+let mut depth_desc = ImgDesc::depth_attachment_2d(1, 1, depth_format);
+depth_desc.usage |= vk::ImageUsageFlags::SAMPLED;
+let depth_image = rmg.new_image_uninitialized(depth_desc, None)?;
+
+
+The resulting handle behaves similar to a Arc<Image>, meaning that the image is dropped when all handles referencing that image are dropped. This makes managing the lifetime of resources easy. No manual delete calls are needed.
+
+## Enhancements
+
+So far we only discussed the user facing aspect that stayed more or less the same. However, there is one big, opinionated advantage. The whole thing automatically manages a bindless descriptor* setup. Meaning, instead of having to manage descriptor-sets and pools all this is done by the graph. At runtime you can translate a resource handle to a 32bit GPU-resource handle. Push that to the GPU and you are free to access any data.
+
+I used three main resources for the implementation:
+
+1. Vulkan specification
+2. TraverseResearch Darius Bouma's posts
+3. Vincent Parizet post
+
+This makes writing shaders and passes even easier. For instance there is a small simulation compute shader in the example. The Task implementation looks like this:
+
+impl Task for Simulation {
+fn name(&self) -> &'static str {
+"Simulation"
+}
+
+fn queue_flags(&self) -> vk::QueueFlags {
+vk::QueueFlags::COMPUTE
+}
+
+fn pre_record(
+&mut self,
+resources: &mut marpii_rmg::Resources,
+_ctx: &marpii_rmg::CtxRmg,
+) -> Result<(), marpii_rmg::RecordError> {
+self.push.get_content_mut().sim_buffer = resources.get_resource_handle(&self.sim_buffer)?;
+self.push.get_content_mut().is_init = self.is_init.into();
+
+if !self.is_init {
+self.is_init = true;
+}
+
+Ok(())
+}
+
+fn register(&self, registry: &mut marpii_rmg::ResourceRegistry) {
+registry.request_buffer(&self.sim_buffer);
+registry.register_asset(self.pipeline.clone());
+}
+
+fn record(
+&mut self,
+device: &std::sync::Arc<marpii::context::Device>,
+command_buffer: &vk::CommandBuffer,
+_resources: &marpii_rmg::Resources,
+) {
+//bind commandbuffer, setup push constant and execute
+unsafe {
+device.inner.cmd_bind_pipeline(
+*command_buffer,
+vk::PipelineBindPoint::COMPUTE,
+self.pipeline.pipeline,
+);
+device.inner.cmd_push_constants(
+*command_buffer,
+self.pipeline.layout.layout,
+0,
+self.push.content_as_bytes(),
+);
+
+device
+.inner
+.cmd_dispatch(*command_buffer, Self::dispatch_count(), 1, 1);
+}
+}
+}
+
+
+#version 460
+
+#extension GL_EXT_nonuniform_qualifier : require
+
+#include "shared.glsl"
+
+#define BOUNDS 20.0f
+
+//push constants block
+layout( push_constant ) uniform constants{
+ResHandle sim;
+uint is_init;
+uint buf_size;
+} Push;
+
+layout(set = 0, binding = 0) buffer SimObjects{
+SimObject objects[];
+} global_buffers_objects[];
+layout(set = 1, binding = 0, rgba8) uniform image2D global_images_2d[];
+layout(set = 2, binding = 0) uniform sampler2D global_textures[];
+layout(set = 3, binding = 0) uniform sampler samplers[];
+
+//src: https://stackoverflow.com/questions/4200224/random-noise-functions-for-glsl
+float rand(vec2 co){
+return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+void main(){
+uint widx = gl_GlobalInvocationID.x;
+
+if (widx >= Push.buf_size){
+return;
+}
+
+SimObject src;
+if (Push.is_init > 0){
+src = global_buffers_objects[nonuniformEXT(get_index(Push.sim))].objects[widx];
+}else{
+
+vec4 rand = vec4(
+rand(vec2(uvec2(widx * 13, widx * 13))),
+rand(vec2(uvec2(widx * 17, widx * 17))),
+rand(vec2(uvec2(widx * 23, widx * 23))),
+rand(vec2(uvec2(widx * 27, widx * 27)))
+);
+
+//Init to some random location and velocity
+src = SimObject(
+rand.xyzw,
+rand.wzyx / 100.0
+);
+}
+
+//"simulation step"
+src.location.xyz += src.velocity.xyz;
+
+//flip velocity if we exceed the bounds
+if (abs(src.location.x) > BOUNDS){
+src.velocity.x *= -1.0;
+}
+if (abs(src.location.y) > BOUNDS){
+src.velocity.y *= -1.0;
+}
+if (abs(src.location.z) > BOUNDS){
+src.velocity.z *= -1.0;
+}
+
+global_buffers_objects[nonuniformEXT(get_index(Push.sim))].objects[widx] = src;
+}
+
+
+So far working with the new graph is much more pleasant. I plan on refining the scheduler later based on a more intelligent topological sort.
+
+Have a look at the MarpII repository if you are interested.

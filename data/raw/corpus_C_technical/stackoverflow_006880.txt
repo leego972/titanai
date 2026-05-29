@@ -1,0 +1,62 @@
+Question: <p>When using urllib2 (and maybe urllib) on windows python seems to magically pick up the authenticated proxy setting applied to InternetExplorer.  However, it doesn't seem to check and process the Advance setting "Exceptions" list.</p>
+
+<p>Is there a way I can get it to process the exceptions list?  Or, ignore the IE proxy setting and apply my own proxy opener to address this issue?</p>
+
+<p>I played with creating a proxy opener before, but couldn't get it to work.  Here's what I managed to dig out, but I still don't see how/where to apply any exceptions and I'm not even sure if this is right:</p>
+
+<pre><code>proxy_info = {
+                      'host':'myproxy.com',
+                      'user':Username,
+                      'pass':Password,
+                      'port':1080
+                      }                                                   
+
+http_str = "http://%(user)s:%(pass)s@%(host)s:%(port)d" % proxy_info
+
+authInfo = urllib2.HTTPBasicAuthHandler()
+authInfo.add_password()
+proxy_dict = {'http':http_str}
+proxyHandler = urllib2.ProxyHandler(proxy_dict)
+
+# apply the handler to an opener
+proxy_opener = urllib2.build_opener(proxyHandler, urllib2.HTTPHandler)
+
+urllib2.install_opener(proxy_opener)
+</code></pre>
+
+Answer: <p>By default <code>urllib2</code> gets the proxy settings from the environment variable, which is why it is using the IE settings.  This is very handy, because you don't need to setup authentication yourself.</p>
+
+<p>You can't apply exceptions like you want to, the easiest way to do this would be to have two <code>opener</code>s and decide which one to use depending on whether the domain is in your exception list or not.</p>
+
+<p>Use the default <code>opener</code> for when you want to use the proxy, and one without a proxy for when you don't need it:</p>
+
+<pre><code>&gt;&gt;&gt; no_proxy = urllib2.ProxyHandler({})
+&gt;&gt;&gt; opener = urllib2.build_opener(no_proxy)
+&gt;&gt;&gt; urllib2.install_opener(opener)
+</code></pre>
+
+<p>From <a href="http://docs.python.org/howto/urllib2.html?highlight=proxyhandler#proxies" rel="nofollow">here</a>.</p>
+
+<p><strong>Edit:</strong></p>
+
+<p>Here's how I'd do it:</p>
+
+<pre><code>exclusion_list = ['http://www.google.com/', 'http://localhost/']
+
+no_proxy = urllib2.ProxyHandler({})
+no_proxy_opener = urllib2.build_opener(no_proxy)
+
+default_proxy_opener = urllib2.build_opener()
+
+url = 'http://www.example.com/'
+
+if url in exclusion_list:
+    opener = no_proxy_opener
+else:
+    opener = default_proxy_opener
+
+page = opener.open(url)
+print page
+</code></pre>
+
+<p>Your biggest problem will be matching the url to the exclusion list, but that's a whole new question.</p>

@@ -1,0 +1,67 @@
+# Problem with Simplify, Sqrt, and Set: What's going on?
+
+I am having some trouble getting Mathematica to simplify an expression of the form Sqrt[x]*Sqrt[1/x], where x>0. The problem is that x is assigned to some complicated form by the time Mathematica encounters it, and it fails to recognize that it will simplify. While debugging this problem, I wrote the following code that fails to simplify only when x gets sufficiently complicated. The cases involving x0,x1,x2,x3 will all simplify, but the x4 case will not. What's going on here?
+
+x0 = a;
+x1 = a + b;
+x2 = a + b*c;
+x3 = a + b*c*d;
+x4 = a + b*c*d*e;
+Simplify[1 == Sqrt[a] Sqrt[1/a], x0 > 0]
+Simplify[1 == Sqrt[a + b] Sqrt[1/(a + b)], x1 > 0]
+Simplify[1 == Sqrt[a + b*c] Sqrt[1/(a + b*c)], x2 > 0]
+Simplify[1 == Sqrt[a + b*c*d] Sqrt[1/(a + b*c*d)], x3 > 0]
+Simplify[1 == Sqrt[a + b*c*d*e] Sqrt[1/(a + b*c*d*e)], x4 > 0]
+
+• Welcome to Mathematica.SE! I suggest that: 1) You take the introductory Tour now! 2) When you see good questions and answers, vote them up by clicking the gray triangles, because the credibility of the system is based on the reputation gained by users sharing their knowledge. Also, please remember to accept the answer, if any, that solves your problem, by clicking the checkmark sign! 3) As you receive help, try to give it too, by answering questions in your area of expertise. Feb 27 '15 at 23:01
+• This looks very strange. fyi, I found a problem tracing this when there are 4 symbols only. Feb 28 '15 at 0:17
+
+Probably some internal weirdness with the ComplexityFunction, but:
+
+Simplify[Sqrt[1/(a + b c d e  )] Sqrt[a + b c d e ]==1] // PowerExpand
+
+Simplify[1 == Sqrt[a + b*c*d*e] Sqrt[1/(a + b*c*d*e)], x4 > 0] // PowerExpand
+
+(*
+True
+True
+*)
+
+• Yes, but PowerExpand yields True even without Simplify. Feb 28 '15 at 0:58
+• @bbgodfrey: Of course it does. What would you expect it to do with the equality?
+– ciao
+Feb 28 '15 at 0:59
+• No offense meant. I merely was observing that the use of PowerExpand does not explain why Simplify is not producing the expected result in this case. Feb 28 '15 at 1:04
+• @bbgodfrey:Oh, none taken! Hypothesis non fingo on why MMA is behaving that way, other than theory in my answer. Just offering a work-around...
+– ciao
+Feb 28 '15 at 1:07
+
+The cases involving x0, x1, x2, x3 will all simplify, but the x4 case will not.
+What's going on here?
+
+Simplify[1 == Sqrt[a + b*c*d*e] Sqrt[1/(a + b*c*d*e)], x4 > 0]
+
+
+Sqrt[1/(a + b c d e)] Sqrt[a + b c d e] == 1
+
+With x4 added, you have one too many variables for the assumptions to work. Maximum number of variables in non-linear expressions for the assumptions to be processed in Simplify and FullSimplify is 4 (the value of "AssumptionsMaxNonlinearVariables" sub-option of the system option "SimplificationOptions")
+
+"SimplificationOptions" /. SystemOptions["SimplificationOptions"]
+
+
+"AssumptionsMaxNonlinearVariables" -> 4,
+"AssumptionsMaxVariables" -> 21, "AutosimplifyTrigs" -> True,
+"AutosimplifyTwoArgumentLog" -> True, "FiniteSumMaxTerms" -> 30,
+"FunctionExpandMaxSteps" -> 15, "ListableFirst" -> True,
+"RestartELProver" -> False, "SimplifyMaxExponents" -> 100,
+"SimplifyToPiecewise" -> True}
+
+You can reset this sub-option value to a large enough number
+
+SetSystemOptions["SimplificationOptions" -> {"AssumptionsMaxNonlinearVariables" -> 10}];
+Simplify[1 == Sqrt[a + b*c*d*e] Sqrt[1/(a + b*c*d*e)], x4 > 0]
+
+
+True
+
+Related Q/As:

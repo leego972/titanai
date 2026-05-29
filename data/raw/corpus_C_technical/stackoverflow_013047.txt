@@ -1,0 +1,64 @@
+Question: <p>I have a class with two class methods (using the classmethod() function) for getting and setting what is essentially a static variable.  I tried to use the property() function with these, but it results in an error.  I was able to reproduce the error with the following in the interpreter:</p>
+
+<pre><code>&gt;&gt;&gt; class foo(object):
+...     _var=5
+...     def getvar(cls):
+...             return cls._var
+...     getvar=classmethod(getvar)
+...     def setvar(cls,value):
+...             cls._var=value
+...     setvar=classmethod(setvar)
+...     var=property(getvar,setvar)
+...
+&gt;&gt;&gt; f.getvar()
+5
+&gt;&gt;&gt; f.setvar(4)
+&gt;&gt;&gt; f.getvar()
+4
+&gt;&gt;&gt; f.var
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in ?
+TypeError: 'classmethod' object is not callable
+&gt;&gt;&gt; f.var=5
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in ?
+TypeError: 'classmethod' object is not callable
+</code></pre>
+
+<p>Is it possible to use the property() function with classmethod decorated functions?</p>
+
+Answer: <blockquote>
+  <h1>Is it possible to use the property() function with classmethod decorated functions?</h1>
+</blockquote>
+
+<p>No. </p>
+
+<p>However, a classmethod is simply a bound method (a partial function) on a class accessible from instances of that class.</p>
+
+<p>Since the instance is a function of the class and you can derive the class from the instance, you can can get whatever desired behavior you might want from a class-property with <code>property</code>:</p>
+
+<pre><code>class Example(object):
+    _class_property = None
+    @property
+    def class_property(self):
+        return self._class_property
+    @class_property.setter
+    def class_property(self, value):
+        type(self)._class_property = value
+    @class_property.deleter
+    def class_property(self):
+        del type(self)._class_property
+</code></pre>
+
+<p>This code can be used to test - it should pass without raising any errors:</p>
+
+<pre><code>ex1 = Example()
+ex2 = Example()
+ex1.class_property = None
+ex2.class_property = 'Example'
+assert ex1.class_property is ex2.class_property
+del ex2.class_property
+assert not hasattr(ex1, 'class_property')
+</code></pre>
+
+<p>And note that we didn't need metaclasses at all - and you don't directly access a metaclass through its classes' instances anyways.</p>

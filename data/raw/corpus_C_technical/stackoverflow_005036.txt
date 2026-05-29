@@ -1,0 +1,77 @@
+Question: <p>Any gotchas I should be aware of?  Can I store it in a text field, or do I need to use a blob?
+(I'm not overly familiar with either pickle or sqlite, so I wanted to make sure I'm barking up the right tree with some of my high-level design ideas.)</p>
+
+Answer: <p>It is possible to store object data as pickle dump, jason etc but it is also possible to index, them, restrict them  and run select queries that use those indices. Here is example with tuples, that can be easily applied for any other python class. All that is needed is explained in python sqlite3 documentation (somebody already posted the link). Anyway here it is all put together in the following example:</p>
+
+<pre><code>import sqlite3
+import pickle
+
+def adapt_tuple(tuple):
+    return pickle.dumps(tuple)    
+
+sqlite3.register_adapter(tuple, adapt_tuple)    #cannot use pickle.dumps directly because of inadequate argument signature 
+sqlite3.register_converter("tuple", pickle.loads)
+
+def collate_tuple(string1, string2):
+    return cmp(pickle.loads(string1), pickle.loads(string2))
+
+#########################
+# 1) Using declared types
+con = sqlite3.connect(":memory:", detect_types=sqlite3.PARSE_DECLTYPES)
+
+con.create_collation("cmptuple", collate_tuple)
+
+cur = con.cursor()
+cur.execute("create table test(p tuple unique collate cmptuple) ")
+cur.execute("create index tuple_collated_index on test(p collate cmptuple)")
+
+cur.execute("select name, type  from sqlite_master") # where type = 'table'")
+print(cur.fetchall())
+
+p = (1,2,3)
+p1 = (1,2)
+
+cur.execute("insert into test(p) values (?)", (p,))
+cur.execute("insert into test(p) values (?)", (p1,))
+cur.execute("insert into test(p) values (?)", ((10, 1),))
+cur.execute("insert into test(p) values (?)", (tuple((9, 33)) ,))
+cur.execute("insert into test(p) values (?)", (((9, 5), 33) ,))
+
+try:
+    cur.execute("insert into test(p) values (?)", (tuple((9, 33)) ,))
+except Exception as e:
+    print e
+
+cur.execute("select p from test order by p")
+print "\nwith declared types and default collate on column:"
+for raw in cur:
+    print raw
+
+cur.execute("select p from test order by p collate cmptuple")
+print "\nwith declared types collate:"
+for raw in cur:
+    print raw
+
+con.create_function('pycmp', 2, cmp)
+
+print "\nselect grater than using cmp function:"
+cur.execute("select p from test where pycmp(p,?) &gt;= 0", ((10, ),) )
+for raw in cur:
+    print raw
+
+cur.execute("explain query plan select p from test where p &gt; ?", ((3,)))
+for raw in cur:
+    print raw 
+
+print "\nselect grater than using collate:"
+cur.execute("select p from test where p &gt; ?", ((10,),) )
+for raw in cur:
+    print raw  
+
+cur.execute("explain query plan select p from test where p &gt; ?", ((3,)))
+for raw in cur:
+    print raw
+
+cur.close()
+con.close()
+</code></pre>

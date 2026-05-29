@@ -1,0 +1,97 @@
+# Constraint (computational chemistry)
+
+In computational chemistry, a constraint algorithm is a method for satisfying the  Newtonian motion of a rigid body which consists of mass points. A restraint algorithm is used to ensure that the distance between mass points is maintained. The general steps involved are: (i) choose novel unconstrained coordinates (internal coordinates), (ii) introduce explicit constraint forces, (iii) minimize constraint forces implicitly by the technique of Lagrange multipliers or projection methods.
+
+Constraint algorithms are often applied to molecular dynamics simulations. Although such simulations are sometimes performed using internal coordinates that automatically satisfy the bond-length, bond-angle and torsion-angle constraints, simulations may also be performed using explicit or implicit constraint forces for these three constraints. However, explicit constraint forces give rise to inefficiency; more computational power is required to get a trajectory of a given length. Therefore, internal coordinates and implicit-force constraint solvers are generally preferred.
+
+Constraint algorithms achieve computational efficiency by neglecting motion along some degrees of freedom. For instance, in atomistic molecular dynamics, typically the length of covalent bonds to hydrogen are constrained; however, constraint algorithms should not be used if vibrations along these degrees of freedom are important for the phenomenon being studied.
+
+Mathematical background
+
+The motion of a set of N particles can be described by a set of second-order ordinary differential equations, Newton's second law, which can be written in matrix form
+
+ 
+
+where M is a mass matrix and q is the vector of generalized coordinates that describe the particles' positions.  For example, the vector q may be a 3N Cartesian coordinates of the particle positions rk, where k runs from 1 to N; in the absence of constraints, M would be the 3Nx3N diagonal square matrix of the particle masses.  The vector f represents the generalized forces and the scalar V(q) represents the potential energy, both of which are functions of the generalized coordinates q.
+
+If M constraints are present, the coordinates must also satisfy M time-independent algebraic equations
+
+where the index j runs from 1 to M.  For brevity, these functions gi are grouped into an M-dimensional vector g  below.  The task is to solve the combined set of differential-algebraic (DAE) equations, instead of just the ordinary differential equations (ODE) of Newton's second law.
+
+This problem was studied in detail by Joseph Louis Lagrange, who laid out most of the methods for solving it.  The simplest approach is to define new generalized coordinates that are unconstrained; this approach eliminates the algebraic equations and reduces the problem once again to solving an ordinary differential equation.  Such an approach is used, for example, in describing the motion of a rigid body; the position and orientation of a rigid body can be described by six independent, unconstrained coordinates, rather than describing the positions of the particles that make it up and the constraints among them that maintain their relative distances.  The drawback of this approach is that the equations may become unwieldy and complex; for example, the mass matrix M may become non-diagonal and depend on the generalized coordinates.
+
+A second approach is to introduce explicit forces that work to maintain the constraint; for example, one could introduce strong spring forces that enforce the distances among mass points within a "rigid" body.  The two difficulties of this approach are that the constraints are not satisfied exactly, and the strong forces may require very short time-steps, making simulations inefficient computationally.
+
+A third approach is to use a method such as Lagrange multipliers or projection to the constraint manifold to determine the coordinate adjustments necessary to satisfy the constraints.  
+
+Finally, there are various hybrid approaches in which different sets of constraints are satisfied by different methods, e.g., internal coordinates, explicit forces and implicit-force solutions.
+
+Internal coordinate methods
+
+The simplest approach to satisfying constraints in energy minimization and molecular dynamics is to represent the mechanical system in so-called internal coordinates corresponding to unconstrained independent degrees of freedom of the system. For example, the dihedral angles of a protein are an independent set of coordinates that specify the positions of all the atoms without requiring any constraints. The difficulty of such internal-coordinate approaches is twofold: the Newtonian equations of motion become much more complex and the internal coordinates may be difficult to define for cyclic systems of constraints, e.g., in ring puckering or when a protein has a disulfide bond.
+
+The original methods for efficient recursive energy minimization in internal coordinates were developed by Gō and coworkers.
+
+Efficient recursive, internal-coordinate constraint solvers were extended to molecular dynamics.  Analogous methods were applied later to other systems.
+
+Lagrange multiplier-based methods
+
+In most of molecular dynamics simulations that use constraint algorithms, constraints are enforced using the method of Lagrange multipliers. Given a set of n linear (holonomic) constraints at the time t,
+
+where  and  are the positions of the two particles involved in the kth constraint at the time t and  is the prescribed inter-particle distance.
+
+The forces due to these constraints are added in the equations of motion, resulting in, for each of the N particles in the system
+
+Adding the constraint forces does not change the total energy, as the net work done by the constraint forces (taken over the set of particles that the constraints act on) is zero. Note that the sign on  is arbitrary and some references have an opposite sign.
+
+From integrating both sides of the equation with respect to the time, the constrained coordinates of particles at the time, , are given,
+
+where  is the unconstrained (or uncorrected) position of the ith particle after integrating the unconstrained equations of motion.
+
+To satisfy the constraints  in the next timestep, the Lagrange multipliers should be determined as the following equation,
+
+This implies solving a system of  non-linear equations
+
+simultaneously for the  unknown Lagrange multipliers .
+
+This system of  non-linear equations in  unknowns is commonly solved using Newton–Raphson method where the solution vector  is updated using
+
+where  is the Jacobian of the equations σk:
+
+Since not all particles contribute to all of constraints,  is a block matrix and can be solved individually to block-unit of the matrix. In other words,  can be solved individually for each molecule.
+
+Instead of constantly updating the vector , the iteration can be started with , resulting in simpler expressions for  and . In this case
+
+ 
+
+then  is updated to
+
+After each iteration, the unconstrained particle positions are updated using
+
+The vector is then reset to
+
+The above procedure is repeated until the solution of constraint equations, , converges to a prescribed tolerance of a numerical error.
+
+Although there are a number of algorithms to compute the Lagrange multipliers, these difference is rely only on the methods to solve the system of equations. For this methods, quasi-Newton methods are commonly used.
+
+The SETTLE algorithm
+The SETTLE algorithm solves the system of non-linear equations analytically for  constraints in constant time. Although it does not scale to larger numbers of constraints, it is very often used to constrain rigid water molecules, which are present in almost all biological simulations and are usually modelled using three constraints (e.g. SPC/E and TIP3P water models).
+
+The SHAKE algorithm 
+The SHAKE algorithm was first developed for satisfying a bond geometry constraint during molecular dynamics simulations. The method was then generalised to handle any holonomic constraint, such as those required to maintain constant bond angles, or molecular rigidity.
+
+In SHAKE algorithm, the system of non-linear constraint equations is solved using the Gauss–Seidel method which approximates the solution of the linear system of equations using the Newton–Raphson method;
+
+This amounts to assuming that  is diagonally dominant and solving the th equation only for the  unknown. In practice, we compute
+
+ 
+
+for all  iteratively until the constraint equations  are solved to a given tolerance.
+
+The calculation cost of each iteration is , and the iterations themselves converge linearly.
+
+A noniterative form of SHAKE was developed later on.
+
+Several variants of the SHAKE algorithm exist. Although they differ in how they compute or apply the constraints themselves, the constraints are still modelled using Lagrange multipliers which are computed using the Gauss–Seidel method.
+
+The original SHAKE algorithm is capable of constraining both rigid

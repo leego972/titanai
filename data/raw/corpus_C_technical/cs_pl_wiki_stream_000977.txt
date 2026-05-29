@@ -1,0 +1,130 @@
+# Hume (programming language)
+
+Hume is a functionally based programming language developed at the University of St Andrews and Heriot-Watt University in Scotland since the year 2000. The language name is both an acronym meaning 'Higher-order Unified Meta-Environment' and an honorific to the 18th-century philosopher David Hume. It targets real-time computing embedded systems, aiming to produce a design that is both highly abstract, and yet allows precise extraction of time and space execution costs. This allows guaranteeing the bounded time and space demands of executing programs.
+
+Hume combines functional programming ideas with ideas from finite state automata. Automata are used to structure communicating programs into a series of "boxes", where each box maps inputs to outputs in a purely functional way using high-level pattern-matching. It is  structured as a series of levels, each of which exposes different machine properties.
+
+Design model 
+The Hume language design attempts to maintain the essential properties and features required by the embedded systems domain (especially for transparent time and space costing) whilst incorporating as high a level of program abstraction as possible. It aims to target applications ranging from simple microcontrollers to complex real-time systems such as smartphones. This ambitious goal requires incorporating both low-level notions such as interrupt handling, and high-level ones of data structure abstraction etc. Such systems are programmed in widely differing ways, but the language design should accommodate such varying requirements.
+
+Hume is a three-layer language: an outer (static) declaration/metaprogramming layer, an intermediate coordination layer describing a static layout of dynamic processes and the associated devices, and an inner layer describing each process as a (dynamic) mapping from patterns to expressions. The inner layer is stateless and purely functional.
+
+Rather than attempting to apply cost modeling and correctness proving technology to an existing language framework either directly or by altering a more general language (as with e.g., RTSJ), the approach taken by the Hume designers is to design Hume in such a way that formal models and proofs can definitely be constructed. Hume is structured as a series of overlapping language levels, where each level adds expressibility to the expression semantics, but either loses some desirable property or increases the technical difficulty of providing formal correctness/cost models.
+
+Characteristics 
+The interpreter and compiler versions differ a bit.
+ the interpreter (concept prover) admits timeout and custom exceptions.
+ the compiler admits heap and stack cost bounding but exceptions only print the exception name.
+
+The coordination system wires boxes in a dataflow programming style.
+
+The expression language is Haskell-like.
+
+The message passing concurrency system remembers JoCaml's join-patterns or Polyphonic C Sharp chords, but with all channels asynchronous.
+
+There is a scheduler built-in that continuously checks pattern-matching through all boxes in turn, putting on hold the boxes that cannot copy outputs to busy input destinations.
+
+Examples
+
+Vending machine 
+data Coins = Nickel | Dime | Fake;
+data Drinks = Coffee | Tea;
+data Buttons = BCoffee | BTea | BCancel;
+
+type Int = int 32 ;
+
+exception EFakeCoin :: (Int, string) ;
+
+show v = v as string ;
+ 
+box coffee
+in ( coin :: Coins, button :: Buttons, value :: Int ) -- input channels
+out ( drink_outp :: string, value’ :: Int
+    , refund_outp :: string, display :: string)  -- named outputs
+
+within 500KB (400B) -- max heap ( max stack) cost bounding
+handles EFakeCoin, TimeOut, HeapOverflow, StackOverflow
+
+match
+-- * wildcards for unfilled outputs, and unconsumed inputs
+  ( my_coin, *, v)  {- ''join-pattern'' equivalent: coin(my_coin) & value(v) -} 
+                -> let v’ = incrementCredit my_coin v
+                   in ( *, v’, *, show v’)
+ 
+           -- time bounding (''within x time-unit'') raises TimeOut ()
+| ( *, BCoffee, v) {- ''join-pattern'' equivalent: button(BCoffee) & value(v) -}
+                   -> (vend Coffee 10 v) within 30s 
+| ( *, BTea, v)    -> (vend Tea 5 v) within 30s
+| ( *, BCancel, v) -> let refund u = "Refund " ++ show u ++ "\n"
+                      in ( *, 0, refund v, *)
+
+handle
+   EFakeCoin (v, msg) -> ( *, v , *, msg)
+|  TimeOut () -> (*, *, *, "maybe content exhausted, call service!")
+|  HeapOverflow () -> (*, *, *, "error: heap limit exceeded")
+|  StackOverflow () -> (*, *, *, "error: stack limit exceeded") 
+;
+
+incrementCredit coin v = 
+    case coin of
+      Nickel -> v + 5
+      Dime -> v + 10
+      Fake -> raise EFakeCoin (v, "coin rejected")
+    ; 
+ 
+vend drink cost v = 
+    if v >= cost
+       then ( serve drink, v - cost, *, "your drink") 
+       else ( *, v, *, "money is short of " ++ show (cost - v))
+    ;
+ 
+serve drink = case drink of
+               Coffee -> "Coffee\n"
+               Tea -> "Tea\n"
+    ;
+ 
+box control
+in (c :: char)
+out (coin :: Coins, button:: Buttons)
+match
+ 'n' -> (Nickel, *)
+ | 'd' -> (Dime, *)
+ | 'f' -> (Fake, *)
+ | 'c' -> (*, BCoffee)
+ | 't' -> (*, BTea)
+ | 'x' -> (*, BCancel)
+ | _ -> (*, *)
+;
+ 
+stream console_outp to "std_out" ;
+stream console_inp from "std_in" ;
+
+-- dataflow
+ 
+wire coffee
+    -- inputs (channel origins)
+    (control.coin, control.button, coffee.value’ initially 0)  -- 
+    -- outputs destinations
+    (console_outp, coffee.value, console_outp, console_outp) 
+;
+ 
+wire control
+    (console_inp)
+    (coffee.coin, coffee.button)
+;
+
+References
+
+Further reading
+
+External links 
+ The Hume Programming Language web site
+ The Hume Project at Heriot-Watt University
+ EmBounded project, certifies resource-bounded code in Hume
+ Hume and Multicore
+
+Haskell programming language family
+Functional languages
+Systems programming languages
+Embedded systems
+Articles with example code

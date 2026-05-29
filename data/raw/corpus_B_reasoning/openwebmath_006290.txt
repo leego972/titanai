@@ -1,0 +1,208 @@
+# Typesetting the square of a mathematical operator
+
+Assume I want to typeset the square of some mathematical operator A. Using \operatorname (amsmath package), there are basically two ways to do that:
+
+1. $$\operatorname{A^{2}}$$ (i.e., the exponent is considered part of the operator name)
+2. $$\operatorname{A}^{2}$$ (i.e., the exponent is not considered part of the operator name)
+
+According to my tests, the above two formulae are not equivalent, though. In fact, the first formula has a smaller height than the second one. Minimal example:
+
+\documentclass{article}
+
+\usepackage{amsmath}
+
+\newlength{\len}
+
+\begin{document}
+
+\begin{enumerate}
+\item
+\settoheight{\len}{$$\operatorname{A^{2}}$$}
+$$\operatorname{A^{2}}$$: height = \the\len
+\item
+\settoheight{\len}{$$\operatorname{A}^{2}$$}
+$$\operatorname{A}^{2}$$: height = \the\len
+\end{enumerate}
+
+\end{document}
+
+
+Can anybody explain what is at the bottom of my observation?
+
+-
+This issue is due to how TeX handles operators. An operator is boxed, so subscript placement is different than for normal characters. –  Philippe Goutet Aug 20 '12 at 20:06
+
+The reason for the difference is that TeX typesets superscripts differently whether it follows a character or a box, as described in rule 18a of Appendix G of The TeXbook. As the macro \operatorname boxes its contents (because it calls \mathop which does), that's why \operatorname{A}^2 and \operatorname{A^2} differ (the first superscript concerns a box, whereas the second only the preceding A). You can easily see that an \operatorname and an \hbox behave similarly:
+
+\documentclass{article}
+
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+\begin{document}
+
+\begin{tabular}{ccc}
+\scalebox{5}{$\operatorname{A}^2$} & \scalebox{5}{$\hbox{A}^2$} & \scalebox{5}{$\operatorname{A^2}$} \\
+\verb"$\operatorname{A}^2$" & \verb"$\hbox{A}^2$" & \verb"$\operatorname{A^2}$" \\
+\end{tabular}
+
+\raisebox{1.22cm}[0pt]{\color{red}\rule{\textwidth}{0.4pt}}
+
+\end{document}
+
+
+Here are the technical details of the actual computations made by TeX in the present case:
+
+\documentclass[a4paper]{article}
+
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\begin{document}
+
+\setbox0=\hbox{$a$}% to initialize the maths fonts
+
+\begingroup
+\newdimen\h
+\newdimen\q
+\newdimen\boxedu
+\newdimen\unboxedu
+\newdimen\sigmafourteen
+\newdimen\sigmafive
+\q=\the\fontdimen18\scriptfont2
+\sigmafourteen=\the\fontdimen14\textfont2
+\sigmafive=\the\fontdimen5\textfont2
+
+\noindent List of relevant font parameters and their values:
+\begin{quote}
+\begin{tabular}{lll}
+\texttt{x\_height} & $\sigma_5$ & \the\sigmafive \\
+\texttt{sup2}      & $\sigma_{14}$ & \the\sigmafourteen \\
+\texttt{sup\_drop} & $q$ (it's $\sigma_{18}$ of superscript font) & \the\q \\
+\end{tabular}
+\end{quote}
+Comparison of the amount the superscript is shifted up for a boxed and unboxed $A$:
+\begin{quote}
+\setbox0=\hbox{$A$}
+\h=\the\ht0
+\def\maxof#1#2{%
+\ifdim#1>#2%
+#1%
+\else
+#2%
+\fi}
+\begin{tabular}{lll}
+& \tabularheading Boxed $A$ & \tabularheading Unboxed $A$ \\
+\tabularheading height $h$ & \the\h & \the\h \\
+\tabularheading base superscript shift $u_0$ & $h-q = \mathrm{\the\dimexpr\h-\q\relax}$ & 0pt \\
+\tabularheading real shift $u = \max(u_0,\sigma_{14},\frac{1}{4}\sigma_5)$ &
+\boxedu=\dimexpr\h-\q\relax
+\boxedu=\maxof{\boxedu}{\sigmafourteen}%
+\global\boxedu=\maxof{\boxedu}{.25\sigmafive}%
+\the\boxedu
+&
+\unboxedu=0pt
+\unboxedu=\maxof{\unboxedu}{\sigmafourteen}%
+\global\unboxedu=\maxof{\unboxedu}{.25\sigmafive}%
+\the\unboxedu
+\end{tabular}
+\end{quote}
+Comparision of the calculations with the real typesetting:
+\begin{quote}
+\begin{tabular}{cc}
+\scalebox{5}{$\hbox{$A$}^2$\hbox{$A$\raise\boxedu\hbox{$\scriptstyle2$}}} & \scalebox{5}{$A^2$\hbox{$A$\raise\unboxedu\hbox{$\scriptstyle2$}}} \\
+\tabularheading boxed $A$ & \tabularheading unboxed $A$ \\
+\end{tabular}
+
+\raisebox{1.35cm}[0pt]{\color{blue}\rule{9.5cm}{0.4pt}}
+\end{quote}
+\endgroup
+
+\end{document}
+
+-
+I’ve done some further tests. \hbox{<base>}^{<exponent>} doesn’t behave the same as \mathop{<base>}^{<exponent>}. However, \operatorname internally uses something like \mathop{\kern0pt<base>}^{<exponent>}, and, in fact, this matches the behaviour of \hbox{<base>}^{<exponent>}. –  mhp Aug 21 '12 at 9:53
+@mhp: do you have an example of \hbox{<base>}^{<exponent>} being different than \mathop{<base>}^{<exponent>}? Because you must be careful of what \mathop does that \hbox doesn't (it shifts single characters to the math axis) and of what \hbox does and \mathop doesn't (put the type in roman). This should normally account for the differences you saw. –  Philippe Goutet Aug 21 '12 at 10:06
+Try \settoheight{\len}{$$\hbox{A}^{2}$$} vs. \settoheight{\len}{$$\mathrm{\mathop{A}^{2}}$$}. Moreover, you’ll see the same effect if you replace \mathop with \mathord. –  mhp Aug 21 '12 at 10:46
+@mhp: nothing unexpected happening here. Measuring is not enough, you should see what formulas look like. The 2 is low in \mathrm{\mathop{A}^{2}} because the A is in fact below the baseline as you see if you type \mathrm{A^2\mathop{A}^{2}}. As for \mathord giving the same result as \mathop height-wise, that's normal as {A}, \mathord{A} and A are all the same thing and, in \mathrm{\mathop{A}^{2}}, the 2 is as low as it can be just as in A^2. The \kern0pt in \operatorname is here for only one reason: avoiding that \operatorname{A} go below baseline. –  Philippe Goutet Aug 21 '12 at 11:26
+OK, so \mathop always boxes its content whereas \mathord boxes its content if there is more than one character, right? –  mhp Aug 21 '12 at 11:52
+
+Here's a fairly detailed explanation of what goes on in the execution of an \operatorname instruction. Note that this explanation is simplified to the case of the use of this command without the * ("star") qualifier. (See amsopn.sty for the full details.)
+
+The \operatorname instruction (without the "star" qualifier) is set up as
+
+\DeclareRobustCommand{\operatorname}{{\qopname\newmcodes@ o}}
+
+
+where \qopname, in turn, is defined as
+
+\DeclareRobustCommand{\qopname}[3]{%
+\mathop{#1\kern\z@\operator@font#3}%
+\csname n#2limits@\endcsname},
+
+
+\operator@font is given by
+
+\def\operator@font{\mathgroup\symoperators},
+
+
+and \newmcodes@ is given -- inside a TeX group for which " has catcode 12 -- by
+
+\gdef\newmcodes@{\mathcode\'39\mathcode\*42\mathcode\."613A%
+\ifnum\mathcode\-=45 \else
+\mathchardef\std@minus\mathcode\-\relax
+\fi
+\mathcode\-45\mathcode\/47\mathcode\:"603A\relax}
+
+
+(Basically, the \newmcodes@ command modifies the meanings to the characters ' * . - / and : from their "regular" math-mode settings.) Finally, the command \z@ is equivalent to 0pt (zero length).
+
+Hence, executing the command \operatorname{xyz} is equivalent to executing
+
+{\qopname\newmcodes@ o xyz}
+
+
+which boils down to executing, after (i) recognizing that none of the special characters affected by the \newmodes@ command are involved in the current example, (ii) resolving the construct in the \csname ... \endcsname complex to \nolimits, and (iii) noting that \nolimits has no effects if we don't specify limits:
+
+{\mathop{\kern0pt \operator@font xyz}
+
+
+Therefore, $\operatorname{A}^2$ resolves to
+
+${\mathop{\kern0pt \operator@font A}^2$
+
+
+whereas $\operatorname{A^2}$ resolves to
+
+${\mathop{\kern0pt \operator@font A^2}$
+
+
+If the "squaring instruction" is inside the \mathop instruction, it appears that the height of the letter(s) that precede the superscript-2 do not affect the vertical positioning of the 2. E.g., check out the positions of the 2 glyph in
+
+$\mathop{\kern0pt \operator@font ln^2}$
+$\mathop{\kern0pt \operator@font sin^2}$
+$\mathop{\kern0pt \operator@font cos}^2$
+
+
+They're all the same.
+
+Conversely, if the "squaring instruction" is not inside the \mathop instruction, what comes into play is the height of the entire box that contains the "name" part of the \operatorname instruction; if the "name" part contains letters with ascenders, the box's height increases, and this will affect the positioning of the superscript-2. E.g., for $\ln^2$, $\det^2$, and $\cos^2$, the superscript is at different heights because of the differences in the heights of the boxes that contain ln, sin, and cos, respectively.
+
+-
+@mhp: I've revised my answer thoroughly to track in all gory detail what exactly goes on in the execution of the \operatorname command. –  Mico Aug 20 '12 at 21:16
+The placing of superscripts is not affected by the presence of absence of ascenders when applied to characters, the vertical position of the superscript x^2 and X^2 will be the same. On the other hand, when applied to boxes the height of the box is taken into account, so {xx}^2 and {XX}^2 are different. –  Khaled Hosny Aug 21 '12 at 4:55
+@mhp: not always: {A}^2 gives the same result as A^2. But as soon as there is something else than one character inside the braces, it becomes boxed content, so the behavior is perfectly normal as all boxed content behave the same. –  Philippe Goutet Aug 21 '12 at 9:59
+@KhaledHosny -- thanks for providing this clarification. I'll update my answer to incorporate the importance of thinking in terms of boxes. –  Mico Aug 21 '12 at 11:16
+@Mico: If I understand you right the last two paragraphs of your answer are contradictory to the answer of Philippe Goutet. –  mhp Aug 21 '12 at 12:05
+
+You got some great answers explaining the TeXnicalities (and thus answering your question). I'd like to point out that you should never use $$\operatorname{A^{2}}$$, and that you probably just want $$A^2$$:
+
+If you have some mathematical operator, then you can use the variable A to denote that operator. In that case you should just use A^2. Only for special (non-variable) operators one should use \operatorname, e.g. \operatorname{E} for the expected value. (In this example it happens that \operatorname{E}^{2} doesn't really make sense, but you'd always put the square outside the \operatorname.)
+
+-
+Of course, you’re right. But, as a matter of fact, \operatorname is not only used for real operators, but also for functions such as sin, log etc. –  mhp Aug 22 '12 at 14:15
+By the way, I think you mean ‘you should never use $$\operatorname{A^{2}}$$’, right? –  mhp Aug 22 '12 at 14:19
+@mhp: Oh my god, I wrote it the wrong way - thanks for pointing that out. Corrected! –  Hendrik Vogt Aug 22 '12 at 15:45
+@mhp: Of course, \operatorname` is used for special (non-variable) functions, too. I thought I didn't need to mention that - an operator is a just a function, after all. –  Hendrik Vogt Aug 22 '12 at 15:47

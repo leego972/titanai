@@ -1,0 +1,50 @@
+Question: <p>I'm attempting to write a Python C extension that reads packed binary data (it is stored as  structs of structs) and then parses it out into Python objects.  Everything works as expected on a 32 bit machine (the binary files are always written on 32bit architecture), but not on a 64 bit box.  Is there a "preferred" way of doing this?</p>
+
+<p><hr /></p>
+
+<p>It would be a lot of code to post but as an example:</p>
+
+<pre><code>struct
+{
+	WORD	version;
+	BOOL	upgrade;
+	time_t	time1;
+            time_t  time2;
+} apparms;
+
+File *fp;
+fp = fopen(filePath, "r+b");
+fread(&amp;apparms, sizeof(apparms), 1, fp);
+return Py_BuildValue("{s:i,s:l,s:l}",
+  "sysVersion",apparms.version,
+  "powerFailTime", apparms.time1,
+  "normKitExpDate", apparms.time2
+ );
+</code></pre>
+
+<p>Now on a 32 bit system this works great, but on a 64 bit my time_t sizes are different (32bit vs 64 bit longs).</p>
+
+<p><hr /></p>
+
+<p>Damn, you people are fast.  </p>
+
+<p>Patrick, I originally started using the struct package but found it just way to slow for my needs.  Plus I was looking for an excuse to write a Python Extension.</p>
+
+<p>I know this is a stupid question but what types do I need to watch out for?</p>
+
+<p>Thanks.</p>
+
+Answer: <p>You need to make sure you're using architecture independent members for your struct.  For instance an int may be 32 bits on one architecture and 64 bits on another.  As others have suggested, use the <code>int32_t</code> style types instead.  If your struct contains unaligned members, you may need to deal with padding added by the compiler too.</p>
+
+<p>Another common problem with cross architecture data is endianness.  Intel i386 architecture is little-endian, but if you're reading on a completely different machine (e.g. an Alpha or Sparc), you'll have to worry about this too.</p>
+
+<p>The Python struct module deals with both these situations, using the prefix passed as part of the format string.</p>
+
+<ul>
+<li>@ - Use native size, endianness and alignment. i= sizeof(int), l= sizeof(long)</li>
+<li>= - Use native endianness, but standard sizes and alignment (i=32 bits, l=64 bits)</li>
+<li>&lt; - Little-endian standard sizes/alignment</li>
+<li>> - Big-endian standard sizes/alignment</li>
+</ul>
+
+<p>In general, if the data passes off your machine, you should nail down the endianness and the size / padding format to something specific â ie. use "&lt;" or ">" as your format.  If you want to handle this in your C extension, you may need to add some code to handle it.</p>

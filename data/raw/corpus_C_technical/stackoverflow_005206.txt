@@ -1,0 +1,127 @@
+Question: <p>I've been wondering about how hard it would be to write some Python code to search a string for the index of a substring of the form <code>${</code><em>expr</em><code>}</code>, for example, where <em>expr</em> is meant to be a Python expression or something resembling one.  Given such a thing, one could easily imagine going on to check the expression's syntax with <code>compile()</code>, evaluate it against a particular scope with <code>eval()</code>, and perhaps even substitute the result into the original string.  People must do very similar things all the time.</p>
+
+<p>I could imagine solving such a problem using a third-party parser generator [oof], or by hand-coding some sort of state machine [eek], or perhaps by convincing Python's own parser to do the heavy lifting somehow [hmm].  Maybe there's a third-party templating library somewhere that can be made to do exactly this.  Maybe restricting the syntax of <em>expr</em> is likely to be a worthwhile compromise in terms of simplicity or execution time or cutting down on external dependencies -- for example, maybe all I really need is something that matches any <em>expr</em> that has balanced curly braces.</p>
+
+<p>What's your sense?</p>
+
+<h2>Update:</h2>
+
+<p>Thanks very much for your responses so far!  Looking back at what I wrote yesterday, I'm not sure I was sufficiently clear about what I'm asking.  Template substitution is indeed an interesting problem, and probably much more useful to many more people than the expression extraction subproblem I'm wondering about, but I brought it up only as a simple example of how the answer to my question might be useful in real life.  Some other potential applications might include passing the extracted expressions to a syntax highlighter; passing the result to a real Python parser and looking at or monkeying with the parse tree; or using the sequence of extracted expressions to build up a larger Python program, perhaps in conjunction with some information taken from the surrounding text.</p>
+
+<p>The <code>${</code><em>expr</em><code>}</code> syntax I mentioned is also intended as an example, and in fact I wonder if I shouldn't have used <code>$(</code><em>expr</em><code>)</code> as my example instead, because it makes the potential drawbacks of the obvious approach, along the lines of <code>re.finditer(r'$\{([^}]+)\}', s)</code>, a bit easier to see.  Python expressions can (and often do) contain the <code>)</code> (or <code>}</code>) character.  It seems possible that handling any of those cases might be much more trouble than it's worth, but I'm not convinced of that yet.  Please feel free to try to make this case!</p>
+
+<p>Prior to posting this question, I spent quite a bit of time looking at Python template engines hoping that one might expose the sort of low-level functionality I'm asking about -- namely, something that can find expressions in a variety of contexts and tell me where they are rather than being limited to finding expressions embedded using a single hard-coded syntax, always evaluating them, and always substituting the results back into the original string.  I haven't figured out how to use any of them to solve my problem yet, but I do very much appreciate the suggestions regarding more to look at (can't believe I missed that wonderful list on the wiki!).  The API documentation for these things tends to be pretty high-level, and I'm not too familiar with the internals of any of them, so I'm sure I could use help looking at those and figuring out how to get them to do this sort of thing.</p>
+
+<p>Thanks for your patience!</p>
+
+Answer: <p>After posting this, reading the replies so far (thanks everyone!), and thinking about the problem for a while, here is the best approach I've been able to come up with:</p>
+
+<ol>
+<li>Find the first <code>${</code>.</li>
+<li>Find the next <code>}</code> after that.</li>
+<li>Feed whatever's in between to <code>compile()</code>.  If it works, stick a fork in it and we're done.</li>
+<li>Otherwise, keep extending the string by looking for subsequent occurences of <code>}</code>.  As soon as something compiles, return it.</li>
+<li>If we run out of <code>}</code> without being able to compile anything, use the results of the last compilation attempt to give information about where the problem lies.</li>
+</ol>
+
+<p>Advantages of this approach:</p>
+
+<ul>
+<li>The code is quite short and easy to understand.</li>
+<li>It's pretty efficient -- optimal, even, in the case where the expression contains no <code>}</code>.  Worst-case seems like it wouldn't be too bad either.</li>
+<li>It works on many expressions that contain <code>${</code> and/or <code>}</code>.</li>
+<li>No external dependencies.  No need to import <em>anything</em>, in fact.  (This surprised me.)</li>
+</ul>
+
+<p>Disadvantages:</p>
+
+<ul>
+<li>Sometimes it grabs too much or too little.  See below for an example of the latter.  I could imagine a scary example where you have two expressions and the first one is subtly wrong and the algorithm ends up mistakenly grabbing the whole thing and everything in between and returning it as valid, though I haven't been able to demonstrate this.  Perhaps things are not so bad as I fear.  I don't think misunderstandings can be avoided in general -- the problem definition is kind of slippery -- but it seems like it ought to be possible to do better, especially if one were willing to trade simplicity or execution time.</li>
+<li>I haven't done any benchmarks, but I could imagine there being faster alternatives, especially in cases that involve lots of <code>}</code> in the expression.  That could be a big deal if one wanted to apply this technique to sizable blocks of Python code rather than just very short expressions.</li>
+</ul>
+
+<p>Here is my implementation.</p>
+
+<pre><code>def findExpr(s, i0=0, begin='${', end='}', compArgs=('&lt;string&gt;', 'eval')):
+  assert '\n' not in s, 'line numbers not implemented'
+  i0 = s.index(begin, i0) + len(begin)
+  i1 = s.index(end, i0)
+  code = errMsg = None
+  while code is None and errMsg is None:
+    expr = s[i0:i1]
+    try: code = compile(expr, *compArgs)
+    except SyntaxError, e:
+      i1 = s.find(end, i1 + 1)
+      if i1 &lt; 0: errMsg, i1 = e.msg, i0 + e.offset
+  return i0, i1, code, errMsg
+</code></pre>
+
+<p>And here's the docstring with some illustrations in doctest format, which I didn't insert into the middle of the function above only because it's long and I feel like the code is easier to read without it.</p>
+
+<pre><code>'''
+Search s for a (possibly invalid) Python expression bracketed by begin
+and end, which default to '${' and '}'.  Return a 4-tuple.
+
+&gt;&gt;&gt; s = 'foo ${a*b + c*d} bar'
+&gt;&gt;&gt; i0, i1, code, errMsg = findExpr(s)
+&gt;&gt;&gt; i0, i1, s[i0:i1], errMsg
+(6, 15, 'a*b + c*d', None)
+&gt;&gt;&gt; ' '.join('%02x' % ord(byte) for byte in code.co_code)
+'65 00 00 65 01 00 14 65 02 00 65 03 00 14 17 53'
+&gt;&gt;&gt; code.co_names
+('a', 'b', 'c', 'd')
+&gt;&gt;&gt; eval(code, {'a': 1, 'b': 2, 'c': 3, 'd': 4})
+14
+&gt;&gt;&gt; eval(code, {'a': 'a', 'b': 2, 'c': 'c', 'd': 4})
+'aacccc'
+&gt;&gt;&gt; eval(code, {'a': None})
+Traceback (most recent call last):
+  ...
+NameError: name 'b' is not defined
+
+Expressions containing start and/or end are allowed.
+
+&gt;&gt;&gt; s = '{foo ${{"}": "${"}["}"]} bar}'
+&gt;&gt;&gt; i0, i1, code, errMsg = findExpr(s)
+&gt;&gt;&gt; i0, i1, s[i0:i1], errMsg
+(7, 23, '{"}": "${"}["}"]', None)
+
+If the first match is syntactically invalid Python, i0 points to the
+start of the match, i1 points to the parse error, code is None and
+errMsg contains a message from the compiler.
+
+&gt;&gt;&gt; s = '{foo ${qwerty asdf zxcvbnm!!!} ${7} bar}'
+&gt;&gt;&gt; i0, i1, code, errMsg = findExpr(s)
+&gt;&gt;&gt; i0, i1, s[i0:i1], errMsg
+(7, 18, 'qwerty asdf', 'invalid syntax')
+&gt;&gt;&gt; print code
+None
+
+If a second argument is given, start searching there.
+
+&gt;&gt;&gt; i0, i1, code, errMsg = findExpr(s, i1)
+&gt;&gt;&gt; i0, i1, s[i0:i1], errMsg
+(33, 34, '7', None)
+
+Raise ValueError if there are no further matches.
+
+&gt;&gt;&gt; i0, i1, code, errMsg = findExpr(s, i1)
+Traceback (most recent call last):
+  ...
+ValueError: substring not found
+
+In ambiguous cases, match the shortest valid expression.  This is not
+always ideal behavior.
+
+&gt;&gt;&gt; s = '{foo ${x or {} # return {} instead of None} bar}'
+&gt;&gt;&gt; i0, i1, code, errMsg = findExpr(s)
+&gt;&gt;&gt; i0, i1, s[i0:i1], errMsg
+(7, 25, 'x or {} # return {', None)
+
+This implementation must not be used with multi-line strings.  It does
+not adjust line number information in the returned code object, and it
+does not take the line number into account when computing the offset
+of a parse error.
+
+'''
+</code></pre>

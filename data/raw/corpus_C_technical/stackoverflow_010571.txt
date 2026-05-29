@@ -1,0 +1,69 @@
+Question: <p>Is there a way to conveniently define a C-like structure in Python? I'm tired of writing stuff like:</p>
+
+<pre><code>class MyStruct():
+    def __init__(self, field1, field2, field3):
+        self.field1 = field1
+        self.field2 = field2
+        self.field3 = field3
+</code></pre>
+
+Answer: <p>This might be a bit late but I made a solution using Python Meta-Classes (decorator version below too).</p>
+
+<p>When <code>__init__</code> is called during run time, it grabs each of the arguments and their value and assigns them as instance variables to your class. This way you can make a struct-like class without having to assign every value manually.</p>
+
+<p>My example has no error checking so it is easier to follow.</p>
+
+<pre><code>class MyStruct(type):
+    def __call__(cls, *args, **kwargs):
+        names = cls.__init__.func_code.co_varnames[1:]
+
+        self = type.__call__(cls, *args, **kwargs)
+
+        for name, value in zip(names, args):
+            setattr(self , name, value)
+
+        for name, value in kwargs.iteritems():
+            setattr(self , name, value)
+        return self 
+</code></pre>
+
+<p>Here it is in action.</p>
+
+<pre><code>&gt;&gt;&gt; class MyClass(object):
+    __metaclass__ = MyStruct
+    def __init__(self, a, b, c):
+        pass
+
+
+&gt;&gt;&gt; my_instance = MyClass(1, 2, 3)
+&gt;&gt;&gt; my_instance.a
+1
+&gt;&gt;&gt; 
+</code></pre>
+
+<p>I <a href="http://www.reddit.com/r/Python/comments/300psq/i_made_a_cstyle_struct_using_a_metaclass_to_save/" rel="nofollow">posted it on reddit</a> and <a href="http://www.reddit.com/user/matchu" rel="nofollow">/u/matchu</a> posted a decorator version which is cleaner. I'd encourage you to use it unless you want to expand the metaclass version.</p>
+
+<pre><code>&gt;&gt;&gt; def init_all_args(fn):
+    @wraps(fn)
+    def wrapped_init(self, *args, **kwargs):
+        names = fn.func_code.co_varnames[1:]
+
+        for name, value in zip(names, args):
+            setattr(self, name, value)
+
+        for name, value in kwargs.iteritems():
+            setattr(self, name, value)
+
+    return wrapped_init
+
+&gt;&gt;&gt; class Test(object):
+    @init_all_args
+    def __init__(self, a, b):
+        pass
+
+
+&gt;&gt;&gt; a = Test(1, 2)
+&gt;&gt;&gt; a.a
+1
+&gt;&gt;&gt; 
+</code></pre>

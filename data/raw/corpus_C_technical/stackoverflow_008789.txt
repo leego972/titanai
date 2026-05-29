@@ -1,0 +1,68 @@
+Question: <p>I run a subprocess using:</p>
+
+<pre><code>  p = subprocess.Popen("subprocess", 
+                       stdout=subprocess.PIPE, 
+                       stderr=subprocess.PIPE, 
+                       stdin=subprocess.PIPE)
+</code></pre>
+
+<p>This subprocess could either exit immediately with an error on stderr, or keep running. I want to detect either of these conditions - the latter by waiting for several seconds.</p>
+
+<p>I tried this:</p>
+
+<pre><code>  SECONDS_TO_WAIT = 10
+  select.select([], 
+                [p.stdout, p.stderr], 
+                [p.stdout, p.stderr],
+                SECONDS_TO_WAIT)
+</code></pre>
+
+<p>but it just returns:</p>
+
+<pre><code>  ([],[],[])
+</code></pre>
+
+<p>on either condition. What can I do?</p>
+
+Answer: <p>This is what i came up with. Works when you need and don't need to timeout on thep process, but with a semi-busy loop.</p>
+
+<pre><code>def runCmd(cmd, timeout=None):
+    '''
+    Will execute a command, read the output and return it back.
+
+    @param cmd: command to execute
+    @param timeout: process timeout in seconds
+    @return: a tuple of three: first stdout, then stderr, then exit code
+    @raise OSError: on missing command or if a timeout was reached
+    '''
+
+    ph_out = None # process output
+    ph_err = None # stderr
+    ph_ret = None # return code
+
+    p = subprocess.Popen(cmd, shell=True,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    # if timeout is not set wait for process to complete
+    if not timeout:
+        ph_ret = p.wait()
+    else:
+        fin_time = time.time() + timeout
+        while p.poll() == None and fin_time &gt; time.time():
+            time.sleep(1)
+
+        # if timeout reached, raise an exception
+        if fin_time &lt; time.time():
+
+            # starting 2.6 subprocess has a kill() method which is preferable
+            # p.kill()
+            os.kill(p.pid, signal.SIGKILL)
+            raise OSError("Process timeout has been reached")
+
+        ph_ret = p.returncode
+
+
+    ph_out, ph_err = p.communicate()
+
+    return (ph_out, ph_err, ph_ret)
+</code></pre>

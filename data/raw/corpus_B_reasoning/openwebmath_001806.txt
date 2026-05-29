@@ -1,0 +1,148 @@
+Mathias Brandewinder on .NET, F#, VSTO and Excel development, and quantitative analysis / machine learning.
+14. January 2012 14:16
+
+I am putting together a demo VSTO add-in for my talk at the Excel Developer Conference. I wanted to play with charts a bit, and given that I am working off a .NET model, I figured it would be interesting to produce charts directly from the data, bypassing the step of putting data in a worksheet altogether.
+
+In order to do that, we simply need to create a Chart in a workbook, add a Series to the SeriesCollection of the chart, and directly set the Series Values and XValues as an array, along these lines:
+
+var excel = this.Application;
+var workbook = excel.ActiveWorkbook;
+var charts = workbook.Charts;
+
+chart.ChartType = Excel.XlChartType.xlLine;
+chart.Location(XlChartLocation.xlLocationAsNewSheet, "Tab Name");
+
+var seriesCollection = (SeriesCollection)chart.SeriesCollection();
+var series = seriesCollection.NewSeries();
+
+series.Values = new double[] {1d, 3d, 2d, 5d};
+series.XValues = new string[] {"A", "B", "C", "D"};
+series.Name = "Series Name";
+
+This will create a simple Line chart in its own sheet – without any reference to a worksheet data range.
+
+Now why would I be interested in this approach, when it’s so convenient to create a chart from data that is already in Excel?
+
+Suppose for a moment that you are dealing with the market activity on a stock, which you can retrieve from an external data source as a collection of StockActivity .NET objects:
+
+public class StockActivity
+{
+public DateTime Day { get; set; }
+public decimal Open { get; set; }
+public decimal Close { get; set; }
+}
+
+In this case, extracting the array for the X and Y values would be a trivial matter, making it very easy to produce a chart of, say, the Close values over time:
+
+// Create a few fake datapoints
+var day1 = new StockActivity()
+{
+Day = new DateTime(2010, 1, 1),
+Open = 100m,
+Close = 110m
+};
+var day2 = new StockActivity()
+{
+Day = new DateTime(2010, 1, 2),
+Open = 110m,
+Close = 130m
+};
+var day3 = new StockActivity()
+{
+Day = new DateTime(2010, 1, 3),
+Open = 130m,
+Close = 105m
+};
+var history = new List<StockActivity>() { day1, day2, day3 };
+
+var excel = this.Application;
+var workbook = excel.ActiveWorkbook;
+var charts = workbook.Charts;
+
+chart.ChartType = Excel.XlChartType.xlLine;
+chart.Location(XlChartLocation.xlLocationAsNewSheet, "Stock Chart);
+
+var seriesCollection = (SeriesCollection)chart.SeriesCollection();
+var series = seriesCollection.NewSeries();
+
+series.Values = history.Select(it => (double)it.Close).ToArray();
+series.XValues = history.Select(it => it.Day).ToArray();
+series.Name = "Stock";
+
+Using LINQ, we Select from the list the values we are interested in, and pass them into an array, ready for consumption into a chart, and boom! We are done.
+
+If what you need to do is explore data and produce charts to figure out potentially interesting relationships, this type of approach isn’t very useful. On the other hand, if your problem is to produce on a regular basis the same set of charts, using data coming from an external data source, this is a very interesting option!
+
+23. April 2010 09:24
+
+I gave a lightning talk on Pex at the San Francisco .Net user group this Wednesday, and figured I might as well post the slide deck. Pex is a fascinating free add-in to Visual Studio, totally worth looking into: unleash Pex on a method, and it will identify interesting input values for you.
+
+18. January 2010 09:01
+
+.Net events in the North California area, Feb 18, 2010 – Feb 24, 2010.
+
+## Tuesday, Jan 19, 2010
+
+7:00 PM, O'Reilly Media, Sebastopol: Mathias Brandewinder (that’s me) will talk “For Those about to Mock”. Free, organized by the North Bay .Net user group.
+
+## Wednesday, Jan 20, 2010
+
+6:30 PM, Microsoft San Francisco Office, San Francisco: Peter Kellner will talk about “Using WCF RIA Services in Silverlight 4 to Build n-tier LOB application”. Free, organized by the San Francisco .Net user group.
+
+If you know of upcoming .Net-related events in North California that I would have missed, please let me know, and I’ll add them to the thread!
+
+18. September 2009 06:12
+
+I found a bug in my code the other day. It happens to everybody - apparently I am not the only one to write bugs – but the bug itself surprised me. In my experience, once you know a piece of code is buggy, it’s usually not too difficult to figure out what the origin of the problem might be (fixing it might). This bug surprised me, because I knew exactly the 10 lines of code where it was taking place, and yet I had no idea what was going on – I just couldn’t see the bug, even though it was floating in plain sight (hint: the pun is intended).
+
+Here is the context. The code reads a double and converts it into a year and a quarter, based on the following convention: the input is of the form yyyy.q, for instance, 2010.2 represents the second quarter of 2010. Anything after the 2nd decimal is ignored, 2010.0 is “rounded up” to 1st quarter, and 2010.5 and above rounded down to 4th quarter.
+
+Here is my original code:
+
+public class DateConverter
+{
+public static int ExtractYear(double dateAsDouble)
+{
+int year = (int)dateAsDouble;
+return year;
+}
+
+public static int ExtractQuarter(double dateAsDouble)
+{
+int year = ExtractYear(dateAsDouble);
+int quarter = (int)(10 * (Math.Round(dateAsDouble, 1) - (double)year));
+if (quarter < 1)
+{
+quarter = 1;
+}
+if (quarter > 4)
+{
+quarter = 4;
+}
+return quarter;
+}
+}
+
+Can you spot the bug?
+
+More...
+
+27. May 2009 13:36
+
+The iterative nature of writing code inevitably involves adding code which is good enough for now, but should be refactored later. The problem is that unless you have some system in place, later, you will just forget about it. Personally, I have been trying 3 approaches to address this: bug-tracking systems, the good old-fashion text to-do list, and its variant, the task list built in Visual Studio, and finally, comments embedded in the code.
+
+Each have their pros and cons. Bug tracking systems are great for systematically managing work items in a team (prioritization, assignment to various members...), but work best for items at the level of a feature: in my experience, smaller code changes don't fit well. I am a big fan of the bare-bones text file to-do list; I tried, but never took to the Visual Studio to-do list (no clear reason there). I hardly embed comments in code anymore (like 'To-do: change this later'): on the plus side, the comment is literally tacked to the code that needs changing, but the comments cannot be displayed all as one list, which makes them too easy to forget.
+
+Today I found a cool alternative via Donn Felker’s blog: #warning. You use it essentially like a comment, but preface it with #warning, like this:
+
+#warning The tag name should not be hardcoded
+XmlNodeList atBatNodes = document.GetElementsByTagName("atbat");
+
+Now, when you build, you will see something like this in Visual Studio:
+
+It has all the benefits of the embedded comment – it’s close to the code that needs to be changed - but will also show up as a list which will be in-your-face every time you build. I’ll try that out, and see how that goes, and what stays in the todo.txt!
+
+#### Need help with F#?
+
+The premier team for
+F# training & consulting.

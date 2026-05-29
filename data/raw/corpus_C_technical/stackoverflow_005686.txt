@@ -1,0 +1,118 @@
+Question: <p>I believe I'm getting bitten by some combination of nested scoping rules and list comprehensions.  <a href="http://www.python.org/~jeremy/weblog/040204.html">Jeremy Hylton's blog post</a> is suggestive about the causes, but I don't really understand CPython's implementation well-enough to figure out how to get around this. </p>
+
+<p>Here is an (overcomplicated?) example.  If people have a simpler one that demos it, I'd like to hear it.   The issue:  the list comprehensions using next() are filled with the result from the last iteration.  </p>
+
+<p><strong>edit</strong>: The Problem:</p>
+
+<p>What exactly is going on with this, and how do I fix this?  Do I have to use a standard for loop? Clearly the function is running the correct number of times, but the list comprehensions end up with the <em>final</em> value instead of the result of each loop.</p>
+
+<p>Some hypotheses:</p>
+
+<ul>
+<li>generators?</li>
+<li>lazy filling of list comprehensions?</li>
+</ul>
+
+<p><strong>code</strong></p>
+
+<pre><code>import itertools
+def digit(n):
+    digit_list = [ (x,False) for x in xrange(1,n+1)]
+    digit_list[0] = (1,True)
+    return itertools.cycle ( digit_list)
+</code></pre>
+
+<pre>
+>>> D = digit(5)
+>>> [D.next() for x in range(5)]
+## This list comprehension works as expected
+[(1, True), (2, False), (3, False), (4, False), (5, False)]
+</pre>
+
+<pre><code>class counter(object):
+    def __init__(self):
+        self.counter = [ digit(4) for ii in range(2) ] 
+        self.totalcount=0
+        self.display = [0,] * 2
+    def next(self):
+        self.totalcount += 1
+        self.display[-1] = self.counter[-1].next()[0]
+        print self.totalcount, self.display
+        return self.display
+
+    def next2(self,*args):
+        self._cycle(1)
+        self.totalcount += 1
+        print self.totalcount, self.display
+        return self.display
+
+    def _cycle(self,digit):
+        d,first = self.counter[digit].next()
+        #print digit, d, first
+        #print self._display
+        self.display[digit] = d
+        if first and digit &gt; 0:
+            self._cycle(digit-1)
+
+
+C = counter()
+[C.next() for x in range(5)]
+[C.next2() for x in range(5)]
+</code></pre>
+
+<p><strong>OUTPUT</strong></p>
+
+<pre>
+In [44]: [C.next() for x in range(6)]
+1 [0, 1]
+2 [0, 2]
+3 [0, 3]
+4 [0, 4]
+5 [0, 1]
+6 [0, 2]
+Out[44]: [[0, 2], [0, 2], [0, 2], [0, 2], [0, 2], [0, 2]]
+
+In [45]: [C.next2() for x in range(6)]
+7 [0, 3]
+8 [0, 4]
+9 [1, 1]
+10 [1, 2]
+11 [1, 3]
+12 [1, 4]
+Out[45]: [[1, 4], [1, 4], [1, 4], [1, 4], [1, 4], [1, 4]]
+
+# this should be:  [[0,3],[0,4]....[1,4]] or similar
+</pre>
+
+Answer: <p>Mind if i refactor this a bit?</p>
+
+<pre><code>def digit(n):
+    for i in itertools.count():
+        yield (i%n+1, not i%n)
+</code></pre>
+
+<p>But actually you don't need that one, if you implement the whole thing as a simple iterator:</p>
+
+<pre><code>def counter(digits, base):
+    counter = [0] * digits
+
+    def iterator():
+        for total in itertools.count(1):
+            for i in range(len(counter)):
+                counter[i] = (counter[i] + 1) % base
+                if counter[i]:
+                    break
+            print total, list(reversed(counter))
+            yield list(reversed(counter))
+
+    return iterator()
+
+c = counter(2, 4)
+print list(itertools.islice(c, 10))
+</code></pre>
+
+<p>If you want to get rid of the print (debugging, is it?), go with a while-loop.</p>
+
+<p>This incindentally also solves your initial problem, because <code>reversed</code> returns a copy of the list.</p>
+
+<p>Oh, and it's zero-based now ;)</p>

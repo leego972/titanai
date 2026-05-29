@@ -1,0 +1,225 @@
+draw using md2 format, then reuse the same data problem
+
+This topic is 4877 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+Recommended Posts
+
+Not sure if I can make this clear... I can draw my models using md2 format for running - it all goes fine. However, I wanted to save some frame rate and re-use the vertices for the run mode so that all models re-use the data. eg for the frame - calculate teh vertices, and save them for the next enemy of the same type to re-use. The problem is that the first model drawn looks perfect, then the next models that re-uses the vertex data look bad - you can see right through them - and the trianlgesa are in the wrong place. I'll do a code dump and try and simplify it somewhat as it looks like a lot of work (although its quite simple) code to calculate the model vertices for this frame:
+AnimateModel_run(int startFrame, int endFrame, float percent)
+{
+...
+...
+...set up code
+...
+
+glBegin(GL_TRIANGLES);
+for (i = 0; i < geometry->numTriangles; i++)
+{
+//get first points in each frame's triangle
+vList = geometry->getVertexList(currentFrame, i, 0);
+x1 = vList->point[0];
+y1 = vList->point[1];
+z1 = vList->point[2];
+
+nextVList = geometry->getVertexList(nextFrame, i, 0);
+x2 = nextVList->point[0];
+y2 = nextVList->point[1];
+z2 = nextVList->point[2];
+
+//IMPORTANT THIS IS THE FIRST VERTEX IN THE TRIANGLE
+// store first interpolated vertex of triangle
+vertex[0].point[0] = x1 + interpol * (x2 - x1);
+vertex[0].point[1] = y1 + interpol * (y2 - y1);
+vertex[0].point[2] = z1 + interpol * (z2 - z1);
+
+// get second points of each frame
+//IMPORTANT: it is as above.......
+vList = geometry->getVertexList(currentFrame, i, 2);
+...
+...
+// store second interpolated vertex of triangle
+//IMPORTANT : 2ND VERTEX OF THE TRIANGLE
+vertex[2].point[0] = x1 + interpol * (x2 - x1);
+vertex[2].point[1] = y1 + interpol * (y2 - y1);
+vertex[2].point[2] = z1 + interpol * (z2 - z1);
+
+// get third points of each frame
+//as above
+...
+// store third interpolated vertex of triangle
+....
+vertex[1].point[0] = x1 + interpol * (x2 - x1);
+vertex[1].point[1] = y1 + interpol * (y2 - y1);
+vertex[1].point[2] = z1 + interpol * (z2 - z1);
+
+// calculate the normal of the triangle
+CalculateNormal(vertex[0].point, vertex[2].point,
+vertex[1].point);
+
+// render properly textured triangle
+geometry->setTexCoord(i, 0);
+glVertex3fv(vertex[0].point);
+
+geometry->setTexCoord(i, 2);
+glVertex3fv(vertex[2].point);
+
+geometry->setTexCoord(i, 1);
+glVertex3fv(vertex[1].point);
+
+} //end for
+glEnd();
+}
+
+CalculateNormal simply takes the vectors and calcs the normal and calls
+glNormal3f(result[0]/length, result[1]/length, result[2]/length);
+
+also setTexCoord:
+void CMD2Geometry::setTexCoord(GLuint tIndx, GLuint vertex)
+{
+glTexCoord2f(st[triIndex[tIndx].stIndex[vertex]].s,
+st[triIndex[tIndx].stIndex[vertex]].t);
+}
+
+
+so that all works prefectly and the models look great ! However, if I try and store the vertices/Tex/Normals calculated above and draw them then parts of the model are see through, and vertices don't join up properly. So here is the code that is placed within the above loop to save the data as static data
+//each tri has 3 vertices, each vertice has 3 points
+frameRunTriVertices = (float*)malloc (geom->numTriangles *3*3*sizeof(float));
+//each normal has one vertie of 3 points
+frameRunNormals = (float*)malloc (geom->numTriangles *3*sizeof(float));
+// frame's tex - each tri has 3 vertices and each vertice has 2 tex
+frameRunTex = (float*)malloc (geom->numTriangles*3*2*sizeof(float));
+...
+...
+glBegin(GL_TRIANGLES);
+for (i = 0; i < geometry->numTriangles; i++)
+{
+//same draw thing as above except store data
+
+//store this data
+//1st pt
+frameRunTriVertices[i*3] = vertex[0].point[0];
+frameRunTriVertices[(i*3)+1] = vertex[0].point[1];
+frameRunTriVertices[(i*3)+2] = vertex[0].point[2];
+
+//2nd pt
+frameRunTriVertices[(i*3)+3] = vertex[2].point[0];
+frameRunTriVertices[(i*3)+4] = vertex[2].point[1];
+frameRunTriVertices[(i*3)+5] = vertex[2].point[2];
+
+//3rd pt
+frameRunTriVertices[(i*3)+6] = vertex[1].point[0];
+frameRunTriVertices[(i*3)+7] = vertex[1].point[1];
+frameRunTriVertices[(i*3)+8] = vertex[1].point[2];
+
+//get normal
+CalculateNormal(vertex[0].point, vertex[2].point, vertex[1].point, frameRunNormals+(i*3));
+
+//get tex
+//ith tri, 0 vertex, s tex
+frameRunTex[(i*3)] = geometry->getTexCoord(i, 0, 0);
+//ith tri, 0 vertex, t tex
+frameRunTex[(i*3)+1] = geometry->getTexCoord(i, 0, 1);
+
+frameRunTex[(i*3)+2] = geometry->getTexCoord(i, 2, 0);
+frameRunTex[(i*3)+3] = geometry->getTexCoord(i, 2, 1);
+frameRunTex[(i*3)+4] = geometry->getTexCoord(i, 1, 0);
+frameRunTex[(i*3)+5] = geometry->getTexCoord(i, 1, 1);
+}
+glEnd();
+
+where the new overloaded CalculateNormal is as for the previous case except it sets:
+void CalculateNormal( float *p1, float *p2, float *p3, float *out )
+{
+...
+out[0] = result[0]/length;
+out[1] = result[1]/length;
+out[2] = result[2]/length;
+}
+
+and getTexCoord is v. similar to setTexCoord
+float CMD2Geometry::getTexCoord(GLuint tIndx, GLuint vertex, GLuint uv)
+{
+if (uv==0)
+return st[triIndex[tIndx].stIndex[vertex]].s;
+else
+return st[triIndex[tIndx].stIndex[vertex]].t;
+}
+
+
+Finally, the model is drawn with this:
+		float *vert, *tex, *norm = NULL;
+vert = frameRunTriVertices;
+tex = frameRunTex;
+norm = frameRunNormals;
+
+glBindTexture(GL_TEXTURE_2D, geometry->modelTex->texID);
+glBegin(GL_TRIANGLES);
+for (i = 0; i < geometry->numTriangles; i++)
+{
+glNormal3fv(norm);
+
+glTexCoord2fv(tex);
+glVertex3fv(vert);
+
+tex+=2;
+vert+=3;
+
+glTexCoord2fv(tex);
+glVertex3fv(vert);
+
+tex+=2;
+vert+=3;
+
+glTexCoord2fv(tex);
+glVertex3fv(vert);
+
+tex+=2;
+vert+=3;
+norm += 3;
+
+}
+glEnd();
+glDisable(GL_TEXTURE_2D);
+
+
+It must be simple for an outsider but I can't see it ! cheers Adrian
+
+Share on other sites
+     for (i = 0; i < geometry->numTriangles; i++)     {         //same draw thing as above except store data			//store this data			//1st pt			frameRunTriVertices[i*3] = vertex[0].point[0];			frameRunTriVertices[(i*3)+1] = vertex[0].point[1];			frameRunTriVertices[(i*3)+2] = vertex[0].point[2];			//2nd pt			frameRunTriVertices[(i*3)+3] = vertex[2].point[0];			frameRunTriVertices[(i*3)+4] = vertex[2].point[1];			frameRunTriVertices[(i*3)+5] = vertex[2].point[2];			//3rd pt			frameRunTriVertices[(i*3)+6] = vertex[1].point[0];			frameRunTriVertices[(i*3)+7] = vertex[1].point[1];			frameRunTriVertices[(i*3)+8] = vertex[1].point[2];
+
+This seems wrong. You're incrementing 'i' by 1 and multiplying by 3. Perhaps it should either change to incrementing by 3 or multiplying by 9, since by the 3rd point you're adding an offset of 8 (the next offset should be 9, not 3). You're code doesn't make total sense as-is, so it's kinda hard to tell. (for example, you're currently copying the same data, vertex[0, 2, 1] into every triangle...)
+
+Share on other sites
+thanks, its absolutely perfect now !
+
+As regards the vector 0,1,2 thing - each of these vectors is calculated each time in through each loop in the for loop - maybe I cut out too much from the code..
+
+In any case I'll mark you up some !!
+
+cheers
+
+Share on other sites
+thanks, its absolutely perfect now !
+
+As regards the vector 0,1,2 thing - each of these vectors is calculated each time in through each loop in the for loop - maybe I cut out too much from the code..
+
+In any case I'll mark you up some !!
+
+cheers
+
+• What is your GameDev Story?
+
+In 2019 we are celebrating 20 years of GameDev.net! Share your GameDev Story with us.
+
+• 28
+• 16
+• 10
+• 10
+• 11
+• Forum Statistics
+
+• Total Topics
+634106
+• Total Posts
+3015547
+×

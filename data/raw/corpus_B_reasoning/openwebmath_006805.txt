@@ -1,0 +1,79 @@
+# How can I access a property if I know the path?
+
+Actual Question: I know I can get the value of a property in Python by a line of code like this:
+
+shader = bpy.context.space_data.shading.type = 'WIREFRAME'
+
+I know some modules access that data by getting the path to it as text and use that. So if I have the path in text, like this:
+
+shader_path = "bpy.context.space_data.shading.type"
+
+How do I use that string to access that value and read it or set it?
+
+Background (likely unneeded): I have a script that will render images from a number of different cameras and the rendering properties (such as resolution, background, and shading type) will change from camera to camera. I'd like to be able to just store all the value locations in a list so I can step through it and save the values in a dictionary, in Python, then, when I'm done with the rendering, just step through the keys of the dictionary, take the value, and store it from where I got it. (I'm using a dictionary and not a PropertyCollection because this is short term and doesn't need to be stored long term and a dictionary will be easier to write.)
+
+If there's a better way to do this, I'm open to it. I just don't want to be managing over half a dozen statements to get values and to reset them after the rendering, since I may be adding more property values that will need to be saved as I make changes over time - so I'd rather just be able to put the property location in a list and it's looped through. I think this is also a good idea since it's consistent with how classes are registered and unregistered now days.
+
+• You can use eval or exec to run string statements / expressions but there usually is a better way to do it. stackoverflow.com/questions/2220699/… Why do you need to store the left part of the statement in a dictionary ? Apr 17 at 12:40
+• @Gorgious: I don't need to store it in a dictionary, but I figure that would be the easiest way to step through a list of properties and get the value to replace it when I'm done. I'm looking over the answer you specify, but that seems to work for getting, but not for setting. Apr 17 at 18:02
+• @Gorgious I've figured out what I can and can't do with this and I'll be writing it up soon - need to finish testing a few other parts of what I'm doing first. Apr 18 at 7:24
+• @Gorgious I worked out something even better than what I expected. First, use getattr(), then loop through the path. I wrote it up in an answer. It wouldn't be hard to change the code in the answer to work for setattr() as well. Apr 22 at 2:58
+
+The simple answer is that you can't get the value from a string of the entire path. You need to have a path to an object where you can use getattr() to get a value or object from that object. But it's simple to write code to bypass this and use the entire path.
+
+Also, I am probably not using all the correct technical terms, so if someone points out what I need to change, I'll gladly fix it - or they can just edit it.
+
+If you have the path bpy.context.scene.render.image_settings.color_mode and want to get color_mode, you cannot use:
+
+getattr(bpy.context.scene.render.image_settings.color_mode)
+
+But if you have the path to the image_settings object, you can do this:
+
+getattr(bpy.context.scene.render.image_settings, 'color_mode')
+
+So, normally, and for getattr() you need the path to, and including, the object (in this case image_settings) and then specify the object or setting you need.
+
+But if you have an issue where you'll have entire path names in strings (like bpy.context.scene.render.image_settings.color_mode), for whatever reason, it's possible to simply step through each level to get to the item you need. Here's how I did it:
+
+import bpy
+
+cm = "bpy.context.scene.render.image_settings.color_mode"
+cd = "bpy.context.scene.render.image_settings.color_depth"
+
+path = cd
+
+#
+nodes = path.split('.')
+
+#
+#loop through all the nodes in order
+for node in nodes:
+#If it's the first node, bpy, we have to start differently
+#than wth the others - so set the object to bpy
+if node == 'bpy':
+obj = bpy
+continue
+#We have a node, so now get the next one
+obj = getattr(obj, node)
+#Print out the final node we've gotten to - note that now the
+#object (obj) is not a node, but the value stored in that node
+print("Last level: %s, type: %s" % (obj, type(obj)))
+
+
+I used the path to two different settings, color_mode and color_depth as examples and you can easily change which one you're testing in the 4th line of code (not counting blank lines).
+
+Just split the entire path at periods, so you'll get a list with each level of the path in it, in order. Then step through each one (note it's a bit different on the first one). At each level, you use the current object to get the object at the next level down. When you reach the end, you'll have the object (whether it's just an object, or a string or setting value) that you need.
+
+The output for this is just:
+
+Last level: 8, type: <class 'str'>
+
+Taking this and turning it into something you can call so it returns the object you're looking for is trivial. Just pass the entire path to the function and it returns the object.
+
+This does not include any error trapping and assumes you're starting at bpy, so if you want to be able to start at context (since that's often easily available), you'll need to work in how to handle a string starting with that level.
+
+• You absolutely can. As pointed out by Gorgious in the very first comment you can use eval("your_attrib_path_as_string"), test using the console: C.object.color[0] returns 1.0 and eval("C.object.color[0]") returns 1.0 as well. You can also use exec to run statements like exec("C.object.color[0]=0.1"), how to set the color depth based on a string: exec("C.scene.render.image_settings.color_depth='16'"). However, there should be a serious reason why using it. Apr 22 at 7:03
+• @brockmann: Show me a screenshot of this actually working, please. Apr 22 at 7:05
+• @brockmann: Well, we have had a problem with you telling me, over and over, "Try this!" and me trying it and saying, "It does not do what I need" because it simply wouldn't give me what I had specified I needed it to do. Not to be a pain, but that was quite frustrating, so, yes, I'd like to see something clear, showing it works. Apr 22 at 7:08
+• You can even have a gif: i.stack.imgur.com/o5gSg.gif Please note that I'm wasting my sparetime to help you out and even create a gif which takes 3min for nothing. Apr 22 at 7:15
+• @brockmann I appreciate your help. I honestly do, but I just want to make sure we don't end up in a never-ending loop again of, "This will work," "No, it doesn't, that's not what I want" again - that would waste a lot more time for both of us. Apr 22 at 8:33

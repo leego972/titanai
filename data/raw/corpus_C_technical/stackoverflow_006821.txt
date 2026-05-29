@@ -1,0 +1,58 @@
+Question: <p>I am running my <code>HTTPServer</code> in a separate thread (using the threading module which has no way to stop threads...) and want to stop serving requests when the main thread also shuts down.</p>
+
+<p>The Python documentation states that <code>BaseHTTPServer.HTTPServer</code> is a subclass of <code>SocketServer.TCPServer</code>, which supports a <code>shutdown</code> method, but it is missing in <code>HTTPServer</code>.</p>
+
+<p>The whole <code>BaseHTTPServer</code> module has very little documentation :(</p>
+
+Answer: <p>In python 2.7, calling shutdown() works but only if you are serving via serve_forever, because it uses async select and a polling loop. Running your own loop with handle_request() ironically excludes this functionality because it implies a dumb blocking call.</p>
+
+<p>From SocketServer.py's BaseServer:</p>
+
+<pre><code>def serve_forever(self, poll_interval=0.5):
+    """Handle one request at a time until shutdown.
+
+    Polls for shutdown every poll_interval seconds. Ignores
+    self.timeout. If you need to do periodic tasks, do them in
+    another thread.
+    """
+    self.__is_shut_down.clear()
+    try:
+        while not self.__shutdown_request:
+            # XXX: Consider using another file descriptor or
+            # connecting to the socket to wake this up instead of
+            # polling. Polling reduces our responsiveness to a
+            # shutdown request and wastes cpu at all other times.
+            r, w, e = select.select([self], [], [], poll_interval)
+            if self in r:
+                self._handle_request_noblock()
+    finally:
+        self.__shutdown_request = False
+        self.__is_shut_down.set()
+</code></pre>
+
+<p>Heres part of my code for doing a blocking shutdown from another thread, using an event to wait for completion:</p>
+
+<pre><code>class MockWebServerFixture(object):
+    def start_webserver(self):
+        """
+        start the web server on a new thread
+        """
+        self._webserver_died = threading.Event()
+        self._webserver_thread = threading.Thread(
+                target=self._run_webserver_thread)
+        self._webserver_thread.start()
+
+    def _run_webserver_thread(self):
+        self.webserver.serve_forever()
+        self._webserver_died.set()
+
+    def _kill_webserver(self):
+        if not self._webserver_thread:
+            return
+
+        self.webserver.shutdown()
+
+        # wait for thread to die for a bit, then give up raising an exception.
+        if not self._webserver_died.wait(5):
+            raise ValueError("couldn't kill webserver")
+</code></pre>

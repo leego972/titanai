@@ -1,0 +1,47 @@
+Question: <p>I have scripts calling other script files but I need to get the filepath of the file that is currently running within the process. </p>
+
+<p>For example, let's say I have three files. Using <a href="http://docs.python.org/library/functions.html#execfile">execfile</a>:</p>
+
+<ul>
+<li><code>script_1.py</code> calls <code>script_2.py</code>. </li>
+<li>In turn, <code>script_2.py</code> calls <code>script_3.py</code>. </li>
+</ul>
+
+<p>How can I get the file name and path of <strong><code>script_3.py</code></strong>, <em>from code within <code>script_3.py</code></em>, without having to pass that information as arguments from <code>script_2.py</code>?</p>
+
+<p>(Executing <code>os.getcwd()</code> returns the original starting script's filepath not the current file's.)</p>
+
+Answer: <p>I wrote a function which take into account eclipse <strong>debugger</strong> and <strong>unittest</strong>.
+It return the folder of the first script you launch. You can optionally specify the <em>__file__</em> var, but the main thing is that you don't have to share this variable across all your <strong>calling hierarchy</strong>.</p>
+
+<p>Maybe you can handle others stack particular cases I didn't see, but for me it's ok.</p>
+
+<pre><code>import inspect, os
+def getRootDirectory(_file_=None):
+    """
+    Get the directory of the root execution file
+    Can help: http://stackoverflow.com/questions/50499/how-do-i-get-the-path-and-name-of-the-file-that-is-currently-executing
+    For eclipse user with unittest or debugger, the function search for the correct folder in the stack
+    You can pass __file__ (with 4 underscores) if you want the caller directory
+    """
+    # If we don't have the __file__ :
+    if _file_ is None:
+        # We get the last :
+        rootFile = inspect.stack()[-1][1]
+        folder = os.path.abspath(rootFile)
+        # If we use unittest :
+        if ("/pysrc" in folder) &amp; ("org.python.pydev" in folder):
+            previous = None
+            # We search from left to right the case.py :
+            for el in inspect.stack():
+                currentFile = os.path.abspath(el[1])
+                if ("unittest/case.py" in currentFile) | ("org.python.pydev" in currentFile):
+                    break
+                previous = currentFile
+            folder = previous
+        # We return the folder :
+        return os.path.dirname(folder)
+    else:
+        # We return the folder according to specified __file__ :
+        return os.path.dirname(os.path.realpath(_file_))
+</code></pre>

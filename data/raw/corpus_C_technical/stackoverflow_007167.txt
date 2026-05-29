@@ -1,0 +1,146 @@
+Question: <p>Given:</p>
+
+<pre><code>from django.db import models
+
+class Food(models.Model):
+     """Food, by name."""
+     name = models.CharField(max_length=25)
+
+class Cat(models.Model):
+     """A cat eats one type of food"""
+     food = models.ForeignKey(Food)
+
+class Cow(models.Model):
+     """A cow eats one type of food"""
+     food = models.ForeignKey(Food)
+
+class Human(models.Model):
+     """A human may eat lots of types of food"""
+     food = models.ManyToManyField(Food)
+</code></pre>
+
+<p>How can one, given only the class Food, get a set of all classes that it has "reverse relationships" to. I.e. given the class <strong>Food</strong>, how can one get the classes <strong>Cat</strong>, <strong>Cow</strong> and <strong>Human</strong>.</p>
+
+<p>I would think it's possible because Food has the three "reverse relations": <em>Food.cat_set</em>, <em>Food.cow_set</em>, and <em>Food.human_set</em>.</p>
+
+<p>Help's appreciated &amp; thank you!</p>
+
+Answer: <p>Either </p>
+
+<p>A) Use <a href="http://docs.djangoproject.com/en/dev/topics/db/models/#multi-table-inheritance" rel="nofollow">multiple table inheritance</a> and create a "Eater" base class, that Cat, Cow and Human inherit from.</p>
+
+<p>B) Use a <a href="http://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#id1" rel="nofollow">Generic Relation</a>, where Food could be linked to any other Model.</p>
+
+<p>Those are well-documented and officially supported features, you'd better stick to them to keep your own code clean, avoid workarounds and be sure it'll be still supported in the future.</p>
+
+<p>-- EDIT ( A.k.a. "how to be a reputation whore" )</p>
+
+<p>So, here is a recipe for that particular case.</p>
+
+<p>Let's assume you absolutely want separate models for Cat, Cow and Human. In a real-world application, you want to ask to yourself why a "category" field wouldn't do the job.</p>
+
+<p>It's easier to get to the "real" class through generic relations, so here is the implementation for B. We can't have that 'food' field in Person, Cat or Cow, or we'll run into the same problems. So we'll create an intermediary "FoodConsumer" model. We'll have to write additional validation tests if we don't want more than one food for an instance.</p>
+
+<pre><code>from django.db import models
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes import generic
+
+class Food(models.Model):
+     """Food, by name."""
+     name = models.CharField(max_length=25)
+
+# ConsumedFood has a foreign key to Food, and a "eaten_by" generic relation
+class ConsumedFood(models.Model):
+    food = models.ForeignKey(Food, related_name="eaters")
+    content_type = models.ForeignKey(ContentType, null=True)
+    object_id = models.PositiveIntegerField(null=True)
+    eaten_by = generic.GenericForeignKey('content_type', 'object_id')
+
+class Person(models.Model):
+    first_name = models.CharField(max_length=50)
+    last_name = models.CharField(max_length=50)
+    birth_date = models.DateField()
+    address = models.CharField(max_length=100)
+    city = models.CharField(max_length=50)
+    foods = generic.GenericRelation(ConsumedFood)
+
+class Cat(models.Model):
+    name = models.CharField(max_length=50)
+    foods = generic.GenericRelation(ConsumedFood)    
+
+class Cow(models.Model):
+    farmer = models.ForeignKey(Person)
+    foods = generic.GenericRelation(ConsumedFood)
+</code></pre>
+
+<p>Now, to demonstrate it let's just write this working <a href="http://docs.djangoproject.com/en/dev/topics/testing/#writing-doctests" rel="nofollow">doctest</a>:</p>
+
+<pre><code>"""
+&gt;&gt;&gt; from models import *
+
+Create some food records
+
+&gt;&gt;&gt; weed = Food(name="weed")
+&gt;&gt;&gt; weed.save()
+
+&gt;&gt;&gt; burger = Food(name="burger")
+&gt;&gt;&gt; burger.save()
+
+&gt;&gt;&gt; pet_food = Food(name="Pet food")
+&gt;&gt;&gt; pet_food.save()
+
+John the farmer likes burgers
+
+&gt;&gt;&gt; john = Person(first_name="John", last_name="Farmer", birth_date="1960-10-12")
+&gt;&gt;&gt; john.save()
+&gt;&gt;&gt; john.foods.create(food=burger)
+&lt;ConsumedFood: ConsumedFood object&gt;
+
+Wilma the cow eats weed
+
+&gt;&gt;&gt; wilma = Cow(farmer=john)
+&gt;&gt;&gt; wilma.save()
+&gt;&gt;&gt; wilma.foods.create(food=weed)
+&lt;ConsumedFood: ConsumedFood object&gt;
+
+Felix the cat likes pet food
+
+&gt;&gt;&gt; felix = Cat(name="felix")
+&gt;&gt;&gt; felix.save()
+&gt;&gt;&gt; pet_food.eaters.create(eaten_by=felix)
+&lt;ConsumedFood: ConsumedFood object&gt;
+
+What food john likes again ?
+&gt;&gt;&gt; john.foods.all()[0].food.name
+u'burger'
+
+Who's getting pet food ?
+&gt;&gt;&gt; living_thing = pet_food.eaters.all()[0].eaten_by
+&gt;&gt;&gt; isinstance(living_thing,Cow)
+False
+&gt;&gt;&gt; isinstance(living_thing,Cat)
+True
+
+John's farm is in fire ! He looses his cow.
+&gt;&gt;&gt; wilma.delete()
+
+John is a lot poorer right now
+&gt;&gt;&gt; john.foods.clear()
+&gt;&gt;&gt; john.foods.create(food=pet_food)
+&lt;ConsumedFood: ConsumedFood object&gt;
+
+Who's eating pet food now ?
+&gt;&gt;&gt; for consumed_food in pet_food.eaters.all():
+...    consumed_food.eaten_by
+&lt;Cat: Cat object&gt;
+&lt;Person: Person object&gt;
+
+Get the second pet food eater
+&gt;&gt;&gt; living_thing = pet_food.eaters.all()[1].eaten_by
+
+Try to find if it's a person and reveal his name
+&gt;&gt;&gt; if isinstance(living_thing,Person): living_thing.first_name
+u'John'
+
+"""
+</code></pre>

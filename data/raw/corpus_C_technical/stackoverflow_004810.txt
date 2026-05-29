@@ -1,0 +1,38 @@
+Question: <p>I've seen a fair share of ungainly XML->JSON code on the web, and having interacted with Stack's users for a bit, I'm convinced that this crowd can help more than the first few pages of Google results can.</p>
+
+<p>So, we're parsing a weather feed, and we need to populate weather widgets on a multitude of web sites.  We're looking now into Python-based solutions.</p>
+
+<p>This public <a href="http://rss.weather.com/weather/rss/local/14607?cm_ven=LWO&amp;cm_cat=rss&amp;par=LWO_rss" rel="nofollow">weather.com RSS feed</a> is a good example of what we'd be parsing (<em>our actual weather.com feed contains additional information because of a partnership w/them</em>).</p>
+
+<p>In a nutshell, how should we convert XML to JSON using Python?</p>
+
+Answer: <p>Here's the code I built for that. There's no parsing of the contents, just plain conversion.</p>
+
+<pre><code>from xml.dom import minidom
+import simplejson as json
+def parse_element(element):
+    dict_data = dict()
+    if element.nodeType == element.TEXT_NODE:
+        dict_data['data'] = element.data
+    if element.nodeType not in [element.TEXT_NODE, element.DOCUMENT_NODE, 
+                                element.DOCUMENT_TYPE_NODE]:
+        for item in element.attributes.items():
+            dict_data[item[0]] = item[1]
+    if element.nodeType not in [element.TEXT_NODE, element.DOCUMENT_TYPE_NODE]:
+        for child in element.childNodes:
+            child_name, child_dict = parse_element(child)
+            if child_name in dict_data:
+                try:
+                    dict_data[child_name].append(child_dict)
+                except AttributeError:
+                    dict_data[child_name] = [dict_data[child_name], child_dict]
+            else:
+                dict_data[child_name] = child_dict 
+    return element.nodeName, dict_data
+
+if __name__ == '__main__':
+    dom = minidom.parse('data.xml')
+    f = open('data.json', 'w')
+    f.write(json.dumps(parse_element(dom), sort_keys=True, indent=4))
+    f.close()
+</code></pre>

@@ -1,0 +1,41 @@
+Question: <p>I have this Python application that gets stuck from time to time and I can't find out where.</p>
+
+<p>Is there any way to signal Python interpreter to show you the exact code that's running? </p>
+
+<p>Some kind of on-the-fly stacktrace?</p>
+
+<p><strong><em>Related questions:</em></strong></p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/1156023/print-current-call-stack-from-a-method-in-python-code">Print current call stack from a method in Python code</a></li>
+<li><a href="http://stackoverflow.com/questions/6849138/check-what-a-running-process-is-doing-print-stack-trace-of-an-uninstrumented-py">Check what a running process is doing: print stack trace of an uninstrumented Python program</a></li>
+</ul>
+
+Answer: <p>I have module I use for situations like this - where a process will be running for a long time but gets stuck sometimes for unknown and irreproducible reasons.  Its a bit hacky, and only works on unix (requires signals):</p>
+
+<pre><code>import code, traceback, signal
+
+def debug(sig, frame):
+    """Interrupt running process, and provide a python prompt for
+    interactive debugging."""
+    d={'_frame':frame}         # Allow access to frame object.
+    d.update(frame.f_globals)  # Unless shadowed by global
+    d.update(frame.f_locals)
+
+    i = code.InteractiveConsole(d)
+    message  = "Signal received : entering python shell.\nTraceback:\n"
+    message += ''.join(traceback.format_stack(frame))
+    i.interact(message)
+
+def listen():
+    signal.signal(signal.SIGUSR1, debug)  # Register handler
+</code></pre>
+
+<p>To use, just call the listen() function at some point when your program starts up (You could even stick it in site.py to have all python programs use it), and let it run.  At any point, send the process a SIGUSR1 signal, using kill, or in python:</p>
+
+<pre><code>    os.kill(pid, signal.SIGUSR1)
+</code></pre>
+
+<p>This will cause the program to break to a python console at the point it is currently at, showing you the stack trace, and letting you manipulate the variables.  Use control-d (EOF) to continue running (though note that you will probably interrupt any I/O etc at the point you signal, so it isn't fully non-intrusive.</p>
+
+<p>I've another script that does the same thing, except it communicates with the running process through a pipe (to allow for debugging backgrounded processes etc).  Its a bit large to post here, but I've added it as a <a href="http://code.activestate.com/recipes/576515/">python cookbook recipe</a>.</p>

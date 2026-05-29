@@ -1,0 +1,46 @@
+Question: <p>I'm trying to run some python code under Apache 2.2 / mod_python 3.2.8. Eventually the code does os.fork() and spawns 2 separate long-run processes. Each of those processes has to create a separate instance of a class in order to avoid any possible collision in the parallel flow. </p>
+
+<pre><code>class Foo(object):
+   pass
+
+kidprocs = []
+
+for kid in ('kid1', 'kid2'):
+
+  pid = os.fork()
+  if pid:
+    # parent
+    kidprocs.append(pid)
+    time.sleep(5)
+  else:
+    # child
+
+    fooobj = Foo() 
+    print "Starting %s in sub-process %s" % (kid, os.getpid())
+    print "Kid fooobj: %s" % repr(fooobj) 
+    os._exit(0)
+
+for kidproc in kidprocs:
+  os.waitpid(kidproc, 0)
+</code></pre>
+
+<p>Those print outputs look like this:</p>
+
+<pre><code>Starting kid1 in sub-process 20906
+    foo obj: &lt;__main__.Foo instance at 0xb7da5fec&gt;
+
+Starting kid2 in sub-process 20909
+    foo obj: &lt;__main__.Foo instance at 0xb7da5fec&gt;
+</code></pre>
+
+<p>As you can see I got the same object for both sub-processes. 
+Do you have an idea why it's going like this under mod_python and is there a way to get separate instances anyway?
+Thanks a lot.</p>
+
+Answer: <p>The memory location given by the <code>repr()</code> function is an address in virtual memory, not an address in the system's global memory.  Each of your processes returned by fork() has its own virtual memory space which is completely distinct from other processes.  They do not share memory.</p>
+
+<p><strong>Edit:</strong> Per brian's comments below, technically they do share memory until the kernel decides to segregate them (when a child writes to a portion of shared memory).  The behavior, though, is effectively the same.</p>
+
+<p>The structure of your programs is the same, so python uses the same virtual memory location <strong>in each processes' distinct virtual memory store</strong>  for each of your identical objects for each child.</p>
+
+<p>If you actually modify the content of the objects and test them, you will see that even though the memory location looks the same, the two are completely distinct objects, because they belong to two distinct processes.  In reality you can't modify one from the other (without some kind of interprocess communication to mediate).</p>

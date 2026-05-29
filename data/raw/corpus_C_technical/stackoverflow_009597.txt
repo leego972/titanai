@@ -1,0 +1,43 @@
+Question: <p>I've factored out common attributes from two classes into an abstract base class, however I have another model that needs to reference either one of those classes. It's not possible to reference an ABC as it doesn't actually have a database table.</p>
+
+<p>The following example should illustrate my problem:</p>
+
+<pre><code>class Answer(models.Model):
+    ovramt = models.ForeignKey("Ovramt")
+    question = models.ForeignKey("Question")
+    answer = models.CharField(max_length=3, choices=(("yes","yes"),("no","no") ("NA","N/A"))
+    likelihood = models.IntegerField(choices=LIKELY_CHOICES)
+    consequence = models.IntegerField(choices=CONSEQUENCE_CHOICES)
+
+    class Meta:
+        abstract = True
+
+class Answer_A(Answer):
+    resident = models.ForeignKey("Resident")
+    def __unicode__(self):
+        return u"%s - %s - %s" %(self.ovramt.ssa.name, self.resident, self.question)    
+
+class Answer_B(Answer):
+    def __unicode__(self):
+        return u"%s - %s" %(self.ovramt.ssa.name, self.question)    
+
+class Answer_Risk(models.Model):
+    answer = models.ForeignKey("Answer")
+    risk = models.CharField(max_length=200)
+
+    def __unicode__(self):
+        return self.risk
+</code></pre>
+
+<p>Answer_A and Answer_B are slightly different in that Answer_A also needs a FK relationship to another table. Answer_B may also require some specific attributes later. The problem would STILL exist if I had Answer_B be the superclass - and have Answer_A subclass or compose it.</p>
+
+<p>A 'Risk' is the same whether it's Answer_A or Answer_B. I also have other models that need to reference an 'Answer' regardless of it's sub-type. How can this be done? How can you reference a type regardless of it's sub-type?</p>
+
+<p>Update:<br />
+I was trying to avoid a join operation but I don't think I'm going to be able to. Would it be worth having the reference to 'Resident' in all 'Answer's and just nulling it where required? Or is that considered very bad practice? </p>
+
+Answer: <p>My gut would be to suggest removing the abstract modifier on the base class.  You'll get the same model structure, but Answer will be it's own table.  The downside of this is that if these are large tables and/or your queries are complex, queries against it could be noticeably slower.</p>
+
+<p>Alternatively, you could keep your models as is, but replace the ForeignKey to Animal with a <a href="https://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/#generic-relations" rel="nofollow">GenericForeignKey</a>.  What you lose in the syntactic sugar of model inheritance, you gain a bit in query speed.</p>
+
+<p>I don't  believe it's possible to reference an abstract base model by ForeignKey (or anything functionally the same).</p>

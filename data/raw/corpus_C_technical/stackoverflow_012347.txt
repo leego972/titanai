@@ -1,0 +1,115 @@
+Question: <pre><code>class Tag(models.Model):
+  name = models.CharField(maxlength=100)
+
+class Blog(models.Model):
+  name = models.CharField(maxlength=100)
+  tags =  models.ManyToManyField(Tag)
+</code></pre>
+
+<p>Simple models just to ask my question.</p>
+
+<p>I wonder how can i query blogs using tags in two different ways.</p>
+
+<ul>
+<li>Blog entries that are tagged with "tag1" or "tag2":
+<code>Blog.objects.filter(tags_in=[1,2]).distinct()</code></li>
+<li>Blog objects that are tagged with "tag1" and "tag2" : <strong>?</strong></li>
+<li>Blog objects that are tagged with exactly "tag1" and "tag2" and nothing else : <strong>??</strong></li>
+</ul>
+
+<p><hr /></p>
+
+<p>Tag and Blog is just used for an example.</p>
+
+Answer: <p>You could use Q objects for #1:</p>
+
+<pre><code># Blogs who have either hockey or django tags.
+from django.db.models import Q
+Blog.objects.filter(
+    Q(tags__name__iexact='hockey') | Q(tags__name__iexact='django')
+)
+</code></pre>
+
+<p>Unions and intersections, I believe, are a bit outside the scope of the Django ORM, but its possible to to these.  The following examples are from a Django application called called <a href="http://code.google.com/p/django-tagging/">django-tagging</a> that provides the functionality. <a href="http://code.google.com/p/django-tagging/source/browse/trunk/tagging/models.py#346">Line 346 of models.py</a>: </p>
+
+<p>For part two, you're looking for a union of two queries, basically</p>
+
+<pre><code>def get_union_by_model(self, queryset_or_model, tags):
+    """
+    Create a ``QuerySet`` containing instances of the specified
+    model associated with *any* of the given list of tags.
+    """
+    tags = get_tag_list(tags)
+    tag_count = len(tags)
+    queryset, model = get_queryset_and_model(queryset_or_model)
+
+    if not tag_count:
+        return model._default_manager.none()
+
+    model_table = qn(model._meta.db_table)
+    # This query selects the ids of all objects which have any of
+    # the given tags.
+    query = """
+    SELECT %(model_pk)s
+    FROM %(model)s, %(tagged_item)s
+    WHERE %(tagged_item)s.content_type_id = %(content_type_id)s
+      AND %(tagged_item)s.tag_id IN (%(tag_id_placeholders)s)
+      AND %(model_pk)s = %(tagged_item)s.object_id
+    GROUP BY %(model_pk)s""" % {
+        'model_pk': '%s.%s' % (model_table, qn(model._meta.pk.column)),
+        'model': model_table,
+        'tagged_item': qn(self.model._meta.db_table),
+        'content_type_id': ContentType.objects.get_for_model(model).pk,
+        'tag_id_placeholders': ','.join(['%s'] * tag_count),
+    }
+
+    cursor = connection.cursor()
+    cursor.execute(query, [tag.pk for tag in tags])
+    object_ids = [row[0] for row in cursor.fetchall()]
+    if len(object_ids) &gt; 0:
+        return queryset.filter(pk__in=object_ids)
+    else:
+        return model._default_manager.none()
+</code></pre>
+
+<p>For part #3 I believe you're looking for an intersection. See <a href="http://code.google.com/p/django-tagging/source/browse/trunk/tagging/models.py#307">line 307 of models.py</a> </p>
+
+<pre><code>def get_intersection_by_model(self, queryset_or_model, tags):
+    """
+    Create a ``QuerySet`` containing instances of the specified
+    model associated with *all* of the given list of tags.
+    """
+    tags = get_tag_list(tags)
+    tag_count = len(tags)
+    queryset, model = get_queryset_and_model(queryset_or_model)
+
+    if not tag_count:
+        return model._default_manager.none()
+
+    model_table = qn(model._meta.db_table)
+    # This query selects the ids of all objects which have all the
+    # given tags.
+    query = """
+    SELECT %(model_pk)s
+    FROM %(model)s, %(tagged_item)s
+    WHERE %(tagged_item)s.content_type_id = %(content_type_id)s
+      AND %(tagged_item)s.tag_id IN (%(tag_id_placeholders)s)
+      AND %(model_pk)s = %(tagged_item)s.object_id
+    GROUP BY %(model_pk)s
+    HAVING COUNT(%(model_pk)s) = %(tag_count)s""" % {
+        'model_pk': '%s.%s' % (model_table, qn(model._meta.pk.column)),
+        'model': model_table,
+        'tagged_item': qn(self.model._meta.db_table),
+        'content_type_id': ContentType.objects.get_for_model(model).pk,
+        'tag_id_placeholders': ','.join(['%s'] * tag_count),
+        'tag_count': tag_count,
+    }
+
+    cursor = connection.cursor()
+    cursor.execute(query, [tag.pk for tag in tags])
+    object_ids = [row[0] for row in cursor.fetchall()]
+    if len(object_ids) &gt; 0:
+        return queryset.filter(pk__in=object_ids)
+    else:
+        return model._default_manager.none()
+</code></pre>

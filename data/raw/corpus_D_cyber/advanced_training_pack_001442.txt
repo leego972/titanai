@@ -1,0 +1,611 @@
+================================================================================
+TITAN AI — TRAINING PACK 017: API DESIGN — REST, GRAPHQL, GRPC, CONTRACTS
+DEEP PROFESSIONAL GUIDE TO BUILDING APIS THAT LAST
+================================================================================
+
+================================================================================
+PART 1: REST API DESIGN — EXPERT LEVEL
+================================================================================
+
+--- REST MATURITY MODEL (Richardson) ---
+
+Level 0 — The Swamp of POX (Plain Old XML/JSON):
+  One endpoint, one method: POST /api with action in body.
+  {"action": "getUser", "id": 123}
+  This is not REST. This is RPC over HTTP.
+
+Level 1 — Resources:
+  Multiple endpoints, one per noun.
+  POST /api/users/get, POST /api/users/create, POST /api/users/delete
+  HTTP method ignored. Resource concept introduced. Still not REST.
+
+Level 2 — HTTP Verbs (what most people call "REST"):
+  GET /users/123       → Read user
+  PUT /users/123       → Replace user
+  PATCH /users/123     → Update user (partial)
+  DELETE /users/123    → Delete user
+  GET /users?role=admin → List with filter
+  POST /users          → Create user
+  
+  HTTP status codes used correctly:
+  200 OK, 201 Created, 204 No Content, 400 Bad Request,
+  401 Unauthorized, 403 Forbidden, 404 Not Found, 409 Conflict,
+  422 Unprocessable Entity, 429 Too Many Requests, 500 Internal Server Error
+
+Level 3 — Hypermedia Controls (HATEOAS):
+  Responses include links telling the client what it can do next.
+  {
+    "id": 123,
+    "name": "John Doe",
+    "status": "pending",
+    "_links": {
+      "self": {"href": "/users/123"},
+      "approve": {"href": "/users/123/approve", "method": "POST"},
+      "reject": {"href": "/users/123/reject", "method": "POST"},
+      "profile": {"href": "/users/123/profile"}
+    }
+  }
+  Client doesn't need to know business logic rules about what actions are available.
+  API tells the client based on current state. Decouples client from server logic.
+
+--- URL DESIGN RULES ---
+
+NOUNS not verbs in URLs:
+  WRONG: /getUser, /createOrder, /deleteProduct
+  RIGHT: /users, /orders, /products (use HTTP method for the verb)
+
+Hierarchical relationships:
+  /users/{userId}/orders           → Orders for a specific user
+  /users/{userId}/orders/{orderId} → Specific order of specific user
+  /teams/{teamId}/members          → Members of a team
+  Rule: Nest only when the child truly only exists in context of the parent.
+  If orders exist independently: /orders/{orderId} is also valid and often better.
+
+Query parameters for filtering, sorting, pagination:
+  /products?category=electronics&min_price=100&max_price=500
+  /orders?status=shipped&sort=created_at:desc
+  /users?page=3&page_size=25
+  /users?cursor=eyJpZCI6MTIzfQ==&limit=25  (cursor-based pagination, better for large datasets)
+
+Path parameters for resource identity:
+  /users/{userId}  → userId identifies the resource
+  Not: /users?id=123  (ID is the resource identifier — belongs in path)
+
+Versioning strategies:
+  URL versioning: /v1/users, /v2/users (most common, most visible)
+  Header versioning: Accept: application/vnd.company.v2+json
+  Query string: /users?version=2
+  
+  Recommendation: URL versioning for public APIs (explicit, cacheable, easy to test).
+  Header versioning for internal APIs (cleaner URLs).
+
+--- RESPONSE DESIGN PATTERNS ---
+
+CONSISTENT ENVELOPE (every response same shape):
+  Success:
+  {
+    "data": { ... },
+    "meta": {
+      "request_id": "req-abc123",
+      "timestamp": "2025-01-15T10:00:00Z"
+    }
+  }
+  
+  List with pagination:
+  {
+    "data": [ ... ],
+    "meta": {
+      "total": 1000,
+      "page": 3,
+      "page_size": 25,
+      "next_cursor": "eyJpZCI6MTI1fQ=="
+    }
+  }
+  
+  Error:
+  {
+    "error": {
+      "code": "VALIDATION_ERROR",
+      "message": "Request validation failed",
+      "details": [
+        {"field": "email", "message": "Invalid email format"},
+        {"field": "age", "message": "Must be 18 or older"}
+      ]
+    },
+    "meta": {
+      "request_id": "req-abc123",
+      "timestamp": "2025-01-15T10:00:00Z"
+    }
+  }
+
+PAGINATION DESIGN — CURSOR vs OFFSET:
+
+Offset pagination:
+  /users?page=5&page_size=20
+  SQL: LIMIT 20 OFFSET 80
+  Problem: If new records inserted, pages shift. Page 5 might show records from page 4.
+  Problem: Deep pagination is slow (OFFSET 100000 scans 100000 rows to discard them).
+  Use when: Small datasets, user needs to jump to arbitrary page number.
+
+Cursor pagination:
+  /users?cursor=eyJpZCI6MTIzfQ==&limit=20
+  cursor = base64({"id": 123})  (last seen record identifier)
+  SQL: WHERE id > 123 ORDER BY id LIMIT 20
+  Advantages: Stable (new inserts don't break pages), constant-time (no full scan).
+  Use when: Large datasets, feed-style (infinite scroll), no need to jump to page N.
+
+--- REST API SECURITY ---
+
+AUTHENTICATION HEADER PATTERNS:
+  Bearer token (OAuth2, JWT): Authorization: Bearer eyJhbG...
+  API Key in header: X-API-Key: sk-live-abc123xyz
+  API Key as query param: /endpoint?api_key=sk-live-abc123xyz (AVOID — logged in URLs)
+  Basic auth: Authorization: Basic base64(username:password) (AVOID except for machine-to-machine)
+  
+  ALWAYS: Use HTTPS. Auth headers in plaintext HTTP = credential exposure.
+
+RATE LIMITING HEADERS (communicate limits to clients):
+  Response headers:
+  X-RateLimit-Limit: 1000        → Total allowed per window
+  X-RateLimit-Remaining: 847     → Remaining in current window
+  X-RateLimit-Reset: 1735689600  → Unix timestamp when window resets
+  Retry-After: 60                → Seconds to wait when rate limited (429 response)
+  
+  Clients that see Retry-After MUST respect it. If not: Backoff of client is your last resort.
+  Implement: Block client IPs that ignore 429 and keep hammering.
+
+IDEMPOTENCY KEYS (critical for payments/mutations):
+  Problem: Client sends POST /orders. Network times out. Did order get created?
+  Client retries. If not idempotent: Two orders created.
+  
+  Solution: Client sends unique Idempotency-Key header with each request.
+  Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+  
+  Server: First time seeing this key → process and store result.
+  Second time seeing this key → return stored result. Don't process again.
+  
+  Implementation:
+  def create_order(request):
+      idempotency_key = request.headers.get('Idempotency-Key')
+      if idempotency_key:
+          cached = redis.get(f"idempotency:{idempotency_key}")
+          if cached:
+              return json.loads(cached)  # Return previous result
+      
+      order = process_order(request.json)
+      result = order.to_dict()
+      
+      if idempotency_key:
+          redis.setex(f"idempotency:{idempotency_key}", 86400, json.dumps(result))
+      
+      return result
+
+================================================================================
+PART 2: GRAPHQL — DEEP PROFESSIONAL GUIDE
+================================================================================
+
+--- GRAPHQL FUNDAMENTALS ---
+
+CORE CONCEPT: Client specifies exactly what data it needs.
+No over-fetching (getting more than needed).
+No under-fetching (needing multiple requests to get all needed data).
+
+QUERY EXAMPLE:
+  # Get user with only needed fields + their last 5 orders
+  query GetUserDashboard($userId: ID!) {
+    user(id: $userId) {
+      id
+      name
+      email
+      orders(first: 5, orderBy: {field: CREATED_AT, direction: DESC}) {
+        edges {
+          node {
+            id
+            total
+            status
+            createdAt
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+
+MUTATION:
+  mutation CreateOrder($input: CreateOrderInput!) {
+    createOrder(input: $input) {
+      order {
+        id
+        total
+        estimatedDelivery
+      }
+      errors {
+        field
+        message
+      }
+    }
+  }
+
+SUBSCRIPTION (real-time):
+  subscription OnOrderStatusChange($orderId: ID!) {
+    orderStatusChanged(orderId: $orderId) {
+      id
+      status
+      updatedAt
+    }
+  }
+
+--- THE N+1 PROBLEM AND DATALOADER ---
+
+CRITICAL PERFORMANCE TRAP:
+
+Schema:
+  type User {
+    orders: [Order!]!
+  }
+
+Naive resolver:
+  def resolve_orders(user, info):
+      return Order.query.filter_by(user_id=user.id).all()
+
+With 100 users in a list: 1 query for users + 100 queries for orders = 101 queries.
+N+1 problem. Destroys performance at scale.
+
+DATALOADER SOLUTION — Batch and cache:
+  DataLoader batches all requests made in same tick, then fetches in one query.
+  
+  from promise import Promise
+  from graphql import GraphQLError
+  
+  class OrderLoader:
+      def __init__(self):
+          self.loader = DataLoader(self.batch_load_orders)
+      
+      def batch_load_orders(self, user_ids):
+          # Called once with ALL user_ids requested in current execution
+          orders = Order.query.filter(Order.user_id.in_(user_ids)).all()
+          
+          # Group by user_id
+          orders_by_user = {uid: [] for uid in user_ids}
+          for order in orders:
+              orders_by_user[order.user_id].append(order)
+          
+          # Return in same order as input
+          return [orders_by_user.get(uid, []) for uid in user_ids]
+  
+  # Resolver using loader:
+  def resolve_orders(user, info):
+      loader = info.context['order_loader']
+      return loader.load(user.id)  # Returns promise, batched automatically
+  
+  # Result: 100 users → 1 user query + 1 order query (with IN clause) = 2 queries.
+
+--- GRAPHQL SECURITY ---
+
+DEPTH LIMIT (prevent deeply nested DoS queries):
+  # Attacker query: Deeply nested, expensive to compute
+  query {
+    user(id: "1") {
+      friends {
+        friends {
+          friends {  # 10 levels deep → exponential DB queries
+            friends { ... }
+          }
+        }
+      }
+    }
+  }
+  
+  # Implement max depth:
+  from graphql import build_schema, validate
+  from graphql.validation.rules import DepthLimitRule
+  
+  # Reject queries deeper than 5 levels
+  validation_rules = [DepthLimitRule(max_depth=5)]
+
+QUERY COMPLEXITY ANALYSIS:
+  Not all fields are equal cost. User.name = trivial. User.orders = expensive.
+  Assign complexity scores to resolvers.
+  Reject queries that exceed total complexity budget.
+  
+  # Each field assigned complexity:
+  # user: 1, orders: 5, orderItems: 3
+  # Budget: 50
+  # Query with 2 users × 3 orders × 4 items = 2 + 6 + 24 = 32 (under budget)
+  # Query with 10 users × 10 orders × 10 items = 10 + 50 + 300 = 360 (rejected)
+
+INTROSPECTION IN PRODUCTION:
+  GraphQL introspection lets you discover the entire schema.
+  In production: Disable or restrict introspection.
+  Attackers use it to map your entire API before attacking it.
+  
+  # Apollo Server:
+  const server = new ApolloServer({
+    introspection: process.env.NODE_ENV === 'development'  // Only in dev
+  });
+
+================================================================================
+PART 3: gRPC — HIGH-PERFORMANCE RPC
+================================================================================
+
+--- WHEN TO USE gRPC ---
+
+USE gRPC when:
+  - Internal service-to-service communication (not client-facing)
+  - High throughput, low latency required (binary protocol, HTTP/2)
+  - Strong typing across services (Protobuf schema as contract)
+  - Streaming required (client stream, server stream, bidirectional)
+  - Polyglot services (Protobuf generates clients in any language)
+
+DON'T USE gRPC when:
+  - Public API (browser support limited — requires gRPC-web proxy)
+  - Simple CRUD (REST is simpler, more tooling, easier debugging)
+  - Team is unfamiliar (operational overhead not worth it for simple cases)
+
+PROTOBUF DEFINITION (the contract):
+  syntax = "proto3";
+  package security.v1;
+  
+  service ThreatIntelService {
+    rpc GetIndicator(GetIndicatorRequest) returns (IndicatorResponse);
+    rpc BatchGetIndicators(BatchGetRequest) returns (BatchGetResponse);
+    rpc StreamAlerts(StreamAlertsRequest) returns (stream Alert);  // Server streaming
+    rpc SubmitIndicators(stream Indicator) returns (SubmitResponse);  // Client streaming
+    rpc BidirectionalAnalysis(stream AnalysisRequest) returns (stream AnalysisResponse);
+  }
+  
+  message GetIndicatorRequest {
+    string ioc = 1;  // Field numbers are wire format identifiers
+    IndicatorType type = 2;
+  }
+  
+  enum IndicatorType {
+    INDICATOR_TYPE_UNSPECIFIED = 0;  // Proto3 requires zero value
+    IP_ADDRESS = 1;
+    DOMAIN = 2;
+    FILE_HASH = 3;
+    URL = 4;
+  }
+  
+  message IndicatorResponse {
+    string ioc = 1;
+    IndicatorType type = 2;
+    ThreatScore threat_score = 3;
+    repeated string tags = 4;  // repeated = array
+    google.protobuf.Timestamp last_seen = 5;
+    map<string, string> metadata = 6;  // key-value pairs
+  }
+
+PYTHON GRPC SERVER:
+  import grpc
+  from concurrent import futures
+  import threat_intel_pb2
+  import threat_intel_pb2_grpc
+  
+  class ThreatIntelServicer(threat_intel_pb2_grpc.ThreatIntelServiceServicer):
+      def GetIndicator(self, request, context):
+          # context: Metadata, auth, deadlines, cancellation
+          ioc = request.ioc
+          
+          # Authentication check
+          metadata = dict(context.invocation_metadata())
+          if not self.validate_token(metadata.get('authorization', '')):
+              context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid token")
+          
+          result = self.threat_db.lookup(ioc)
+          if not result:
+              context.abort(grpc.StatusCode.NOT_FOUND, f"IOC {ioc} not found")
+          
+          return threat_intel_pb2.IndicatorResponse(
+              ioc=ioc,
+              threat_score=result.threat_score,
+              tags=result.tags
+          )
+      
+      def StreamAlerts(self, request, context):
+          # Server-side streaming: yield multiple responses
+          filters = request.filters
+          for alert in self.alert_stream.subscribe(filters):
+              if context.is_active():  # Check if client still connected
+                  yield threat_intel_pb2.Alert(
+                      id=alert.id,
+                      severity=alert.severity,
+                      description=alert.description
+                  )
+              else:
+                  break  # Client disconnected
+  
+  def serve():
+      server = grpc.server(
+          futures.ThreadPoolExecutor(max_workers=10),
+          interceptors=[AuthInterceptor(), LoggingInterceptor()],
+          options=[
+              ('grpc.max_receive_message_length', 4 * 1024 * 1024),  # 4MB max
+              ('grpc.keepalive_time_ms', 30000),
+          ]
+      )
+      threat_intel_pb2_grpc.add_ThreatIntelServiceServicer_to_server(
+          ThreatIntelServicer(), server
+      )
+      server.add_insecure_port('[::]:50051')  # Use secure port in production
+      server.start()
+      server.wait_for_termination()
+
+gRPC INTERCEPTOR (cross-cutting concerns):
+  class AuthInterceptor(grpc.ServerInterceptor):
+      def intercept_service(self, continuation, handler_call_details):
+          metadata = dict(handler_call_details.invocation_metadata)
+          token = metadata.get('authorization', '')
+          
+          if not validate_jwt(token):
+              def abort_handler(request, context):
+                  context.abort(grpc.StatusCode.UNAUTHENTICATED, "Authentication required")
+              return grpc.unary_unary_rpc_method_handler(abort_handler)
+          
+          return continuation(handler_call_details)
+
+================================================================================
+PART 4: API CONTRACT TESTING
+================================================================================
+
+--- CONTRACT TESTING WITH PACT ---
+
+PROBLEM: Service A calls Service B. Both have their own tests.
+But: Service A's tests mock Service B. Service B's tests don't know what Service A expects.
+When Service B changes its API: Service A's mocks still pass. Tests green. Production breaks.
+
+PACT SOLUTION: Consumer-driven contract testing.
+Consumer (Service A) defines what it expects from Provider (Service B).
+Provider must prove it fulfills those expectations.
+
+Consumer test (generates contract):
+  from pact import Consumer, Provider
+  
+  pact = Consumer('orders-service').has_pact_with(Provider('payments-service'))
+  
+  def test_payment_endpoint():
+      expected_request = {
+          'method': 'POST',
+          'path': '/payments',
+          'headers': {'Content-Type': 'application/json'},
+          'body': {'order_id': '123', 'amount': 150.00, 'currency': 'USD'}
+      }
+      
+      expected_response = {
+          'status': 200,
+          'headers': {'Content-Type': 'application/json'},
+          'body': {
+              'payment_id': like('pay-abc123'),  # String matching like
+              'status': 'authorized',
+              'amount': 150.00
+          }
+      }
+      
+      with pact.given('payment service is available') \
+               .upon_receiving('a valid payment request') \
+               .with_request(**expected_request) \
+               .will_respond_with(**expected_response):
+          
+          result = payments_client.create_payment(order_id='123', amount=150.00)
+          assert result['status'] == 'authorized'
+  
+  # Pact generates: contract JSON file. Share with Provider.
+
+Provider verification (proves it fulfills contract):
+  # payments-service runs all contracts against its actual implementation
+  pact.verify_with_broker(
+      broker_url='https://pact-broker.company.com',
+      provider='payments-service',
+      provider_version='1.2.3'
+  )
+  # Fails if payments-service doesn't fulfill what orders-service expects.
+  # Run in CI before merging. Breaks build if contract violated.
+
+--- OPENAPI SPECIFICATION — PRODUCTION QUALITY ---
+
+openapi: 3.1.0
+info:
+  title: Security Operations API
+  version: 2.0.0
+  description: |
+    API for security operations platform.
+    All endpoints require Bearer token authentication.
+  contact:
+    name: Security Team
+    email: security@company.com
+
+servers:
+  - url: https://api.company.com/v2
+    description: Production
+  - url: https://staging-api.company.com/v2
+    description: Staging
+
+security:
+  - bearerAuth: []
+
+paths:
+  /alerts:
+    get:
+      operationId: listAlerts
+      summary: List security alerts
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [new, investigating, resolved]
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+components:
+  schemas:
+    Alert:
+      type: object
+      required: [id, severity, status, title, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: {type: integer}
+        X-RateLimit-Reset:
+          schema: {type: integer}
+
+================================================================================
+END OF PACK 017: API DESIGN
+Total: REST maturity model, URL design rules, response patterns, cursor vs offset
+pagination, security (auth headers, rate limiting, idempotency keys), GraphQL
+(N+1 problem with DataLoader, security controls, introspection), gRPC (when to use,
+Protobuf definition, server/streaming/interceptors), contract testing with Pact,
+production-quality OpenAPI spec.
+================================================================================

@@ -1,0 +1,107 @@
+Question: <p>We have a current application where user login credentials are stored in a SQL Server DB.  These are, basically, stored as a plain text username, a password hash, and an associated salt for this hash.</p>
+
+<p>These were all created by built in functions in ASP.NET's membership/role system.  Here's a row for a user named 'joe' and a password of 'password':</p>
+
+<blockquote>
+  <p>joe,kDP0Py2QwEdJYtUX9cJABg==,OJF6H4KdxFLgLu+oTDNFodCEfMA=</p>
+</blockquote>
+
+<p>I've dumped this stuff into a CSV file and I'm attempting to get it into a usable format for Django which stores its passwords in this format:</p>
+
+<p>[algo]$[salt]$[hash]</p>
+
+<p>Where the salt is a plain string and the hash is the hex digest of an SHA1 hash.</p>
+
+<p>So far I've been able to ascertain that ASP is storing these hashes and salts in a base64 format.  Those values above decode into binary strings.</p>
+
+<p>We've used reflector to glean how ASP authenticates against these values:</p>
+
+<pre><code>internal string EncodePassword(string pass, int passwordFormat, string salt)
+{
+    if (passwordFormat == 0)
+    {
+        return pass;
+    }
+    byte[] bytes = Encoding.Unicode.GetBytes(pass);
+    byte[] src = Convert.FromBase64String(salt);
+    byte[] dst = new byte[src.Length + bytes.Length];
+    byte[] inArray = null;
+    Buffer.BlockCopy(src, 0, dst, 0, src.Length);
+    Buffer.BlockCopy(bytes, 0, dst, src.Length, bytes.Length);
+    if (passwordFormat == 1)
+    {
+        HashAlgorithm algorithm = HashAlgorithm.Create(Membership.HashAlgorithmType);
+        if ((algorithm == null) &amp;&amp; Membership.IsHashAlgorithmFromMembershipConfig)
+        {
+            RuntimeConfig.GetAppConfig().Membership.ThrowHashAlgorithmException();
+        }
+        inArray = algorithm.ComputeHash(dst);
+    }
+    else
+    {
+        inArray = this.EncryptPassword(dst);
+    }
+    return Convert.ToBase64String(inArray);
+}
+</code></pre>
+
+<p>Eseentially, pulls in the salt from the DB and b64 decodes it into a binary representation.  It does a "GetBytes" on the raw password and then it concatinates them, salt first.</p>
+
+<p>It then runs the SHA1 algorithm on this new string, base64 encodes it, and compares it against the value stored in the database.</p>
+
+<p>I've attempted to write some code to try and reproduce these hashes in Python and I'm failing.  I won't be able to use them in Django until I can figure out how this translates over.  Here's how I'm testing:</p>
+
+<pre><code>import hashlib
+from base64 import b64decode, b64encode
+
+b64salt = "kDP0Py2QwEdJYtUX9cJABg=="
+b64hash = "OJF6H4KdxFLgLu+oTDNFodCEfMA="
+binsalt = b64decode(b64salt)
+password_string = 'password'
+
+m1 = hashlib.sha1()
+# Pass in salt
+m1.update(binsalt)
+# Pass in password
+m1.update(password_string)
+# B64 encode the binary digest
+if b64encode(m1.digest()) == b64hash:
+    print "Logged in!"
+else:
+    print "Didn't match"
+    print b64hash
+    print b64encode(m1.digest())
+</code></pre>
+
+<p>I'm wondering if anyone can see any flaws in my approach or can suggest an alternate method.  Perhaps you can take the algorithms above and the known password and salt above and produce the hash on your system?</p>
+
+Answer: <p>It appears python is inserting a byte order marker when you convert a UTF16 string to binary.  The .NET byte array contains no BOM, so I did some ghetto python that turns the UTF16 into hex, removes the first 4 characters, then decodes it to binary.</p>
+
+<p>There may be a better way to rip out the BOM, but this works for me!</p>
+
+<p>Here's one that passes:</p>
+
+<pre><code>import hashlib
+from base64 import b64decode, b64encode
+
+def utf16tobin(s):
+  return s.encode('hex')[4:].decode('hex')
+
+b64salt = "kDP0Py2QwEdJYtUX9cJABg=="
+b64hash = "OJF6H4KdxFLgLu+oTDNFodCEfMA="
+binsalt = b64decode(b64salt)
+password_string = 'password'.encode("utf16")
+password_string = utf16tobin(password_string)
+
+m1 = hashlib.sha1()
+# Pass in salt
+m1.update(binsalt + password_string)
+# Pass in password
+# B64 encode the binary digest
+if b64encode(m1.digest()) == b64hash:
+    print "Logged in!"
+else:
+    print "Didn't match"
+    print b64hash
+    print b64encode(m1.digest())
+</code></pre>

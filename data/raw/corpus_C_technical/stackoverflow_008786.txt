@@ -1,0 +1,71 @@
+Question: <p>I run a subprocess using:</p>
+
+<pre><code>  p = subprocess.Popen("subprocess", 
+                       stdout=subprocess.PIPE, 
+                       stderr=subprocess.PIPE, 
+                       stdin=subprocess.PIPE)
+</code></pre>
+
+<p>This subprocess could either exit immediately with an error on stderr, or keep running. I want to detect either of these conditions - the latter by waiting for several seconds.</p>
+
+<p>I tried this:</p>
+
+<pre><code>  SECONDS_TO_WAIT = 10
+  select.select([], 
+                [p.stdout, p.stderr], 
+                [p.stdout, p.stderr],
+                SECONDS_TO_WAIT)
+</code></pre>
+
+<p>but it just returns:</p>
+
+<pre><code>  ([],[],[])
+</code></pre>
+
+<p>on either condition. What can I do?</p>
+
+Answer: <p>Have you tried using the Popen.Poll() method. You could just do this:</p>
+
+<pre><code>p = subprocess.Popen("subprocess", 
+                   stdout=subprocess.PIPE, 
+                   stderr=subprocess.PIPE, 
+                   stdin=subprocess.PIPE)
+
+time.sleep(SECONDS_TO_WAIT)
+retcode = p.poll()
+if retcode is not None:
+   # process has terminated
+</code></pre>
+
+<p>This will cause you to always wait 10 seconds, but if the failure case is rare this would be amortized over all the success cases.</p>
+
+<hr>
+
+<p>Edit:</p>
+
+<p>How about:</p>
+
+<pre><code>t_nought = time.time()
+seconds_passed = 0
+
+while(p.poll() is not None and seconds_passed &lt; 10):
+    seconds_passed = time.time() - t_nought
+
+if seconds_passed &gt;= 10:
+   #TIMED OUT
+</code></pre>
+
+<p>This has the ugliness of being a busy wait, but I think it accomplishes what you want.</p>
+
+<p>Additionally looking at the select call documentation again I think you may want to change it as follows:</p>
+
+<pre><code>SECONDS_TO_WAIT = 10
+  select.select([p.stderr], 
+                [], 
+                [p.stdout, p.stderr],
+                SECONDS_TO_WAIT)
+</code></pre>
+
+<p>Since you would typically want to read from stderr, you want to know when it has something available to read (ie the failure case).</p>
+
+<p>I hope this helps.</p>

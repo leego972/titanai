@@ -1,0 +1,59 @@
+Question: <p>What I would like to achive is: </p>
+
+<ul>
+<li>I go to admin site, apply some filters to the list of objects</li>
+<li>I click and object edit, edit, edit, hit 'Save'</li>
+<li>Site takes me to the list of objects... unfiltered. I'd like to have the filter from step 1 remembered and applied.</li>
+</ul>
+
+<p>Is there an easy way to do it?</p>
+
+Answer: <p>There's a simple hack to do this, but it's not a general solution and requires modifying every <code>ModelAdmin</code> which you want to support this. Maybe there is a general way to do this, but I've not spent the time to solve it on a general level.</p>
+
+<p>The first step is to write a custom <code>FilterSpec</code> for the filter (see Harley's post for links that will help) which saves the chosen filter value in the session (and deletes it when no longer wanted).</p>
+
+<pre><code># in cust_admin/filterspecs.py
+from django.contrib.admin.filterspecs import FilterSpec, ChoicesFilterSpec
+
+class MyFilterSpec(ChoicesFilterSpec):
+
+    def __init__(self, f, request, params, model, model_admin):
+        super(MyFilterSpec, self).__init__(f, request, params, model,
+                                           model_admin)
+        if self.lookup_val is not None:
+            request.session[self.lookup_kwarg] = self.lookup_val
+        elif self.lookup_kwarg in request.session:
+            del(request.session[self.lookup_kwarg])
+
+# Register the filter with a test function which will apply it to any field
+# with a my_filter attribute equal to True
+FilterSpec.filter_specs.insert(0, (lambda f: getattr(f, 'my_filter', False),
+                               MyFilterSpec))
+</code></pre>
+
+<p>You must import the module this is in somewhere, for example your <code>urls.py</code>:</p>
+
+<pre><code># in urls.py
+from cust_admin import filterspecs
+</code></pre>
+
+<p>Set a property on the field you want to apply the filter to:</p>
+
+<pre><code># in models.py
+class MyModel(models.Model):
+    my_field = Models.IntegerField(choices=MY_CHOICES)
+    my_field.my_filter = True
+</code></pre>
+
+<p>In a custom <code>ModelAdmin</code> class, override the <code>change_view</code> method, so that after the user clicks <strong>save</strong>, they are returned to the list view with their filter field value added to the URL.</p>
+
+<pre><code>class MyModelAdmin(admin.ModelAdmin):
+    def change_view(self, request, object_id, extra_context=None):
+        result = super(MyModelAdmin, self).change_view(request, object_id,
+                                                       extra_context)
+        if '_save' in request.POST:
+            if 'my_field__exact' in request.session:
+                result['Location'] = '/admin/myapp/mymodel/?my_field__exact=%s' \
+                                     % request.session['my_field__exact']
+        return result
+</code></pre>

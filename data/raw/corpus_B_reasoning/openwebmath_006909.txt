@@ -1,0 +1,209 @@
+Question: DESeq2 and ComBat
+1
+3.4 years ago by
+riccardo70
+riccardo70 wrote:
+
+Hi, is it possible to remove batch effects with ComBat and then to do a differential analysis with DESeq2? If yes, what are the steps to do?
+
+Thank you.
+
+deseq2 combat • 5.0k views
+ADD COMMENTlink
+modified 3.4 years ago by Bernd Klaus550 • written 3.4 years ago by riccardo70
+Answer: DESeq2 and ComBat
+1
+3.4 years ago by
+United Kingdom
+andrew.j.skelton73310 wrote:
+
+Don't use ComBat on raw counts, I believe ComBat requires log transformed data anyway. Check out the DESeq2 Users Guide, section 3.12.1 Linear Combinations, to add batch effects in your model design.
+
+ADD COMMENTlink written 3.4 years ago by andrew.j.skelton73310
+Answer: DESeq2 and ComBat
+1
+3.4 years ago by
+Michael Love23k
+United States
+Michael Love23k wrote:
+
+Here's another link to show how you can use estimated batch effect variables with DESeq2 (here svaseq, but the principle would be the same)
+
+http://www.bioconductor.org/help/workflows/rnaseqGene/#batch
+
+ADD COMMENTlink written 3.4 years ago by Michael Love23k
+Answer: DESeq2 and ComBat
+0
+3.4 years ago by
+riccardo70
+riccardo70 wrote:
+Thank you. In that example svaseq is used but If I have two datasets and I know the batches, combat is better than svaseq?
+ADD COMMENTlink written 3.4 years ago by riccardo70
+
+I can't really give any more specific advice without a more specific description of what your data looks like and what you are trying to do (what biological question do you want to ask, and in what way does batch effect correction enter the picture).
+
+ADD REPLYlink written 3.4 years ago by Michael Love23k
+
+I will try to explain you my experimets:
+
+1) I have a sequencing of some cells in different states of differention: 1, 2, and 5;
+
+2) I have a different sequencing of other cells in the states: 3, 4, and 5;
+
+I want to use DESeq2 and at the moment i have used it to analyze the experiment 1 and 2 separately but i would like to compare the common genes.
+
+I do not know if it is correct to compare the two different analyses directly or if i have to remove the batch effects (with svaseq or ComBat) or if i have to normalize all the experiment together and use the contrast.
+
+Thank you
+
+ADD REPLYlink written 3.4 years ago by riccardo70
+
+My first question would be how many replicates of each, but the design you've described means that you'd only be able to adequately estimate the batch effect of cells in state 5, as they're shared across experiment (this also requires that they were sequenced with the same machine, prep, chemistry, etc).
+
+I think your best bet is to do the experiments independently (as you've done so far), then use a non-parametric rank based approach maybe? Either that or simple look at the overlap in what is significantly differentially expressed between the two experiments.
+
+ADD REPLYlink written 3.4 years ago by andrew.j.skelton73310
+
+I have 3 replicates for every condition. Are the FC comparable, between the two experiments, if i choose to compare the overlapping genes?
+
+ADD REPLYlink written 3.4 years ago by riccardo70
+
+Not comparable directly, but the fact that something is differentially expressed in two separate experiments should tell you something.
+
+ADD REPLYlink written 3.4 years ago by andrew.j.skelton73310
+
+Can you also tell the biological question you want to answer? What comparisons do you want to make?
+
+ADD REPLYlink written 3.4 years ago by Michael Love23k
+
+I want to investigate the role of some genes in the different stages.
+
+Considering the two analysis separately i think that i can only extract the information of what genes are differentially expressed across the two analysis.
+
+If i would to do a differential analysis 1 VS 3 (or other combination of the conditions of the two experiments) can i normalize the table with all conditions and do a contrast on it?
+
+Should I use svaseq considering that i have only the condition 5 in both experiments?
+
+ADD REPLYlink written 3.4 years ago by riccardo70
+
+While it's not the ideal experimental design (better would be to have distributed all states within each library preparation batch in a block design, or even randomized), it is still possible to analyze all the samples together using a design ~batch + state. I assume the colData looks something like this (with replicates in addition):
+
+batch state
+1     1
+1     2
+1     5
+2     3
+2     4
+2     5
+
+Be sure that these columns are factors, not numerics.
+
+What happens when you run DESeq2 with a design of ~batch + state, is that it will use the samples from state 5 to estimate the batch effect. So if you only have a few samples, this can be a very noisy estimate of the batch differences for each gene, but it's the best you can do given you want to make comparisons across batch.
+
+ADD REPLYlink modified 3.4 years ago • written 3.4 years ago by Michael Love23k
+
+Thank you. Can I also use svaseq or in this case this method is more appropriate?
+
+ADD REPLYlink written 3.4 years ago by riccardo70
+
+Hi riccardo,
+
+If you use mike's proposal of including a batch effect coefficient, you don't need to use svaseq anymore.
+
+Bernd
+
+ADD REPLYlink written 3.4 years ago by Bernd Klaus550
+
+Hi riccardo,
+
+you might try to compute surrogate variables (SVs) using the condition 5 samples only. Then you get 3 values of the SVs for data set 1, and 3 value for data set 2. You can then create SVs for the whole data set by simply repeating the values appropriately for the other samples.
+
+This way, you inferred the SV only from a condition that is shared. This way, you could analyse the data jointly, rather than separately.
+
+However, I am not sure whether this idea is really super brilliant. In case Mike, Andrew or others  have comments on that I would love to hear them :)
+
+Bernd
+
+ADD REPLYlink written 3.4 years ago by Bernd Klaus550
+
+Hi, how can i choose what is the best method between yours and the method of Mike?
+
+ADD REPLYlink written 3.4 years ago by riccardo70
+1
+
+Hi Riccardo,
+
+if you use exactly one SV, my proposal and Mike's approach will likely to be quite similar.
+
+However, Mike's proposal is more robust as well as close to a "textbook" solution, so easy to communicate as well.
+
+sva uses a quite complex algorithm, so the additionally variability caused by that might hamper the potential advantages.  So I would recommend Mike's proposal.
+
+Bernd
+
+ADD REPLYlink written 3.4 years ago by Bernd Klaus550
+
+I agree with Bernd. They are both probably going to give similar answers, and perhaps doing it with fixed effects (the ~batch + condition approach) sounds simpler and so more palatable to reviewers.
+
+Trying to remove batch effects with only a few samples to rely on is a tough statistical challenge, and I just want to stress for future experiments it would make inference more powerful with full block designs or randomization of conditions across library preparation batches. (Sometimes the data is as it is and this can't be avoided, or it was handed down to the analyst as such, but that's my attempt at a PSA.)
+
+ADD REPLYlink written 3.4 years ago by Michael Love23k
+Ok, thank you. But in this case, with only the condition 5 in both batches, the correction is done only for the condition 5 or also the other conditions are corrected?
+ADD REPLYlink written 3.4 years ago by riccardo70
+
+All conditions are corrected, but the estimation comes from only the condition 5 samples. Few samples => noisier estimates and worse inference.
+
+ADD REPLYlink written 3.4 years ago by Michael Love23k
+Answer: DESeq2 and ComBat
+0
+3.4 years ago by
+Bernd Klaus550
+Germany
+Bernd Klaus550 wrote:
+
+Hi Riccardo,
+
+you could try to apply sva to both datasets together, plot a PCA and see whether you can detect a clustering
+
+by data set.
+
+Usually, if there is e.g. a strong dataset specific effect, sva will capture it anyway, even though it works "unsupervised", so it might not be necessary to use Combat.
+
+Simply apply sva and then inspect the computed surrogate variables to see whether they capture a difference bewtween the two data sets. For an example, see the capturing of the cell line effect by the surrogate variables in the RNA-Seq gene workflow:
+
+http://bioconductor.org/help/workflows/rnaseqGene/#batch
+
+and then include the SVs in your usual DE workflow.
+
+As a side note, Combat has the disadvantage that it will regress the batch effect, which might lead to spurious or overoptimistic DE results, as shown by this recent paper by Nygaard et. al.:
+
+http://dx.doi.org/10.1093/biostatistics/kxv027
+
+So I personally would always prefer to include the batch effect in the model, rather than regressing it out beforehand.
+
+Bernd
+
+ADD COMMENTlink written 3.4 years ago by Bernd Klaus550
+
+Hi, thank you. SVA could help me in this situation:
+
+1) I have a sequencing of some cells in different states of differention: 1, 2, and 5;
+
+2) I have a different sequencing of other cells in the states: 3, 4, and 5;
+
+I want to use DESeq2 and at the moment i have used it to analyze the experiment 1 and 2 separately but i would like to compare the common genes.
+
+I do not know if it is correct to compare the two different analyses directly or if i have to remove the batch effects (with svaseq or ComBat) or if i have to normalize all the experiment together and use the contrast.
+
+Thank you
+
+ADD REPLYlink written 3.4 years ago by riccardo70
+Please log in to add an answer.
+
+Content
+Help
+Access
+
+Use of this site constitutes acceptance of our User Agreement and Privacy Policy.
+Powered by Biostar version 16.09
+Traffic: 191 users visited in the last hour

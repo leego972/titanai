@@ -1,0 +1,271 @@
+September 25, 2017, Monday
+
+# Executive Summary
+
+In "Klebsiella pneumoniae Flocculation Dynamics", Bortz, et. al [1] propose a nonlinear transport partial differential equation (PDE) as a model for the flocculation dynamics of bacterial aggregates in suspension. One goal for this Wiki page is to describe their model. Another goal is to provide enhanced detail on how the authors approached solving the PDE numerically. Finally, the most important goal is to present and explain a Matlab program that approximates a solution to the PDE.
+
+# Overview
+
+1. Mathematics Used - The following model heavily relies on Partial Differential Equations to model aggregation, flocculation, and growth (respectively) within a closed system (i.e. a body). Using the Method of Lines (MOL) technique, the governing PDE is reduced -through discretization of the spatial dimensions- into a system on Ordinary Differential Equations. The system of ODE's can then be solved in numerous ways. For other examples of PDEs in mathematical biology, look at Traveling Waves in Excitable Media and Gravitational Effects on Blood Flow.
+2. Type of Model - This model attempts to obtain numerical rates for aggregation, fragmentation and growth of clusters of bacteria.
+3. Biological System Studied- Much research is being done to study the interaction of miscro-organisms, inside the body and outside. This research can have applications from epidemiology to water treatment to evolutionary biology and the origination of multicellular life.
+
+# Context/Biological Phenomenon under Consideration
+
+"Klebsiella pneumoniae" are a common source of infections in the bloodstream. How these bacteria behave in the bloodstream, and in particular, how they behave in suspension (as opposed to how they behave attached to a substrate), provides a focus for the paper mentioned above and for the study in this Wiki. We consider three factors in the flocculation dynamics of the bacteria, aggregation, fragmentation, and growth. Aggregation simply means an individual bacteria or group of bacteria joining together with another individual bacteria or group of bacteria to form one larger group (or aggregate). Fragmentation is the reverse process, where an aggregate of bacteria breaks into smaller aggregates, meaning each new aggregate consists of fewer bacteria than the original clump. Finally, growth refers to the increase in size (volume) of an aggregate.
+
+• For those of you food lovers out there: Believe it or not, flocculation has a large impact in Cheese Production
+
+# Mathematical Model with Variable/Parameter Definitions
+
+Bortz, et al., propose the following governing PDE as a model, and solving it provides a focus for this wiki
+
+$b_{t}+(G(x)b)_{x}=A(x,b)+F(x,b)$
+
+with $G(\underline {x})b(t,\underline {x})=0$ and $b(0,x)=b_{0}(x)$. Figure 1 shows a representation of the processes included in this model.
+
+Figure 1: Aggregation, Fragmentation, and Growth Schematic.
+Variables
+
+• $x$ - volume of bacterial aggregate (in fL)
+• $\underline {x}=2fL$, $\overline {x}=1000fL$ - assumed minimum and maximum volumes
+• $t$ - time (in minutes unless otherwise stated)
+• $b(t,x)$ - density function representing the number of aggregates of size x per fL
+• $G(x)=\gamma _{G}x(1-{\frac {x}{\overline {x}}})$ - assumed logistic growth rate of bacterial aggregates of size x
+• $A(x,b)=A_{{in}}-A_{{out}}$ - net rate at which bacterial flocs aggregate
+• $A_{{in}}={\frac {1}{2}}\int _{{\underline {x}}}^{{x-\underline {x}}}K_{A}(y,x-y)b(t,y)b(t,x-y)dy$ for $x\in [2\underline {x},\overline {x}]$
+• $A_{{out}}=b(t,x)\int _{{\underline {x}}}^{{\overline {x}-x}}K_{A}(x,y)b(t,y)dy$ for $x\in [\underline {x},\overline {x}-\underline {x}]$
+• $K_{A}(x,y)=\gamma _{A}\left({\frac {\epsilon }{\nu }}\right)^{{1/2}}\left(x^{{1/3}}+y^{{1/3}}\right)^{3}$ - assumed turbulent mixing kernel describing the rate at which flocs of volumes x and y join to make a floc of size x + y
+• $F(x,b)=F_{{in}}-F_{{out}}$ - net rate at which bacterial flocs fragment
+• $F_{{in}}=\int _{x}^{{\overline {x}}}\Gamma (x,y)K_{F}(y)b(t,y)dy$ for $x\in [\underline {x},\overline {x}-\underline {x}]$
+• $F_{{out}}={\frac {1}{2}}K_{F}(x)b(t,x)\triangle x$ for $x\in [2\underline {x},\overline {x}]$
+• $K_{F}(x)=\gamma _{F}(x-\underline {x})^{{1/3}}$ - describes rate at which flocs fragment
+• $\Gamma (x,y)={\begin{cases}3/y;&{\frac {y}{3}} - describes probability density of daughter flocs for the fragmentation of a parent floc of size y
+Parameters
+
+• $\gamma _{G}=6.8\times 10^{{-4}}/{\textrm {min}}$
+• $\gamma _{A}=2.7\times 10^{{-15}}/{\textrm {fL}}^{2}$
+• $\gamma _{F}=6.6\times 10^{{-5}}/(\mu {\textrm {mfLmin)}}$
+• $\epsilon =4.43\times 10^{{-4}}{\textrm {m}}^{2}/{\textrm {s}}^{3}$
+• $\nu =1.99\times 10^{{-6}}{\textrm {m}}^{2}/{\textrm {s}}$
+
+# Analysis (Analytical and Computational)
+
+• In order to solve the governing PDE, we will employ a strategy known as Method of Lines (MOL). In general, to execute the MOL technique, we discretize our PDE in its spatial variable(s), which will result in a system of ODEs. We can then use our favorite ODE solver to advance the PDE solution in discrete time steps.
+
+## Discretization Scheme
+
+Bortz, et al., provide a detailed analysis of the discretization scheme and a proof for the convergence of the scheme including the allowable space of functions, $H$, we can use for our density function. An assumption we make for the rest of this Wiki is that of an equispaced mesh. To produce the scheme, we need a set of basis elements for $i=1,\dots ,N$,
+
+$\beta _{i}^{N}(x)={\begin{cases}1;\;x_{{i-1}}^{N}\leq x
+
+where $x_{i}$ represents a node in the mesh from the minimum volume $x_{0}$ to the maximum volume $x_{N}$. These functions form an orthogonal basis for
+
+$H^{N}=\left\{h\in H|\;h=\sum _{{i=1}}^{N}\alpha _{i}\beta _{i}^{N},\;\alpha \in {\mathbb {R}}\right\}$
+
+with projections $\pi ^{N}:H\rightarrow H^{N}$
+
+$\pi ^{N}h=\sum _{{j=1}}^{N}\alpha _{j}\beta _{j}^{N};{\textrm {where}}\alpha _{j}={\frac {1}{\triangle x}}\int _{{x_{{j-1}}^{N}}}^{{x_{j}^{N}}}h(x)dx.$
+
+Finally, we need one more operator, ${\mathcal {G}}^{N}$, defined as
+
+$({\mathcal {G}}^{N}h)(x)=\sum _{{j=1}}^{N}{\frac {1}{\triangle x}}\left(G(x_{{j-1}})\alpha _{{j-1}}-G(x_{{j}})\alpha _{{j}}\right)\beta _{j}^{N}(x).$
+
+All of this provides the spatial discretization needed for MOL to provide the resulting system of ODEs
+
+$b_{t}^{N}={\mathcal {G}}^{N}b^{N}+\pi ^{N}({\mathcal {A}}(b^{N})+{\mathcal {F}}(b^{N}))$
+
+$b^{N}(0,x)=\pi ^{N}b_{0}(x).$
+
+Each of the operators in the discretized system generate a matrix (or vector) that in combination provide the framework for an ODE solver. The following gives a detailed description of each term in the discretized system. We also include the code associated with each.
+
+## Initial Conditions
+
+Initial Conditions and the left hand side vector, $[b^{N}]_{t}$, in our ODE system.
+
+Based on actual data taken five minutes after the biofilm colony was placed in the swirling flask, the authors determined a bi-exponential initial density function. The function used in this Wiki has been updated since the publishing of the paper.
+
+$b_{0}(x)=89.828e^{{-0.0035303x}}+1946.6\times 10^{6}e^{{-1.3159x}}$
+
+The projection into $H^{N}$ of these initial conditions is derived as follows: $\pi ^{N}(b_{0}(x))=\sum _{{j=1}}^{N}\alpha _{j}\beta _{j}^{N}(x){\textrm {where}}\alpha _{j}={\frac {1}{\triangle x}}\int _{{x_{{j-1}}^{N}}}^{{x_{j}^{N}}}b_{0}(x)dx.$
+
+So we have, $\alpha _{1}={\frac {1}{\triangle x}}\int _{{x_{0}^{N}}}^{{x_{1}^{N}}}b_{0}(x)dx,\;\alpha _{2}={\frac {1}{\triangle x}}\int _{{x_{1}^{N}}}^{{x_{2}^{N}}}b_{0}(x)dx,{\textrm {etc.}}$
+
+Then to develop the left hand side of our system of differential equations recall that $\beta _{j}^{N}=1$ when $x_{{j-1}}\leq x. So for instance, $\beta _{1}(x_{0})=1$, but $\beta _{1}(x_{i})=0$ for any $i\neq 1$. Now we have
+
+$\pi ^{N}b_{0}(x_{0})=\alpha _{1}\beta _{1}^{N}(x_{0})+\alpha _{2}\beta _{2}^{N}(x_{0})+\dots +\alpha _{N}\beta _{N}^{N}(x_{0})=\alpha _{1}$
+
+$\pi ^{N}b_{0}(x_{1})=\alpha _{1}\beta _{1}^{N}(x_{1})+\alpha _{2}\beta _{2}^{N}(x_{1})+\dots +\alpha _{N}\beta _{N}^{N}(x_{1})=\alpha _{2}$
+
+$\vdots$
+
+$\pi ^{N}b_{0}(x_{N})=\alpha _{1}\beta _{1}^{N}(x_{N})+\alpha _{2}\beta _{2}^{N}(x_{N})+\dots +\alpha _{N}\beta _{N}^{N}(x_{N})=\alpha _{N}$
+
+In other words,
+
+$[b^{N}]_{t}={\begin{bmatrix}\alpha _{1}\\\alpha _{2}\\\vdots \\\alpha _{N}\end{bmatrix}}_{t}$
+
+To implement this in Matlab and actually form our initial conditions on the mesh, we wrote the following function. Of note, the first iteration of this function used symbolic integration on the original $b_{0}$ defined above for each calculation on the mesh. On a suggestion from Dr. Bortz, we ran a symbolic integration on $b_{0}$ using symbolic variables $x_{1}$ and $x_{2}$ to generate the expression for the code below. With a mesh of 50 increments from $x_{0}$ to $x_{N}$, this technique sped up our code significantly.
+
+ function c = intinitcond2(x1,x2) % This function will integrate the symbolic initial function from volume % x1 to volume x2. 
+
+c = 19466000000000/(13159*exp((13159*x1)/10000)) - ... 
+
+ 19466000000000/(13159*exp((13159*x2)/10000)) + ... 809098694654873829376/(31798115529012125*... exp((254384924232097*x1)/72057594037927936)) - ... 809098694654873829376/(31798115529012125*... exp((254384924232097*x2)/72057594037927936)) ; 
+
+Additionally, we can see the general pattern for the left hand side vector, $b^{N}]_{t}$, in our ODE system.
+
+${\begin{bmatrix}\sum _{{i=1}}^{N}\alpha _{i}\beta _{i}^{N}(x_{0})\\\sum _{{i=1}}^{N}\alpha _{i}\beta _{i}^{N}(x_{1})\\\vdots \\\sum _{{i=1}}^{N}\alpha _{i}\beta _{i}^{N}(x_{{N-1}})\end{bmatrix}}_{t}$
+
+## Approximating generators
+
+${\mathcal {G}}^{N}:H^{N}\rightarrow H^{N}$ of the infinitesimal generator
+
+
+This was defined as
+
+$({\mathcal {G}}^{N}h)(x)=\sum _{{j=1}}^{N}{\frac {1}{\triangle x}}\left(G(x_{{j-1}})\alpha _{{j-1}}-G(x_{{j}})\alpha _{{j}}\right)\beta _{J}^{N}(x)$,
+
+for $h\in H^{N}$. Recall, $G(x)$ represents an assumed logistical growth with maximum size of 1000 fL, where $G(x)=\gamma _{G}x(1-{\frac {x}{\overline {x}}})$. When the approximating growth generator is applied to the projected density function, $b^{N}$, in our system of ODEs, we get the relation
+
+${\mathcal {G}}^{N}\beta _{J}^{N}={\frac {1}{\triangle x}}G(x_{j}^{N})\beta _{{j+1}}^{N}-{\frac {1}{\triangle x}}G(x_{j}^{N})\beta _{j}^{N}.$
+
+To see why this is true, consider application of the approximating generator to $\beta _{2}^{N}$, and note the substitution, $\alpha _{j}={\frac {1}{\triangle x}}\int _{{x_{{j-1}}^{N}}}^{{x_{j}^{N}}}\beta _{2}^{N}(x)dx$. A key point to remember below is that $\beta _{2}^{N}(x)=1$ from $x_{1}$ to $x_{2}$ and it is zero everywhere else. So when we integrate it across those nodes we get $\triangle x$, whereas it integrates to zero across any other pair of nodes.
+
+${\mathcal {G}}^{N}\beta _{2}^{N}(x)=\sum _{{j=1}}^{N}{\frac {1}{\triangle x}}\left(G(x_{{j-1}}){\frac {1}{\triangle x}}\int _{{x_{{j-2}}^{N}}}^{{x_{{j-1}}^{N}}}\beta _{2}^{N}(x)dx-G(x_{j}){\frac {1}{\triangle x}}\int _{{x_{{j-1}}^{N}}}^{{x_{j}^{N}}}\beta _{2}^{N}(x)dx\right)\beta _{J}^{N}(x)$
+
+$={\frac {1}{\triangle x}}\left\{\left[G(x_{0}){\frac {1}{\triangle x}}\int _{{x_{{-1}}^{N}}}^{{x_{0}^{N}}}\beta _{2}^{N}(x)dx-G(x_{1}){\frac {1}{\triangle x}}\int _{{x_{0}^{N}}}^{{x_{1}^{N}}}\beta _{2}^{N}(x)dx\right]\beta _{1}^{N}(x)\right.$
+
+$+\left[G(x_{1}){\frac {1}{\triangle x}}\int _{{x_{0}^{N}}}^{{x_{1}^{N}}}\beta _{2}^{N}(x)dx-G(x_{2}){\frac {1}{\triangle x}}\int _{{x_{1}^{N}}}^{{x_{2}^{N}}}\beta _{2}^{N}(x)dx\right]\beta _{2}^{N}(x)$
+
+$\left.+\left[G(x_{2}){\frac {1}{\triangle x}}\int _{{x_{1}^{N}}}^{{x_{2}^{N}}}\beta _{2}^{N}(x)dx-G(x_{3}){\frac {1}{\triangle x}}\int _{{x_{2}^{N}}}^{{x_{3}^{N}}}\beta _{2}^{N}(x)dx\right]\beta _{3}^{N}(x)+\cdots \right\}$
+
+$={\frac {1}{\triangle x}}\left\{0-0+0-G(x_{2}){\frac {\triangle x}{\triangle x}}\beta _{2}^{N}(x)+G(x_{2}){\frac {\triangle x}{\triangle x}}\beta _{3}^{N}(x)-0+0\cdots \right\}$
+
+$={\frac {1}{\triangle x}}G(x_{2})\beta _{3}^{N}(x)-{\frac {1}{\triangle x}}G(x_{2})\beta _{2}^{N}(x)$
+
+Once we have the general relationship above, we can determine the contributions to each component of the left hand side of our ODE system. To illustrate, consider
+
+${\mathcal {G}}^{N}\beta _{1}^{N}(x)={\frac {1}{\triangle x}}G(x_{1})\beta _{2}^{N}(x)-{\frac {1}{\triangle x}}G(x_{1})\beta _{1}^{N}(x)$
+
+therefore ${\mathcal {G}}^{N}\beta _{1}^{N}(x_{0})={\frac {1}{\triangle x}}G(x_{1})\beta _{2}^{N}(x_{0})-{\frac {1}{\triangle x}}G(x_{1})\beta _{1}^{N}(x_{0})=0-{\frac {1}{\triangle x}}G(x_{1})$
+
+${\mathcal {G}}^{N}\beta _{1}^{N}(x_{1})={\frac {1}{\triangle x}}G(x_{1})\beta _{2}^{N}(x_{1})-{\frac {1}{\triangle x}}G(x_{1})\beta _{1}^{N}(x_{1})={\frac {1}{\triangle x}}G(x_{1})-0$
+
+${\mathcal {G}}^{N}\beta _{1}^{N}(x_{2})={\frac {1}{\triangle x}}G(x_{1})\beta _{2}^{N}(x_{2})-{\frac {1}{\triangle x}}G(x_{1})\beta _{1}^{N}(x_{2})=0={\mathcal {G}}^{N}\beta _{1}^{N}(x_{3},x_{4},\dots x_{N})$
+
+This shows that in row one of our vector for $\mathcal{G}^N b^N$ we have the negative contribution from $\beta _{1}^{N}$ of ${\frac {1}{\triangle x}}G(x_{1})$, and in row two, $\beta _{1}^{N}$ contributes ${\frac {1}{\triangle x}}G(x_{1})$. Let's consider the contributions from $\beta _{2}^{N}$ which should clearly illustrate the pattern for the rest of the vector for ${\mathcal {G}}^{N}b^{N}$.
+
+${\mathcal {G}}^{N}\beta _{2}^{N}(x)={\frac {1}{\triangle x}}G(x_{2})\beta _{3}^{N}(x)-{\frac {1}{\triangle x}}G(x_{2})\beta _{2}^{N}(x)$
+
+therefore
+
+${\mathcal {G}}^{N}\beta _{2}^{N}(x_{0})={\frac {1}{\triangle x}}G(x_{2})\beta _{3}^{N}(x_{0})-{\frac {1}{\triangle x}}G(x_{2})\beta _{2}^{N}(x_{0})=0$
+
+${\mathcal {G}}^{N}\beta _{2}^{N}(x_{1})={\frac {1}{\triangle x}}G(x_{2})\beta _{3}^{N}(x_{1})-{\frac {1}{\triangle x}}G(x_{2})\beta _{2}^{N}(x_{1})=0-{\frac {1}{\triangle x}}G(x_{2})$
+
+${\mathcal {G}}^{N}\beta _{2}^{N}(x_{2})={\frac {1}{\triangle x}}G(x_{2})\beta _{3}^{N}(x_{2})-{\frac {1}{\triangle x}}G(x_{2})\beta _{2}^{N}(x_{2})={\frac {1}{\triangle x}}G(x_{2})-0$
+
+${\mathcal {G}}^{N}\beta _{2}^{N}(x_{3})={\frac {1}{\triangle x}}G(x_{2})\beta _{3}^{N}(x_{3})-{\frac {1}{\triangle x}}G(x_{2})\beta _{2}^{N}(x_{2})=0={\mathcal {G}}^{N}\beta _{2}^{N}(x_{4},x_{5},\dots x_{N})$
+
+The pattern then emerges as follows,
+
+$[{\mathcal {G}}^{N}]b^{N}={\begin{bmatrix}-{\frac {1}{\triangle x}}G(x_{1})\ &0&\cdots &\cdots &0\\{\frac {1}{\triangle x}}G(x_{1})&-{\frac {1}{\triangle x}}G(x_{2})&0&\cdots &0\\\vdots \\0&\cdots &0&{\frac {1}{\triangle x}}G(x_{{N-1}})&-{\frac {1}{\triangle x}}G(x_{N})\end{bmatrix}}b^{N}$
+
+The code to build this matrix follows.  
+
+% Build Growth Matrix 
+
+gammaG = 6.8e-4; % - parameter given 
+
+G = @(xx) gammaG.*xx.*(1-(xx./xmax)); 
+
+Growthvec = zeros(N,N); 
+
+Growthvec(1,1) = -G(x(2)); 
+
+for r = 2:N 
+
+ Growthvec(r,r-1) = G(x(r)); Growthvec(r,r) = - G(x(r+1)); end % The whole matrix has a factor of 1/delx 
+
+Growthvec = Growthvec./delx; 
+
+## Fragmentation
+
+Projected fragmentation matrix, $\pi ^{N}({\mathcal {F}}(b^{N}))$
+
+$K_{F}(x)$ represents the fragmentation kernel. For this analysis, we used the kernel described by the authors as $K_{F}(x)=\gamma _{F}(x-\underline {x})^{{1/3}}$. Furthermore $\Gamma (x,y)$ represents the authors' assumed uniform post-fragmetation distribution, centered around $y/2$, with width, $y/3$
+
+$\Gamma (x,y)={\begin{cases}3/y;&{\frac {3}{y}}
+
+To generate the probability distribution we built the following MATLAB function  
+
+function g = probdist(x1,x2) 
+
+% Determines the value of the post frag distribution function 
+
+% for inputs, x1 and x2, where x1 assumed less than x2 
+
+if (x1 > x2/3) && (x1 <= 2*x2/3) 
+
+ g = 3/x1; else g =0; 
+
+end 
+
+We can then generate $\pi ^{N}{\mathcal {F}}(b^{N})$
+
+$[\pi ^{N}{\mathcal {F}}(b^{N})]={\begin{bmatrix}\sum _{{j=2}}^{N}\Gamma (x_{0},x_{{j-1}})K_{F}(x_{{j-1}})\alpha _{j}\triangle x\\-{\frac {1}{2}}K_{F}(x_{1})\alpha _{2}\triangle x+\sum _{{j=3}}^{N}\Gamma (x_{1},x_{{j-1}})K_{F}(x_{{j-1}})\alpha _{j}\triangle x\\\vdots \\-{\frac {1}{2}}K_{F}(x_{{N-2}})\alpha _{{N-1}}\triangle x+\Gamma (x_{{N-2}},x_{{N-1}})K_{F}(x_{{N-1}})\alpha _{N}\triangle x\\-{\frac {1}{2}}K_{F}(x_{{N-1}})\alpha _{N}\triangle x\end{bmatrix}}$
+
+To see how this matrix develops from the actual model, we will demonstrate an example where we set $N=4$. Our partition then starts at $x_{0}=2$fL and ends at $x_{4}=1000$fL. The fragmentation operator acting on $b^{4}$ is
+
+${\mathcal {F}}(b^{4})(x)=\int _{x}^{{x_{4}}}\Gamma (x,y)K_{F}(y)b^{4}(y)dy{\textrm {;}}\;x\in [x_{0},x_{4}-x_{0}]$
+
+$-{\frac {1}{2}}K_{F}(x)b^{4}(x)\triangle x{\textrm {;}}\;x\in [2x_{0},x_{4}]$
+
+and its projection is defined as
+
+$\pi ^{4}({\mathcal {F}}(b^{4}))=\sum _{{j=1}}^{4}\gamma _{j}\beta _{j}^{4}(x){\textrm {where}}\gamma _{j}=\int _{{x_{{j-1}}}}^{{x_{j}}}{\mathcal {F}}(b^{4})(x)dx$
+
+Now consider row one of $[\pi ^{N}{\mathcal {F}}(b^{N})]$, so
+
+$\pi ^{N}{\mathcal {F}}(b^{N})(x_{0})=\sum _{{j=1}}^{4}\gamma _{j}\beta _{j}^{4}(x_{0})=\gamma _{1}$
+
+where,
+
+$\gamma _{1}={\frac {1}{\triangle x}}\int _{{x_{0}}}^{{x_{1}}}\left[\int _{{x_{0}}}^{{x_{4}}}\Gamma (x_{0},y)K_{F}(y)b^{4}(y)dy{\textrm {;}}\;x\in [x_{0},x_{4}-x_{0}]\right]dx-0{\textrm {since}}x_{0}\notin [2x_{0},x_{4}]$
+
+$={\frac {1}{\triangle x}}\int _{{x_{0}}}^{{x_{1}}}\left[\int _{{x_{0}}}^{{x_{1}}}\Gamma (x_{0},y)K_{F}(y)b^{4}(y)dy+\int _{{x_{1}}}^{{x_{2}}}\Gamma (x_{0},y)K_{F}(y)b^{4}(y)dy\right.$
+
+$\left.+\int _{{x_{2}}}^{{x_{3}}}\Gamma (x_{0},y)K_{F}(y)b^{4}(y)dy+\int _{{x_{3}}}^{{x_{4}}}\Gamma (x_{0},y)K_{F}(y)b^{4}(y)dy\right]dx$
+
+For each of the inter integrals we'll use a right hand estimate. Also, note that $b^{4}(x)=\sum _{{j=1}}^{4}\alpha _{j}\beta _{J}^{4}(x)$ and our basis elements $\beta _{J}^{4}(x)=1$ for the prior node, i.e., $\beta _{1}^{4}(x_{0})=1$ otherwise it is zero. Then
+
+$\gamma _{1}={\frac {1}{\triangle x}}\int _{{x_{0}}}^{{x_{1}}}\left[\Gamma (x_{0},x_{1})K_{F}(x_{1})\alpha _{2}\triangle x+\Gamma (x_{0},x_{2})K_{F}(x_{2})\alpha _{3}\triangle x\right.$
+
+$\left.+\Gamma (x_{0},x_{3})K_{F}(x_{3})\alpha _{4}\triangle x+\Gamma (x_{0},x_{4})K_{F}(x_{4})\times 0\times \triangle x\right]dx$
+
+$=\Gamma (x_{0},x_{1})K_{F}(x_{1})\alpha _{2}\triangle x+\Gamma (x_{0},x_{2})K_{F}(x_{2})\alpha _{3}\triangle x+\Gamma (x_{0},x_{3})K_{F}(x_{3})\alpha _{4}\triangle x$
+
+$=\sum _{{j=2}}^{4}\Gamma (x_{0},x_{{j-1}})K_{F}(x_{{j-1}})\alpha _{j}\triangle x$
+
+Now consider row two where $\pi ^{N}{\mathcal {F}}(b^{N})(x_{1})=\gamma _{2}$, and
+
+$\gamma _{2}={\frac {1}{\triangle x}}\int _{{x_{1}}}^{{x_{2}}}\left[\int _{{x_{1}}}^{{x_{4}}}\Gamma (x_{1},y)K_{F}(y)b^{4}(y)dy\right]dx-{\frac {1}{\triangle x}}\int _{{x_{1}}}^{{x_{2}}}{\frac {1}{2}}K_{F}(x_{1})b^{4}(x_{1})\triangle xdx$
+
+$={\frac {1}{\triangle x}}\int _{{x_{1}}}^{{x_{2}}}\left[\int _{{x_{1}}}^{{x_{2}}}\Gamma (x_{1},y)K_{F}(y)b^{4}(y)dy+\int _{{x_{2}}}^{{x_{3}}}\Gamma (x_{1},y)K_{F}(y)b^{4}(y)dy\right.$
+
+$\left.+\int _{{x_{3}}}^{{x_{4}}}\Gamma (x_{1},y)K_{F}(y)b^{4}(y)dy\right]dx-{\frac {1}{2}}K_{F}(x_{1})\alpha _{2}\triangle x$
+
+$=-{\frac {1}{2}}K_{F}(x_{1})\alpha _{2}\triangle x+{\frac {1}{\triangle x}}\int _{{x_{1}}}^{{x_{2}}}\left[\Gamma (x_{1},x_{2})K_{F}(x_{2})b^{4}(x_{2})\triangle x+\Gamma (x_{1},x_{3})K_{F}(x_{3})b^{4}(x_{3})\triangle x\right.$
+
+$\left.+\Gamma (x_{1},x_{4})K_{F}(x_{4})b^{4}(x_{4})\triangle x\right]dx$
+
+$=-{\frac {1}{2}}K_{F}(x_{1})\alpha _{2}\triangle x+\Gamma (x_{1},x_{2})K_{F}(x_{2})\alpha _{3}\triangle x+\Gamma (x_{1},x_{3})K_{F}(x_{3})\alpha _{4}\triangle x+0$
+
+$=-{\frac {1}{2}}K_{F}(x_{1})\alpha _{2}\triangle x+\sum _{{j=3}}^{4}\Gamma (x_{1},x_{{j-1}})K_{F}(x_{{j-1}})\alpha _{j}\triangle x$
+
+Similarly, for the third row, $\pi ^{N}{\mathcal {F}}(b^{N})(x_{2})=\gamma _{3}$, and
+
+$\gamma _{3}={\frac {1}{\triangle x}}\int _{{x_{2}}}^{{x_{3}}}\left[\int _{{x_{2}}}^{{x_{4}}}\Gamma (x_{2},y)K_{F}(y)b^{4}(y)dy\right]dx-{\frac {1}{\triangle x}}\int _{{x_{2}}}^{{x_{3}}}{\frac {1}{2}}K_{F}(x_{2})b^{4}(x_{2})\triangle xdx$
+
+$=-{\frac {1}{

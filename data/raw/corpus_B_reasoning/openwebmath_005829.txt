@@ -1,0 +1,47 @@
+# Camera Calibration Explained
+
+Camera calibration is the process of determining camera and lens model parameters accurately. With the pinhole model, this amounts to determining the parameters of a suitable camera model. at least the focal length $f$, and possibly central point coordinates ($c_x, c_y$) and lens distortion parameters $\boldsymbol{k}$.
+
+In the most common, offline calibration process, images are taken under specific constraints. The calibration object defines a world coordinate system such that 3D coordinates of the visual features are known. Most of these methods work by observing a calibration object with known visual features. This is preferred when full control over the calibration procedure is necessary and high accuracy is demanded.
+
+Camera Model
+
+In any camera calibration effort, it is crucial to select a suitable camera model, which neither under- nor over-parameterized the camera. More information on camera models is found in our article on the subject
+
+Calibration Procedures
+
+Many procedures for camera calibration have been proposed in literature. See e.g. Tsai's method [3] and Heikkilä and Silvén's [4]. These procedures differ in the type of calibration object needed, and the derivation of an initial guess for the camera parameters and the following nonlinear optimization step. Probably the most popular of all procedures is Zhang's [5].
+
+All of these methods should always be followed by non-linear optimisation (bundle adjustment) as they only return algebraic solutions and don't account for lens effects. They do however provide an initial guess which is required for the non-linear optimisation to converge.
+
+Zhang's Method
+
+A modern and popular method in the computer vision community is that of Zhang, which also is implemented in popular software libraries such as libCalib, OpenCV, Jean-Yves Bouguet's Camera Calibration Toolbox for Matlab and Matlab's Computer Vision Toolbox. Zhang's calibration routine relies on observations of a planar calibration board with easily recognizable features. It relates the 3-D coordinates of these to the observed image coordinates projections by means of the model above and solves for the calibration plane extrinsics (the camera's position and orientation relative to the calibration board's coordinate system), and the camera intrinsics, by means of a closed form solution. This is then followed by non-linear optimization with the Levenberg-Marquardt algorithm over all parameters, including $\boldsymbol{k}$. The objective function to be minimized is the sum of squared reprojection errors, defined in the image plane:
+$$\sum_i{\sum_j{||\vec{p}_{ij} - \breve{\vec{p}}(\vec{P}_j, \boldsymbol{A}, \vec{k}, \boldsymbol{R}_i, \vec{T}_i)||^2}} \quad ,$$
+where $\breve{\vec{p}}$ is the projection operator determining 2-D point coordinates given 3-D coordinates and the camera parameters. $i$ sums over the positions of the calibration board and $j$ over the points in a single position. $\vec{P}_j$ are 3-D point coordinates in the local calibration object coordinate system, $\vec{P}_j = [x, y, 0]^\top$, and $\vec{p}_{ij}$ the observed 2-D coordinates in the camera. The per-position extrinsic $\boldsymbol{R}_i, \vec{T}_i$ can be understood as the position of the camera relative to the coordinate system defined by the calibration object. With quality lenses and calibration targets, final mean reprojection errors in the order of a few tenths of a pixel are usually achieved.
+
+Tsai's method
+
+In contrast to Zhang's methods, Tsai's does not formulate the relation between object and image points as a series of homographies. Instead, algebraic constraints are derived which lead to a stepwise procedure to incrementally eliminate the unknowns. The camera is modelled as a standard pinhole + a single radial distortion coefficient.
+
+One advantage of Tsai's method over Zhang's is that it can find a solution for the model parameters also for non-planar calibration objects (e.g. step targets or V-shaped calibration rigs). For this reason, libCalib implements Tsai's method.
+
+Following any of the initialisation methods above, non-linear optimisation is employed to refine the parameter estimates and to include additional camera parameters which cannot be solved for with those techniques (e.g. radial lens distortion parameters). This estimation problem can be seen as a particular case of bundle block adjustment (sometimes just bundle adjustment), and it aims to find the max-likelihood solution to minimise the average reprojection error under the assumption of Gaussian noise in feature detections.
+
+The Levenberg-Marquardt algorithm has emerged as the de-facto standard to solve this least-squares problem with many parameters and unknowns. It can be seen as a hybrid method, interpolating between Gauss-Newtons iterative optimisation scheme and Gradient Descend. For computational reasons, a sparse solver should be used, as the Jacobian of the reprojection error tends to be very sparse (most parameters do only depend on a small number of equations).
+
+Calib Camera Calibrator and libCalib implement robust optimisation, which can use the Huber loss function. This loss function weights large errors linearly, ensuring good convergence even in the presence of a few outliers.
+
+Autocalibration
+
+An alternative to the standard offline calibration routines described above is autocalibration. In autocalibration, parameters are determined from normal camera images viewing a general scene [1,2]. Depending on the specific method, little or no assumptions are made about the viewed scene or the motion of the camera between images. For some applications, this does indeed work, but generally, some assumptions need to be made about the camera or a reduced camera model needs to be chosen. However, even then, the autocalibration process tends to be unreliable and its success very dependent on the specific scene composition.
+
+[1]: O.D. Faugeras, Q.-T. Luong, and S.J. Maybank. Camera Self- Calibration: Theory and Experiments. In European Conference on Computer Vision, 1992.
+
+[2]: Ri Hartley. Euclidean reconstruction from uncalibrated views. In Applications of invariance in computer vision, pages 235–256, 1994.
+
+[3]: Roger Y. Tsai. An efficient and accurate camera calibration technique for 3D machine vision. In IEEE Conference on Computer Vision and Pattern Recognition, pages 364–374, 1986.
+
+[4]: Janne Heikkilä and Olli Silvén. A Four-step Camera Calibration Procedure with Implicit Image Correction. In IEEE Conference on Computer Vision and Pattern Recognition, pages 1106–1112, 1997.
+
+[5]: Zhengyou Zhang. Flexible camera calibration by viewing a plane from unknown orientations. In IEEE International Conference on Computer Vision, volume 1, pages 666–673, 1999.

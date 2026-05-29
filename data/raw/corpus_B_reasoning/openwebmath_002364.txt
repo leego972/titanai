@@ -1,0 +1,125 @@
+Unlimited Plugins, WordPress themes, videos & courses! Unlimited asset downloads! From \$16.50/m
+
+# Creating a Game With Bonjour: Sending Data
+
+Difficulty:IntermediateLength:LongLanguages:
+
+In the previous article, we laid the foundation of the network component of the game by enabling a user to host or join a game. At the end of the tutorial, we successfully established a connection between two devices running the application separately. In this tutorial, we will take a closer look at how we send data from one socket to another.
+
+## Introduction
+
+As we saw in the previous tutorial, the CocoaAsyncSocket library makes working with sockets quite easy. However, there is more to the story than sending a simple string from one device to another, as we did in the previous tutorial. In the first article of this series, I wrote that the TCP protocol can manage a continuous stream of data in two directions. The problem, however, is that it is literally a continuous stream of data. The TCP protocol takes care of sending the data from one end of the connection to the other, but it is up to the receiver to make sense of what is being sent through that connection.
+
+There are several solutions to this problem. The HTTP protocol, which is built on top of the TCP protocol, sends an HTTP header with every request and response. The HTTP header contains information about the request or response, which the receiver can use to make sense of the incoming stream of data. One key component of the HTTP header is the length of the body. If the receiver knows the length of the body of the request or response, it can extract the body from the incoming stream of data.
+
+The strategy that we will be using differs from how the HTTP protocols operates. Every packet of data that we send through the connection is prefixed with a header that has a fixed length. The header is not as complex as an HTTP header. The header that we will be using contains one piece of information, the length of the body or packet that comes after the header. In other words, the header is nothing more than a number that informs the receiver of the length of the body. With that knowledge, the receiver can successfully extract the body or packet from the incoming stream of data. Even though this is a simple approach, it works surprisingly well as you will see in this tutorial.
+
+## 1. Packets
+
+It is important to understand that the above strategies are tailored to the TCP protocol and they only work because of how the TCP protocol operates. The TCP protocol does its very best to ensure that every packet reaches its destination in the order that it was sent; thus, the strategies that I have outlined work very well.
+
+### Step 1: Creating the Packet Class
+
+Even though we can send any type of data through a TCP connection, it is recommended to provide a custom structure to hold the data we would like to send. We can accomplish this by creating a custom packet class. The advantage of this approach becomes evident once we start using the packet class. The idea is simple, though. The class is an Objective-C class that holds data; the body, if you will. It also includes some extra information about the packet, called the header. The main difference with the HTTP protocol is that the header and body are not strictly separated. The packet class will also need to conform to the NSCoding protocol, which means that instances of the class can be encoded and decoded. This is key if we want to send instances of the packet class through a TCP connection.
+
+Create a new Objective-C class, make it a subclass of NSObject, and name it MTPacket (figure 1). For the game that we are building, the packet class can be fairly simple. The class has three properties, type, action, and data. The type property is used to identify the purpose of the packet while the action property contains the intention of the packet. The data property is used to store the actual contents or load of the packet. This will all become clearer once we start using the packet class in our game.
+
+Take a moment to inspect the interface of the MTPacket class shown below. As I mentioned, it is essential that instances of the class can be encoded and decoded by conforming to the NSCoding protocol. To conform to the NSCoding protocol, we only need to implement two (required) methods, encodeWithCoder: and initWithCoder:.
+
+Another important detail is that the type and action properties are of type MTPacketType and MTPacketAction, respectively. You can find the type definitions at the top of MTPacket.h. If you are not familiar with typedef and enum, you can read more about it at Stack Overflow. It will make working with the MTPacket class a lot easier.
+
+The class' data property is of type id. This means that it can be any Objective-C object. The only requirement is that it conforms to the NSCoding protocol. Most members of the Foundation framework, such as NSArray, NSDictionary, and NSNumber, conform to the NSCoding protocol.
+
+To make it easy to initialize instances of the MTPacket class, we declare a designated initializer that takes the packet's data, type, and action as arguments.
+
+The implementation of the MTPacket class shouldn't be too difficult if you are familiar with the NSCoding protocol. As we saw earlier, the NSCoding protocol defines two methods and both are required. They are automatically invoked when an instance of the class is encoded (encodeWithCoder:) or decoded (initWithCoder:). In other words, you never have to invoke these methods yourself. We will see how this works a bit later in this article.
+
+As you can see below, the implementation of the designated initializer, initWithData:type:action: couldn't be easier. In the implementation file, it also becomes clear why we declared three string constants in the class's interface. It is good practice to use constants for the keys you use in the NSCoding protocol. The primary reason isn't performance, but typing errors. The keys that you pass when encoding the class's properties need to be identical to the keys that are used when decoding instances of the class.
+
+### Step 2: Sending Data
+
+Before we move on to the next piece of the puzzle, I want to make sure that the MTPacket class works as expected. What better way to test this than by sending a packet as soon as a connection is established? Once this works, we can start refactoring the network logic by putting it in a dedicated controller.
+
+When a connection is established, the application instance hosting the game is notified of this by the invocation of the socket:didAcceptNewSocket: delegate method of the GCDAsyncSocketDelegate protocol. We implemented this method in the previous article. Take a look at its implementation below to refresh your memory. The last line of its implementation should now be clear. We tell the new socket to start reading data and we pass a tag, an integer, as the last parameter. We don't set a timeout (-1) because we don't know when we can expect the first packet to arrive.
+
+What really interests us, however, is the first argument of readDataToLength:withTimeout:tag:. Why do we pass sizeof(uint64_t) as the first argument?
+
+The sizeof function returns the length in bytes of the function's argument, uint64_t, which is defined in stdint.h (see below). As I explained earlier, the header that precedes every packet that we send has a fixed length (figure 2), which is very different from the header of an HTTP request or response. In our example, the header has only one purpose, telling the receiver the size of the packet that it precedes. In other words, by telling the socket to read incoming data the size of the header (sizeof(uint64_t)), we know that we will have read the complete header. By parsing the header once it's been extracted from the incoming stream of data, the receiver knows the size of the body that follows the header.
+
+Import the header file of the MTPacket class and amend the implementation of socket:didAcceptNewSocket: as shown below (MTHostGameViewController.m). After instructing the new socket to start monitoring the incoming stream of data, we create an instance of the MTPacket class, populate it with dummy data, and pass the packet to the sendPacket: method.
+
+As I wrote earlier, we can only send binary data through a TCP connection. This means that we need to encode the MTPacket instance we created. Because the MTPacket class conforms to the NSCoding protocol, this isn't a problem. Take a look at the sendPacket: method shown below. We create a NSMutableData instance and use it to initialize a keyed archiver. The NSKeyedArchiver class is a subclass of NSCoder and has the ability to encode objects conforming to the NSCoding protocol. With the keyed archiver at our disposal, we encode the packet.
+
+We then create another NSMutableData instance, which will be the data object that we will pass to the socket a bit later. The data object, however, does not only hold the encoded MTPacket instance. It also needs to include the header that precedes the encoded packet. We store the length of the encoded packet in a variable named headerLength which is of type uint64_t. We then append the header to the NSMutableData buffer. Did you spot the & symbol preceding headerLength? The appendBytes:length: method expects a buffer of bytes, not the value of the headerLength value. Finally, we append the contents of packetData to the buffer. The buffer is then passed to writeData:withTimeout:tag:. The CocoaAsyncSocket library takes care of the nitty gritty details of sending the data.
+
+### Step 3: Receiving Data
+
+To receive the packet we just sent, we need to modify the MTJoinGameViewController class. Remember that in the previous article, we implemented the socket:didConnectToHost:port: delegate method. This method is invoked when a connection is established after the client has joined a game. Take a look at its original implementation below. Just as we did in the MTHostGameViewController class, we tell the socket to start reading data without a timeout.
+
+When the socket has read the complete header preceding the packet data, it will invoke the socket:didReadData:withTag: delegate method. The tag that is passed is the same tag in the readDataToLength:withTimeout:tag: method. As you can see below, the implementation of the socket:didReadData:withTag: is surprisingly simple. If tag is equal to 0, we pass the data variable to parseHeader:, which returns the header, that is, the length of the packet that follows the header. We now know the size the encoded packet and we pass that information to readDataToLength:withTimeout:tag:. The timeout is set to 30 (seconds) and the last parameter, the tag, is set to 1.
+
+Before we look at the implementation of parseHeader:, let's first continue our exploration of socket:didReadData:withTag:. If tag is equal to 1, we know that we have read the complete encoded packet. We parse the packet and repeat the cycle by telling the socket to watch out for the header of the next packet that arrives. It is important that we pass -1 for timeout (no timeout) as we don't know when the next packet will arrive.
+
+In the parseHeader: method, the memcpy function does all the heavy lifting for us. We copy the contents of data in the variable headerLength of type uint64_t. If you are not familiar with the memcpy function, you can read more about it here.
+
+In parseBody:, we do the reverse of what we did in the sendPacket: method in the MTHostGameViewController class. We create an instance of NSKeyedUnarchiver, pass the data we read from the read stream, and create an instance of MTPacket by decoding the data using the keyed unarchiver. To prove that everything works as it should, we log the packet's data, type, and action to the Xcode console. Don't forget to import the header file of the MTPacket class.
+
+Run two instances of the application. Host a game on one instance and join that game on the other instance. You should see the contents of the packet being logged to the Xcode console.
+
+## 2. Refactoring
+
+It isn't convenient to put the networking logic in the MTHostGameViewController and MTJoinGameViewController classes. This will only give us problems down the road. It is more appropriate to use MTHostGameViewController and MTJoinGameViewController for establishing the connection and passing the connection - the socket - to a controller that is in charge of the control and flow of the game.
+
+The more complex a problem is, the more solutions a problem has and those solutions are often very specific to the problem. In other words, the solution presented in this article is a viable option, but don't consider it as the only solution. For one of my projects, Pixelstream, I have also been using Bonjour and the CocoaAsyncSocket library. My approach for that project, however, is very different than the one I present here. In Pixelstream, I need to be able to send packets from various places in the application and I have therefore chosen to use a single object that manages the connection. In combination with completion blocks and a packet queue, this solution works very well for Pixelstream. In this article, however, the setup is less complicated because the problem is fairly simple. Don't overcomplicate things if you don't have to.
+
+The strategy that we will use is simple. Both the MTHostGameViewController and MTJoinGameViewController classes have a delegate that is notified when a new connection is established. The delegate will be our MTViewController instance. The latter will create a game controller, an instance of the MTGameController class, that manages the connection and the flow of the game. The MTGameController class will be in charge of the connection: sending and receiving packets as well as taking appropriate action based on the contents of the packets. If you were to work on a more complex game, then it would be good to separate network and game logic, but I don't want to overcomplicate things too much in this example project. In this series, I want to make sure that you understand how the various pieces fit together so that you can adapt this strategy to whatever project you are working on.
+
+### Step 1: Creating Delegate Protocols
+
+The delegate protocols that we need to create are not complex. Each protocol has two methods. Even though I am allergic to duplication, I think it is useful to create a separate delegate protocol for each class, the MTHostGameViewController and MTJoinGameViewController classes.
+
+The declaration of the delegate protocol for the MTHostGameViewController class is shown below. If you have created custom protocols before, then you won't find any surprises.
+
+The delegate protocol declared in the MTJoinGameViewController class is almost identical. The only differences are the method signatures of the delegate methods.
+
+We also need to update the hostGame: and joinGame: actions in the MTViewController class. The only change we make is assigning the MTViewController instance as the delegate of the MTHostGameViewController and MTJoinGameViewController instances.
+
+This also means that the MTViewController class needs to conform to the MTHostGameViewControllerDelegate and MTJoinGameViewControllerDelegate delegate protocols and implement the methods of each protocol. We will take a look at the implementation of these delegate methods in a few moments. First, I would like to continue refactoring the MTHostGameViewController and MTJoinGameViewController classes.
+
+### Step 2: Refactoring MTHostGameViewController
+
+The first thing that we need to do is update the socket:didAcceptNewSocket: delegate method of the GCDAsyncSocket delegate protocol. The method becomes much simpler because the work is moved to the delegate. We also invoke endBroadcast, a helper method that we will implement in a moment. When a connection is established, we dismiss the host view controller and the game can start.
+
+In endBroadcast, we make sure that we clean everything up. This is also a good moment to update the cancel: action that we left unfinished in the previous article.
+
+In the cancel: action, we notify the delegate by invoking the second delegate method and we also invoke endBroadcast as we did earlier.
+
+Before continuing our refactoring spree, it is good practice to clean things up in the view controller's dealloc method as shown below.
+
+### Step 3: Refactoring MTJoinGameViewController
+
+Similar to what we did in the socket:didAcceptNewSocket: method, we need to update the socket:didConnectToHost:port: method as shown below. We notify the delegate, stop browsing for services, and dismiss the view controller.
+
+We also update the cancel: and dealloc methods as we did in the MTHostGameViewController class.
+
+To make sure that we didn't break anything, implement the delegate methods of both protocols in the MTViewController class as shown below and run two instances of the application to test if we didn't break anything. If all goes well, you should see the appropriate messages being logged to the Xcode console and the modal view controllers should automatically dismiss when a game is joined, that is, when a connection is established.
+
+## 3. Implementing the Game Controller
+
+### Step 1: Creating the Game Controller Class
+
+The MTViewController class will not be in charge of handling the connection and the game flow. A custom controller class, MTGameController will be in charge of this. One of the reasons for creating a separate controller class is that once the game has started, we won't make a distinction between server and client. It is therefore appropriate to have a controller that is in charge of the connection and the game, but that doesn't differentiate between the server and the client. Another reason is that the only responsibility of the MTHostGameViewController and MTJoinGameViewController classes is finding players on the local network and establishing a connection. They shouldn't have any other responsibilities.
+
+Create a new NSObject subclass and name it MTGameController (figure 3). The interface of the MTGameController class is pretty straightforward as you can see below. This will change once we start implementing the game logic, but this will do for now. The designated initializer takes one argument, the GCDAsyncSocket instance that it will be managing.
+
+Before we implement initWithSocket:, we need to create a private property for the socket. Create a class extension as shown below and declare a property of type GCDAsyncSocket named socket. I have also taken the liberty to import the header file of the MTPacket class and define TAG_HEAD and TAG_BODY to make it easier to work with tags in the GCDAsyncSocketDelegate delegate methods. Of course, the MTGameController class needs to conform to the GCDAsyncSocketDelegate delegate protocol to make everything work.
+
+The implementation of initWithSocket: is shown below and shouldn't be too surprising. We store a reference to the socket in the private property we just created, set the game controller as the socket's delegate, and tell the socket to start reading incoming data, that is, intercept the first header that arrives.
+
+The remainder of the refactoring process isn't complicated either because we already did most of the work in the MTHostGameViewController and MTJoinGameViewController classes. Let's start by taking a look at the implementation of the GCDAsyncSocketDelegate delegate protocol. The implementation doesn't differ from what we saw earlier in the MTHostGameViewController and MTJoinGameViewController classes.
+
+The implementation of sendPacket:, parseHeader:, and parseBody: aren't any different either.
+
+The parseBody: method will play an important role a bit later in the story, but this will do for now. Our goal at this point is to get everything working again after the refactoring process is complete.
+
+Before we move on, it is important to implement the dealloc method of the MTGameController class as shown below. Whenever

@@ -1,0 +1,44 @@
+Question: <p>Is there a reasonable way to extract plain text from a Word file that doesn't depend on COM automation?  (This is a a feature for a web app deployed on a non-Windows platform - that's non-negotiable in this case.)</p>
+
+<p>Antiword seems like it might be a reasonable option, but it seems like it might be abandoned.</p>
+
+<p>A Python solution would be ideal, but doesn't appear to be available.</p>
+
+Answer: <p>If all you want to do is extracting text from Word files (.docx), it's possible to do it only with Python. Like Guy Starbuck wrote it, you just need to unzip the file and then parse the XML. Inspired by <code>python-docx</code>, I have written a <a href="http://etienned.github.io/posts/extract-text-from-word-docx-simply/" rel="nofollow">simple function</a> to do this:</p>
+
+<pre><code>try:
+    from xml.etree.cElementTree import XML
+except ImportError:
+    from xml.etree.ElementTree import XML
+import zipfile
+
+
+"""
+Module that extract text from MS XML Word document (.docx).
+(Inspired by python-docx &lt;https://github.com/mikemaccana/python-docx&gt;)
+"""
+
+WORD_NAMESPACE = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+PARA = WORD_NAMESPACE + 'p'
+TEXT = WORD_NAMESPACE + 't'
+
+
+def get_docx_text(path):
+    """
+    Take the path of a docx file as argument, return the text in unicode.
+    """
+    document = zipfile.ZipFile(path)
+    xml_content = document.read('word/document.xml')
+    document.close()
+    tree = XML(xml_content)
+
+    paragraphs = []
+    for paragraph in tree.getiterator(PARA):
+        texts = [node.text
+                 for node in paragraph.getiterator(TEXT)
+                 if node.text]
+        if texts:
+            paragraphs.append(''.join(texts))
+
+    return '\n\n'.join(paragraphs)
+</code></pre>

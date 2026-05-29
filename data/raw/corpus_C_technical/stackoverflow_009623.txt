@@ -1,0 +1,56 @@
+Question: <p>Say I have a package "mylibrary".</p>
+
+<p>I want to make "mylibrary.config" available for import, either as a dynamically created module, or a module imported from an entirely different place that would then basically be "mounted" inside the "mylibrary" namespace.</p>
+
+<p>I.e., I do:</p>
+
+<pre><code>import sys, types
+sys.modules['mylibrary.config'] = types.ModuleType('config')
+</code></pre>
+
+<p>Given that setup:</p>
+
+<pre><code>&gt;&gt;&gt; import mylibrary.config    # -&gt; works
+
+&gt;&gt;&gt; from mylibrary import config
+&lt;type 'exceptions.ImportError'&gt;: cannot import name config
+</code></pre>
+
+<p>Even stranger:</p>
+
+<pre><code>&gt;&gt;&gt; import mylibrary.config as X
+&lt;type 'exceptions.ImportError'&gt;: cannot import name config
+</code></pre>
+
+<p>So it seems that using the direct import works, the other forms do not. Is it possible to make those work as well?</p>
+
+Answer: <p>You can try something like this:</p>
+
+<pre><code>class VirtualModule(object):
+  def __init__(self, modname, subModules):
+    try:
+      import sys
+      self._mod = __import__(modname)
+      sys.modules[modname] = self
+      __import__(modname)
+      self._modname = modname
+      self._subModules = subModules
+    except ImportError, err:
+      pass  # please signal error in some useful way :-)
+  def __repr__(self):
+    return "Virtual module for " + self._modname
+  def __getattr__(self, attrname):
+    if attrname in self._subModules.keys():
+      import sys
+      __import__(self._subModules[attrname])
+      return sys.modules[self._subModules[attrname]]
+    else:
+      return self._mod.__dict__[attrname]
+
+
+VirtualModule('mylibrary', {'config': 'actual_module_for_config'})
+
+import mylibrary
+mylibrary.config
+mylibrary.some_function
+</code></pre>

@@ -1,0 +1,193 @@
+R2-C2
+
+Reliable RAID Configuration Calculator (R2-C2)
+
+Reliable RAID Configuration Calculator (R2-C2) lets you compare the probability of zpool failure as a function of individual drive failure probability for different ZFS RAID configurations. Enter the number of hard drives per vdev, the parity drives per vdev, and number of vdevs. Click "+" or "-" to add or remove configs. See notes and detailed derivation examples below.
+
+ Config. HDDs per vdev Parity per vdev Total vdevs Total HDDs Total data Total parity 1 24 18 6 2 24 18 6 3 24 18 6
+
+x=y line
+
+Number of Iterations:
+
+This graph shows the probability of zpool failure (y-axis) as a function of (assumed independent) individual drive failure probability (x-axis) for the given configurations (smaller numbers indicate a more reliable zpool). Please note the assumptions listed below when considering these results. The failure probability equations are as follows:
+
+GENERAL EQUATION
+
+$$P_n=1-\left(\sum_{i=0}^{r}\left(\binom{d}{i}p^i(1-p)^{d-r}\right)\right)^{v}$$
+
+where
+
+$$P_n = \text{Probability of zpool failure for Configuration n}$$
+
+$$p = \text{Probability of a single drive failure}$$
+
+$$r = \text{Number of parity drives per vdev}$$
+
+$$d = \text{Number of drives per vdev}$$
+
+$$v = \text{Total number of vdevs in zpool}$$
+
+$$\binom{n}{k} = \frac{n!}{k!(n-k)!}$$
+
+Calculator Notes & Assumptions
+
+A couple of notes on RAID, ZFS, and drive failure:
+
+• This calculator assumes that one drive failure is completely independent of another drive's failure, i.e., that drive #3 failing will have no bearing on when (or if) drive #7 fails. This may not always be the case; for example, a set of drives from the same manufacturing lot could share defect characteristics and all fail around the same time. There is also anecdotal evidence that drives, even if not from the same manufacturing run, somehow may tend to fail in groups.
+• When one drive has failed in ZFS, the act of rebuilding the zpool is itself a high-risk, high-intensity operation which puts the drive under considerably more stress than its default run condition. Because of this, rebuilding a zpool may actually increase the likelihood that the pool dies. Again, this calculator does not account for that.
+• In RAID 5/6 and RAID-Z1/2/3, the RAID controller (be it hardware or software) does not actually dedicate some quantity of the drives to user data and the remainder to parity data. This sort of configuration was employed in RAID 4, but having all the parity information for the whole array reside on a single disk created contention for access to that disk. The solution was to stager the parity data across all the disks in the array, in a sort of barber pole fashion. For the sake of making visualization and discussion easier, I will still refer to "data drives" and "parity drives", but this distinction is purely conceptual. I would encourage readers to familiarize themselves with the standard RAID levels before reading on.
+• This calculator is intended for comparative purposes only, and its output should be used as such. It will not tell you the absolute probability of zpool failure in the real world; it only shows an estimate of which configuration might be best. Because of this, and for the sake of better viewing, the axis scales are different by a factor of 50. If you want to overlay an x=y line on the graph for reference, check the "x=y line" box next to the control buttons.
+
+Detailed Derivation Examples
+
+Below is a detailed step-by-step derivation of the failure probability equations for two different configurations. Once this processes is understood, it should be easy to see where the above equations come from.
+
+The two examples we'll review are the first two default configurations supplied when R2-C2 is first loaded. They are as follows:
+
+Example 1: 3 vdevs, each with 8 drives in RAID-Z2 (24 total, 18 data, 6 parity)
+
+Example 2: 2 vdevs, each with 12 drives in RAID-Z3 (24 total, 18 data, 6 parity)
+
+We'll assume that all our drives have a certain probability of failure, and that you would use the same exact drives for either configuration. We can call the probability of failure of a single drive $$p$$:
+
+$$p = \text{Probability(Single drive failure)}$$
+
+A few quick points if you haven't studied basic probability before:
+
+• Multiplication in probability is like an AND operator; if you multiply the probability of event X occurring with the probability of event Y occurring, you get the probability that event X AND event Y will occur.
+• Addition in probability is like an OR operator; if you add the probability of event X occurring and the probability of event Y occurring, you get the probability that event X OR event Y will occur.
+• We'll make use of the fact that $$\text{1 - Probability(Event X occurring) = Probability(Event X NOT occurring)}$$ several times in these calculations.
+• We'll be using binomial distributions to calculate our failure probabilities, which you can read more about here.
+
+Example 1: 3 vdevs, 8 drives per vdev, each in RAIDZ2
+
+We have 3 vdevs and any 3 drives in the same vdev must fail for us to have data loss, and a loss of a single vdev will result in a total loss of the zpool. We'll start by calculating the probability of losing a single vdev of 8 drives using a binomial distribution:
+
+$$f(k;n,p) = \binom{n}{k}p^n(1-p)^{n-k}$$
+
+$$\text{where}$$
+
+$$\binom{n}{k} = \frac{n!}{k!(n-k)!}$$
+
+For example 1, we'll have $$p = \text{Probability(Single drive failure)}, n = 8, k = 3$$:
+
+$$\binom{8}{3}p^3(1-p)^{5}$$
+
+$$=56p^3(1-p)^5$$
+
+This has 3 parts to it:
+
+1. $$\binom{8}{3}$$ is saying "how many ways can I have 3 failures in a vdev of 8 drives?" Using the binomial coefficient, we determine there are 56.
+2. $$p^3$$ is the probability of any 3 drives failing.
+3. $$(1-p)^5$$ is the probability that the other 5 drives don't fail.
+
+Summed up, these parts are:
+
+The probability that...
+
+...drives 1, 2, and 3 fail, and that 4, 5, 6, 7, and 8 don't fail, OR...
+
+...drives 1, 2, and 4 fail, and that 3, 5, 6, 7, and 8 don't fail, OR...
+
+...drives 1, 2, and 5 fail, and that 3, 4, 6, 7, and 8 don't fail, OR...
+
+...and so on, 56 times, once for each possible combination of failures. Again, all of this is the probability that we'll lose 3 drives on one vdev. However, this alone doesn't fully account for the probability that we'll lose the vdev, since we can lose it by having 4 drives fail, or 5, 6, 7, or even all 8 drives. To account for these, we'd have to add 5 more binomial distributions, with $$n=8$$ and $$k=4 ... 8$$. With all these summed up, we'd have the probability that 3 or more drives in a vdev failed. That's a lot of terms. Another option that's a lot simpler to express makes use of the fact that:
+
+$$\text{Probability(3 or more drives failing) = 1 - Probability(2 or fewer drives failing)}$$
+
+Because of a similar trick you'll see in the next step, we'll actually use $$\text{Probability(2 or fewer drives failing)}$$, i.e., the probability that the vdev is still alive (the same equation as the probability that it's dead, but without the $$(1 - ...)$$ part in front). We'll still use several binomial distributions (3 of them, to be exact, as opposed to 6 with the other way) with $$n=8$$ and $$k=2,1,0$$, and we'll sum them all up. This is what it'll look like (we'll call the whole thing $$A$$):
+
+$$A = \binom{8}{2} p^2(1-p)^{6} + \binom{8}{1} p^1(1-p)^{7} + \binom{8}{0} p^0(1-p)^{8}$$
+
+$$A = 28 p^2(1-p)^{6} + 8 p^1(1-p)^{7} + (1-p)^{8}$$
+
+Notice the 3 terms in this formula. The first term, $$\binom{8}{2} p^2(1-p)^{6} = 28 p^2(1-p)^{6}$$, is the probability that 2 drives in our vdev fail. The second term, $$\binom{8}{1} p^1(1-p)^{7} = 8 p^1(1-p)^{7}$$, is the probability that 1 drive fails. The last term, $$\binom{8}{0} p^0(1-p)^{8} = (1-p)^{8}$$, is the probability that none of the drives fail. Summing all these up is saying "the probability that (2 drives fail -OR- 1 drive fails -OR- 0 drives fail)".
+
+Now we need to account for the fact that we have 3 vdevs, and that if at least one of them fails (2 could fail, or even all 3), we lose the whole zpool. One option is to use a set of 3 binomial distributions, this time using $$p = A$$, $$n = 3$$, and $$k = 1, 2, 3$$. A much easier option is to use the same trick $$1-...$$ as above:
+
+$$\text{Probability(at least one vdev fails) = 1 - Probability(all 3 vdevs are alive)}$$
+
+We calculated the probability of a single vdev being alive in the previous step, and we'll use that here to calculate $$P_1$$, the probability of losing our whole zpool in example 1:
+
+$$P_1 = 1-A^3$$
+
+$$P_1 = 1-\left(\binom{8}{2} p^2(1-p)^{6} + \binom{8}{1} p^1(1-p)^{7} + \binom{8}{0} p^0(1-p)^{8}\right)^3$$
+
+$$P_1 = 1-(28 p^2(1-p)^{6} + 8 p^1(1-p)^{7} + (1-p)^{8})^3$$
+
+To reiterate, $$A$$ is the probability that one of our vdevs is healthy, so $$A^3$$ is the probability that vdev1 AND vdev2 AND vdev3 are healthy, and $$1 - A^3$$, is the opposite of that, i.e., all 3 vdevs are not healthy (at least 1 vdevs has failed) and our whole zpool is lost.
+
+Example 2: 2 vdevs, 12 drives per vdev, each in RAIDZ3
+
+We have 2 vdevs and any 4 (or more) drives in the same vdev must fail for us to have data loss, but a loss of either vdev will result in a total loss of the zpool. We'll proceed in the same way as example 1, using the same trick to compute the probability that one vdev is alive, with $$p = \text{Probability(Single drive failure)}, n = 12, k = 3, 2, 1, 0$$, and we'll call the whole thing $$B$$:
+
+$$B = \binom{12}{3} p^3(1-p)^{9} + \binom{12}{2} p^2(1-p)^{10} + \binom{12}{1} p^1(1-p)^{11} + \binom{12}{0} p^0(1-p)^{12}$$
+
+$$B = 220 p^3(1-p)^{9} + 66 p^2(1-p)^{10} + 12 p^1(1-p)^{11} + (1-p)^{12}$$
+
+Agian, this is the probability that one of our 12-drive vdevs is alive. As above, we'll use a second binomial distribution to determine the probability that at least two vdevs fail by computing $$\text{1 - probability that both vdevs are alive}$$, and we'll call this $$P_2$$:
+
+$$P_2 = 1-B^2$$
+
+$$P_2 = 1-\left(\binom{12}{3} p^3(1-p)^{9} + \binom{12}{2} p^2(1-p)^{10} + \binom{12}{1} p^1(1-p)^{11} + \binom{12}{0} p^0(1-p)^{12}\right)^2$$
+
+$$P_2 = 1-\left(220 p^3(1-p)^{9} + 66 p^2(1-p)^{10} + 12 p^1(1-p)^{11} + (1-p)^{12}\right)^2$$
+
+Source Code
+
+The JavaScript code that generates the probability data that go into the graphing function can be found below. The code for generating the graphs (with flotr2), the LaTeX (with MathJax), and other UI elements can be found towards the bottom of the JS file here. Feel free to contact me with any comments, questions, suggestions, etc.
+
+
+function Factorial(n) {
+// Factorial(n) = n! = n * n-1 * n-2 * ... * 2 * 1
+var rval = 1;
+for (var i = 2; i <= n; i++) {
+rval = rval * i;
+}
+return rval;
+}
+
+function BinomCoeff(n,k) {
+// BinomCoeff(n,k) = n choose k = n! / (k! * (n-k)!)
+return Factorial(n) / (Factorial(k) * Factorial(n-k));
+}
+
+function BinomDistrib(n,k,p) {
+// BinomDistrib(n,k,p) = (n choose k) * p^k * (1-p)^(n-k)
+return BinomCoeff(n,k) * Math.pow(p,k) * Math.pow(1-p,n-k)
+}
+
+function R2C2(numHDD, rLvl, numVdev, pFail) {
+// R2C2() returns the probability value of zpool failure given configuration parameters
+// numHDD = (number) Number of HDDs per vdev
+// rLvl = (number) Redundancy level (1 for RAID-Z1, 2 for RAID-Z2, 3 for RAID-Z3, etc.)
+// numVdev = (number) Number of vdevs in zpool
+// pFail = (number) Probabililty of an individual drive failing
+
+var P = 0;
+// P = probability that rLvl or fewer drives have failed (i.e., vdev is still alive)
+for (var i = rLvl; i >= 0; i--) {
+P = P + BinomDistrib(numHDD, i, pFail);
+}
+// 1 - P^numVdev = probability that one or more of the vdevs are not alive
+return 1 - Math.pow(P,numVdev);
+}
+
+function GenDataset(numHDD, rLvl, numVdev, numIttr) {
+// GenDataset() returns an array of zpool failure probability values given a set of configuration parameters
+// numHDD = (number) Number of HDDs per vdev
+// rLvl = (number) Redundancy level (1 for RAID-Z1, 2 for RAID-Z2, 3 for RAID-Z3, etc.)
+// numVdev = (number) Number of vdevs in zpool
+// numIttr = (number) Number of iterations to run
+
+var x = [];
+for(var i = 0; i <= numIttr; i++) {
+x.push([i/(numIttr*10), R2C2(numHDD, rLvl, numVdev, i/(numIttr*10))])
+}
+return x;
+}
+
+
+
+❖ back to main

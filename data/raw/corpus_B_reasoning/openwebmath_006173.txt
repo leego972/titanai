@@ -1,0 +1,80 @@
+# Discrete Fourier Transform - Inadequate precision and wrong peak positions
+
+I have a small problem with a piece of code. I searched the site but was not able to find an answer to my specific question. I am trying a quick test of the Fourier capabilities (on lists) of Mathematica. I am using the following code
+
+a := 0.1;
+L[x_] := 1/(x^2 + 1);
+s[x_] := L[x] + a Cos[x];
+
+
+Note that the Fourier Transformation is $$\mathcal{F}(s(t)) (\omega)=\sqrt{\frac{\pi }{2}} e^{-\left| \omega \right| }+\sqrt{\frac{\pi }{2}} \delta (\omega -1)+\sqrt{\frac{\pi }{2}} \delta (\omega +1)$$ Then I create a list of values
+
+STable1 := Table[s[t], {t, 0, 40, 0.001}];
+
+
+and then I apply Fourier
+
+ListLinePlot[Abs[Fourier[STable1]], PlotRange -> {{0, 30}, {0, 10}},Frame -> True]
+
+
+this is what I get
+
+Now the peak should be at 1 (theoretically it is a Dirac Delta function). My question is:
+
+How to get more points (so a smoother function)?
+
+• Have a look here – Stelios Jan 5 '16 at 22:40
+• Thanks @Stelios I will check it! – Umberto Jan 7 '16 at 22:12
+
+@Hugh has given a good answer, explaining how to increase the frequency-domain resolution by increasing the maximum measurement time tmax. The relationship is df=1/tmax. One additional point is that you have not matched the endpoints of your Cos function, so that the DFT implemented by Fourier will not return a delta function. Better resolution of your delta function component is achieved by setting the maximum measured time to an integral multiple of cosine periods. See here, for example.
+
+tmax = 12*Pi;
+dt = 0.001;
+df = 1/tmax;
+n = Floor[tmax/(2*dt)];
+STable = Table[s[t], {t, 0, tmax - dt, dt}];
+ListLinePlot[
+Transpose[{Table[i*df, {i, 0, n}],
+Take[Abs[Fourier[STable]], n + 1]}],
+PlotRange -> {{0, 1}, {0, 14}}, Frame -> True,
+FrameLabel -> {"Frequency", "Amplitude"}]
+
+
+This plot shows the new result along with the original transform.
+
+Increasing tmax in multiples of 2 Pi will further improve the plot.
+
+Some basic properties of Fourier may be found here. Starting with your code again but dropping your set delayed we have
+
+a := 0.1;
+L[x_] := 1/(x^2 + 1);
+s[x_] := L[x] + a Cos[x];
+STable1 = Table[s[t], {t, 0, 40, 0.001}];
+ft = Fourier[STable1];
+
+
+We now need to construct a frequency axis. You have used a time increment of 0.001 and thus this corresponds to a sample rate of 1000 samples per second. The Fourier frequency axis goes between zero and one point less than the sample rate. Thus the frequencies in radians per second corresponding to your data are
+
+sr = 1000;
+ff = Table[2 \[Pi] (n - 1) sr/Length[STable1], {n, Length[STable1]}];
+
+
+Now we can put an axis on your plot
+
+ListLinePlot[Transpose[{ff, Abs[ft]}], PlotRange -> {{0, 5}, {0, 10}},
+Frame -> True]
+
+
+To get more frequency resolution we have to increase the number of points thus
+
+STable1 = Table[s[t], {t, 0, 400, 0.001}];
+ft = Fourier[STable1];
+ff = Table[2 \[Pi] (n - 1) sr/Length[STable1], {n, Length[STable1]}];
+ListLinePlot[Transpose[{ff, Abs[ft]}], PlotRange -> {{0, 5}, {0, 40}},
+Frame -> True]
+
+
+Your delta function is now more clearly visible.
+
+• Just a note: A more appropriate approach for increasing the frequency resolution is probably to perform Fourier on a zero padded version of the sampled signal, i.e., Fourier[PadRight[STable1],FFTsize], instead of increasing the observation interval, which may not be possible. – Stelios Jan 5 '16 at 22:44
+• @Stelios Yes I agree; that is a useful method. However, the usual warning should apply that this is equivalent to interpolation and not the calculation of addition information. – Hugh Jan 5 '16 at 22:49

@@ -1,0 +1,63 @@
+Question: <p>I have a function that resembles the one below. I'm not sure how to use the os module to get back to my original working directory at the conclusion of the jar's execution. </p>
+
+<pre><code>def run(): 
+    owd = os.getcwd()
+    #first change dir to build_dir path
+    os.chdir(testDir)
+    #run jar from test directory
+    os.system(cmd)
+    #change dir back to original working directory (owd)
+</code></pre>
+
+<p>note: I think my code formatting is off - not sure why. My apologies in advance</p>
+
+Answer: <p>A context manager is a very appropriate tool for this job:</p>
+
+<pre><code>from contextlib import contextmanager
+
+@contextmanager
+def cwd(path):
+    oldpwd=os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(oldpwd)
+</code></pre>
+
+<p>...used as:</p>
+
+<pre><code>os.chdir('/tmp') # for testing purposes, be in a known directory
+print 'before context manager: %s' % os.getcwd()
+with cwd('/'):
+    # code inside this block, and only inside this block, is in the new directory
+    print 'inside context manager: %s' % os.getcwd()
+print 'after context manager: %s' % os.getcwd()
+</code></pre>
+
+<p>...which will yield something like:</p>
+
+<pre><code>before context manager: /tmp
+inside context manager: /
+after context manager: /tmp
+</code></pre>
+
+<p>This is actually <strong>superior</strong> to the <code>cd -</code> shell builtin, inasmuch as it also takes care of changing directories back when a block is exited due to an exception being thrown.</p>
+
+<hr>
+
+<p>For your specific use case, this would instead be:</p>
+
+<pre><code>with cwd(testDir):
+    os.system(cmd)
+</code></pre>
+
+<hr>
+
+<p>Another option to consider is using <code>subprocess.call()</code> instead of <code>os.system()</code>, which will let you specify a working directory for the command to run:</p>
+
+<pre><code># note: better to modify this to not need shell=True if possible
+subprocess.call(cmd, cwd=testDir, shell=True)
+</code></pre>
+
+<p>...which would prevent you from needing to change the interpreter's directory at all.</p>

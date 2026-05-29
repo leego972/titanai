@@ -1,0 +1,52 @@
+# Uploading files with SFTP
+
+I have successfully uploaded files over ftp, but I now need to do via SFTP. I can successfully connect to the remote server, create a file and write to it, but I am unable to upload an existing file from my local server to the remote server. Is ftp_put not firing with an sftp connection?
+
+My code used to write a file :
+
+//Send file via sftp to server
+
+$strServer = "*****";$strServerPort = "****";
+$strServerUsername = "*****";$strServerPassword = "*****";
+$csv_filename = "Test_File.csv"; //connect to server$resConnection = ssh2_connect($strServer,$strServerPort);
+
+if(ssh2_auth_password($resConnection,$strServerUsername, $strServerPassword)){ //Initialize SFTP subsystem echo "connected";$resSFTP = ssh2_sftp($resConnection);$resFile = fopen("ssh2.sftp://{$resSFTP}/".$csv_filename, 'w');
+fwrite($resFile, "Testing"); fclose($resFile);
+
+}else{
+echo "Unable to authenticate on server";
+}
+
+Has anyone had any success in grabbing a local file and uploading via a method such as above with sftp? An example would be greatly appreciated.
+
+Thanks
+
+-
+add comment
+
+## 3 Answers
+
+With the method above (involving sftp) you can use stream_copy_to_stream:
+
+$resFile = fopen("ssh2.sftp://{$resSFTP}/".$csv_filename, 'w');$srcFile = fopen("/home/myusername/".$csv_filename, 'r');$writtenBytes = stream_copy_to_stream($srcFile,$resFile);
+fclose($resFile); fclose($srcFile);
+
+You can also try using ssh2_scp_send
+
+-
+That worked perfectly, thank you. I shall bookmark for future projects! –  Marc Mar 5 '12 at 20:41
+add comment
+
+Personally, I prefer avoiding the PECL SSH2 extension. My preferred approach involves phpseclib, a pure PHP SFTP implementation. eg.
+
+<?php
+include('Net/SFTP.php');
+
+$sftp = new Net_SFTP('www.domain.tld'); if (!$sftp->login('username', 'password')) {
+exit('Login Failed');
+}
+
+$sftp->put('remote.ext', 'local.ext', NET_SFTP_LOCAL_FILE); ?> One of the big things I like about phpseclib over the PECL extension is that it's portable. Maybe the PECL extension works on one version of Linux but not another. And on shared hosts it almost never works because it's hardly ever installed. phpseclib is also, surprisingly, faster. And if you need confirmation that the file uploaded you can use phpseclib's built-in logging as proof. - add comment Sharing further inputs, found ssh2_scp_send was not copying properly (bytes were different) when the copying the file from Linux (64 bit) to Windows (32 bit) , there sftp routine worked perfectly. When using Windows with stfp, the path in case of C:\to\path needs to be put as ssh2.sftp://{$resSFTP}/cygdrive/c/to/path if Cygwin is used for SSH on the Windows box.
+
+-
+add comment

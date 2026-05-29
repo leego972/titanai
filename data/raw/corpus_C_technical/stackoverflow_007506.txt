@@ -1,0 +1,85 @@
+Question: <p>How can I poll the keyboard from a console python app?  Specifically, I would like to do something akin to this in the midst of a lot of other I/O activities (socket selects, serial port access, etc.):</p>
+
+<pre><code>   while 1:
+      # doing amazing pythonic embedded stuff
+      # ...
+
+      # periodically do a non-blocking check to see if
+      # we are being told to do something else
+      x = keyboard.read(1000, timeout = 0)
+
+      if len(x):
+          # ok, some key got pressed
+          # do something
+</code></pre>
+
+<p>What is the correct pythonic way to do this on Windows?  Also, portability to Linux wouldn't be bad, though it's not required.</p>
+
+Answer: <p>From the comments:</p>
+
+<pre><code>import msvcrt # built-in module
+
+def kbfunc():
+    return ord(msvcrt.getch()) if msvcrt.kbhit() else 0
+</code></pre>
+
+<p><hr /></p>
+
+<p>Thanks for the help.  I ended up writing a C DLL called PyKeyboardAccess.dll and accessing the crt conio functions, exporting this routine:</p>
+
+<pre><code>#include &lt;conio.h&gt;
+
+int kb_inkey () {
+   int rc;
+   int key;
+
+   key = _kbhit();
+
+   if (key == 0) {
+      rc = 0;
+   } else {
+      rc = _getch();
+   }
+
+   return rc;
+}
+</code></pre>
+
+<p>And I access it in python using the ctypes module (built into python 2.5):</p>
+
+<pre><code>import ctypes
+import time
+
+#
+# first, load the DLL
+#
+
+
+try:
+    kblib = ctypes.CDLL("PyKeyboardAccess.dll")
+except:
+    raise ("Error Loading PyKeyboardAccess.dll")
+
+
+#
+# now, find our function
+#
+
+try:
+    kbfunc = kblib.kb_inkey
+except:
+    raise ("Could not find the kb_inkey function in the dll!")
+
+
+#
+# Ok, now let's demo the capability
+#
+
+while 1:
+    x = kbfunc()
+
+    if x != 0:
+        print "Got key: %d" % x
+    else:
+        time.sleep(.01)
+</code></pre>

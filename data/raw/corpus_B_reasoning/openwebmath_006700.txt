@@ -1,0 +1,173 @@
+# Iain Dunning
+
+## Sudoku-as-a-Service with Julia
+
+Posted on 15 Sep 2013
+
+Sudoku is (was?) an extremely popular number puzzle. Players are presented with a 9 by 9 grid, with some of the cells filled in with a number between 1 and 9. The goal is to complete the grid while respecting these rules:
+
+• Each row of the grid must contain each of the numbers 1 to 9 exactly once.
+• Each column of the grid must contain each of the numbers 1 to 9 exactly once.
+• Divide the grid into 9 3-by-3 non-overlapping subgrids. Each of these 3-by-3 grids must contain each of the numbers 1 to 9 exactly once.
+
+An unsolved sudoku puzzle (Wikimedia Commons)
+
+In this post I'm going to
+
+• walk through one way to solve sudoku puzzles, and
+• show how you can offer that functionality as an online service
+
+using the Julia programming language.
+
+## Solving Sudoku puzzles with integer programming
+
+The rules of sudoku can be expressed as an integer programming problem which can be solved by any of the many linear and integer programming solvers out there. Of course there are algorithms designed to solve sudoku problems directly that are probably more efficient than integer programming, but stay with me for a moment - I'll justify it later on! We will start our model by defining a variable x(i,j,k) that equals 1 if and only if cell (i,j) is set to value k, and is 0 otherwise. This can be written mathematically (with constraints to enforce the fixed cells omitted) as:
+
+MIP formulation of sudoku problem
+
+Lets break down how these constraints translate back to the rules above. In the first set of constraints we enforce that for every row i, across the columns j the value k must appear once and once only. For example, for value 5 and row 3, we say that x(3,1,5) + x(3,2,5) + x(3,3,5) + ... + x(3,9,5) == 1. We can check: if a 5 appeared in row 3 column 2 and row 3 column 6, the sum on the left hand side would be 2. If 5 doesn't appear in row 3 at all, the sum would be 0. Note that x(3,1,5) = 0.5, x(3,2,5) = 0.5 would be feasible with respect to this constraint, but that we are enforcing the constraint (not shown) that x can only be 0 or 1.
+
+The second set of constraints is very similar to the first, and enforces the second 'rule' above regarding columns. The third set of constraints is not so obvious. This set of constraints enforces that any given position i,j can only contain one digit by summing across all values. This is kinda self-evident for a human so I didn't even mention it above. Finally, the fourth set of constraints corresponds to the third rule. Its the most complex notationally, but is conceptually the same as the previous two. On the right side of the equations we iterate over the 9 3-by-3 subgrids, where (0,0) is the top left subgrid and (2,2) is the bottom subgrid. The sum is then over the 9 cells inside that subgrid. Lets pick an example subgrid, e.g. (i,j)=(0,1) and k=5, which corresponds to the left-center subgrid. We then sum over a and b:
+
+• x(3*0+1,3*1+1,5) + x(3*0+2,3*1+1,5) + x(3*0+3,3*1+1,5) + x(3*0+1,3*1+2,5) + x(3*0+2,3*1+2,5) + ... == 1
+• x(1,4,5) + x(2,4,5) + x(3,4,5) + x(1,5,5) + x(2,5,5) + ... == 1
+
+As I mentioned above, we have ommitted constraints that would fix particular x(i,j,k) based on the provided cells, but there is no clean way to write that above. The question now is, how do we implement this model in an expressive and maintainable way in code?
+
+## JuMPing Julia!
+
+Julia is a fantastic up-and-coming dynamic language that emphasises high-performance scientific computing that is extensible and easy to read and write. It doesn't reinvent the wheel: it utilizes the LLVM compiler to generate fast code, open-source linear algebra packages to provide fast number crunching, and the libuv library to provide excellent cross-platform IO. libuv is the library that powers the popular node.js environment that has become very popular over the past couple of years for web development. Being a web development language is not an official goal of Julia, but there is certainly no reason it can't be used. For example, if server-side number crunching is one of the features your site needs, that part could be implemented in Julia and the rest of the application logic in node.js or your tool of choice.
+
+But back to sudoku. The Julia package JuMP is an algebraic modeling language for linear (and integer and quadratic) programming created by myself and the very talented Miles Lubin. You should compare JuMP with tools like PuLP and AMPL. If you aren't familiar with algebraic modeling languages embedded in other languages, you can think of them as an embedded domain specific language (DSL). Julia's fantastic metaprogramming functionality has allowed us to create a particularily fast and expressive modeling language. I encourage you to read to the documentation, but here is a taste of what it looks like.
+
+ 1 # Assuming a solver has been previously installed, e.g. Cbc
+2 using JuMP
+3
+4 function SolveModel(initgrid)
+5   m = Model()
+6
+7   # Create the variables
+8   @defVar(m, 0 <= x[1:9, 1:9, 1:9] <= 1, Int)
+9
+10   # ... snip other constraints ...
+11   # Constraint 4 - Only one value in each cell
+12   for row in 1:9
+13     for col in 1:9
+14       @addConstraint(m, sum{x[row, col, val], val=1:9} == 1)
+15     end
+16   end
+17
+18   # ... snip initial solution constraints ...
+19   # Solve it (default solver is CBC)
+20   status = solve(m)
+21
+22   # Check solution
+23   if status == :Infeasible
+24     error("No solution found!")
+25   else
+26     mipSol = getValue(x)
+27
+28     sol = zeros(Int, 9, 9)
+29     for row in 1:9
+30       for col in 1:9
+31         for val in 1:9
+32           if mipSol[row, col, val] >= 0.9  # mipSol is stored as floats
+33             sol[row, col] = val
+34           end
+35         end
+36       end
+37     end
+38
+39     return sol
+40   end
+41 end
+
+Line 7 creates our variable x with three indices over the range 1 to 9, and enforces integrality. @defVar is a macro, not a function, which lets it create a variable x in the local scope. I have removed the other constraints for brevity and left the constraint that enforces that each cell contains only one value. Note the correspondance between the mathematical notation ("for all rows, for all columns") and the for loops (lines 11 and 12). @addConstraint (line 13) is another macro that facilitates the efficient storage of the constraint as a sparse vector, and matches the mathematical description very closely. On line 19 we solve the model with the default solver COIN-OR CBC - an open-source integer programming solver. As a side note, Julia/JuMP also has interfaces to GLPK (open-source) and Gurobi (closed-source). Finally, we pull the solution back from the solver (if a feasible solution could be found) as a three-dimensional matrix of 0s and 1s which we convert to a two-dimensional vector of 1-to-9s (lines 27 to 36).
+
+If you are interested in how macros and metaprogramming offer up new possibilities for optimization, operations research, and modelling languages, check out our paper.
+
+## SaaS == Sudoku-as-a-service?
+
+Now we can solve sudoku puzzles, we should share this functionality with the world. The best way to get started with creating a web service is to use the HttpServer.jl package, a package made at Hacker School. Documentation is pretty scarce at this point, but hopefully by inspecting the relatively short code and looking at some examples you can get started.
+
+I bundled my sudoku solver with a server in SudokuService. This kinda brings me back to why I used integer programming - to demonstrate that you can make pretty complex web-capable number crunching applications with relative ease. Check out server.jl in the repository - its pretty straightforward and most of the work is input validation. The form of a query is /sudoku/123...123 or /sudoku/123...123/pretty for human-readable response. There should be 81 numbers, one for each cell of the 9x9 sudoku board, row-wise. A zero indicates a blank. Heres a taster of the server code:
+
+using HttpServer
+
+# Load the Sudoku solver
+require("sudoku.jl")
+
+# Build the request handler
+http = HttpHandler() do req::Request, res::Response
+if ismatch(r"^/sudoku/", req.resource)
+# Expecting 81 numbers between 0 and 9
+reqsplit = split(req.resource, "/")
+# ...snip validation...#
+probstr = reqsplit[3]
+if length(probstr) != 81
+return Response(400, "Error: expected 81 numbers.")
+end
+
+# Convert string into numbers, and place in matrix
+# Return error if any non-numbers or numbers out of range detected
+prob = zeros(Int,9,9)
+pos = 1
+try
+for row = 1:9
+for col = 1:9
+val = int(probstr[pos:pos])
+if val < 0 || val > 10
+return Response(422, "Error: number out of range 0:9.")
+end
+prob[row,col] = val
+pos += 1
+end
+end
+catch
+return Response(422, "Error: couldn't parse numbers.")
+end
+
+# Attempt to solve the problem using integer programming
+try
+sol = SolveModel(prob)
+if prettyoutput
+# Human readable output
+out = "<table>"
+for row = 1:9
+out = string(out,"<tr>")
+for col = 1:9
+out = string(out,"<td>",sol[row,col],"</td>")
+end
+out = string(out,"</tr>")
+end
+out = string(out,"</table>")
+return Response(out)
+else
+# Return solution like input
+return Response(join(sol,""))
+end
+catch
+return Response(422, "Error: coudn't solve puzzle.")
+end
+else
+# Not a valid URL
+return Response(404)
+end
+end
+
+# Boot up the server
+server = Server(http)
+run(server, 8000)
+
+## Try it yourself!
+
+Julia is still growing (rapidly) - I suggest grabbing the 0.2 pre-release and having a bit of patience in case of strange errors! You may also see some warnings regarding deprecation - hopefully they'll be cleaned up soon once we reach version 0.2 for Julia and have a chance to go back and tidy up all the packages. Instructions for installing everything are in README.md. I encourage you to check it out for yourself, and maybe extend it. Some ideas:
+
+• Implement a pure-Julia sudoku solver and benchmark performance against the MIP solver.
+• Generalize the code to accept and solve n-by-n sudoku problems
+
+Let me know how that goes by contacting me at idunning AT mit.edu or @iaindunning.
+
+© 2013 Iain Dunning
+Contact me by email (idunning AT mit DOT edu), @iaindunning, LinkedIn, GitHub
+This website was made with Jekyll and Skeleton.

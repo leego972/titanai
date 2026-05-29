@@ -1,0 +1,52 @@
+# obs_subaru install with eups distrib fails
+
+XMLWordPrintable
+
+## Details
+
+• Type: Bug
+• Status: Done
+• Resolution: Done
+• Fix Version/s: None
+• Component/s:
+• Labels:
+None
+• Story Points:
+1
+• Sprint:
+Science Pipelines DM-W16-6
+• Team:
+Data Release Production
+
+Thus:
+
+ $eups distrib install -t w_2016_06 obs_subaru ...  [ 52/52 ] obs_subaru 5.0.0.1-60-ge4efae7+2 ...   ***** error: from /Users/jds/Projects/Astronomy/LSST/stack/EupsBuildDir/DarwinX86/obs_subaru-5.0.0.1-60-ge4efae7+2/build.log: ---------------------------------------------------------------------- Traceback (most recent call last):  File "tests/hscRepository.py", line 91, in setUp  self.repoPath = createDataRepository("lsst.obs.hsc.HscMapper", rawPath)  File "tests/hscRepository.py", line 63, in createDataRepository  check_call([ingest_cmd, repoPath] + glob(os.path.join(inputPath, "*.fits.gz")))  File "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/subprocess.py", line 540, in check_call  raise CalledProcessError(retcode, cmd) CalledProcessError: Command '['/Users/jds/Projects/Astronomy/LSST/stack/EupsBuildDir/DarwinX86/obs_subaru-5.0.0.1-60-ge4efae7+2/obs_subaru-5.0.0.1-60-ge4efae7+2/bin/hscIngestImages.py', '/var/folders/jp/lqz3n0m17nqft7bwtw3b8n380000gp/T/tmptUSKuf', '/Users/jds/Projects/Astronomy/LSST/stack/DarwinX86/testdata_subaru/master-gf9ba9abdbe/hsc/raw/HSCA90402512.fits.gz']' returned non-zero exit status 1   ---------------------------------------------------------------------- Ran 8 tests in 9.928s   FAILED (errors=7) The following tests failed: /Users/jds/Projects/Astronomy/LSST/stack/EupsBuildDir/DarwinX86/obs_subaru-5.0.0.1-60-ge4efae7+2/obs_subaru-5.0.0.1-60-ge4efae7+2/tests/.tests/hscRepository.py.failed 1 tests failed scons: *** [checkTestStatus] Error 1 scons: building terminated because of errors. + exit -4  Please fix it. ## Attachments ## Issue Links ## Activity Hide John Swinbank added a comment -  $ eups distrib install -t fe_test4 obs_subaru  [ 1/51 ] cfitsio 3360.lsst4 (already installed) done. ...  [ 51/51 ] obs_subaru 5.0.0.1-63-gfd8740e+1 done. 
+
+Thanks, everybody!
+
+Show
+John Swinbank added a comment - $eups distrib install -t fe_test4 obs_subaru [ 1/51 ] cfitsio 3360.lsst4 (already installed) done. ... [ 51/51 ] obs_subaru 5.0.0.1-63-gfd8740e+1 done. Thanks, everybody! Hide Joshua Hoblitt added a comment - - edited It looks like there were multiple issues going. Mario Juric identified the most severe with distrib packages being unaware of git-lfs. Another, minor, issue was that git tags were not being applied to the repo – resolved by Tim Jenness. I have merged John Swinbank PR to add testsdata_subaru to the remap list. TL;DR – the w_2016_06 weekly tag is broken for obs_subaru. Show Joshua Hoblitt added a comment - - edited It looks like there were multiple issues going. Mario Juric identified the most severe with distrib packages being unaware of git-lfs. Another, minor, issue was that git tags were not being applied to the repo – resolved by Tim Jenness . I have merged John Swinbank PR to add testsdata_subaru to the remap list. TL;DR – the w_2016_06 weekly tag is broken for obs_subaru . Hide John Swinbank added a comment - Thanks, Mario Juric. It's appropriate to treat testdata_subaru as analogous to afwdata, so blacklisting package creation seems like the way to go. The wider issue of eups distrib/git lfs integration isn't a current requirement. Joshua Hoblitt, are you happy with the changes on lsstsw PR#83? Show John Swinbank added a comment - Thanks, Mario Juric . It's appropriate to treat testdata_subaru as analogous to afwdata , so blacklisting package creation seems like the way to go. The wider issue of eups distrib / git lfs integration isn't a current requirement. Joshua Hoblitt , are you happy with the changes on lsstsw PR#83 ? Hide Mario Juric added a comment - EUPS doesn't know about git-lfs; we need to teach it about it, or you can also override the create() and/or fetch() verbs in eupspkg.cfg.sh in the short term. To answer the original question, I think it's fine to blacklist this package in manifest.remap if you don't expect end users to want to install it using EUPS. Show Mario Juric added a comment - EUPS doesn't know about git-lfs; we need to teach it about it, or you can also override the create() and/or fetch() verbs in eupspkg.cfg.sh in the short term. To answer the original question, I think it's fine to blacklist this package in manifest.remap if you don't expect end users to want to install it using EUPS. Hide Michael Wood-Vasey added a comment - - edited Should we create tests for the testdata_* packages that explicitly verify that the git-lfs pull worked? This would prevent such packages from being setup. Show Michael Wood-Vasey added a comment - - edited Should we create tests for the testdata_* packages that explicitly verify that the git-lfs pull worked? This would prevent such packages from being setup . Hide John Swinbank added a comment - - edited By the way, I imagine this is breaking attempts to install lsst_distrib through eups distrib. Show John Swinbank added a comment - - edited By the way, I imagine this is breaking attempts to install lsst_distrib through eups distrib . Hide John Swinbank added a comment - The obs_subaru table file declares testdata_subaru as setupOptional. However, eups distrib still attempts to install it:  $ eups distrib install -t w_2016_06 obs_subaru ...  [ 11/52 ] testdata_subaru master-gf9ba9abdbe (already installed) done. ... 
+
+This produces an installed version which has not checked out files from git lfs:
+
+ $cat${TESTDATA_SUBARU_DIR}/hsc/calib/BIAS/2013-11-02/NONE/master/BIAS-050.fits.gz version https://git-lfs.github.com/spec/v1 oid sha256:d70512df8c1fd25f5c9bcc5b95f413c62f65da752f50a3da0a8331686682ad5a size 31345503 
+
+obs_subaru will skip tests gracefully if testdata_subaru is not set up, however here it is set up but is populated with (from the point of view of the tests, at least) garbage data.
+
+My suggested fix is that it should be treated in the same way as afwdata in lsstsw/etc/manifest.remap, which will suppress the creation of the package – I guess this will do the trick, as it's evidently possible to install afw through eups distrib. I'd appreciate input from eups distrib experts (Mario Juric?) on whether this is actually the correct solution, though.
+
+Even if that fixes the immediate failure, I'm not sure if the failure of eups distrib install to check out the contents of files from git lfs is a bug or a feature.
+
+Show
+John Swinbank added a comment - The obs_subaru table file declares testdata_subaru as setupOptional . However, eups distrib still attempts to install it: $eups distrib install -t w_2016_06 obs_subaru ... [ 11/52 ] testdata_subaru master-gf9ba9abdbe (already installed) done. ... This produces an installed version which has not checked out files from git lfs :$ cat \${TESTDATA_SUBARU_DIR}/hsc/calib/BIAS/2013-11-02/NONE/master/BIAS-050.fits.gz version https://git-lfs.github.com/spec/v1 oid sha256:d70512df8c1fd25f5c9bcc5b95f413c62f65da752f50a3da0a8331686682ad5a size 31345503 obs_subaru will skip tests gracefully if testdata_subaru is not set up, however here it is set up but is populated with (from the point of view of the tests, at least) garbage data. My suggested fix is that it should be treated in the same way as afwdata in lsstsw/etc/manifest.remap , which will suppress the creation of the package – I guess this will do the trick, as it's evidently possible to install afw through eups distrib . I'd appreciate input from eups distrib experts ( Mario Juric ?) on whether this is actually the correct solution, though. Even if that fixes the immediate failure, I'm not sure if the failure of eups distrib install to check out the contents of files from git lfs is a bug or a feature.
+
+## People
+
+• Assignee:
+John Swinbank
+Reporter:
+John Swinbank
+Reviewers:
+Joshua Hoblitt
+Watchers:
+John Swinbank, Joshua Hoblitt, Mario Juric, Michael Wood-Vasey, Tim Jenness

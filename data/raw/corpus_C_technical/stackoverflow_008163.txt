@@ -1,0 +1,52 @@
+Question: <p>(Django 1.x, Python 2.6.x)</p>
+
+<p>I have models to the tune of:</p>
+
+<pre><code>class Animal(models.Model):
+  pass
+
+class Cat(Animal):
+  def __unicode__(self):
+    return "This is a cat"
+
+class Dog(Animal):
+  def __unicode__(self):
+    return "This is a dog"
+
+class AnimalHome(models.Model):
+  animal = models.ForeignKey(Animal)
+</code></pre>
+
+<p>I have instantiated no Animals, because this is supposed to be a virtual class.  I have instantiated Cats and Dogs, but in the Admin Page for AnimalHome, my choices for Animals are displayed as "Animal object" (the default __unicode__(), I guess) as opposed to the __unicode__ I have defined for the two subclasses.  Help.</p>
+
+<p><hr /></p>
+
+<p>The abstract base class issue is a red herring wrt to this question, I think.  Even if Animal was not supposed to be abstract, I still have the problem that, for some reason, since the ForeignKey is defined on Animal and not one of its subclasses, the superclass method is being called instead of the subclass.  In OO programming when you call object.method() you're supposed to get the lowest-subclass's implementation, and you have to do extra work to get any superclass's implementation.  So why is it that having __unicode__ defined on the subclasses is not sufficient for --- actually the problem might be that __unicode__ is not getting called at all because introspection on the Animal class reveals that it's not defined.  So maybe if I define __unicode__ for Animal and have it call subclasses' __unicode__ I could get the desired effect.</p>
+
+<p><hr /></p>
+
+<p>Okay, I think that I understand the ORM issues.  Both these answers have helped me understand this, thank you.  While experimenting with this, I discovered that when Django saves a subclassed model, it does two things: (1) it creates a row for the subclassed object in the superclass's table, and (2) it makes the PK in the subclass table identical to the PK assigned in the superclass table.  This PK in the subclass table is named superclass_ptr.  Based upon this I've concocted the following.  I'd appreciate feedback.</p>
+
+<pre><code>Class Animal(models.Model)
+  def __unicode__(self):
+    if Dog.objects.filter(pk=self.pk).count() &gt; 0:
+      return unicode(Dog.objects.get(pk=self.pk))
+    elif Cat.objects.filter(pk=self.pk).count() &gt; 0:
+      return unicode(Cat.objects.get(pk=self.pk))
+    else:
+      return "An Animal!"
+</code></pre>
+
+<p><hr /></p>
+
+<p>It seems that Lawrence is most on-point wrt this question.  Cat and Dog will have disjoint PK sets (and any subclass of Animal will have a PK identical to the record of its superclass), but unfortunately Django does not perform any work behind the scenes a la: "I'm an Animal.  I know Animals have subclasses Dog and Cat.  Specifically, I'm Animal number 3, and furthermore I just checked and there's a Cat number 3 too.  That means that I'm actually Cat number 3".  Even though this seems entirely possible and very reasonable (since a Cat won't do anything an Animal couldn't do itself) using Python's introspection.  Thank you all.</p>
+
+Answer: <p>You can use the <a href="https://docs.djangoproject.com/en/dev/ref/contrib/contenttypes/" rel="nofollow">django content framework</a></p>
+
+<p>I made an example of how to implement you models here -> </p>
+
+<p><a href="https://github.com/jmg/django_content_types_example/blob/master/generic_models/models.py" rel="nofollow">https://github.com/jmg/django_content_types_example/blob/master/generic_models/models.py</a></p>
+
+<p>And here you can see how to use the orm -> </p>
+
+<p><a href="https://github.com/jmg/django_content_types_example/blob/master/generic_models/tests.py" rel="nofollow">https://github.com/jmg/django_content_types_example/blob/master/generic_models/tests.py</a></p>

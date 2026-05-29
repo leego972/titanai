@@ -1,0 +1,383 @@
+================================================================================
+TITAN AI — TRAINING PACK 049: API SECURITY — REST, GRAPHQL, GRPC
+OWASP API TOP 10, AUTHENTICATION FLAWS, MASS ASSIGNMENT, GRAPHQL INTROSPECTION
+================================================================================
+
+================================================================================
+PART 1: OWASP API SECURITY TOP 10 (2023)
+================================================================================
+
+--- API1: BROKEN OBJECT LEVEL AUTHORIZATION (BOLA/IDOR) ---
+
+THE MOST COMMON API VULNERABILITY.
+
+Scenario:
+  GET /api/users/123/orders → Returns user 123's orders.
+  Attacker changes to: GET /api/users/124/orders → Returns user 124's orders.
+  No authorization check: Does user making request own ID 124?
+
+Testing:
+  Create two accounts (A and B). Get resource ID for B.
+  Use A's session to request B's resource. If returned: BOLA.
+  
+  Predictable IDs: Sequential integers, UUIDs. If UUIDs: Find via other API calls that leak IDs.
+
+Code that's vulnerable:
+  # Vulnerable:
+  @app.route('/api/orders/<order_id>')
+  def get_order(order_id):
+      return Order.query.get(order_id)  # No auth check!
+  
+  # Secure:
+  @app.route('/api/orders/<order_id>')
+  @require_auth
+  def get_order(order_id):
+      order = Order.query.get(order_id)
+      if order.user_id != current_user.id:  # Authorization check
+          abort(403)
+      return order
+
+--- API2: BROKEN AUTHENTICATION ---
+
+Common issues:
+  Weak/no API key rotation.
+  No rate limiting on auth endpoints → brute force.
+  JWT issues (see Pack 034 for full coverage).
+  Insecure secret storage: API keys in git repos, environment variables logged.
+  No expiry on long-lived tokens.
+
+API KEY EXPOSURE:
+  GitHub secret scanning: Scans all public repos for known API key patterns.
+  GitGuardian, TruffleHog: Tools that detect secrets in commits.
+  
+  Common patterns detected:
+  AWS: AKIA[0-9A-Z]{16}
+  GitHub: ghp_[a-zA-Z0-9]{36}
+  Stripe: sk_live_[a-zA-Z0-9]+
+  Twilio: SK[0-9a-fA-F]{32}
+
+--- API3: BROKEN OBJECT PROPERTY LEVEL AUTHORIZATION (BOPLA) ---
+
+Also known as: Mass Assignment, Excessive Data Exposure.
+
+Mass Assignment:
+  Developer binds user input directly to internal object.
+  User submits: {"name": "John", "email": "john@co.com", "role": "admin"}
+  If role mapped from input: User can promote themselves to admin.
+  
+  Vulnerable (Flask/SQLAlchemy):
+  user = User(**request.json)  # Binds ALL fields including role, is_admin, balance
+  db.session.add(user)
+  
+  Secure:
+  user = User(
+      name=request.json['name'],
+      email=request.json['email']
+      # role not included — defaults to 'user'
+  )
+
+Excessive Data Exposure:
+  API returns full object with sensitive fields.
+  Frontend displays only needed fields.
+  But: All fields accessible in response.
+  
+  Vulnerable:
+  GET /api/users/me → Returns:
+  {"id": 1, "name": "John", "email": "john@co.com", "ssn": "123-45-6789", "credit_card": "4111..."}
+  
+  Frontend: Shows only name and email. Developer thinks safe.
+  Attacker: Reads full API response. Gets SSN and card number.
+  
+  Fix: Explicit serialization. Only return needed fields.
+
+--- API4: UNRESTRICTED RESOURCE CONSUMPTION ---
+
+Missing rate limiting → DoS, account enumeration, brute force.
+Missing size limits → Billion laughs XML, large payload DoS.
+
+Examples:
+  No rate limit on POST /api/sms/send → Attacker sends 10M SMS messages using your account.
+  No pagination limit: GET /api/users?limit=10000000 → OOM crash.
+  File upload: No size limit → 10GB upload → disk exhaustion.
+
+--- API5: BROKEN FUNCTION LEVEL AUTHORIZATION ---
+
+Missing authorization on admin/sensitive endpoints.
+Attackers enumerate API paths to find unprotected admin functionality.
+
+Testing:
+  Change: GET /api/users/me to GET /api/admin/users (guess admin paths).
+  Try: DELETE /api/users/5 (might work if only GET is protected).
+  Try: PUT /api/users/5 (modify other users if only read is restricted).
+  Look for: admin, internal, debug, test, management in API paths.
+
+--- API6: UNRESTRICTED ACCESS TO SENSITIVE BUSINESS FLOWS ---
+
+API flows that can be abused if not rate-limited or validated.
+
+Examples:
+  E-commerce: Add item to cart → Checkout → Payment. If checkout can be called multiple times: Items shipped multiple times with one payment.
+  
+  Account registration: No CAPTCHA → Bot creates 1M fake accounts.
+  
+  Password reset: No rate limit → Enumerate valid usernames (timing difference).
+
+--- API7: SERVER SIDE REQUEST FORGERY (SSRF) ---
+
+(Full coverage in Pack 034 — reference)
+API endpoints that fetch URLs: ?url=http://... or webhook targets.
+SSRF via API: Same impact as web SSRF. Reach internal services, metadata.
+
+--- API8: SECURITY MISCONFIGURATION ---
+
+Common API misconfigurations:
+  CORS wildcard: Access-Control-Allow-Origin: * (any origin can call API with cookies).
+  Debug endpoints left in production: /api/debug, /api/test, /actuator.
+  Verbose error messages: Stack traces, SQL queries, server version in error responses.
+  HTTP methods not restricted: DELETE allowed when only GET/POST should be.
+  Old API versions active: /api/v1/ abandoned but still works with old vulnerabilities.
+
+CORS misconfiguration:
+  If API reflects Origin header: Access-Control-Allow-Origin: attacker.com
+  And: Access-Control-Allow-Credentials: true
+  Attacker site: Can make authenticated API calls on behalf of logged-in users.
+  
+  Test:
+  GET /api/user
+  Origin: attacker.com
+  
+  If response includes:
+  Access-Control-Allow-Origin: attacker.com
+  Access-Control-Allow-Credentials: true
+  
+  Vulnerable. Attacker site can steal authenticated API responses.
+
+--- API9: IMPROPER INVENTORY MANAGEMENT ---
+
+Shadow APIs: APIs forgotten/undocumented but still running.
+Zombie APIs: Old versions (v1, v2) active after v3 launched. Old code = old vulns.
+Third-party APIs: APIs from integrated SaaS, partners. Unknown security posture.
+
+--- API10: UNSAFE CONSUMPTION OF APIS ---
+
+Trusting third-party API responses without validation.
+  Your API calls third-party → gets response → processes without validation.
+  If third-party compromised or returns unexpected data: Injection into your system.
+
+================================================================================
+PART 2: GRAPHQL SECURITY
+================================================================================
+
+--- GRAPHQL ATTACK SURFACE ---
+
+GraphQL: Query language for APIs. Single endpoint (/graphql). Flexible queries.
+Security difference from REST: Single endpoint, complex query structure, introspection.
+
+INTROSPECTION:
+  GraphQL introspection: Query that reveals entire API schema.
+  query IntrospectionQuery {
+    __schema {
+      types {
+        name
+        fields {
+          name
+          type { name kind }
+        }
+      }
+    }
+  }
+  
+  Returns: ALL types, fields, mutations, queries, arguments in the API.
+  Security impact: Attacker learns entire attack surface. Find hidden mutations, admin queries.
+  
+  Defense: Disable introspection in production.
+  # Apollo Server:
+  const server = new ApolloServer({
+    schema,
+    introspection: process.env.NODE_ENV !== 'production'
+  });
+
+GRAPHQL INJECTION:
+  Arguments in queries can be injection vectors.
+  
+  # SQL injection in GraphQL argument:
+  query {
+    user(id: "1 OR 1=1") {
+      email
+      password
+    }
+  }
+  
+  # If resolver uses string concatenation: SQL injection.
+  # Fix: Parameterized queries in resolvers.
+
+BATCHING ATTACKS:
+  GraphQL allows multiple operations in one request.
+  
+  # Brute force login in single request (rate limiting often per-request, not per-operation):
+  mutation {
+    login1: login(email: "user@co.com", password: "password1") { token }
+    login2: login(email: "user@co.com", password: "password2") { token }
+    login3: login(email: "user@co.com", password: "password3") { token }
+    ... (100 operations in one request)
+  }
+  
+  100 login attempts in 1 HTTP request. Rate limiter counts as 1 request.
+  Fix: Rate limit per operation, not per request. Query depth limiting.
+
+GRAPHQL DENIAL OF SERVICE:
+  Deeply nested queries: Extremely expensive to resolve.
+  
+  {
+    user {
+      friends {
+        friends {
+          friends {
+            friends {
+              friends {
+                name  # Recursively nested — O(n^5) query
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  Fix: Query depth limiting (max depth 5-10). Query complexity analysis. Timeout.
+  
+  # Apollo: graphql-depth-limit, graphql-validation-complexity
+
+AUTHORIZATION IN GRAPHQL:
+  GraphQL doesn't have built-in per-field authorization.
+  Risk: Resolver returns entire user object; consumer filters fields. But: All fields resolved.
+  
+  Secure: Check authorization at resolver level for each sensitive field.
+  
+  # GraphQL Shield (authorization middleware):
+  const permissions = shield({
+    Query: {
+      user: isAuthenticated,
+      adminUsers: isAdmin,
+    },
+    User: {
+      ssn: isOwnerOrAdmin,      # Only owner or admin can see SSN
+      email: isAuthenticated,
+    },
+  })
+
+================================================================================
+PART 3: GRPC SECURITY
+================================================================================
+
+--- GRPC ATTACK SURFACE ---
+
+gRPC: Google's RPC framework. Protocol Buffers (binary), HTTP/2.
+Used: Microservice-to-microservice communication. Higher performance than REST.
+
+GRPC SECURITY ISSUES:
+
+No authentication by default:
+  gRPC: Doesn't require authentication. Developer must add it.
+  If no auth: Any client can call any method.
+  Fix: TLS (mTLS preferred for service-to-service) + auth interceptor.
+
+Reflection:
+  gRPC server reflection: Similar to GraphQL introspection.
+  Reveals: All services, methods, and their proto definitions.
+  
+  Test: grpc_cli ls TARGET_HOST:PORT  → lists all services.
+  Fix: Disable reflection in production. grpc.reflection.v1alpha not registered.
+
+Proto enumeration:
+  Even without reflection: Proto files in git repos or leaked reveal API structure.
+  .proto files should be treated as sensitive. Not publicly exposed.
+
+Injection:
+  Proto fields often map to database queries.
+  If proto field value inserted into SQL without parameterization: SQLi.
+  String proto fields: Can carry SQL injection, command injection payloads.
+
+Tools: grpcurl, grpc-tools (grpc_cli), BloomRPC (GUI client).
+  grpcurl -plaintext TARGET:PORT list          # List services (if reflection enabled)
+  grpcurl -plaintext TARGET:PORT describe      # Describe all methods
+  grpcurl -plaintext -d '{"user_id": "1"}' TARGET:PORT service.GetUser  # Call method
+
+================================================================================
+PART 4: API AUTHENTICATION DEEP DIVE
+================================================================================
+
+--- OAUTH 2.0 / OPENID CONNECT IN APIS ---
+
+Access tokens for API authorization. Three common types:
+
+Opaque tokens:
+  Random string. Server looks up in database/cache to get claims.
+  Advantages: Easy revocation. Token has no intrinsic value.
+  Disadvantages: Database lookup per request. Latency.
+
+JWT access tokens:
+  Self-contained. Claims verified by signature.
+  Advantages: No database lookup. Distributed verification.
+  Disadvantages: Revocation difficult (wait for expiry). Attacks (see Pack 034).
+
+Token introspection (RFC 7662):
+  Hybrid: Client passes opaque token. Resource server introspects at AS.
+  Advantages: Easy revocation. No JWT complexity.
+  Used: When resource server can't verify JWT directly.
+
+PKCE (PROOF KEY FOR CODE EXCHANGE):
+  Required for: Public clients (SPAs, mobile apps). Cannot keep secret.
+  
+  Flow:
+  Client generates: code_verifier (43-128 char random string).
+  code_challenge = base64url(sha256(code_verifier)).
+  Auth request: Include code_challenge, code_challenge_method=S256.
+  Token request: Include code_verifier.
+  AS verifies: sha256(code_verifier) == code_challenge.
+  
+  Security: Even if auth code intercepted: Attacker needs code_verifier. Never transmitted.
+  Prevents: Auth code injection attacks, authorization code theft.
+
+--- API RATE LIMITING IMPLEMENTATION ---
+
+  NGINX rate limiting:
+  limit_req_zone $binary_remote_addr zone=api:10m rate=100r/m;
+  
+  location /api/ {
+      limit_req zone=api burst=20 nodelay;
+      limit_req_status 429;
+      add_header Retry-After 60 always;
+  }
+  
+  # Per user (authenticated): Rate limit by user ID, not IP
+  limit_req_zone $http_x_user_id zone=api_user:10m rate=1000r/m;
+  
+  DISTRIBUTED RATE LIMITING (Redis):
+  import redis
+  import time
+  
+  r = redis.Redis()
+  
+  def rate_limit(user_id: str, max_requests: int, window_seconds: int) -> bool:
+      key = f"rate:{user_id}:{int(time.time()) // window_seconds}"
+      current = r.incr(key)
+      if current == 1:
+          r.expire(key, window_seconds)
+      return current <= max_requests
+  
+  # In API handler:
+  if not rate_limit(request.user_id, max_requests=100, window_seconds=60):
+      return JSONResponse({"error": "Rate limit exceeded"}, status_code=429,
+                          headers={"Retry-After": "60"})
+
+================================================================================
+END OF PACK 049: API SECURITY
+Total: OWASP API Top 10 2023 (all 10 with code examples — BOLA/IDOR with vulnerable vs
+secure code, mass assignment, excessive data exposure, missing rate limiting, function-level
+authz), CORS misconfiguration with test method, GraphQL attack surface (introspection
+dump, batching brute force, deeply nested DoS, GraphQL Shield authorization), gRPC
+(reflection enumeration, grpcurl commands, injection), OAuth 2.0 API token types
+(opaque/JWT/introspection), PKCE (flow detail, security guarantee), distributed Redis
+rate limiting implementation.
+================================================================================

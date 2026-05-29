@@ -1,0 +1,29 @@
+Question: <p>Right now I have a log parser reading through 515mb of plain-text files (a file for each day over the past 4 years). My code currently stands as this: <a href="http://gist.github.com/12978" rel="nofollow">http://gist.github.com/12978</a>. I've used psyco (as seen in the code) and I'm also compiling it and using the compiled version. It's doing about 100 lines every 0.3 seconds. The machine is a standard 15" MacBook Pro (2.4ghz C2D, 2GB RAM)</p>
+
+<p>Is it possible for this to go faster or is that a limitation on the language/database?</p>
+
+Answer: <p>Don't waste time profiling.  The time is always in the database operations.  Do as few as possible.  Just the minimum number of inserts.</p>
+
+<p>Three Things.</p>
+
+<p>One.  Don't SELECT over and over again to conform the Date, Hostname and Person dimensions.  Fetch all the data ONCE into a Python dictionary and use it in memory.  Don't do repeated singleton selects.  Use Python.</p>
+
+<p>Two.  Don't Update.</p>
+
+<p>Specifically, Do not do this.  It's bad code for two reasons.</p>
+
+<pre><code>cursor.execute("UPDATE people SET chats_count = chats_count + 1 WHERE id = '%s'" % person_id)
+</code></pre>
+
+<p>It be replaced with a simple SELECT COUNT(*) FROM ... .  Never update to increment a count.  Just count the rows that are there with a SELECT statement.  [If you can't do this with a simple SELECT COUNT or SELECT COUNT(DISTINCT), you're missing some data -- your data model should always provide correct complete counts.  Never update.]</p>
+
+<p>And.  Never build SQL using string substitution.  Completely dumb.</p>
+
+<p>If, for some reason the <code>SELECT COUNT(*)</code> isn't fast enough (benchmark first, before doing anything lame) you can cache the result of the count in another table.  AFTER all of the loads.  Do a <code>SELECT COUNT(*) FROM whatever GROUP BY whatever</code> and insert this into a table of counts.  Don't Update.  Ever.</p>
+
+<p>Three.  Use Bind Variables.  Always.</p>
+
+<pre><code>cursor.execute( "INSERT INTO ... VALUES( %(x)s, %(y)s, %(z)s )", {'x':person_id, 'y':time_to_string(time), 'z':channel,} )
+</code></pre>
+
+<p>The SQL never changes.  The values bound in change, but the SQL never changes.  This is MUCH faster.  Never build SQL statements dynamically.  Never.  </p>

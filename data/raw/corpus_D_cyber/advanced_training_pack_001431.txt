@@ -1,0 +1,676 @@
+================================================================================
+TITAN AI — TRAINING PACK 006: COMPLEX SYSTEMS DESIGN + DEBUGGING + ERROR HANDLING
+DEEP DIVE — ARCHITECTURE, BUILD STRATEGY, ROOT CAUSE ANALYSIS, FAILURE PATTERNS
+================================================================================
+
+================================================================================
+PART 1: COMPLEX SYSTEMS — HOW TO ACTUALLY PLAN AND BUILD THEM
+================================================================================
+
+--- THE SYSTEM DESIGN MINDSET ---
+
+RULE 1: Never design for what you have. Design for 10x what you have.
+The system you build today will either die of success or irrelevance.
+If it dies of success (usage explodes), it must scale.
+If it dies of irrelevance (nobody uses it), the overengineering cost was wasted.
+Resolution: Design for 10x NOW. Build for 1x NOW. Have the 10x path ready but not built.
+
+RULE 2: The bottleneck moves. Every optimization exposes the next bottleneck.
+Amdahl's Law: If 90% of a system can be parallelized, doubling parallelism gives 1.82x speedup.
+The remaining 10% sequential work becomes the ceiling.
+   
+RULE 3: Complexity is the enemy. Every feature added is a debt to maintain,
+a surface to attack, a point of failure. The best engineers subtract, not add.
+
+RULE 4: Failure is a design parameter. Every component will fail.
+Design for graceful degradation: System should work at 80% when 20% is down.
+Not: System collapses when any component fails.
+
+--- ARCHITECTURAL DECISION RECORDS (ADRs) ---
+
+Before writing any code for a complex system, document your decisions.
+Format: Status, Context, Decision, Consequences
+
+EXAMPLE ADR: Choosing between microservices and monolith
+
+ADR-001: System Architecture Pattern
+Status: Accepted
+Date: 2025-03-15
+Context:
+  We are building a fraud detection platform processing 50K transactions/sec.
+  Team size: 12 engineers. Timeline: MVP in 6 months.
+  Future scaling requirement: 500K tx/sec within 2 years.
+
+Decision:
+  Start with modular monolith. Extract fraud scoring engine as first microservice
+  at 3-month mark once interface is stable.
+
+Reasons:
+  - 12 engineers cannot effectively maintain >3 services simultaneously with quality
+  - 6-month MVP timeline requires deployment simplicity
+  - We don't know yet which modules need independent scaling
+  - Network latency between services would add 5-10ms to fraud check critical path
+  - Monolith with clean module boundaries enables future extraction
+
+Consequences:
+  Positive:
+    - Single deployment unit (CI/CD simple)
+    - Shared memory (no serialization overhead)
+    - Easy debugging (single log stream)
+    - Fast development iteration
+  Negative:
+    - Deployment of any change requires full rebuild
+    - Any memory leak affects entire system
+    - Technology lock-in (must be consistent language/runtime)
+  
+  Mitigations:
+    - Blue/green deployment eliminates downtime risk of full rebuilds
+    - Memory profiling alerts will catch leaks early
+    - Module boundaries enforced by code review (no cross-module imports)
+
+Review date: 2025-09-15 (post-MVP, reassess)
+
+--- SYSTEM PLANNING: FROM REQUIREMENTS TO ARCHITECTURE ---
+
+REQUIREMENTS DECOMPOSITION (RF + NFR):
+
+FUNCTIONAL REQUIREMENTS — What the system does:
+  Start with user stories: "As a [persona], I want to [action] so that [outcome]."
+  Convert to system behaviors: What inputs produce what outputs?
+  
+  EXAMPLE: Security Operations Platform
+  User story: "As an analyst, I want to see all alerts for a specific IP address
+  across all detection sources so I can understand the full picture quickly."
+  
+  System behavior:
+  - Input: IP address
+  - Process: Query all sources (SIEM, EDR, firewall, proxy) with 30-second timeout
+  - Output: Unified timeline of all events involving that IP
+  - Performance: Full query <5 seconds for 30-day window
+  - Data source count: 8 different log types
+
+NON-FUNCTIONAL REQUIREMENTS — How the system behaves:
+  These kill more systems in production than missing features.
+  
+  For every system define:
+  Availability:   99.9% = 8.7 hours/year downtime
+                  99.99% = 52 minutes/year downtime
+                  99.999% = 5 minutes/year downtime
+                  Each 9 costs ~10x more to achieve
+  
+  Latency:        P50 (median), P95, P99, P99.9
+                  P99 is what angry users experience.
+                  P99.9 is what breaks SLAs.
+  
+  Throughput:     Requests/second at steady state AND at peak
+                  Define peak: 3x normal? 10x on release day?
+  
+  Durability:     If data written, can it be lost? (RPO)
+                  How long to recover? (RTO)
+  
+  Security:       Who can access what? Authentication model?
+                  What happens if component is compromised?
+
+EXAMPLE: Security Log Platform NFRs
+  Availability: 99.99% (security monitoring cannot go dark)
+  Latency: Alert generation P99 < 60 seconds from event
+  Throughput: 1M events/second sustained, 10M/second during incident
+  Durability: Zero log loss (write-ahead log, acknowledge only after durable write)
+  Retention: 13 months hot, 7 years cold (regulatory)
+  Security: Read-only access for analysts, write access only from log shippers,
+            admin access MFA + break-glass process with approval workflow
+
+--- CAPACITY PLANNING: THE MATH ---
+
+Never build a system without doing the numbers first.
+
+EXAMPLE: Planning storage for a security data lake
+
+Inputs:
+  - 50,000 endpoints generating Sysmon events
+  - Average 500 events/endpoint/minute
+  - Average event size: 800 bytes
+  - Retention: 1 year hot, 7 years cold
+
+Calculation:
+  Events/second = 50,000 × 500 / 60 = 416,667 events/sec
+  Bytes/second = 416,667 × 800 = 333 MB/sec = 20 GB/minute
+  Daily raw ingestion = 20 GB/min × 1440 min = 28.8 TB/day
+  Annual raw storage = 28.8 TB × 365 = 10.5 PB
+
+Compression factor: Sysmon events compress ~10:1 with zstd
+  Annual compressed = 10.5 PB / 10 = 1.05 PB
+
+Replication factor 3: 1.05 × 3 = 3.15 PB for 1-year hot tier
+7-year cold (slower storage, higher compression ~20:1):
+  28.8 TB/day × 365 × 7 / 20 = 3.68 PB cold tier
+
+Total infrastructure: ~7 PB storage
+Infrastructure cost: ~$0.023/GB/month (AWS S3) = $161K/month for hot tier alone
+Decision trigger: At this scale, on-premises object storage (MinIO) saves 70%.
+
+BUILD ORDER — HOW TO SEQUENCE COMPLEX SYSTEM CONSTRUCTION:
+
+WRONG order (common mistake):
+  1. Build all microservices
+  2. Build data pipelines
+  3. Build UI
+  4. Integrate everything
+  5. Test
+  This fails because: Integration problems found at step 5 require rework of steps 1-4.
+
+RIGHT order (walking skeleton approach):
+  1. Build thinnest possible vertical slice end-to-end
+     "Can log one event, display it in UI, alert on it"
+     This proves the entire stack works together.
+  2. Expand each component once integration is proven
+  3. Performance test each expansion before moving on
+  4. Add observability (metrics, tracing, logging) before adding features
+     You cannot optimize what you cannot measure.
+  5. Hardening (security, error handling, edge cases) continuous throughout
+
+EXAMPLE WALKING SKELETON — Security Alert Platform:
+  Week 1: One agent → Kafka topic → Elasticsearch → Kibana dashboard
+           Nothing hardened, nothing scaled, but full data flow proven
+  Week 2: 10 agents. Does data flow still work? Measure throughput. Fix bottlenecks.
+  Week 3: Add alert rule engine. Simple threshold rule fires alert. Alert appears in UI.
+  Week 4: 1000 agents. Find next bottleneck. Tune Elasticsearch indexing.
+  Week 5: Add SIEM correlation engine. Multi-event rule works end-to-end.
+  Week 6-12: Scale each layer, add features, hardening, testing.
+
+================================================================================
+PART 2: DEBUGGING — THE EXPERT APPROACH
+================================================================================
+
+--- THE DEBUGGING MINDSET ---
+
+PRINCIPLE 1: Bugs don't lie. The system is behaving exactly according to its rules.
+Your mental model of the rules is wrong.
+Debugging = updating your mental model until it matches reality.
+
+PRINCIPLE 2: Never guess. Hypothesize, then test to confirm or deny.
+"Maybe it's the network" is not a debugging step.
+"I hypothesize network latency is causing timeout. Test: Add timing logs around network call,
+reproduce bug, measure actual latency" — this is debugging.
+
+PRINCIPLE 3: Reproduce first. Everything.
+A bug you cannot reproduce reliably is a bug you cannot fix reliably.
+Even if you think you know the cause, until you can trigger it deterministically:
+- You might be fixing the wrong thing
+- You cannot verify the fix worked
+- It will come back in production
+
+PRINCIPLE 4: Change one thing at a time.
+Every debug attempt that changes multiple variables simultaneously destroys
+your ability to learn which change caused what effect.
+This is the scientific method applied to software.
+
+PRINCIPLE 5: The last change is usually the culprit.
+"Works on my machine" and "started failing after we deployed yesterday" are
+telling you where to look. Respect the temporal signal.
+
+--- SYSTEMATIC DEBUGGING METHODOLOGY ---
+
+THE WOLF FENCE ALGORITHM (Binary search for bugs):
+"There's one wolf somewhere in Alaska. Build a fence across the middle.
+Which side does the wolf howl from? Repeat on that half."
+
+Applied to code:
+  Bug: Application crashes somewhere during processing of a 10,000-item dataset
+  
+  Step 1: Split input in half. Process items 1-5000. Crash? Yes.
+  Step 2: Split again. Process items 1-2500. Crash? No.
+  Step 3: Process items 2500-5000. Crash? Yes.
+  Step 4: Process items 2500-3750. Crash? No.
+  Step 5: Process items 3750-5000. Crash? Yes.
+  ... Continue until single item causing crash is isolated.
+  
+  Applied to distributed systems:
+  8 microservices in a request chain. Request fails somewhere.
+  Add tracing. Check which service returns error.
+  Binary fence: Does request fail before or after service 4?
+  Narrow down to single service, then to single code path.
+
+THE RUBBER DUCK METHOD:
+Explain your bug out loud to an inanimate object (or another person, or an AI).
+Why it works:
+  1. Verbalizing forces you to formalize your understanding
+  2. Forming sentences requires logical structure
+  3. You often hear the flaw while speaking it
+  4. The act of explaining creates cognitive distance from the problem
+  
+  Professional version: Write a clear bug report before asking for help.
+  The act of writing the bug report (steps to reproduce, expected vs actual,
+  environment details) resolves the bug ~30% of the time without anyone reading it.
+
+THE CHANGE LOG DIFF METHOD:
+"It worked last week. What changed?"
+  git log --oneline --since="1 week ago"
+  git diff HEAD~5 HEAD -- src/suspicious_module.py
+  
+  For infrastructure: Diff Terraform plans, config management commits
+  For data pipelines: Compare schema before/after
+  For APIs: Compare OpenAPI spec versions
+  
+  Pro tip: If you can't narrow it to a single change with git bisect:
+  git bisect start
+  git bisect bad HEAD          # Current commit is bad
+  git bisect good v1.2.3       # This commit was good
+  Git checks out middle commit, you test, mark good/bad.
+  Git binary-searches through commits. Finds exact breaking commit.
+
+--- DEBUGGING BY SYSTEM TYPE ---
+
+DEBUGGING DISTRIBUTED SYSTEMS:
+
+The fundamental challenge: State is spread across multiple systems.
+Classic errors:
+  - Race conditions (two systems modifying same data simultaneously)
+  - Clock skew (events timestamped out of order across machines)
+  - Partial failures (request reaches server, response lost — server did work, client retries)
+  - Thundering herd (all clients retry simultaneously after outage)
+  - Cascading failures (overloaded service A → timeouts in B → timeouts in C → full outage)
+
+TOOL: Distributed tracing (OpenTelemetry)
+Every request gets a trace_id that follows it across all services.
+  from opentelemetry import trace
+  from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+  
+  tracer = trace.get_tracer(__name__)
+  
+  def process_alert(alert_data, trace_context=None):
+      with tracer.start_as_current_span("process_alert") as span:
+          span.set_attribute("alert.id", alert_data['id'])
+          span.set_attribute("alert.severity", alert_data['severity'])
+          
+          # All downstream calls inherit this trace context
+          result = enrich_with_threat_intel(alert_data)
+          span.set_attribute("enrichment.status", result['status'])
+          
+          return result
+
+In Jaeger/Zipkin: Search trace_id, see complete cross-service timeline.
+Immediately see which service added latency, where the error originated.
+
+DEBUGGING RACE CONDITIONS:
+  Symptoms: Bug reproduces rarely and non-deterministically. Worse under load.
+  
+  Classic example:
+  # Thread 1                    # Thread 2
+  balance = get_balance()       balance = get_balance()
+  new_bal = balance - 100       new_bal = balance - 200
+  set_balance(new_bal)          set_balance(new_bal)
+  # One update is lost — both threads read $1000
+  # Thread 1 sets $900, Thread 2 sets $800
+  # Final: $800 (should be $700)
+  
+  Detection:
+  - Enable thread sanitizer (TSan): clang++ -fsanitize=thread
+  - Add sleep() calls at suspicious points to widen the race window
+  - Run under high concurrency load to increase race probability
+  - Add counters: if operation X happens > N times in Y seconds = alert
+  
+  Fix patterns:
+  - Database-level: UPDATE accounts SET balance = balance - 100 WHERE id=1 AND balance >= 100
+    Atomic at database level. No race possible.
+  - Application-level: Optimistic locking (version field, retry on conflict)
+  - Pessimistic locking: LOCK in Redis/DB (performance cost, use sparingly)
+  - Event sourcing: Append-only log, no concurrent mutation problem
+
+DEBUGGING MEMORY LEAKS:
+
+Python memory leak:
+  # Finding leaks with tracemalloc
+  import tracemalloc
+  
+  tracemalloc.start()
+  snapshot1 = tracemalloc.take_snapshot()
+  
+  run_suspected_leaky_code_1000_times()
+  
+  snapshot2 = tracemalloc.take_snapshot()
+  top_stats = snapshot2.compare_to(snapshot1, 'lineno')
+  
+  for stat in top_stats[:10]:
+      print(stat)  # Shows file, line, size of memory increase
+
+Go memory leak:
+  import _ "net/http/pprof"
+  go func() { http.ListenAndServe(":6060", nil) }()
+  
+  # After running:
+  go tool pprof http://localhost:6060/debug/pprof/heap
+  # Then: top20 (shows top 20 memory consumers)
+
+Node.js memory leak:
+  node --inspect app.js
+  # In Chrome DevTools → Memory → Take heap snapshot
+  # Run suspected code N times
+  # Take second snapshot
+  # Comparison view shows what objects grew
+
+Common causes:
+  - Event listeners added but never removed
+  - Cache that grows without bound (no eviction)
+  - Circular references preventing GC
+  - Global variables accumulating data
+  - Timers/intervals never cleared
+
+DEBUGGING SECURITY INCIDENTS (forensic debugging):
+
+This is debugging where the "bug" is a malicious actor's actions.
+The methodology is the same — form hypothesis, test, narrow down — but
+evidence preservation matters more than speed.
+
+TIMELINE RECONSTRUCTION:
+  # Build chronological event timeline
+  # Source 1: Sysmon event log
+  Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Sysmon/Operational'} |
+    Where-Object {$_.TimeCreated -gt (Get-Date).AddDays(-7)} |
+    Select-Object TimeCreated, Id, Message |
+    Export-Csv timeline_sysmon.csv
+  
+  # Source 2: Windows Security log  
+  Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624,4625,4648,4688} |
+    Select-Object TimeCreated, Id, Message |
+    Export-Csv timeline_security.csv
+  
+  # Source 3: Proxy/firewall
+  grep "192.168.1.42" proxy_logs.csv | sort > timeline_network.csv
+  
+  # Merge and sort by timestamp
+  import pandas as pd
+  
+  dfs = [pd.read_csv(f) for f in ['timeline_sysmon.csv', 'timeline_security.csv', 'timeline_network.csv']]
+  combined = pd.concat(dfs).sort_values('TimeCreated')
+  combined.to_csv('full_incident_timeline.csv')
+
+ATTACKER ARTIFACT DISCOVERY:
+  Files:
+    dir /a /s /b C:\Users\*\AppData\Roaming\*.exe 2>nul
+    dir /a /s /b C:\ProgramData\*.bat 2>nul
+    Get-ChildItem -Recurse -Force C:\Windows\Temp
+    
+  Registry persistence:
+    reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+    reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Run
+    reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
+    
+  Services:
+    sc query type= all state= all | findstr /i "SERVICE_NAME RUNNING"
+    Get-WmiObject Win32_Service | Where-Object {$_.PathName -notmatch "System32"} | Select Name, PathName
+    
+  Network connections:
+    netstat -anob | findstr ESTABLISHED
+    Get-NetTCPConnection -State Established | Select LocalAddress,LocalPort,RemoteAddress,RemotePort,OwningProcess
+
+================================================================================
+PART 3: ERROR HANDLING — PROFESSIONAL PATTERNS
+================================================================================
+
+--- ERROR HANDLING PHILOSOPHY ---
+
+PRINCIPLE: Errors are first-class citizens, not afterthoughts.
+Every function that can fail should make that failure explicit, not hidden.
+
+THE TWO FAILURE MODES TO AVOID:
+
+1. FAIL SILENTLY: The worst possible behavior
+   try:
+       result = risky_operation()
+   except Exception:
+       pass  # This is professional negligence
+   
+   Why it's catastrophic: The caller doesn't know it failed. They proceed
+   with invalid state. The failure manifests somewhere completely different,
+   hours or days later, in a way that makes no sense. Debugging becomes archaeology.
+
+2. FAIL WITH TOO MUCH INFORMATION: The second worst behavior
+   except Exception as e:
+       print(f"Failed: {traceback.format_exc()}")
+       return None  # Still returns silently to caller
+   
+   Why it's bad: Logs are full of noise. The real problem is buried.
+   Plus: Detailed stack traces in production user-facing responses = 
+   information disclosure vulnerability.
+
+RIGHT APPROACH: Fail explicitly, fail informatively, fail at the right level
+
+STRUCTURED ERROR HIERARCHY:
+  class TitanSecurityError(Exception):
+      """Base exception for all security platform errors"""
+      def __init__(self, message: str, code: str, context: dict = None):
+          self.message = message
+          self.code = code  # Machine-readable error code
+          self.context = context or {}
+          super().__init__(message)
+  
+  class IntelEnrichmentError(TitanSecurityError):
+      """Failed to enrich IOC with threat intelligence"""
+      pass
+  
+  class CorrelationEngineError(TitanSecurityError):
+      """Correlation engine failed to process alert"""
+      pass
+  
+  class StorageError(TitanSecurityError):
+      """Failed to persist data"""
+      pass
+
+  # Usage:
+  try:
+      intel = vt_client.get_report(ioc)
+  except VTRateLimitError as e:
+      raise IntelEnrichmentError(
+          message=f"VT rate limit exceeded for IOC {ioc}",
+          code="INTEL_RATE_LIMITED",
+          context={"ioc": ioc, "retry_after": e.retry_after}
+      ) from e
+
+--- ERROR HANDLING IN DISTRIBUTED SYSTEMS ---
+
+THE FALLACIES OF DISTRIBUTED COMPUTING:
+  1. The network is reliable
+  2. Latency is zero
+  3. Bandwidth is infinite
+  4. The network is secure
+  5. Topology doesn't change
+  6. There is one administrator
+  7. Transport cost is zero
+  8. The network is homogeneous
+  
+  Every distributed system error handling must account for these being false.
+
+RETRY PATTERNS:
+
+Naive retry (WRONG):
+  for attempt in range(3):
+      try:
+          response = requests.post(api_url, data=payload)
+          break
+      except requests.RequestException:
+          continue
+  # Problem: All retries happen immediately. If service is overwhelmed,
+  # immediate retries make it worse. 1000 clients × 3 retries = 3000x more load.
+
+Exponential backoff with jitter (RIGHT):
+  import random
+  import time
+  
+  def retry_with_backoff(func, max_attempts=5, base_delay=1.0, max_delay=60.0):
+      for attempt in range(max_attempts):
+          try:
+              return func()
+          except TransientError as e:
+              if attempt == max_attempts - 1:
+                  raise  # Last attempt — re-raise
+              
+              # Exponential backoff: 1s, 2s, 4s, 8s...
+              delay = min(base_delay * (2 ** attempt), max_delay)
+              # Jitter: Random variation prevents thundering herd
+              jitter = random.uniform(0, delay * 0.3)
+              actual_delay = delay + jitter
+              
+              logger.warning(f"Attempt {attempt+1} failed: {e}. Retrying in {actual_delay:.1f}s")
+              time.sleep(actual_delay)
+          except PermanentError:
+              raise  # Don't retry permanent failures (bad request, auth failure)
+
+CIRCUIT BREAKER PATTERN:
+  Prevents cascading failures. When a service is down, stop calling it immediately.
+  
+  States:
+    CLOSED (normal): Requests flow through, count failures
+    OPEN (failing): All requests fail fast without calling service
+    HALF-OPEN (testing): Allow one request through to test if service recovered
+  
+  import threading
+  from enum import Enum
+  
+  class CircuitState(Enum):
+      CLOSED = "closed"
+      OPEN = "open"
+      HALF_OPEN = "half_open"
+  
+  class CircuitBreaker:
+      def __init__(self, failure_threshold=5, recovery_timeout=60, expected_exception=Exception):
+          self.failure_threshold = failure_threshold
+          self.recovery_timeout = recovery_timeout
+          self.expected_exception = expected_exception
+          self.failure_count = 0
+          self.last_failure_time = None
+          self.state = CircuitState.CLOSED
+          self._lock = threading.Lock()
+      
+      def call(self, func, *args, **kwargs):
+          with self._lock:
+              if self.state == CircuitState.OPEN:
+                  if time.time() - self.last_failure_time > self.recovery_timeout:
+                      self.state = CircuitState.HALF_OPEN
+                  else:
+                      raise CircuitOpenError(f"Circuit is OPEN — service unavailable")
+          
+          try:
+              result = func(*args, **kwargs)
+              self._on_success()
+              return result
+          except self.expected_exception as e:
+              self._on_failure()
+              raise
+      
+      def _on_success(self):
+          with self._lock:
+              self.failure_count = 0
+              self.state = CircuitState.CLOSED
+      
+      def _on_failure(self):
+          with self._lock:
+              self.failure_count += 1
+              self.last_failure_time = time.time()
+              if self.failure_count >= self.failure_threshold:
+                  self.state = CircuitState.OPEN
+                  logger.error(f"Circuit OPENED after {self.failure_count} failures")
+
+BULKHEAD PATTERN:
+  Isolate failures. Don't let one failing component exhaust shared resources.
+  
+  WRONG: All operations share one thread pool
+    ThreadPool(max_workers=100)  # 100 workers for EVERYTHING
+    # If threat intel calls hang (500ms each), they fill all 100 workers
+    # Now alert generation (fast) also has no workers → total outage
+  
+  RIGHT: Separate thread pools (bulkheads)
+    intel_pool = ThreadPoolExecutor(max_workers=20, thread_name_prefix="intel")
+    alert_pool = ThreadPoolExecutor(max_workers=30, thread_name_prefix="alert")
+    storage_pool = ThreadPoolExecutor(max_workers=50, thread_name_prefix="storage")
+    # Intel can hang all 20 workers, alert generation still has 30
+
+TIMEOUT MANAGEMENT:
+  Every external call must have an explicit timeout. Always.
+  
+  Wrong:
+    response = requests.get("http://external-api.com/data")
+    # Default: Waits forever. One slow API hangs your entire service.
+  
+  Right:
+    CONNECT_TIMEOUT = 2    # Max time to establish TCP connection
+    READ_TIMEOUT = 10      # Max time waiting for response after connection
+    
+    try:
+        response = requests.get(
+            "http://external-api.com/data",
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT)
+        )
+    except requests.Timeout:
+        # Handle timeout explicitly — not same as network error
+        logger.warning("External API timed out after 10s, using cached data")
+        return get_cached_fallback()
+
+--- OBSERVABILITY: MAKING SYSTEMS DEBUGGABLE ---
+
+THE THREE PILLARS OF OBSERVABILITY:
+1. METRICS: Aggregated numbers over time
+   What happened? How much? How fast? How many errors?
+   Tool: Prometheus + Grafana
+
+2. LOGS: Discrete timestamped events
+   What exactly happened? In what order? With what data?
+   Tool: ELK stack, Loki, Splunk
+
+3. TRACES: Request flow through distributed system
+   Which path did this specific request take? Where was time spent?
+   Tool: Jaeger, Zipkin, AWS X-Ray
+
+STRUCTURED LOGGING (logs are parseable, not just readable):
+  # Wrong: Unstructured, hard to parse, hard to search
+  print(f"Error processing alert {alert_id} from {source} at {timestamp}")
+  
+  # Right: Structured JSON, every field queryable
+  import structlog
+  logger = structlog.get_logger()
+  
+  logger.error(
+      "alert_processing_failed",
+      alert_id=alert_id,
+      source=source,
+      severity=severity,
+      error_type=type(e).__name__,
+      error_message=str(e),
+      duration_ms=elapsed_ms,
+      user_id=current_user
+  )
+  
+  # Output: {"event": "alert_processing_failed", "alert_id": "ALT-1234",
+  #  "source": "crowdstrike", "severity": "high", "error_type": "TimeoutError",
+  #  "duration_ms": 10043, "user_id": "analyst_42"}
+  
+  # Now in Splunk/Elastic: search for error_type=TimeoutError duration_ms>5000
+  # Instantly: All slow timeouts with context. No regex parsing needed.
+
+THE SLI/SLO/SLA FRAMEWORK:
+
+SLI (Service Level Indicator): The measurement
+  "99.2% of requests completed in under 500ms last month"
+
+SLO (Service Level Objective): Your internal target
+  "We will maintain 99.9% of requests under 500ms"
+
+SLA (Service Level Agreement): Your contractual commitment
+  "We guarantee 99.5% of requests under 500ms or we provide credits"
+
+Error budget: SLO allows 0.1% failures = 43.8 minutes/month error budget
+If you've used 40 of your 43.8 minutes this month:
+  - No new feature deployments this week (risk of budget exhaustion)
+  - Focus entirely on reliability improvements
+
+This creates a mathematical, non-political way to have the
+"is it safe to deploy?" conversation. The error budget answers it.
+
+================================================================================
+END OF PACK 006: COMPLEX SYSTEMS DESIGN + DEBUGGING + ERROR HANDLING
+Total: System design philosophy, ADRs, requirements decomposition,
+capacity planning math, walking skeleton approach, debugging methodology,
+Wolf Fence algorithm, distributed debugging, race conditions, memory leaks,
+forensic debugging, error hierarchy, retry/circuit breaker/bulkhead patterns,
+observability three pillars, structured logging, SLI/SLO/SLA framework.
+================================================================================

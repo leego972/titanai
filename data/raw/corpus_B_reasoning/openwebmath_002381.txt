@@ -1,0 +1,200 @@
+# Python address index +1 with list comprehension
+
+Return the sum of the numbers in the array, returning 0 for an empty array. Except the number 13 is very unlucky, so it does not count and numbers that come immediately after a 13 also do not count.
+
+My original answer to the problem:
+
+def sum13(nums):
+sum = 0
+for idx,val in enumerate(nums):
+if val == 13 or (idx != 0 and nums[idx-1] == 13):
+pass
+else:
+sum = sum + val
+
+return sum
+
+
+Doing this with list comprehension, I came up with
+
+return sum([x if x!=13 and nums[idx-1 if idx >0 else 0] !=13 else 0 for idx,x in enumerate(nums)])
+
+
+Is there a way to make this cleaner?
+
+-
+stackoverflow.com/questions/21303224/… could interest you. I whave no time to write a proper answer but you could probably avoid the outter "else 0" by moving the condition to the right of the list comprehension. – Josay May 14 '14 at 16:54
+Rule of thumb: if you have a pass in your code, something is wrong. Python doesn't really need a pass, it's there as a place holder for the "empty group", which is utterly useless except from a purely syntactical point of view. Any code that contains a pass can be trivially changed to something that doesn't have it and is more readable. – Bakuriu May 16 '14 at 12:39
+
+For the record, I think your original answer is quite clean and readable. My only suggestion would be to consider using if not (predicate): (do something), as opposed to if (predicate): pass; else: (do something):
+
+def sum13(nums):
+sum = 0
+for idx,val in enumerate(nums):
+if not (val == 13 or (idx != 0 and nums[idx-1] == 13)):
+sum += val
+return sum
+
+
+I like @Josay's suggestion of iterating over pairs of consecutive items. The easiest way to do this is by zipping the list with the list starting from index 1 -- i.e., zip(L, L[1:]). From there, it's just a matter of taking the second item of each pair, unless either of the items == 13. In order to consider the very first item in the list, we'll prepend 0 onto the beginning of the list, so that the first pair is [0, first-item]. In other words, we are going to zip together [0] + L (the list with 0 prepended) and L (the list itself). Here are two slightly different versions of this approach:
+
+def sum13(nums):
+sum = 0
+for first, second in zip([0] + nums, nums):
+if not 13 in (first, second):
+sum += second
+return sum
+
+
+Version 2, a functional approach using a list comprehension:
+
+def sum13(nums):
+pairs = zip([0] + nums, nums)
+allowed = lambda x, y: 13 not in (x, y) # not 13 or following a 13
+return sum(y for x, y in pairs if allowed(x, y))
+
+-
+lol, we were writing answers at the same time, but it looks like you have a better knowledge of Python than I do. would you let me know if I wrote something syntactically in error? – Malachi May 14 '14 at 18:15
+No prob! I left a comment. – Dave Yarwood May 14 '14 at 18:25
+thank you, I fixed that in my code. I need to check my logic better, I saw the if statement and just said that was wrong and didn't check the logic that I changed. big no no – Malachi May 14 '14 at 18:28
+You don't need the [ ] inside sum( ). I think that just makes an unneeded intermediate list, whereas you can just pass the generator directly to the sum function. – DaoWen May 14 '14 at 20:04
+The idiomatic way to get the preceding item while iterating through a list is zip(vals, vals[1:]), it's also quite a bit more efficient than creating a new list. – Voo May 16 '14 at 13:35
+
+EDIT: As pointed out by an anonymous user, my first version did not skip numbers that follow an even number of 13's.
+
+Use an iterator. While you for loop over an iterator you can skip items with next.
+
+def lucky_nums(nums):
+nums = iter(nums)
+for i in nums:
+if i == 13:
+while next(nums) == 13:
+pass
+else:
+yield i
+
+print sum(lucky_nums([12,13,14,15]))
+
+-
+Good one. Testing this out, I discovered that yield statements are not allowed on codingbat. don't know why... – mcgyver5 May 14 '14 at 21:34
+I just saw this error as well Error:Line 8: Yield statements are not allowed. While you may still seek a valid answer that helps you complete this exercise, I encourage you to see using yields is a superior practice. – hexparrot May 15 '14 at 14:51
+This is a great solution. FWIW, you could simplify your if statement to if not 13 in [i, next(nums)]: yield i – Dave Yarwood May 16 '14 at 16:14
+EDIT: Never mind, that doesn't work. I guess the while loop is what makes this code work, although I don't fully understand it. How does it catch 14 in the example above? Wouldn't it fail to go through the while part because 14 != 13? And yet, I tested the code and it prints 27 as expected. *scratches head* – Dave Yarwood May 16 '14 at 16:25
+@DaveYarwood next pulls the next number from the iterator, so it gets skipped even when the comparison fails. – Janne Karila May 16 '14 at 16:27
+
+It's a little "unclean" checking the previous element each time. You can maintain the loop index yourself to avoid this:
+
+def sum13(nums):
+sum = i = 0
+while i < len(nums):
+if nums[i] == 13:
+i += 2  # Exclude this element, and the next one too.
+else:
+sum += nums[i]
+i += 1
+return sum
+
+
+This is similar to the iterator/generator answer.
+
+-
+I like this answer. Sometimes sticking to the built-in looping structures leads to unnecessary contortions whereas rolling your own gives more concise code. Janne's iterator approach is probably a more pythonic solution, however. – Jack Aidley May 15 '14 at 11:23
+another great answer. I was too caught up in sticking to the built-in looping structures. – mcgyver5 May 15 '14 at 14:32
+
+A few simple comments about your original code : you could rewrite if A: pass else do_stuff() without the pass just writing if not A: do_stuff(). In your case, using De Morgan's laws, your code becomes :
+
+def sum13(nums):
+sum = 0
+for idx,val in enumerate(nums):
+if val != 13 and (idx == 0 or nums[idx-1] != 13):
+sum = sum + val
+return sum
+
+
+Please note that you have different ways of avoiding accessing the array using indices :
+
+• Save previous item
+
+For instance :
+
+def sum13(nums):
+sum = 0
+prev = None # or any value different from 13
+for val in nums:
+if val != 13 and prev != 13:
+sum = sum + val
+prev = val
+return sum
+
+
+Now, a quick comment about your new code : you are summin x if condition else 0 to sum all values matching the condition. You could just use if in your list comprehension to filter out elements you don't want.
+
+def sum13(nums):
+return sum([x if x!=13 and nums[idx-1 if idx >0 else 0] !=13 else 0 for idx,x in enumerate(nums)])
+
+
+becomes :
+
+def sum13(nums):
+return sum([x for idx,x in enumerate(nums) if x!=13 and nums[idx-1 if idx >0 else 0] !=13])
+
+
+Also, your code creates a temporary list which is not really required. You could simply write :
+
+def sum13(nums):
+return sum(x for idx,x in enumerate(nums) if x!=13 and nums[idx-1 if idx >0 else 0] !=13)
+
+
+Now it seems like an other answer has been given so I don't have much to say.
+
+-
+LOL looks like we all had a similar idea for the original code answer. would you look over my syntax, I am learning Python here and there where and when I can. – Malachi May 14 '14 at 18:17
+Your code seems to be similar to mine. Therefore, I assume it is write (on the small tests I have written, it seems to be the case) and you have my upvote :) – Josay May 14 '14 at 18:19
+check out Dave's comment on my answer. – Malachi May 14 '14 at 18:25
+Great minds think alike! @Josay, I'm glad you mentioned the "save previous item in a variable" method -- that's a good option for beginners who haven't quite wrapped their heads around functional programming / list comprehensions. – Dave Yarwood May 14 '14 at 18:31
+
+Noting your initial response to the problem
+
+def sum13(nums):
+sum = 0
+for idx,val in enumerate(nums):
+if val == 13 or (idx != 0 and nums[idx-1] == 13):
+pass
+else:
+sum = sum + val
+
+return sum
+
+
+you really should write it like this
+
+def sum13(nums):
+sum = 0
+for idx,val in enumerate(nums):
+if not(val == 13 or (idx != 0 and nums[idx-1] == 13)):
+sum = sum + val
+return sum
+
+
+there is no reason to add an extra block to an if statement if you don't have to, I know that a lot of people don't like the negatives, but if it is writing a negative if statement or writing an empty if statement, you should write the negative if statement, in this case it is straight to the point
+
+-
+You touched on the same thing that I did in my answer :) Your code in the if statement is actually incorrect, though -- it looks like you made all the =='s != and vice versa, rather than putting parentheses around the entire expression and putting not before it, which is what we want (see my answer). The way you have it, the code doesn't work as it's supposed to; for example, it will return true for any number that isn't 13, even if the previous number was 13, in which case we want it to return false. – Dave Yarwood May 14 '14 at 18:22
+@DaveYarwood, that makes sense, I didn't even think about checking my logic, which I should have done first and foremost. thanks for the review of my review – Malachi May 14 '14 at 18:25
+
+I have two suggestions.
+
+Make the unlucky number an optional second parameter with a default value of 13. You gain extra flexibility with no additional effort. Doing so also gives the special number a name, which makes your code self-documenting, and it saves you from writing the magic number twice within your function.
+
+If it were not for the special handling for unlucky numbers, the most Pythonic solution would be return sum(nums). I think that a variant of that would be a good way to express the problem. To skip some entries, you'll have to sum an iterator rather than a list. Then you don't have to deal with indexes at all.
+
+def sum_lucky(nums, unlucky_num=13):
+def unlucky(num_iter):
+try:
+next(num_iter)   # Consume the next number
+finally:             # ... but don't fail if nums ends with unlucky_num
+return 0
+num_iter = iter(nums)
+return sum(n if n != unlucky_num else unlucky(num_iter) for n in num_iter)
+
+-

@@ -1,0 +1,83 @@
+# Finding the real solutions using the ones from a complexification
+
+Let
+
+$$f(x) = 2(1+\cos x - x \sin x) \, .$$
+
+The equation $f(x)=0$ has a set of solutions given by $x = (2n - 1)\pi, \, n \in \mathbb{Z}$, easy to find since $\sin x = 0$ at these roots. To find all solutions we need to solve the equation without any immediate tricks. Reduce and Solve are unable to deal with algebraic solutions, so
+
+NSolve[2 (1 + Cos[x] - x Sin[x]) == 0 && 0 < x < 10, x] => {{x -> 1.30654}, {x -> 3.14159}, {x -> 6.58462}, {x -> 9.42478}}
+
+Now, it'd be the happiest day of my life to find a complete algebraic solution. I decided to see what I could extract from complexifying $f$, that is,
+
+$$\tilde{f}(\tilde{x}) = 2(1+ e^{i \tilde{x}} + i \tilde{x} e^{i \tilde{x}} ) \, ,$$
+
+where the $\tilde{}$ denotes a complex number (notice both $f$ and $x$ are complexified). It is evident both that $\mathrm{Re}[\tilde{f}] = f$ and that $\tilde{f} = \mathrm{Re}[\tilde{f}] + i\, \mathrm{Im}[\tilde{f}]$.Reduce works for this case:
+
+Reduce[2 (1 + Exp[I x] + I x Exp[I x]) == 0, x] => C[1] \[Element] Integers && x == I - I ProductLog[C[1], -E]
+
+but I have no idea whether or not it is possible to find solutions for the real equation from this complex solution set or if it's just plain useless. Can someone help?
+
+P.S.: I had problems to decide whether or not this question was suited for Math.SE (since it is probably about very basic complex analysis), but since I'm using Mathematica to find the solutions I decided to post it here. Feel free to move it in case it doesn't belong here.
+
+• Ponder on the result of FullSimplify[1 + Exp[I x] + I x Exp[I x] /. x -> (2 k - 1) π, k ∈ Integers]. – J. M. will be back soon Aug 31 '17 at 1:32
+• @J.M. I will... But if you have a specific answer, please say it. That's not homework :) – QuantumBrick Aug 31 '17 at 16:08
+• You want the zero of the real part. What you derived with Reduce[] zeroes the real and the imaginary part simultaneously. The solution you were looking for does not zero the imaginary part. That was my point. – J. M. will be back soon Aug 31 '17 at 16:26
+
+You can't get a complete algebraic rule for the solution, since there is no one for x == Cot[x/2]
+
+Factor the f[x] into 3 factors with TrigFactor
+
+g[x_] = f[x] // TrigFactor
+
+(*     -4 Cos[x/2] (-Cos[x/2] + x Sin[x/2])     *)
+
+
+Solve the first part -4 Cos[x/2] for x to get the known general rule x = (2 n-1) Pi
+
+Solve[g[x][[1 ;; 2]] == 0, x, Reals]
+
+(*     {{x -> ConditionalExpression[2 (-(\[Pi]/2) + 2 \[Pi] C[1]),
+C[1] \[Element] Integers]}, {x ->
+ConditionalExpression[2 (\[Pi]/2 + 2 \[Pi] C[1]),
+C[1] \[Element] Integers]}}     *)
+
+
+The third factor is x == Cot[x/2] and roots do not follow a general rule, but can be solved for a restricted x-range
+
+Solve[g[x][[3]] == 0 && 0 <= x < 30, x, Reals]
+
+(*     {{x -> Root[{Cos[#1/2] - Sin[#1/2] #1 &,
+1.30654237418880620223}]}, {x ->
+Root[{Cos[#1/2] - Sin[#1/2] #1 &, 6.5846200425641731922}]}, {x ->
+Root[{Cos[#1/2] - Sin[#1/2] #1 &, 12.7232407841313299947}]}, {x ->
+Root[{Cos[#1/2] - Sin[#1/2] #1 &, 18.9549714108415918088}]}, {x ->
+Root[{Cos[#1/2] - Sin[#1/2] #1 &, 25.212026888550825656}]}}     *)
+
+• So, you say I can't get useful info from the complexification's solution, right? Because I already solved it numerically when asking the question. – QuantumBrick Aug 31 '17 at 16:06
+• I think the main point is that you can't get algebraic solutions except for the regular (2*n-1)*Pi roots, because the solutions are transcendental and not algebraic. – Thies Heidecke Nov 29 '17 at 15:14
+eqn = 2 (1 + Cos[x] - x Sin[x]) == 0;
+
+
+Selecting the solutions within the interval that are not Root objects
+
+soln1 = Select[x /. Solve[{eqn, 0 <= x <= 50}, x], FreeQ[#, Root] &]
+
+(* {π, 3 π, 5 π, 7 π, 9 π, 11 π, 13 π, 15 π} *)
+
+
+Using FindSequenceFunction to generalize the sequence
+
+soln2 = FindSequenceFunction[soln1, n] // Simplify
+
+(* (-1 + 2 n) π *)
+
+
+Verifying the solution for all integers
+
+Assuming[Element[n, Integers], eqn /. x -> soln2 // Simplify]
+
+(* True *)
+
+
+This does not include the solutions represented as Root objects.

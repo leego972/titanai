@@ -1,0 +1,38 @@
+Question: <p>Google app engine tells me to optimize this code. Anybody any ideas what I could do?</p>
+
+<pre><code>def index(request):
+    user = users.get_current_user()
+    return base.views.render('XXX.html', 
+                 dict(profiles=Profile.gql("").fetch(limit=100), user=user))
+</code></pre>
+
+<p>And later in the template I do:</p>
+
+<pre><code>{% for profile in profiles %}
+  &lt;a href="/profile/{{profile.user.email}}/"&gt;&lt;img src="{{profile.gravatarUrl}}"&gt;&lt;/a&gt;
+  &lt;a href="/profile/{{profile.user.email}}/"&gt;{{ profile.user.nickname }}&lt;/a&gt;
+  &lt;br/&gt;{{ profile.shortDisplay }}
+</code></pre>
+
+<p>Where the methods used are:</p>
+
+<pre><code>def shortDisplay(self):
+    return "%s/day; %s/week; %s days" % (self.maxPerDay, self.maxPerWeek, self.days)
+
+def gravatarUrl(self):
+    email = self.user.email().lower()
+    default = "..."
+    gravatar_url = "http://www.gravatar.com/avatar.php?"
+    gravatar_url += urllib.urlencode({'gravatar_id':hashlib.md5(email).hexdigest(), 
+        'default':default, 'size':"64"})
+    return gravatar_url
+</code></pre>
+
+Answer: <p>The high CPU usage will be due to fetching 100 entities per request. You have several options here:</p>
+
+<ul>
+<li>Using Profile.all().fetch(100) will be ever so slightly faster, and easier to read besides.</li>
+<li>Remove any extraneous properties from the Profile model. There's significant per-property overhead deserializing entities.</li>
+<li>Display fewer users per page.</li>
+<li>Store the output of this page in memcache, and render from memcache whenever you can. That way, you don't need to generate the page often, so it doesn't matter so much if it's high CPU.</li>
+</ul>

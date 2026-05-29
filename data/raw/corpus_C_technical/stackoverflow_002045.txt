@@ -1,0 +1,41 @@
+Question: <p>How can I call an external command (as if I'd typed it at the Unix shell or Windows command prompt) from within a Python script?</p>
+
+Answer: <p>Some hints on detaching the child process from the calling one (starting the child process in background).</p>
+
+<p>Suppose you want to start a long task from a CGI-script, that is the child process should live longer than the CGI-script execution process.</p>
+
+<p>The classical example from the subprocess module docs is:</p>
+
+<pre><code>import subprocess
+import sys
+
+# some code here
+
+pid = subprocess.Popen([sys.executable, "longtask.py"]) # call subprocess
+
+# some more code here
+</code></pre>
+
+<p>The idea here is that you do not want to wait in the line 'call subprocess' until the longtask.py is finished. But it is not clear what happens after the line 'some more code here' from the example.</p>
+
+<p>My target platform was freebsd, but the development was on windows, so I faced the problem on windows first.</p>
+
+<p>On windows (win xp), the parent process will not finish until the longtask.py has finished its work. It is not what you want in CGI-script. The problem is not specific to Python, in PHP community the problems are the same.</p>
+
+<p>The solution is to pass DETACHED_PROCESS flag to the underlying CreateProcess function in win API.
+If you happen to have installed pywin32 you can import the flag from the win32process module, otherwise you should define it yourself:</p>
+
+<pre><code>DETACHED_PROCESS = 0x00000008
+
+pid = subprocess.Popen([sys.executable, "longtask.py"],
+                       creationflags=DETACHED_PROCESS).pid
+</code></pre>
+
+<p>/* <em>UPD 2015.10.27</em> @eryksun in a comment below notes, that the semantically correct flag is CREATE_NEW_CONSOLE (0x00000010) */</p>
+
+<p>On freebsd we have another problem: when the parent process is finished, it finishes the child processes as well. And that is not what you want in CGI-script either. Some experiments showed that the problem seemed to be in sharing sys.stdout. And the working solution was the following:</p>
+
+<pre><code>pid = subprocess.Popen([sys.executable, "longtask.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+</code></pre>
+
+<p>I have not checked the code on other platforms and do not know the reasons of the behaviour on freebsd. If anyone knows, please share your ideas. Googling on starting background processes in Python does not shed any light yet.</p>

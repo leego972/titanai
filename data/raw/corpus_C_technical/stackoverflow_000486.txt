@@ -1,0 +1,46 @@
+Question: <p>I am sketching the architecture for a set of programs that share various interrelated objects stored in a database. I want one of the programs to act as a service which provides a higher level interface for operations on these objects, and the other programs to access the objects through that service.</p>
+
+<p>I am currently aiming for Python and the Django framework as the technologies to implement that service with. I'm pretty sure I figure how to demonize the Python program in Linux. However, it is an optional spec item that the system should support Windows. I have little experience with Windows programming and no experience at all with Windows services.</p>
+
+<p><strong>Is it possible to run a Python programs as a Windows service (i. e. run it automatically without user login)?</strong> I won't necessarily have to implement this part, but I need a rough idea how it would be done in order to decide whether to design along these lines.</p>
+
+<p><i>Edit: Thanks for all the answers so far, they are quite comprehensive. I would like to know one more thing: <b>How is Windows aware of my service? Can I manage it with the native Windows utilities?</b> <strong>Basically, what is the equivalent of putting a start/stop script in /etc/init.d?</i></strong></p>
+
+Answer: <p>Yes you can. I do it using the pythoncom libraries that come included with <a href="http://www.activestate.com/Products/activepython/index.mhtml" rel="nofollow">ActivePython</a> or can be installed with <a href="https://sourceforge.net/projects/pywin32/" rel="nofollow">pywin32</a> (Python for Windows extensions).</p>
+
+<p>This is a basic skeleton for a simple service:</p>
+
+<pre><code>import win32serviceutil
+import win32service
+import win32event
+import servicemanager
+import socket
+
+
+class AppServerSvc (win32serviceutil.ServiceFramework):
+    _svc_name_ = "TestService"
+    _svc_display_name_ = "Test Service"
+
+    def __init__(self,args):
+        win32serviceutil.ServiceFramework.__init__(self,args)
+        self.hWaitStop = win32event.CreateEvent(None,0,0,None)
+        socket.setdefaulttimeout(60)
+
+    def SvcStop(self):
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        win32event.SetEvent(self.hWaitStop)
+
+    def SvcDoRun(self):
+        servicemanager.LogMsg(servicemanager.EVENTLOG_INFORMATION_TYPE,
+                              servicemanager.PYS_SERVICE_STARTED,
+                              (self._svc_name_,''))
+        self.main()
+
+    def main(self):
+        pass
+
+if __name__ == '__main__':
+    win32serviceutil.HandleCommandLine(AppServerSvc)
+</code></pre>
+
+<p>Your code would go in the main() method, usually with some kind of infinite loop that might be interrumped by checking a flag, that you set in the SvcStop method</p>

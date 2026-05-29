@@ -1,0 +1,50 @@
+Question: <p>I have two Python dictionaries, and I want to write a single expression that returns these two dictionaries, merged.  The <code>update()</code> method would be what I need, if it returned its result instead of modifying a dict in-place.</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a':1, 'b': 2}
+&gt;&gt;&gt; y = {'b':10, 'c': 11}
+&gt;&gt;&gt; z = x.update(y)
+&gt;&gt;&gt; print z
+None
+&gt;&gt;&gt; x
+{'a': 1, 'b': 10, 'c': 11}
+</code></pre>
+
+<p>How can I get that final merged dict in z, not x?</p>
+
+<p>(To be extra-clear, the last-one-wins conflict-handling of <code>dict.update()</code> is what I'm looking for as well.)</p>
+
+Answer: <p>In python3, the <code>items</code> method <a href="http://docs.python.org/dev/whatsnew/3.0.html#views-and-iterators-instead-of-lists">no longer returns a list</a>, but rather a <em>view</em>, which acts like a set. In this case you'll need to take the set union since concatenating with <code>+</code> won't work:</p>
+
+<pre><code>dict(x.items() | y.items())
+</code></pre>
+
+<p>For python3-like behavior in version 2.7, the <code>viewitems</code> method should work in place of <code>items</code>:</p>
+
+<pre><code>dict(x.viewitems() | y.viewitems())
+</code></pre>
+
+<p>I prefer this notation anyways since it seems more natural to think of it as a set union operation rather than concatenation (as the title shows).</p>
+
+<p><strong>Edit:</strong></p>
+
+<p>A couple more points for python 3. First, note that the <code>dict(x, **y)</code> trick won't work in python 3 unless the keys in <code>y</code> are strings.</p>
+
+<p>Also, Raymond Hettinger's Chainmap <a href="http://stackoverflow.com/a/16259217/386279">answer</a> is pretty elegant, since it can take an arbitrary number of dicts as arguments, but <a href="http://docs.python.org/dev/library/collections">from the docs</a> it looks like it sequentially looks through a list of all the dicts for each lookup:</p>
+
+<blockquote>
+  <p>Lookups search the underlying mappings successively until a key is found.</p>
+</blockquote>
+
+<p>This can slow you down if you have a lot of lookups in your application:</p>
+
+<pre><code>In [1]: from collections import ChainMap
+In [2]: from string import ascii_uppercase as up, ascii_lowercase as lo; x = dict(zip(lo, up)); y = dict(zip(up, lo))
+In [3]: chainmap_dict = ChainMap(y, x)
+In [4]: union_dict = dict(x.items() | y.items())
+In [5]: timeit for k in union_dict: union_dict[k]
+100000 loops, best of 3: 2.15 Âµs per loop
+In [6]: timeit for k in chainmap_dict: chainmap_dict[k]
+10000 loops, best of 3: 27.1 Âµs per loop
+</code></pre>
+
+<p>So about an order of magnitude slower for lookups. I'm a fan of Chainmap, but looks less practical where there may be many lookups.</p>

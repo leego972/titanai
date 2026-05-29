@@ -1,0 +1,30 @@
+Question: <p>I have two Python dictionaries, and I want to write a single expression that returns these two dictionaries, merged.  The <code>update()</code> method would be what I need, if it returned its result instead of modifying a dict in-place.</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a':1, 'b': 2}
+&gt;&gt;&gt; y = {'b':10, 'c': 11}
+&gt;&gt;&gt; z = x.update(y)
+&gt;&gt;&gt; print z
+None
+&gt;&gt;&gt; x
+{'a': 1, 'b': 10, 'c': 11}
+</code></pre>
+
+<p>How can I get that final merged dict in z, not x?</p>
+
+<p>(To be extra-clear, the last-one-wins conflict-handling of <code>dict.update()</code> is what I'm looking for as well.)</p>
+
+Answer: <p>This probably won't be a popular answer, but you almost certainly do not want to do this.  If you want a copy that's a merge, then use copy (or <a href="https://docs.python.org/2/library/copy.html">deepcopy</a>, depending on what you want) and then update.  The two lines of code are much more readable - more Pythonic - than the single line creation with .items() + .items().  Explicit is better than implicit.</p>
+
+<p>In addition, when you use .items() (pre Python 3.0), you're creating a new list that contains the items from the dict.  If your dictionaries are large, then that is quite a lot of overhead (two large lists that will be thrown away as soon as the merged dict is created).  update() can work more efficiently, because it can run through the second dict item-by-item.</p>
+
+<p>In terms of <a href="https://docs.python.org/2/library/timeit.html">time</a>:</p>
+
+<pre><code>&gt;&gt;&gt; timeit.Timer("dict(x, **y)", "x = dict(zip(range(1000), range(1000)))\ny=dict(zip(range(1000,2000), range(1000,2000)))").timeit(100000)
+15.52571702003479
+&gt;&gt;&gt; timeit.Timer("temp = x.copy()\ntemp.update(y)", "x = dict(zip(range(1000), range(1000)))\ny=dict(zip(range(1000,2000), range(1000,2000)))").timeit(100000)
+15.694622993469238
+&gt;&gt;&gt; timeit.Timer("dict(x.items() + y.items())", "x = dict(zip(range(1000), range(1000)))\ny=dict(zip(range(1000,2000), range(1000,2000)))").timeit(100000)
+41.484580039978027
+</code></pre>
+
+<p>IMO the tiny slowdown between the first two is worth it for the readability.  In addition, keyword arguments for dictionary creation was only added in Python 2.3, whereas copy() and update() will work in older versions.</p>

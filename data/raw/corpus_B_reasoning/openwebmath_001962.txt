@@ -1,0 +1,134 @@
+Strategies for Checkpoint Storage on Opportunistic Grids
+
+Raphael Y. de Camargo
+Fabio Kon, University of São Paulo
+Renato Cerqueira, Pontifical Catholic University of Rio de Janeiro
+
+Abstract—This article evaluates several strategies for storing checkpoint data in an opportunistic grid environment, including replication, parity information, and erasure coding. This evaluation compares the computational overhead, storage overhead, and degree of fault tolerance of these strategies.
+
+Executing computationally intensive parallel applications on dynamic heterogeneous environments such as computational grids can be a daunting task, 1-3 especially when using nondedicated resources. Such is the case for opportunistic computing, 4 where we use only the shared machines' idle periods. In such a scenario, machines often fail and frequently change their state from idle to occupied, compromising their execution of applications. Unlike dedicated resources, whose mean time between failures is typically weeks or even months, nondedicated resources can become unavailable several times during a single day. In fact, some machines are unavailable more than they're available. Fault tolerance mechanisms, such as checkpoint-based rollback recovery, 5 can help guarantee that applications execute properly amid frequent failures.
+
+The fault tolerance mechanism must save generated checkpoints on a stable storage medium. The usual solution is to install checkpoint servers and connect them to the nodes through a high-speed network. But a dedicated server can easily become a bottleneck as grid size increases. Moreover, when using an opportunistic computing environment, relying on such dedicated hardware increases hardware costs and contradicts the objective of such a system, which is to use the idle time of shared machines. The simplest solution is to use the grid's shared nodes as the storage medium for checkpoints, thus storing and retrieving data in the nodes' shared disk space. But, to preserve the machine's quality of service, it's best to store and retrieve data from machines only when they are idle. Consequently, it's likely that data stored on a machine will be unavailable when requested to restart a failed application.
+
+One way to solve this problem is to store multiple replicas of checkpoint data, so that you can recover the stored data even when part of the data repositories are unavailable. Another approach is to break data into several fragments, adding some redundancy, to enable data recovery from a subset of the fragments. Two common techniques for splitting data into redundant fragments are the use of erasure coding, such as information dispersal algorithms, 6 and the addition of parity information.
+
+In this article, which builds on previously published work, 7 we evaluate several strategies for the distributed storage of checkpoint data in opportunistic environments. (The " Sidebar: Related Work" discusses other recent work in this area.) We focus on the storage of checkpoint data inside a single cluster. We present a prototype implementation of a distributed checkpoint repository over InteGrade ( http://www.integrade.org.br/portal), 8 a multiuniversity grid middleware project to leverage the computing power of idle shared workstations. Using this prototype, we performed several experiments to determine the trade-offs in these strategies between computational overhead, storage overhead, and degree of fault tolerance.
+
+Data storage strategies
+
+A data-coding strategy must consider scalability, computational cost, and fault tolerance. We analyze three different strategies for data coding: data replication, data parity, and erasure coding in an information dispersal algorithm. We briefly compare their computational cost, storage overhead, and effects on data availability.
+
+To evaluate data availability, we must determine which machines will store checkpoint data. It's possible to distribute the data over the nodes executing the application, other grid nodes, or both. Here, we evaluate checkpoint data storage in the machines where the parallel application executes, using an extra node when the coding strategy requires one. We use this approach because a parallel application normally tries to use most of the available nodes in a cluster to execute its processes. This approach also lets us couple application failures with data repositories failures, making it easier to control checkpoint data availability at any time.
+
+In this work, we don't address data integrity or privacy. It's possible to check data integrity using secure hash functions such as MD5 and SHA-1. Encrypting the checkpoints ensures data privacy. Data encryption is a computationally intensive process and should be used only when necessary.
+
+Data replication
+
+Using data replication, we store full replicas of the generated checkpoints. If one of the replicas becomes inaccessible, we can use another. The advantage is that no extra coding is necessary, but the disadvantage is that we must transfer and store large amounts of data. For example, guaranteeing safety against a single failure requires saving two copies of the checkpoint.
+
+In our scenario, transferring two times the checkpoint data would generate too much network traffic, so we store a copy of the checkpoint locally and another remotely. Even though a failure in a machine running the application will make one of the checkpoints inaccessible, it will be possible to retrieve the other copy. Moreover, the other application processes can use their local checkpoint copies. Consequently, this storage mode provides recovery as long as one of the two nodes containing a checkpoint replica is available.
+
+Parity
+
+An alternative to data replication is to slice the checkpoint data into several fragments and store these fragments with an additional fragment containing parity information. This avoids data replication's large storage requirements because it requires the storage of only one checkpoint copy.
+
+We use a scheme in which each node calculates its checkpoint's parity locally, first dividing the generated checkpoint into m slices and then calculating the parity over these slices. We divide a checkpoint vector, U, of size n into m slices of size n/ m, given by
+
+U = U0, U1 , …, Um, and
+
+Uk = u 0k, u 1k, …, u kn/m, 0 ≤ k < m
+
+where k is the slice number, and uik represents the elements of slice Uk. We calculate elements p i, 0 ≤ i< n/ m of parity information vector P as
+
+$p_i=u_i^0 \oplus u_i^1 \oplus \ldots \oplus u_i^m,0 \le i < n/m$
+
+where $\oplus$ represents the exclusive-or (XOR) operation. From each process, the system then distributes slices Ui and parity vector P for storage on other nodes. Similarly, we can recover a missing fragment by performing the XOR operation over the recovered fragments.
+
+Evaluating parity is fast because it requires only simple XOR operations and storage overhead is very small. The drawback is that the parity strategy doesn't tolerate two or more simultaneous failures.
+
+Information dispersal algorithm
+
+Michael Rabin's classic information dispersal algorithm (IDA) generates a space-optimal coding of data. 6 It allows coding a vector U of size n into m + k encoded vectors of size n/m, such that regenerating U is possible using only m encoded vectors. This encoding lets you achieve different fault tolerance levels by merely tuning the values of m and k. In practice, it's possible to tolerate k failures with an overhead of only k/( mn) elements.
+
+This algorithm requires the computation of mathematical operations over a Galois field GF( q), a finite field of q elements, where q is either prime or a power p x of prime number p. When using q = p x, you carry arithmetic operations over the field by representing the numbers as polynomials of degree x and coefficients in [0, p - 1]. You calculate sums with XOR operations, whereas you carry out multiplications by multiplying the polynomials modulo an irreducible polynomial of degree x. In our case, we use p = 2 and x = 8, representing a byte. To speed up calculations, we perform simple table lookup for the multiplications.
+
+The algorithm also requires the generation of m + k linearly independent vectors ai of size m. We can easily generate these vectors by choosing n distinct values ai, 0 ≤ i < n, and setting αi = ( i, ai, … ain-1), 0 ≤ i< n. We then organize these vectors as a matrix, G, defined as
+
+G = [ αT0, αT1, … αTm+k]
+
+where T indicates the transpose of vector α. We now break file F into n/m information words, Ui, of size m and generate n/ m code words V of size m + k, where
+
+Vi = Ui × G
+
+The m + k encoded vectors, Ei, 0 ≤ i < m + k, are given by
+
+Ei = V0[ i], V1[ i], … Vn/m[ i]
+
+To recover the original information words, Ui, we need to recover k of the encoded m + k slices. We then construct code words Vj′, which are equivalent to the original code words Vi but contain only the components of the k recovered slices. Similarly, we construct matrix G′, containing only elements relative to the recovered slices. We now recover Ui, multiplying encoded words Vj′ by the inverse of G′:
+
+Ui = Vj′ × ( G′) -1
+
+The main drawback of this approach is that coding requires O[( m + k) nm] steps and decoding requires O( nm2) steps, in addition to the inversion of an m × m matrix. Qutaibah Malluhi and William Johnston proposed an algorithm that improves coding computation complexity to O( nmk) and also improves decoding. 9 They showed that you can diagonalize the first m columns of G and still have a valid algorithm. Consequently, the first m fields of code words Vi involve simple data copying. Coding is necessary only for the last k fields. This approach reduces encoding complexity considerably.
+
+IDA's greatest advantage is that it provides the desired degree of fault tolerance with optimal space overhead. For an application composed of 10 nodes, if we set m as 10, the algorithm can tolerate a failure of one node with a 10 percent space overhead, two failures with a 20 percent overhead, and so on. The disadvantage of this approach is the computational complexity of implementing the algorithm and the higher computational overhead.
+
+InteGrade is a grid middleware solution for harnessing idle computing power from shared workstations. 7 It consists of a collection of hierarchically organized InteGrade clusters. Here, we focus on checkpoint storage inside a single cluster.
+
+Architecture
+
+Figure 1 shows an InteGrade cluster's main modules. The global resource manager (GRM) controls resource management at the cluster level; the local resource manager (LRM) controls it at the node level. To form a grid composed of a cluster federation, GRMs from different clusters communicate with one another to allow global sharing of local resources. An LRM communicates only with modules from its own cluster. This separates resources belonging to different clusters; consequently, administrators can apply custom policies for each cluster.
+
+InteGrade provides portable application-level checkpointing and rollback recovery for sequential applications and for BSP (bulk synchronous parallel) and parameter-sweeping parallel applications. 10 The main modules for storing checkpoint data are the checkpointing library, the execution manager (EM), the cluster data repository manager (CDRM), and the autonomous data repositories (ADRs).
+
+The checkpointing library provides the functionality to periodically generate portable checkpoints containing the application state. The EM maintains a list of applications executing on the cluster and coordinates the reinitialization process when an application fails. The CDRM manages the available ADRs from its cluster and the location of checkpoint data fragments. The ADRs store checkpoint data; they reside on machines that share their resources with the grid.
+
+When the checkpointing library needs to store checkpoint data, it queries the local CDRM for available local data repositories and then transfers the data to the returned repositories. Checkpoint data recovery involves the library querying the CDRM for the list of repositories containing the checkpoints and retrieving the checkpoints from these repositories.
+
+The benefits of using a centralized GRM, EM, and CDRM for each cluster include implementation ease and simpler algorithms requiring less message exchanges. Moreover, these modules are part of a cluster federation, thus allowing replication and logging of their contents in other clusters for increased fault tolerance.
+
+Experiments
+
+We performed the experiments using 11 AthlonXP 1700+ processors with 1 Gbyte of RAM, connected by a switched 100-Mbps Fast Ethernet network. Students use the machines during the day, so we performed the experiments at night. Our objective was to measure the overhead of checkpoint storage during normal operation without machines becoming unavailable. We configured all machines as part of a single InteGrade cluster.
+
+We used a matrix multiplication application with matrices of different sizes and composed of 12-byte double-precision elements. We evaluated the time necessary to encode and decode data and the overhead of using different storage strategies.
+
+Data encoding and decoding
+
+We first measured the time required to encode and decode a checkpoint using IDA and local parity. We varied the data size and the number of slices for the comparison. Figure 2 shows the results. In the graphs, IDA ( m, k) represents IDA using m and k as described earlier.
+
+Figure 2   Time required to (a) code and (b) decode a file.
+
+As expected, the local parity calculation was faster than IDA in all scenarios. The most interesting result, however, was that coding with IDA wasn't too expensive. Encoding 100 Mbytes of data required only a few seconds; the encoding time increased linearly with the number of extra slices k and the data size. The same was true for decoding. Therefore, recovering the data shouldn't take more than a few seconds. With further optimizations in vector multiplications, we can achieve even better results. Consequently, the results of this experiment were very satisfactory.
+
+We also evaluated the overhead incurred by checkpointing, coding, and distributing storage over a parallel-application execution time. The objective was to compare the overhead for several of the storage strategies we described earlier. We evaluated the following scenarios:
+
+• No storage. The system generates checkpoints but doesn't store them.
+• Centralized repository. The system stores checkpoints in a centralized repository.
+• Replication. The system stores one copy of the checkpoint locally and another in a remote repository.
+• Parity over local checkpoints. The system breaks the checkpoint into 10 slices, with one containing parity information, and stores them in distributed repositories.
+• IDA ( m = 9, k = 1) . The system codes the checkpoint into 10 slices, from which nine are sufficient for recovery, and stores them in distributed repositories.
+• IDA ( m = 8, k = 2) . The system codes the checkpoint into 10 slices, from which eight are sufficient for recovery, and stores them in distributed repositories.
+
+When using replication, the system distributes remotely stored checkpoints throughout the nine nodes executing the application. For the last three scenarios, which generate 10 slices, we used an additional node to store the remaining slice. We stored the checkpoints in the machines executing the application processes so that we could evaluate how checkpoint storage affects application execution time. If other machines in the cluster are idle, it would be better to store data on these machines, thus transferring the storage overhead to them.
+
+Figure 3 compares the overhead of storing checkpoints to the overhead when the application generates but doesn't store checkpoints. The x-axis contains the six storage scenarios. The y-axis shows the normalized execution time. We used nine nodes to perform the matrix multiplication and three matrix sizes: 1,350 × 1,350; 2,700 × 2,700; and 5,400 × 5,400. To perform the benchmark, we divided the total execution time into execution segments bounded by the checkpoint generation times. Table 1 gives these values for each matrix, along with the number of generated checkpoints and the size of local and global checkpoints.
+
+Figure 3   Checkpoint storage overhead for the matrix multiplication application: (a) 1,350 × 1,350 matrix, (b) 2,700 × 2,700 matrix, and (c) 5,400 × 5,400 matrix.
+
+Table 1. Execution parameters for the execution overhead experiment.
+
+The results show that IDA incurs the highest overhead—which we expected, because IDA requires data encoding. But the extra overhead was always below 3 percent, which is very small, especially considering the large checkpoint sizes. Although for the 5,400 × 5,400 matrices the checkpoint interval was 10 minutes, we could reduce this value to 5 minutes or less and still get a reasonable overhead.
+
+Conclusion
+
+In comparing these storage strategies, we saw that using parity, replication, or centralized storage could reduce overhead, but with a lower degree of fault tolerance. Encoding with IDA was slower but more flexible, because by manipulating its parameters we could trade off between speed, resource use, and level of fault tolerance. Moreover, IDA requires less storage space and network use, thus allowing better resource utilization. Finally, in our experimental scenario, the execution overhead of producing, coding, and storing global checkpoints greater than 1 Gbyte was small, always below 3 percent, for typical checkpoint intervals of a few minutes.
+
+Storing all checkpoint data inside a single cluster is efficient because machines are normally connected by fast switched networks. But this approach has the drawback of being sensitive to correlated failures in the cluster nodes. A scenario in which all machines in a cluster become unreachable is quite common and can occur, for example, from a problem in the local network.
+
+Because we're dealing with a federation of clusters, we can make the system tolerant to correlated failures by distributing the checkpoint fragments randomly throughout the grid. IDA seems to be a good choice for encoding data because it lets us code a file into an arbitrary number of fragments and requires only of a subset of them to recover the original file. For example, we could encode a file into 32 blocks, from which 16 are required for recovery, to achieve very high availability levels. 11,12
+
+The main problem with using remote clusters for storage is that sending and fetching data from distant repositories is typically far slower than operating in the local cluster. A good solution is to store most of the generated checkpoints in the local cluster and the remaining ones in remote repositories. For example, for each five generated checkpoints, the system would store four in the local cluster and one in remote clusters. This solution would prevent the large overhead of sending data through long distances, at the cost of possibly greater computation loss if there are correlated failures in the cluster nodes.
+
+However, coordinating data distribution in the entire grid is complex, requiring the clusters to communicate with one another and share information about their available data repositories and locally stored files. Several challenges remain for efficient distributed storage, including the development of scalable algorithms for data location, data consistency, data privacy, and fault tolerance.
+
+We are working on a distributed storage system for computational grids that allows reliable storage of arbitrary data. In this scheme, CDRMs from InteGrade clusters communicate with one another using a structured peer-to-peer overlay network. The system encodes data using IDA and then distributes the fragments throughout the grid. Each fragment receives a unique ID, which the system uses to route the fragment to the target CDRM. This system stores al

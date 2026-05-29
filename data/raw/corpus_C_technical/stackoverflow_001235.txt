@@ -1,0 +1,72 @@
+Question: <p>I want to grab the value of a hidden input field in HTML.</p>
+
+<pre><code>&lt;input type="hidden" name="fooId" value="12-3456789-1111111111" /&gt;
+</code></pre>
+
+<p>I want to write a regular expression in Python that will return the value of fooId, given that I know the line in the HTML follows the format</p>
+
+<pre><code>&lt;input type="hidden" name="fooId" value="**[id is here]**" /&gt;
+</code></pre>
+
+<p>Can someone provide an example in Python to parse the HTML for the value?</p>
+
+Answer: <p>Pyparsing is a good interim step between BeautifulSoup and regex.  It is more robust than just regexes, since its HTML tag parsing comprehends variations in case, whitespace, attribute presence/absence/order, but simpler to do this kind of basic tag extraction than using BS.</p>
+
+<p>Your example is especially simple, since everything you are looking for is in the attributes of the opening "input" tag.  Here is a pyparsing example showing several variations on your input tag that would give regexes fits, and also shows how NOT to match a tag if it is within a comment:</p>
+
+<pre><code>html = """&lt;html&gt;&lt;body&gt;
+&lt;input type="hidden" name="fooId" value="**[id is here]**" /&gt;
+&lt;blah&gt;
+&lt;input name="fooId" type="hidden" value="**[id is here too]**" /&gt;
+&lt;input NAME="fooId" type="hidden" value="**[id is HERE too]**" /&gt;
+&lt;INPUT NAME="fooId" type="hidden" value="**[and id is even here TOO]**" /&gt;
+&lt;!--
+&lt;input type="hidden" name="fooId" value="**[don't report this id]**" /&gt;
+--&gt;
+&lt;foo&gt;
+&lt;/body&gt;&lt;/html&gt;"""
+
+from pyparsing import makeHTMLTags, withAttribute, htmlComment
+
+# use makeHTMLTags to create tag expression - makeHTMLTags returns expressions for
+# opening and closing tags, we're only interested in the opening tag
+inputTag = makeHTMLTags("input")[0]
+
+# only want input tags with special attributes
+inputTag.setParseAction(withAttribute(type="hidden", name="fooId"))
+
+# don't report tags that are commented out
+inputTag.ignore(htmlComment)
+
+# use searchString to skip through the input 
+foundTags = inputTag.searchString(html)
+
+# dump out first result to show all returned tags and attributes
+print foundTags[0].dump()
+print
+
+# print out the value attribute for all matched tags
+for inpTag in foundTags:
+    print inpTag.value
+</code></pre>
+
+<p>Prints:</p>
+
+<pre><code>['input', ['type', 'hidden'], ['name', 'fooId'], ['value', '**[id is here]**'], True]
+- empty: True
+- name: fooId
+- startInput: ['input', ['type', 'hidden'], ['name', 'fooId'], ['value', '**[id is here]**'], True]
+  - empty: True
+  - name: fooId
+  - type: hidden
+  - value: **[id is here]**
+- type: hidden
+- value: **[id is here]**
+
+**[id is here]**
+**[id is here too]**
+**[id is HERE too]**
+**[and id is even here TOO]**
+</code></pre>
+
+<p>You can see that not only does pyparsing match these unpredictable variations, it returns the data in an object that makes it easy to read out the individual tag attributes and their values.</p>

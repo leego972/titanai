@@ -1,0 +1,131 @@
+Question: <p>What is the best possible way to check if a string can be represented as a number in Python? </p>
+
+<p>The function I currently have right now is:</p>
+
+<pre><code>def is_number(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+</code></pre>
+
+<p>Which, not only is ugly and slow, seems clunky. However I haven't found a better method because calling <code>float</code> in the main function is even worse. </p>
+
+Answer: <p>I did some <a href="http://nbviewer.ipython.org/github/rasbt/One-Python-benchmark-per-day/blob/master/ipython_nbs/day6_string_is_number.ipynb?create=1" rel="nofollow">benchmarks</a> comparing the different approaches</p>
+
+<pre><code>def is_number_tryexcept(s):
+    """ Returns True is string is a number. """
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+import re    
+def is_number_regex(s):
+    """ Returns True is string is a number. """
+    if re.match("^\d+?\.\d+?$", s) is None:
+        return s.isdigit()
+    return True
+
+
+def is_number_repl_isdigit(s):
+    """ Returns True is string is a number. """
+    return s.replace('.','',1).isdigit()
+</code></pre>
+
+<p>If the string is not a number, the except-block is quite slow. But more importantly, the try-except method is the only approach that handles scientific notations correctly.</p>
+
+<pre><code>funcs = [
+          is_number_tryexcept, 
+          is_number_regex,
+          is_number_repl_isdigit
+          ]
+
+a_float = '.1234'
+
+print('Float notation ".1234" is not supported by:')
+for f in funcs:
+    if not f(a_float):
+        print('\t -', f.__name__)
+</code></pre>
+
+<p>Float notation ".1234" is not supported by:<br>
+- is_number_regex  </p>
+
+<pre><code>scientific1 = '1.000000e+50'
+scientific2 = '1e50'
+
+
+print('Scientific notation "1.000000e+50" is not supported by:')
+for f in funcs:
+    if not f(scientific1):
+        print('\t -', f.__name__)
+
+
+
+
+print('Scientific notation "1e50" is not supported by:')
+for f in funcs:
+    if not f(scientific2):
+        print('\t -', f.__name__)
+</code></pre>
+
+<p>Scientific notation "1.000000e+50" is not supported by:<br>
+- is_number_regex<br>
+- is_number_repl_isdigit<br>
+Scientific notation "1e50" is not supported by:<br>
+- is_number_regex<br>
+- is_number_repl_isdigit  </p>
+
+<h2>EDIT: The benchmark results</h2>
+
+<pre><code>import timeit
+
+test_cases = ['1.12345', '1.12.345', 'abc12345', '12345']
+times_n = {f.__name__:[] for f in funcs}
+
+for t in test_cases:
+    for f in funcs:
+        f = f.__name__
+        times_n[f].append(min(timeit.Timer('%s(t)' %f, 
+                      'from __main__ import %s, t' %f)
+                              .repeat(repeat=3, number=1000000)))
+</code></pre>
+
+<p>where the following functions were tested</p>
+
+<pre><code>from re import match as re_match
+from re import compile as re_compile
+
+def is_number_tryexcept(s):
+    """ Returns True is string is a number. """
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+def is_number_regex(s):
+    """ Returns True is string is a number. """
+    if re_match("^\d+?\.\d+?$", s) is None:
+        return s.isdigit()
+    return True
+
+
+comp = re_compile("^\d+?\.\d+?$")    
+
+def compiled_regex(s):
+    """ Returns True is string is a number. """
+    if comp.match(s) is None:
+        return s.isdigit()
+    return True
+
+
+def is_number_repl_isdigit(s):
+    """ Returns True is string is a number. """
+    return s.replace('.','',1).isdigit()
+</code></pre>
+
+<p><a href="http://i.stack.imgur.com/DFoK6.png" rel="nofollow"><img src="http://i.stack.imgur.com/DFoK6.png" alt="enter image description here"></a></p>

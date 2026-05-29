@@ -1,0 +1,68 @@
+Question: <p>What is the idiomatic Python equivalent of this C/C++ code?</p>
+
+<pre><code>void foo()
+{
+    static int counter = 0;
+    counter++;
+    printf("counter is %d\n", counter);
+}
+</code></pre>
+
+<p>specifically, how does one implement the static member at the function level, as opposed to the class level? And does placing the function into a class change anything?</p>
+
+Answer: <p>Prompted by <a href="http://stackoverflow.com/questions/19125515/function-instance-variables-inside-a-class/19125964">this question</a>, may I present another alternative which might be a bit nicer to use and will look the same for both methods and functions:</p>
+
+<pre><code>@static_var2('seed',0)
+def funccounter(statics, add=1):
+    statics.seed += add
+    return statics.seed
+
+print funccounter()       #1
+print funccounter(add=2)  #3
+print funccounter()       #4
+
+class ACircle(object):
+    @static_var2('seed',0)
+    def counter(statics, self, add=1):
+        statics.seed += add
+        return statics.seed
+
+c = ACircle()
+print c.counter()      #1
+print c.counter(add=2) #3
+print c.counter()      #4
+d = ACircle()
+print d.counter()      #5
+print d.counter(add=2) #7
+print d.counter()      #8Â  Â Â 
+</code></pre>
+
+<p>If you like the usage, here's the implementation:</p>
+
+<pre><code>class StaticMan(object):
+    def __init__(self):
+        self.__dict__['_d'] = {}
+
+    def __getattr__(self, name):
+        return self.__dict__['_d'][name]
+    def __getitem__(self, name):
+        return self.__dict__['_d'][name]
+    def __setattr__(self, name, val):
+        self.__dict__['_d'][name] = val
+    def __setitem__(self, name, val):
+        self.__dict__['_d'][name] = val
+
+def static_var2(name, val):
+    def decorator(original):
+        if not hasattr(original, ':staticman'):    
+            def wrapped(*args, **kwargs):
+                return original(getattr(wrapped, ':staticman'), *args, **kwargs)
+            setattr(wrapped, ':staticman', StaticMan())
+            f = wrapped
+        else:
+            f = original #already wrapped
+
+        getattr(f, ':staticman')[name] = val
+        return f
+    return decorator
+</code></pre>

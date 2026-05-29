@@ -1,0 +1,68 @@
+# Buffer overflow
+
+In programming and information security, a buffer overflow or buffer overrun is an anomaly whereby a program writes data to a buffer beyond the buffer's allocated memory, overwriting adjacent memory locations.
+
+Buffers are areas of memory set aside to hold data, often while moving it from one section of a program to another, or between programs. Buffer overflows can often be triggered by malformed inputs; if one assumes all inputs will be smaller than a certain size and the buffer is created to be that size, then an anomalous transaction that produces more data could cause it to write past the end of the buffer. If this overwrites adjacent data or executable code, this may result in erratic program behavior, including memory access errors, incorrect results, and crashes.
+
+Exploiting the behavior of a buffer overflow is a well-known security exploit. On many systems, the memory layout of a program, or the system as a whole, is well defined. By sending in data designed to cause a buffer overflow, it is possible to write into areas known to hold executable code and replace it with malicious code, or to selectively overwrite data pertaining to the program's state, therefore causing behavior that was not intended by the original programmer. Buffers are widespread in operating system (OS) code, so it is possible to make attacks that perform privilege escalation and gain unlimited access to the computer's resources. The famed Morris worm in 1988 used this as one of its attack techniques.
+
+Programming languages commonly associated with buffer overflows include C and C++, which provide no built-in protection against accessing or overwriting data in any part of memory and do not automatically check that data written to an array (the built-in buffer type) is within the boundaries of that array. Bounds checking can prevent buffer overflows, but requires additional code and processing time. Modern operating systems use a variety of techniques to combat malicious buffer overflows, notably by randomizing the layout of memory, or deliberately leaving space between buffers and looking for actions that write into those areas ("canaries").
+
+Technical description
+A buffer overflow occurs when data written to a buffer also corrupts data values in memory addresses adjacent to the destination buffer due to insufficient bounds checking. This can occur when copying data from one buffer to another without first checking that the data fits within the destination buffer.
+
+Example
+
+In the following example expressed in C, a program has two variables which are adjacent in memory: an 8-byte-long string buffer, A, and a two-byte big-endian integer, B.
+
+char           A[8] = "";
+unsigned short B    = 1979;
+
+Initially, A contains nothing but zero bytes, and B contains the number 1979.
+
+Now, the program attempts to store the null-terminated string  with ASCII encoding in the A buffer.
+strcpy(A, "excessive");
+ is 9 characters long and encodes to 10 bytes including the null terminator, but A can take only 8 bytes. By failing to check the length of the string, it also overwrites the value of B:
+
+B's value has now been inadvertently replaced by a number formed from part of the character string. In this example "e" followed by a zero byte would become 25856.
+
+Writing data past the end of allocated memory can sometimes be detected by the operating system to generate a segmentation fault error that terminates the process.
+
+To prevent the buffer overflow from happening in this example, the call to strcpy could be replaced with strlcpy, which takes the maximum capacity of A (including a null-termination character) as an additional parameter and ensures that no more than this amount of data is written to A:
+
+strlcpy(A, "excessive", sizeof(A));
+
+When available, the strlcpy library function is preferred over strncpy which does not null-terminate the destination buffer if the source string's length is greater than or equal to the size of the buffer (the third argument passed to the function). Therefore A may not be null-terminated and cannot be treated as a valid C-style string.
+
+Exploitation
+
+The techniques to exploit a buffer overflow vulnerability vary by architecture, operating system, and memory region. For example, exploitation on the heap (used for dynamically allocated memory), differs markedly from exploitation on the call stack. In general, heap exploitation depends on the heap manager used on the target system, while stack exploitation depends on the calling convention used by the architecture and compiler.
+
+Stack-based exploitation
+
+There are several ways in which one can manipulate a program by exploiting stack-based buffer overflows:
+
+ Changing program behavior by overwriting a local variable located near the vulnerable buffer on the stack;
+ By overwriting the return address in a stack frame to point to code selected by the attacker, usually called the shellcode. Once the function returns, execution will resume at the attacker's shellcode;
+ By overwriting a function pointer or exception handler to point to the shellcode, which is subsequently executed;
+ By overwriting a local variable (or pointer) of a different stack frame, which will later be used by the function that owns that frame.
+
+The attacker designs data to cause one of these exploits, then places this data in a buffer supplied to users by the vulnerable code. If the address of the user-supplied data used to affect the stack buffer overflow is unpredictable, exploiting a stack buffer overflow to cause remote code execution becomes much more difficult. One technique that can be used to exploit such a buffer overflow is called "trampolining". Here, an attacker will find a pointer to the vulnerable stack buffer and compute the location of their shellcode relative to that pointer. The attacker will then use the overwrite to jump to an instruction already in memory which will make a second jump, this time relative to the pointer. That second jump will branch execution into the shellcode. Suitable instructions are often present in large code. The Metasploit Project, for example, maintains a database of suitable opcodes, though it lists only those found in the Windows operating system.
+
+Heap-based exploitation
+
+A buffer overflow occurring in the heap data area is referred to as a heap overflow and is exploitable in a manner different from that of stack-based overflows. Memory on the heap is dynamically allocated by the application at run-time and typically contains program data. Exploitation is performed by corrupting this data in specific ways to cause the application to overwrite internal structures such as linked list pointers. The canonical heap overflow technique overwrites dynamic memory allocation linkage (such as malloc meta data) and uses the resulting pointer exchange to overwrite a program function pointer.
+
+Microsoft's GDI+ vulnerability in handling JPEGs is an example of the danger a heap overflow can present.
+
+Barriers to exploitation
+
+Manipulation of the buffer, which occurs before it is read or executed, may lead to the failure of an exploitation attempt. These manipulations can mitigate the threat of exploitation, but may not make it impossible. Manipulations could include conversion to upper or lower case, removal of metacharacters and filtering out of non-alphanumeric strings. However, techniques exist to bypass these filters and manipulations, such as alphanumeric shellcode, polymorphic code, self-modifying code, and return-to-libc attacks. The same methods can be used to avoid detection by intrusion detection systems. In some cases, including where code is converted into Unicode, the threat of the vulnerability has been misrepresented by the disclosers as only Denial of Service when in fact the remote execution of arbitrary code is possible.
+
+Practicalities of exploitation
+
+In real-world exploits there are a variety of challenges which need to be overcome for exploits to operate reliably. These factors include null bytes in addresses, variability in the location of shellcode, differences between environments, and various counter-measures in operation.
+
+NOP sled technique
+
+A NOP-sled is the oldest and most widely known technique for exploiting stack buffer overflows. It solves the problem of finding the exact address of the buffer by effectively increasing the size of the target area. To do this, much larger sections of the stack are corrupted with the no-op machine instruction. At the end of the attacker-supplied data, after the no-op instructions, the attacker places an instruction to perform a relative jump to the top of the buffer where the shellcode is located. This collection of no-ops is referred to as the "NOP-sled" because if the return address is overwritten with any address within the no-op region of the buffer, the execution will "slide" down the no-ops until it is redirected to the actual malicious code by the jump at the end. This technique requires the attacker to guess where

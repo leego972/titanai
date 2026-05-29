@@ -1,0 +1,91 @@
+# Use and understanding of async/await in .NET 4.5 +
+
+I am just about to embark upon a massive job of multi-threading a cost-engine. I could use TPL of which I am very familiar, but would like to leverage the async/await keywords of .NET 4.5 to make life that little bit simpler.
+
+Is my understanding of what is going on correct? How can I improve this design?
+
+CancellationTokenSource cancelSource;
+
+// Mark the event handler with async so you can use await in it.
+private async void StartButton_Click(object sender, RoutedEventArgs e)
+{
+cancelSource = new CancellationTokenSource();
+CancellationToken token = cancelSource.Token;
+IProgress<ProgressInfo> progressInfo = new Progress<ProgressInfo>(ReportProgress);
+await ProcessScript(progressInfo, token, uiScheduler);
+
+// await sets up the following as an Contnuation to
+// continue once returned from await.
+}
+
+// Class to report progress...
+private void ReportProgress(ProgressInfo progressInfo)
+{
+this.progressBar.Value = progressInfo.PrecentComplete;
+this.progressLabel.Content = progressInfo.Message;
+}
+
+CancellationToken token,
+{
+ProgressInfo pi = new ProgressInfo();
+pi.PrecentComplete = 0;
+pi.Message = "In script processor...";
+progressInfo.Report(pi);
+
+Thread.Sleep(5000); // This is UI Blocking...
+string str = this.resultsTextBox.Text;
+str = "We have added this => going into await...";
+this.resultsTextBox.AppendText(str);
+
+pi.PrecentComplete = 50;
+progressInfo.Report(pi);
+
+// awaits the long runniing task - non-UI blocking.
+
+// The await above sets this up as a continuation on the UI thread.
+pi.PrecentComplete = 95;
+progressInfo.Report(pi);
+
+this.resultsTextBox.AppendText("Where are we now??");
+return;
+}
+
+{
+{
+this.resultsTextBox.AppendText("\n\nNow in 'LongRunning'!! Waiting 5s simulating HARD WORK!!");
+}, CancellationToken.None,
+uiScheduler);
+
+// Simulate hard work.
+{
+this.resultsTextBox.AppendText("\n\n\nHARD WORK COMPLETE!!");
+}, CancellationToken.None,
+uiScheduler);
+return true;
+}
+
+-
+You may want to rephrase the question to better fit the code-review style described in the faq. There are currently a couple of close requests because questions like "Help me understand this code" are off topic here. "How can I improve this async/await code", for instance, would be a better fit. –  codesparkle Jan 23 '13 at 14:04
+I'm confused. The sight is called "CodeReview", I am asking someone to do exactly that, review my code. I will take you advice and make an edit; I hope it helps and thanks for your time... –  Killercam Jan 23 '13 at 15:50
+What's off topic is to ask us to explain the code to you. As long as you aren't asking that, its okay. –  Winston Ewert Jan 23 '13 at 20:28
+
+Yes, your understanding is correct. Note that you're not using CancellationToken provided to ProcessScript. If your operations are cancellable and/or you're using other asynchronous API that accepts CancellationTokens it's highly recommended to pass it through the code, otherwise just don't create the CancellationTokenSource.
+
+Thread.Sleep(5000); // This is UI Blocking...
+
+
+This is correct since async methods return control to the caller only when something is awaited.
+
+// awaits the long runniing task - non-UI blocking.
+
+
+Here we release the UI thread and running a (computing) task in parallel. The reason I've added "computing" is that you're manually spanning a new task using Task.Factory. In case of I/O-related task returned by .NET framework it won't actually represent a new thread as it can wait for external data on the same thread.
+
+// The await above sets this up as a continuation on the UI thread.
+
+
+Correct. See good article Await, SynchronizationContext, and Console Apps that describes in details the behavior of await.
+
+// Allow access to the UI from this background thread from
+
+You're passing TaskScheduler corresponding to UI thread so naturally the code will be safe to work with UI. I would recommend using IProgress<T> to update/inform UI about changes in long-running task though, since you may want to separate computation logic from UI-related code.

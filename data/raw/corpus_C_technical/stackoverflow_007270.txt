@@ -1,0 +1,98 @@
+Question: <p>If I'm writing unit tests in python (using the unittest module), is it possible to output data from a failed test, so I can examine it to help deduce what caused the error? I am aware of the ability to create a customized message, which can carry some information, but sometimes you might deal with more complex data, that can't easily be represented as a string.</p>
+
+<p>For example, suppose you had a class Foo, and were testing a method bar, using data from a list called testdata:</p>
+
+<pre><code>class TestBar(unittest.TestCase):
+    def runTest(self):
+        for t1, t2 in testdata:
+            f = Foo(t1)
+            self.assertEqual(f.bar(t2), 2)
+</code></pre>
+
+<p>If the test failed, I might want to output t1, t2 and/or f, to see why this particular data resulted in a failure. By output, I mean that the variables can be accessed like any other variables, after the test has been run.</p>
+
+Answer: <p>inspect.trace will let you get local variables after an exception has been thrown.  You can then wrap the unit tests with a decorator like the following one to save off those local variables for examination during the post mortem.</p>
+
+<pre><code>import random
+import unittest
+import inspect
+
+
+def store_result(f):
+    """
+    Store the results of a test
+    On success, store the return value.
+    On failure, store the local variables where the exception was thrown.
+    """
+    def wrapped(self):
+        if 'results' not in self.__dict__:
+            self.results = {}
+        # If a test throws an exception, store local variables in results:
+        try:
+            result = f(self)
+        except Exception as e:
+            self.results[f.__name__] = {'success':False, 'locals':inspect.trace()[-1][0].f_locals}
+            raise e
+        self.results[f.__name__] = {'success':True, 'result':result}
+        return result
+    return wrapped
+
+def suite_results(suite):
+    """
+    Get all the results from a test suite
+    """
+    ans = {}
+    for test in suite:
+        if 'results' in test.__dict__:
+            ans.update(test.results)
+    return ans
+
+# Example:
+class TestSequenceFunctions(unittest.TestCase):
+
+    def setUp(self):
+        self.seq = range(10)
+
+    @store_result
+    def test_shuffle(self):
+        # make sure the shuffled sequence does not lose any elements
+        random.shuffle(self.seq)
+        self.seq.sort()
+        self.assertEqual(self.seq, range(10))
+        # should raise an exception for an immutable sequence
+        self.assertRaises(TypeError, random.shuffle, (1,2,3))
+        return {1:2}
+
+    @store_result
+    def test_choice(self):
+        element = random.choice(self.seq)
+        self.assertTrue(element in self.seq)
+        return {7:2}
+
+    @store_result
+    def test_sample(self):
+        x = 799
+        with self.assertRaises(ValueError):
+            random.sample(self.seq, 20)
+        for element in random.sample(self.seq, 5):
+            self.assertTrue(element in self.seq)
+        return {1:99999}
+
+
+suite = unittest.TestLoader().loadTestsFromTestCase(TestSequenceFunctions)
+unittest.TextTestRunner(verbosity=2).run(suite)
+
+from pprint import pprint
+pprint(suite_results(suite))
+</code></pre>
+
+<p>The last line will print the returned values where the test succeeded and the local variables, in this case x, when it fails:</p>
+
+<pre><code>{'test_choice': {'result': {7: 2}, 'success': True},
+ 'test_sample': {'locals': {'self': &lt;__main__.TestSequenceFunctions testMethod=test_sample&gt;,
+                            'x': 799},
+                 'success': False},
+ 'test_shuffle': {'result': {1: 2}, 'success': True}}
+</code></pre>
+
+<p>Har det gÃ¸y :-)</p>

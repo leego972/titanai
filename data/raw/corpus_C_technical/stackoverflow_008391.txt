@@ -1,0 +1,52 @@
+Question: <p>This code</p>
+
+<pre><code>select.select([sys.stdin], [], [], 1.0)
+</code></pre>
+
+<p>does exactly what I want on Linux, but not in Windows.</p>
+
+<p>I've used <code>kbhit()</code> in <code>msvcrt</code> before to see if data is available on stdin for reading, but in this case it always returns <code>0</code>.  Additionally <code>msvcrt.getch()</code> returns <code>'\xff'</code> whereas <code>sys.stdin.read(1)</code> returns <code>'\x01'</code>.  It seems as if the msvcrt functions are not behaving properly.</p>
+
+<p>Unfortunately I can't use TCP sockets as I'm not in control of the application talking my Python program.</p>
+
+Answer: <p>In some rare situations, you might care what stdin is connected to.  Mostly, you don't care -- you just read stdin.</p>
+
+<p>In <code>someprocess | python myprogram.py</code>, stdin is connected to a pipe; in this case, the stdout of the previous process.  You simply read from <code>sys.stdin</code> and you're reading from the other process.  [Note that in Windows, however, there's still (potentially) a "CON" device with a keyboard.  It just won't be <code>sys.stdin</code>.]</p>
+
+<p>In <code>python myprogram.py &lt;someFile</code>, stdin is connected to a file.  You simply read from <code>sys.stdin</code> and you're reading from the file.</p>
+
+<p>In <code>python myprogram.py</code>, stdin is left connected to the console (<code>/dev/ttyxx</code> in *nix).  You simple read from <code>sys.stdin</code> and you're reading from the keyboard.</p>
+
+<p>Note the common theme in the above three cases.  You simply read from <code>sys.stdin</code> and your program's environment defines everything for you.  You don't check "to see if data is available on stdin for reading".  It's already available.</p>
+
+<p>Sometimes, you want a keyboard interrupt (or other shenanigans).  Python, BTW, has a keyboard interrupt as a first-class feature of the I/O elements.  Control-C raises an interrupt during I/O (it won't break into a tight loop, but it will signal a program that prints periodically.)</p>
+
+<p>Sometimes you need to find out what kind of file <code>stdin</code> is connected to.</p>
+
+<p>Something like <code>os.isatty( sys.stdin.fileno() )</code>  If <code>sys.stdin</code> is a TTY, you're program was left connected to the windows "CON" (the keyboard).  If <code>sys.stdin</code> is not a TTY, it's connected to a file or a pipe.</p>
+
+<p><hr /></p>
+
+<p>Example</p>
+
+<pre><code>Microsoft Windows XP [Version 5.1.2600]
+(C) Copyright 1985-2001 Microsoft Corp.
+
+C:\Documents and Settings\slott&gt;python
+Python 2.5.2 (r252:60911, Feb 21 2008, 13:11:45) [MSC v.1310 32 bit (Intel)] on
+win32
+Type "help", "copyright", "credits" or "license" for more information.
+&gt;&gt;&gt; import os
+&gt;&gt;&gt; import sys
+&gt;&gt;&gt; os.isatty( sys.stdin.fileno() )
+True
+&gt;&gt;&gt;
+</code></pre>
+
+<p>The value of <code>True</code> tells me Python is running without a file or pipe attached.  <code>sys.stdin</code> is the keyboard.  Using windows <code>kbhit</code> is needless.</p>
+
+<p>A value of <code>False</code> tells me Python is running with a file or pipe attached.  <code>sys.stdin</code> is NOT the keyboard.  Checking <code>kbhit</code> might be meaningful.  Also, I could open the <code>CON:</code> device and read the keyboard directly, separate from <code>sys.stdin</code>.</p>
+
+<p><hr /></p>
+
+<p>I'm not sure why you need "to see if data is available on stdin for reading".  It might help to update your question with additional details of what you're trying to accomplish.</p>

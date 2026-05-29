@@ -1,0 +1,82 @@
+Question: <p>There is a socket related function call in my code, that function is from another module thus out of my control, the problem is that it blocks for hours occasionally, which is totally unacceptable, How can I limit the function execution time from my code? I guess the solution must utilize another thread.</p>
+
+Answer: <p>I would usually prefer using a contextmanager as suggested by @josh-lee</p>
+
+<p>But in case someone is interested in having this implemented as a decorator, here's an alternative.</p>
+
+<p>Here's how it would look like:</p>
+
+<pre class="lang-py prettyprint-override"><code>import time
+from timeout import timeout
+
+class Test(object):
+    @timeout(2)
+    def test_a(self, foo, bar):
+        print foo
+        time.sleep(1)
+        print bar
+        return 'A Done'
+
+    @timeout(2)
+    def test_b(self, foo, bar):
+        print foo
+        time.sleep(3)
+        print bar
+        return 'B Done'
+
+t = Test()
+print t.test_a('python', 'rocks')
+print t.test_b('timing', 'out')
+</code></pre>
+
+<p>And this is the <code>timeout.py</code> module:</p>
+
+<pre class="lang-py prettyprint-override"><code>import threading
+
+class TimeoutError(Exception):
+    pass
+
+class InterruptableThread(threading.Thread):
+    def __init__(self, func, *args, **kwargs):
+        threading.Thread.__init__(self)
+        self._func = func
+        self._args = args
+        self._kwargs = kwargs
+        self._result = None
+
+    def run(self):
+        self._result = self._func(*self._args, **self._kwargs)
+
+    @property
+    def result(self):
+        return self._result
+
+
+class timeout(object):
+    def __init__(self, sec):
+        self._sec = sec
+
+    def __call__(self, f):
+        def wrapped_f(*args, **kwargs):
+            it = InterruptableThread(f, *args, **kwargs)
+            it.start()
+            it.join(self._sec)
+            if not it.is_alive():
+                return it.result
+            raise TimeoutError('execution expired')
+        return wrapped_f
+</code></pre>
+
+<p>The output:</p>
+
+<pre class="lang-none prettyprint-override"><code>python
+rocks
+A Done
+timing
+Traceback (most recent call last):
+  ...
+timeout.TimeoutError: execution expired
+out
+</code></pre>
+
+<p>Notice that even if the <code>TimeoutError</code> is thrown, the decorated method will continue to run in a different thread. If you would also want this thread to be "stopped" see: <a href="http://stackoverflow.com/questions/323972/is-there-any-way-to-kill-a-thread-in-python">Is there any way to kill a Thread in Python?</a></p>

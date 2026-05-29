@@ -1,0 +1,92 @@
+Question: <p>Now that it's clear <a href="http://stackoverflow.com/questions/100003/what-is-a-metaclass-in-python">what a metaclass is</a>, there is an associated concept that I use all the time without knowing what it really means. </p>
+
+<p>I suppose everybody made once a mistake with parenthesis, resulting  in an "object is not callable" exception. What's more, using <code>__init__</code> and <code>__new__</code> lead to wonder what this bloody <code>__call__</code> can be used for.</p>
+
+<p>Could you give me some explanations, including examples with the magic method ?</p>
+
+Answer: <p>From Python's sources <a href="http://svn.python.org/view/python/trunk/Objects/object.c?rev=64962&amp;view=markup">object.c</a>:</p>
+
+<pre class="lang-c prettyprint-override"><code>/* Test whether an object can be called */
+
+int
+PyCallable_Check(PyObject *x)
+{
+    if (x == NULL)
+        return 0;
+    if (PyInstance_Check(x)) {
+        PyObject *call = PyObject_GetAttrString(x, "__call__");
+        if (call == NULL) {
+            PyErr_Clear();
+            return 0;
+        }
+        /* Could test recursively but don't, for fear of endless
+           recursion if some joker sets self.__call__ = self */
+        Py_DECREF(call);
+        return 1;
+    }
+    else {
+        return x-&gt;ob_type-&gt;tp_call != NULL;
+    }
+}
+</code></pre>
+
+<p>It says:</p>
+
+<ol>
+<li>If an object is an instance of some class then it is callable <em>iff</em> it has <code>__call__</code> attribute.</li>
+<li>Else the object <code>x</code> is callable <em>iff</em> <code>x-&gt;ob_type-&gt;tp_call != NULL</code></li>
+</ol>
+
+<p>Desciption of <a href="http://docs.python.org/api/type-structs.html"><code>tp_call</code> field</a>:</p>
+
+<blockquote>
+  <p><code>ternaryfunc tp_call</code> An optional
+  pointer to a function that implements
+  calling the object. This should be
+  NULL if the object is not callable.
+  The signature is the same as for
+  PyObject_Call(). This field is
+  inherited by subtypes.</p>
+</blockquote>
+
+<p>You can always use built-in <code>callable</code> function to determine whether given object is callable or not; or better yet just call it and catch <code>TypeError</code> later. <code>callable</code> is removed in Python 3.0 and 3.1, use <code>callable = lambda o: hasattr(o, '__call__')</code> or <code>isinstance(o, collections.Callable)</code>.</p>
+
+<p>Example, a simplistic cache implementation:</p>
+
+<pre><code>class Cached:
+    def __init__(self, function):
+        self.function = function
+        self.cache = {}
+
+    def __call__(self, *args):
+        try: return self.cache[args]
+        except KeyError:
+            ret = self.cache[args] = self.function(*args)
+            return ret    
+</code></pre>
+
+<p>Usage:</p>
+
+<pre><code>@Cached
+def ack(x, y):
+    return ack(x-1, ack(x, y-1)) if x*y else (x + y + 1) 
+</code></pre>
+
+<p>Example from standard library, file <a href="http://svn.python.org/projects/python/trunk/Lib/site.py"><code>site.py</code></a>, definition of built-in <code>exit()</code> and <code>quit()</code> functions:</p>
+
+<pre><code>class Quitter(object):
+    def __init__(self, name):
+        self.name = name
+    def __repr__(self):
+        return 'Use %s() or %s to exit' % (self.name, eof)
+    def __call__(self, code=None):
+        # Shells like IDLE catch the SystemExit, but listen when their
+        # stdin wrapper is closed.
+        try:
+            sys.stdin.close()
+        except:
+            pass
+        raise SystemExit(code)
+__builtin__.quit = Quitter('quit')
+__builtin__.exit = Quitter('exit')
+</code></pre>

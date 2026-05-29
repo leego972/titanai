@@ -1,0 +1,89 @@
+Software  ›   pipelines
+
+# Per barcode QC, ATAC signal, and cell calling
+
+The cellranger-atac pipeline performs cell calling where it determines whether each barcode is a cell of any species included in the reference. Based on mapping information, the pipelines also provides QC information associated with the fragments per barcode. Additionally, the pipeline computes the ATAC signal per barcode, captured by various targeting metrics such as number of fragments overlapping transcription start sites (TSS) annotated in the reference package. All of this per barcode information is collated and produced in a single output table: singlecell.csv.
+
+## Structure
+
+The structure and contents of singlecell.csv from a single species analysis are shown below:
+
+$cd /home/jdoe/runs/sample345/outs$ head -5 singlecell.csv
+barcode,total,duplicate,chimeric,unmapped,lowmapq,mitochondrial,passed_filters,cell_id,is__cell_barcode,TSS_fragments,DNase_sensitive_region_fragments,enhancer_region_fragments,promoter_region_fragments,on_target_fragments,blacklist_region_fragments,peak_region_fragments,peak_region_cutsites
+NO_BARCODE,14876,7802,379,704,1149,0,4842,None,0,0,0,0,0,0,0,0,0
+AAACGAAAGAACAGGA-1,1,0,0,0,0,0,1,None,0,0,1,0,0,1,0,0,0
+AAACGAAAGAACCATA-1,27,10,0,0,1,0,16,None,0,2,12,1,0,12,0,1,1
+AAACGAAAGACCATAA-1,8,4,0,0,2,0,2,None,0,2,2,0,2,2,0,0,0
+
+
+The table contains many columns, including the primary barcode column. All the barcodes in the dataset are listed in this column. The NO_BARCODE row contains a summary of fragments that are not associated with any whitelisted barcodes. It usually forms a small fraction of all reads.
+
+## Column Definitions
+
+ColumnTypeDescriptionPipeline specific changesReference specific changes
+barcodekeybarcodes present in input data
+totalsequencingtotal read-pairsabsent in aggr, reanalyze
+duplicatemappingnumber of duplicate read-pairs
+chimericmappingnumber of chimerically mapped read-pairsabsent in aggr, reanalyze
+unmappedmappingnumber of read-pairs with at least one end not mappedabsent in aggr, reanalyze
+lowmapqmappingnumber of read-pairs with <30 mapq on at least one endabsent in aggr, reanalyze
+mitochondrialmappingnumber of read-pairs mapping to mitochondria and non-nuclear contigsabsent in aggr, reanalyze
+passed_filtersmappingnumber of non-duplicate, usable read-pairs i.e. "fragments"absent in aggr, reanalyzefor multi species, for example hg19 and mm10, expect additional columns: passed_filters_hg19 and passed_filtered_mm10
+cell_idcell callingindex of the barcode in cell barcodes. Appears as {species}_cell_{num}, otherwise None.for multi species, for example hg19 and mm10, doublets will appear as hg19_cell_{num1}_mm10_cell_{num2}.
+is__cell_barcodecell callingbinary indicator of whether barcode is associated with a cellfor multi species, for example hg19 and mm10, expect columns is_hg19_cell_barcode and is_mm10_cell_barcode instead.
+TSS_fragmentstargetingnumber of fragments overlapping with TSS regions
+DNase_sensitive_region_fragmentstargetingnumber of fragments overlapping with DNase sensitive regionsFor custom references or references missing the dnase.bed file, this count is 0
+enhancer_region_fragmentstargetingnumber of fragments overlapping enhancer regionsFor custom references or references missing the enhancer.bed file, this count is 0
+promoter_region_fragmentstargetingnumber of fragments overlapping promoter regionsFor custom references or references missing the promoter.bed file, this count is 0
+on_target_fragmentstargetingnumber of fragments overlapping any of TSS, enhancer, promoter and DNase hypersensitivity sites (counted with multiplicity)For custom references or references having only the tss.bed file, this count is simply equal to the TSS_fragments
+blacklist_region_fragmentstargetingnumber of fragments overlapping blacklisted regions
+peak_region_fragmentsdenovo targetingnumber of fragments overlapping peaksfor multi species, for example hg19 and mm10, expect additional columns: peak_region_fragments_hg19 and peak_region_fragments_mm10
+peak_region_cutsitesdenovo targetingnumber of ends of fragments in peak regions
+
+Note that the number of columns and the column names themselves change and depend on what pipeline and what reference was used to generate the output file. Briefly, as described in the last two columns in the table,
+
+• Cell Ranger ATAC aggr and reanalyze pipelines only take fragments as input and not fastqs. Consequently, only the barcodes present in the input fragments file, i.e. barcodes with at least one fragment detected will be listed in this output file.
+• As the Cell Ranger ATAC aggr and reanalyze pipelines don't require the BAM at input, the columns associated with mapping information are not produced for the output file. However, the duplicates, and passed filter information can be deduced from the fragments file.
+• When present, it is guaranteed that the sum of all the mapping type columns (whatever subset is present) will be equal to the total.
+• For custom references, if files such as enhancer.bed are missing, then the counts for the corresponding columns will be zero.
+• For barnyard references, there will be additional species specific columns such as is_hg19_cell_barcodes, passed_filter_hg19 and peak_region_fragments_hg19.
+
+singlecell.csv can be loaded easily in Python as a pandas dataframe:
+
+import pandas as pd
+
+singlecell_file  = "/home/jdoe/runs/sample345/outs/singlecell.csv"
+
+# load with barcode as index
+scdf2 = pd.read_csv(singlecell_file, sep=",", index_col="barcode" )
+
+
+You can use this file in many ways. Below are some examples:
+
+### Regenerate the targeting plot in web summary
+
+Assume you are analyzing data from a single species library, such as hg19. To reproduce the targeting plot on the right side in Targeting section of the websummary, you can do the following:
+
+import matplotlib as plt
+noncell_mask = (scdf['is__cell_barcode'] != 1 && scdf['barcode'] != 'NO_BARCODE')
+c='b')
+c='r')
+
+
+### Edit cell calling for use in aggr and reanalyze
+
+The singlecell.csv file captures the cell calling information in the is_{species}_cell_barcode field. The Cell Ranger ATAC aggr pipeline requires you to specify the singlecell.csv as part of the aggr_csv argument. On the other hand, the Cell Ranger ATAC reanalyze pipeline accepts an optional input for cell barcodes in the form of the singlecell.csv file. You can control what barcodes get analyzed as cells from each library by editing the cell calling columns in the singlecell.csv file. In particular, you only need to edit the is_{species}_cell_barcode columns. For example, if you have a list of barcodes you want to keep, for example, after editing the barcodes.tsv file produced as part of the matrices mex format, you can do the following:
+
+barcodes_file = "/home/jdoe/runs/sample345/outs/filtered_peak_bc_matrix_mex/barcodes.tsv"
+with open(barcodes_file, 'r') as infile:
+keep_barcodes = [bc.strip("\n") for bc in infile]
+# keep_barcode must contain barcodes present in the singlecell.csv file
+scdf2.loc[keep_barcodes, 'is__cell_barcode'] = 1
+scdf2.to_csv(out_file, sep=",", index=False)
+
+
+Care must be taken while editing the singlecell.csv in multi-species samples, in which case, you want to edit the per species cell calling columns separately.
+
+• 1.1
+• 1.0
+• Cell Ranger ATAC v1.2 (latest)

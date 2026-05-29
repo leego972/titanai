@@ -1,0 +1,27 @@
+Question: <p>My friend produced a small proof-of-concept assembler that worked on x86. I decided to port it for x86_64 as well, but I immediately hit a problem.</p>
+
+<p>I wrote a small piece of program in C, then compiled and objdumped the code. After that I inserted it to my python script, therefore the x86_64 code is correct:</p>
+
+<pre><code>from ctypes import cast, CFUNCTYPE, c_char_p, c_long
+
+buffer = ''.join(map(chr, [ #0000000000000000 &lt;add&gt;:
+  0x55,                     # push   %rbp
+  0x48, 0x89, 0xe5,         # mov    %rsp,%rbp
+  0x48, 0x89, 0x7d, 0xf8,   # mov    %rdi,-0x8(%rbp)
+  0x48, 0x8b, 0x45, 0xf8,   # mov    -0x8(%rbp),%rax
+  0x48, 0x83, 0xc0, 0x0a,   # add    $0xa,%rax
+  0xc9,                     # leaveq 
+  0xc3,                     # retq
+]))
+
+fptr = cast(c_char_p(buffer), CFUNCTYPE(c_long, c_long))
+print fptr(1234)
+</code></pre>
+
+<p>Now, why does this script keeps doing segmentation fault whenever I run it?</p>
+
+<p>I have yet a question about mprotect and no execution flag. It is said to protect against most basic security exploits like buffer overruns. But what is the real reason it's in use? You could just keep on writing until you hit the .text, then inject your instructions into a nice, PROT_EXEC -area. Unless, of course, you use a write protection in .text</p>
+
+<p>But then, why have that PROT_EXEC everywhere anyway? Wouldn't it just help tremendously that your .text section is write protected?</p>
+
+Answer: <p>There's simpler approach I've figured only but recently that doesn't involve mprotect. Plainly mmap the executable space for program directly. These days python has a module for doing exactly this, though I didn't find way to get the address of the code. In short you'd allocate memory calling mmap instead of using string buffers and setting the execution flag indirectly. This is easier and safer, you can be sure only your code can be executed now.</p>

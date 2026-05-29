@@ -1,0 +1,30 @@
+# How does partial key escrow work?
+
+It is being speculated that one of the ways that NSA leaker Edward Snowden may have created his "insurance policy" – distributing sensitive documents to various individuals with instructions to disseminate them should anything happen to him--is through the use of a partial key escrow.
+
+The concept is described vaguely in the article:
+
+Modern crypto has lots of ways to accomplish this, including partial key escrow, in which a bunch of encryption keys are distributed to various parties; the individual keys aren't sufficient to decrypt the file, but a quorum of them are. For example, you can release a key to ten people and configure it so that any three can, in combination, unlock the file.
+
+From a technical standpoint, how does partial key escrow work, and how is it most often implemented in practice?
+
+-
+
+## migrated from security.stackexchange.comJun 27 '13 at 12:44
+
+This question came from our site for Information security professionals.
+
+Shamir's Secret Sharing Scheme... (Not a crypto geek, but I suspect there are other similar concepts). –  Deer Hunter Jun 26 '13 at 6:12
+Another note: speculations of that kind are mostly sorry fruit of barren tabloid minds.. –  Deer Hunter Jun 26 '13 at 6:14
+Interesting question. And if someone gets 3 keys, would she need to use them in a specific order and provide passwords? –  Aki Jun 26 '13 at 8:18
+@Aki - no. I suppose you are thinking of rubber-hose cryptography, then. –  Deer Hunter Jun 26 '13 at 9:46
+I couldn't even find information other than theory about this "partial key escrow". My bet is the truecrypt-style keyfiles where you need all the "keys" and a password to decrypt the data. –  Nathan C Jun 27 '13 at 2:25
+
+The two most popular ways I am aware of are Shamir secret sharing and additive secret sharing. I'll explain both.
+
+I'll start with additive as it is conceptually simpler (but also more limited). I'll also use bitwise addition modulo 2 as the addition operation (i.e., XOR), but know that that isn't the only option. You could use real, no-kidding addition in a finite field (say $\mathbb{Z}_p$ for a prime $p$).
+Say I have a key $k$ and a plaintext $p$. I encrypt to get $c=E(p,k)$. Now I distribute $c$ to $n$ friends. I also generate random bitstrings of the same length as $k$, $s_1,\dots,s_{n-1}$. I also set $s_n=k\oplus s_1\oplus\dots\oplus s_{n-1}$. I send $s_i$ to friend $i$. Note that $k=s_1\oplus\dots\oplus s_{n}$. Thus, if all $n$ friends get together, they can reconstruct $k$ and decrypt $c$. If any group of up to $n-1$ of my friends get together they can not reconstruct $k$ and they learn no additional information about $k$ that they didn't already have.
+Shamir secret sharing is more complicated, but more powerful. In SSS, I can generate the shares such that any $t+1$ out of $n$ of my friends can get together to reconstruct $k$. Any group of at most size $t$ learns nothing about $k$. It is based on the idea of polynomial interpolation. For example, in school we learned that it takes 2 points to uniquely identify a line. If you only have one point, there are infinitely many lines that could touch that point. If you have 2 points, there is only 1 line. So, what if we encoded the secret $k$ into the line (for example, the y intercept). Then I can distribute different points on that line (excluding the y intercept) to all my friends. Any 1 of them by themselves, cannot figure out the y intercept. But, 2 of them together can reconstruct the line and figure out the y intercept and recover $k$.
+SSS uses this idea. Fix a field, say $\mathbb{Z}_p$. Construct the following polynomial:
+$f(x)=k+r_1x+r_2x^2+\dots+r_tx^t$ where $r_1,\dots,r_t$ are random field elements. Notice that $f(0)=k$. Send $f(1)$ to one friend, $f(2)$ to another, and so on.
+It turns out that any $t+1$ of your friends can then come together and, using lagrangian interpolation, compute $f(0)=k$ to recover the secret $k$. Any group of size at most $t$, however, learns nothing about $k$.

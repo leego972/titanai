@@ -1,0 +1,52 @@
+Question: <p>Recently I needed to do weighted random selection of elements from a list, both with and without replacement. While there are well known and good algorithms for unweighted selection, and some for weighted selection without replacement (such as modifications of the resevoir algorithm), I couldn't find any good algorithms for weighted selection with replacement. I also wanted to avoid the resevoir method, as I was selecting a significant fraction of the list, which is small enough to hold in memory.</p>
+
+<p>Does anyone have any suggestions on the best approach in this situation? I have my own solutions, but I'm hoping to find something more efficient, simpler, or both.</p>
+
+Answer: <p>It is possible to do Weighted Random Selection with replacement in O(1) time, after first creating an additional  O(N)-sized data structure in O(N) time.  The algorithm is based on the <a href="http://en.wikipedia.org/wiki/Alias_method" rel="nofollow">Alias Method</a> developed by Walker and Vose, which is well described <a href="http://www.keithschwarz.com/darts-dice-coins/" rel="nofollow">here</a>.   </p>
+
+<p>The essential idea is that each bin in a histogram would be chosen with probability 1/N by a uniform RNG. So we will walk through it, and for any underpopulated bin which would would receive excess hits, assign the excess to an overpopulated bin.  For each bin, we store the percentage of hits which belong to it, and the partner bin for the excess. This version tracks small and large bins in place, removing the need for an additional stack.  It uses the index of the partner (stored in <code>bucket[1]</code>) as an indicator that they have already been processed.</p>
+
+<p>Here is a minimal python implementation, based on <a href="https://gist.github.com/ashelly/cc0cd6916235a04df49a" rel="nofollow">the C implementation here</a></p>
+
+<pre><code>def prep(weights):
+    data_sz = len(weights)
+    factor = data_sz/float(sum(weights))
+    data = [[w*factor, i] for i,w in enumerate(weights)]
+    big=0
+    while big&lt;data_sz and data[big][0]&lt;=1.0: big+=1
+    for small,bucket in enumerate(data):
+        if bucket[1] is not small: continue
+        excess = 1.0 - bucket[0]
+        while excess &gt; 0:
+            if big==data_sz: break
+            bucket[1] = big
+            bucket = data[big]
+            bucket[0] -= excess
+            excess = 1.0 - bucket[0]
+            if (excess &gt;= 0):
+                big+=1
+                while big&lt;data_sz and data[big][0]&lt;=1: big+=1
+    return data
+
+def sample(data):
+    r=random.random()*len(data)
+    idx = int(r)
+    return data[idx][1] if r-idx &gt; data[idx][0] else idx
+</code></pre>
+
+<p>Example usage:</p>
+
+<pre><code>TRIALS=1000
+weights = [20,1.5,9.8,10,15,10,15.5,10,8,.2];
+samples = [0]*len(weights)
+data = prep(weights)
+
+for _ in range(int(sum(weights)*TRIALS)):
+    samples[sample(data)]+=1
+
+result = [float(s)/TRIALS for s in samples]
+err = [a-b for a,b in zip(result,weights)]
+print(result)
+print([round(e,5) for e in err])
+print(sum([e*e for e in err]))
+</code></pre>

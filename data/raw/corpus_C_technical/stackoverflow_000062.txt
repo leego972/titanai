@@ -1,0 +1,111 @@
+Question: <p>I've read that it is possible to add a method to an existing object (e.g. not in the class definition) in <strong>Python</strong>, I think this is called <em>Monkey Patching</em> (or in some cases <em>Duck Punching</em>). I understand that it's not always a good decision to do so. But, how might one do this?</p>
+
+<p><strong>UPDATE 8/04/2008 00:21:01 EST:</strong></p>
+
+<p><a href="http://stackoverflow.com/a/982">That</a> looks like a good answer John Downey, I tried it but it appears that it ends up being not a <em>true</em> method.</p>
+
+<p>Your example defines the new patch function with an argument of <strong><code>self</code></strong>, but if you write actual code that way, the now patched class method asks for an argument named <code>self</code> (it doesn't automagically recognize it as the object to which it is supposed to bind, which is what would happen if defined within the class definition), meaning you have to call <strong><code>class.patch(obj)</code></strong> instead of just <strong><code>class.patch()</code></strong> if you want the same functionality as a <em>true</em> method.</p>
+
+<p><strong>It looks like Python isn't really treating it as a method, but more just as a variable which happens to be a function</strong> (and as such is callable).  Is there any way to attach an actual method to a class?</p>
+
+<p>Oh, and Ryan, <a href="http://pypi.python.org/pypi/monkey">that</a> isn't exactly what I was looking for (it isn't a builtin functionality), but it is quite cool nonetheless.</p>
+
+Answer: <blockquote>
+  <h1>Adding a Method to an Existing Object Instance</h1>
+  
+  <p>I've read that it is possible to add a method to an existing object (e.g. not in the class definition) in python, I think this is called Monkey Patching (or in some cases Duck Punching). I understand that it's not always a good decision to do so. <strong>But, how might one do this?</strong></p>
+</blockquote>
+
+<h2>Yes, it is possible. (But not recommended.)</h2>
+
+<p>Since it's instructive, however, I'm going to show you three ways of doing this.</p>
+
+<p>Here's some setup code. We need a class definition. It could be imported, but it really doesn't matter.</p>
+
+<pre><code>class Foo(object):
+    '''An empty class to demonstrate adding a method to an instance'''
+</code></pre>
+
+<p>Create an instance:</p>
+
+<pre><code>foo = Foo()
+</code></pre>
+
+<p>Create a method to add to it:</p>
+
+<pre><code>def sample_method(self, bar, baz):
+    print(bar + baz)
+</code></pre>
+
+<h3>Method one - types.MethodType</h3>
+
+<p>First, import types, from which we'll get the method constructor:</p>
+
+<pre><code>import types
+</code></pre>
+
+<p>Now we add the method to the instance. To do this, we require the MethodType constructor from the <code>types</code> module (which we imported above).</p>
+
+<p>The argument signature for types.MethodType is <code>(function, instance, class)</code>:</p>
+
+<pre><code>foo.sample_method = types.MethodType(sample_method, foo, Foo)
+</code></pre>
+
+<p>and usage: </p>
+
+<pre><code>&gt;&gt;&gt; foo.sample_method(1,2)
+3
+</code></pre>
+
+<h2>Method two: lexical binding</h2>
+
+<p>First, we create a wrapper function that binds the method to the instance:</p>
+
+<pre><code>def bind(instance, method):
+    def binding_scope_fn(*args, **kwargs): 
+        return method(instance, *args, **kwargs)
+    return binding_scope_fn
+</code></pre>
+
+<p>usage:</p>
+
+<pre><code>&gt;&gt;&gt; foo.sample_method = bind(foo, sample_method)    
+&gt;&gt;&gt; foo.sample_method(1,2)
+3
+</code></pre>
+
+<h2>Method three: functools.partial</h2>
+
+<pre><code>&gt;&gt;&gt; from functools import partial
+&gt;&gt;&gt; foo.sample_method = partial(sample_method, foo)
+&gt;&gt;&gt; foo.sample_method(1,2)
+3    
+</code></pre>
+
+<p>This makes sense when you consider that bound methods are partial functions of the instance.</p>
+
+<h2>Unbound function as an object attribute - why this doesn't work:</h2>
+
+<p>If we try to add the sample_method in the same way as we might add it to the class, it is unbound from the instance, and doesn't take the implicit self as the first argument.</p>
+
+<pre><code>&gt;&gt;&gt; foo.sample_method = sample_method
+&gt;&gt;&gt; foo.sample_method(1,2)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: sample_method() takes exactly 3 arguments (2 given)
+</code></pre>
+
+<p>We can make the unbound function work by explicitly passing the instance (or anything, since this method doesn't actually use the <code>self</code> argument variable), but it would not be consistent with the expected signature of other instances (if we're monkey-patching this instance):</p>
+
+<pre><code>&gt;&gt;&gt; foo.sample_method(foo, 1, 2)
+3
+</code></pre>
+
+<hr>
+
+<h1>Disclaimer</h1>
+
+<p>Note, just because this is possible doesn't make it recommended. In fact, I suggest that you not do this unless you have a really good reason. It is far better to define the correct method in the class definition or less preferably to monkey-patch the class directly, like this:</p>
+
+<pre><code>Foo.sample_method = sample_method
+</code></pre>

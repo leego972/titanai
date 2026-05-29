@@ -1,0 +1,45 @@
+Question: <p>I would like to wipe out all data for a specific kind in Google App Engine. What is the
+best way to do this?
+I wrote a delete script (hack), but since there is so much data is
+timeout's out after a few hundred records. </p>
+
+Answer: <p>I've tried db.delete(results) and App Engine Console, and none of them seems to be working for me. Manually removing entries from Data Viewer (increased limit up to 200) didn't work either since I have uploaded more than 10000 entries. I ended writing this script </p>
+
+<pre><code>from google.appengine.ext import db
+from google.appengine.ext import webapp
+from google.appengine.ext.webapp.util import run_wsgi_app
+import wsgiref.handlers
+from mainPage import YourData #replace this with your data
+class CleanTable(webapp.RequestHandler):
+    def get(self, param):
+        txt = self.request.get('table')
+        q = db.GqlQuery("SELECT * FROM "+txt)
+        results = q.fetch(10)
+        self.response.headers['Content-Type'] = 'text/plain'
+        #replace yourapp and YouData your app info below.
+        self.response.out.write("""
+          &lt;html&gt;
+          &lt;meta HTTP-EQUIV="REFRESH" content="5; url=http://yourapp.appspot.com/cleanTable?table=YourData"&gt;
+            &lt;body&gt;""")
+
+        try:
+            for i in range(10):
+                db.delete(results)
+                results = q.fetch(10, len(results))
+                self.response.out.write("&lt;p&gt;10 removed&lt;/p&gt;")
+                self.response.out.write("""
+                &lt;/body&gt;
+              &lt;/html&gt;""")
+
+        except Exception, ints:
+            self.response.out.write(str(inst))
+
+def main():
+  application = webapp.WSGIApplication([
+    ('/cleanTable(.*)', CleanTable),
+  ])
+
+  wsgiref.handlers.CGIHandler().run(application)
+</code></pre>
+
+<p>The trick was to include redirect in html instead of using self.redirect. I'm ready to wait overnight to get rid of all the data in my table. Hopefully, GAE team will make it easier to drop tables in the future.  </p>

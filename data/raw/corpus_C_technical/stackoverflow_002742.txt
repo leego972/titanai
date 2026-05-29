@@ -1,0 +1,51 @@
+Question: <p>I'm searching a wsgi middleware which I can warp around a wsgi applications and which lets me monitor incoming and outgoing http requests and header fields.</p>
+
+<p>Something like firefox live headers, but for the server side.</p>
+
+Answer: <p>The middleware</p>
+
+<pre><code>from wsgiref.util import request_uri
+import sys
+
+def logging_middleware(application, stream=sys.stdout):
+    def _logger(environ, start_response):
+        stream.write('REQUEST\n')
+        stream.write('%s %s\n' %(
+            environ['REQUEST_METHOD'],
+            request_uri(environ),
+        ))
+
+        for name, value in environ.items():
+            if name.startswith('HTTP_'):
+                stream.write('    %s: %s\n' %(
+                    name[5:].title().replace('_', '-'),
+                    value,
+                ))
+        stream.flush()
+        def _start_response(code, headers):
+            stream.write('RESPONSE\n')
+            stream.write('%s\n' % code)
+            for data in headers:
+                stream.write('    %s: %s\n' % data)
+            stream.flush()
+            start_response(code, headers)
+        return application(environ, _start_response)
+    return _logger
+</code></pre>
+
+<p>The test</p>
+
+<pre><code>def application(environ, start_response):
+    start_response('200 OK', [
+        ('Content-Type', 'text/html')
+    ])
+    return ['Hello World']
+
+if __name__ == '__main__':
+    logger = logging_middleware(application)
+    from wsgiref.simple_server import make_server
+    httpd = make_server('', 1234, logger)
+    httpd.serve_forever()
+</code></pre>
+
+<p>See also the <a href="http://werkzeug.pocoo.org/documentation/debug" rel="nofollow">werkzeug debugger</a> Armin wrote, it's usefull for interactive debugging.</p>

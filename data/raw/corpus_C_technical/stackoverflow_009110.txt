@@ -1,0 +1,68 @@
+Question: <p>I'm trying to find the actual class of a django-model object, when using model-inheritance.</p>
+
+<p>Some code to describe the problem:</p>
+
+<pre><code>class Base(models.model):
+    def basemethod(self):
+        ...
+
+class Child_1(Base):
+    pass
+
+class Child_2(Base):
+    pass
+</code></pre>
+
+<p>If I create various objects of the two Child classes and the create a queryset containing them all:</p>
+
+<pre><code>Child_1().save()
+Child_2().save()
+(o1, o2) = Base.objects.all()
+</code></pre>
+
+<p>I want to determine if the object is of type Child_1 or Child_2 in basemethod, I can get to the child object via o1.child_1 and o2.child_2 but that reconquers knowledge about the childclasses in the baseclass.</p>
+
+<p>I have come up with the following code:</p>
+
+<pre><code>def concrete_instance(self):
+    instance = None
+    for subclass in self._meta.get_all_related_objects():
+        acc_name = subclass.get_accessor_name()
+        try:
+            instance = self.__getattribute__(acc_name)
+            return instance
+        except Exception, e:
+            pass
+</code></pre>
+
+<p>But it feels brittle and I'm not sure of what happens when if I inherit in more levels.</p>
+
+Answer: <p>Django implements model inheritance with a OneToOneField between the parent model's table and the child model's table.  When you do <code>Base.object.all()</code>, Django is querying just the Base table, and so has no way of knowing what the child table is.  Therefore, unfortunately, it's not possible to go directly to the child model instance without additional queries.</p>
+
+<p>This <a href="http://www.djangosnippets.org/snippets/1031/" rel="nofollow">snippet</a> shows a common method of adding a ContentType field to the base model:</p>
+
+<pre><code>from django.contrib.contenttypes.models import ContentType
+
+class Base(models.Model):
+    content_type = models.ForeignKey(ContentType,editable=False,null=True)
+
+    def save(self):
+        if(not self.content_type):
+            self.content_type = ContentType.objects.get_for_model(self.__class__)
+        self.save_base()
+
+    def as_leaf_class(self):
+        content_type = self.content_type
+        model = content_type.model_class()
+        if(model == Base):
+            return self
+        return model.objects.get(id=self.id)
+</code></pre>
+
+<p>You can then say <code>if Base.content_type.model_class()</code> to determine the type.</p>
+
+<p><a href="http://www.djangosnippets.org/snippets/1034/" rel="nofollow">Here</a> is another snippet that adds a custom manager into the mix.</p>
+
+<p>As you can see, both of these solutions have the potential to be extremely expensive.  If you have a large number of instances, using the as_leaf_class() method will require one query on each item.</p>
+
+<p>Instead, if you have a known set of child models, simply query each model separately and aggregate the instances into one list.</p>

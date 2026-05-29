@@ -1,0 +1,51 @@
+Question: <p>If I have a Django form such as:</p>
+
+<pre><code>class ContactForm(forms.Form):
+    subject = forms.CharField(max_length=100)
+    message = forms.CharField()
+    sender = forms.EmailField()
+</code></pre>
+
+<p>And I call the as_table() method of an instance of this form, Django will render the fields as the same order as specified above.</p>
+
+<p>My question is how does Django know the order that class variables where defined?  </p>
+
+<p>(Also how do I override this order, for example when I want to add a field from the classe's <strong>init</strong> method?)</p>
+
+Answer: <p>Use a counter in the Field class. Sort by that counter:</p>
+
+<pre><code>import operator
+import itertools
+
+class Field(object):
+    _counter = itertools.count()
+    def __init__(self):
+        self.count = Field._counter.next()
+        self.name = ''
+    def __repr__(self):
+        return "Field(%r)" % self.name
+
+class MyForm(object):
+    b = Field()
+    a = Field()
+    c = Field()
+
+    def __init__(self):
+        self.fields = []
+        for field_name in dir(self):
+            field = getattr(self, field_name)
+            if isinstance(field, Field):
+                field.name = field_name
+                self.fields.append(field)
+        self.fields.sort(key=operator.attrgetter('count'))
+
+m = MyForm()
+print m.fields # in defined order
+</code></pre>
+
+<p>Output:</p>
+
+<pre><code>[Field('b'), Field('a'), Field('c')]
+</code></pre>
+
+<p><hr /></p>

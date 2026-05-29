@@ -1,0 +1,21 @@
+Question: <p>I'm having trouble wrapping my head around this.  Right now I have some models that looks kind of like this:</p>
+
+<pre><code> def Review(models.Model)
+    ...fields...
+    overall_score = models.FloatField(blank=True)
+
+def Score(models.Model)
+    review = models.ForeignKey(Review)
+    question = models.TextField()
+    grade = models.IntegerField()
+</code></pre>
+
+<p>A Review is has several "scores", the overall_score is the average of the scores.  When a review or a score is saved, I need to recalculate the overall_score average.  Right now I'm using a overridden save method.  Would there be any benefits to using Django's signal dispatcher?</p>
+
+Answer: <p>Save/delete signals are generally favourable in situations where you need to make changes which aren't completely specific to the model in question, or could be applied to models which have something in common, or could be configured for use across models.</p>
+
+<p>One common task in overridden <code>save</code> methods is automated generation of slugs from some text field in a model. That's an example of something which, if you needed to implement it for a number of models, would benefit from using a <code>pre_save</code> signal, where the signal handler could take the name of the slug field and the name of the field to generate the slug from. Once you have something like that in place, any enhanced functionality you put in place will also apply to all models - e.g. looking up the slug you're about to add for the type of model in question, to ensure uniqueness.</p>
+
+<p>Reusable applications often benefit from the use of signals - if the functionality they provide can be applied to any model, they generally (unless it's unavoidable) won't want users to have to directly modify their models in order to benefit from it.</p>
+
+<p>With <a href="https://github.com/django-mptt/django-mptt/">django-mptt</a>, for example, I used the <code>pre_save</code> signal to manage a set of fields which describe a tree structure for the model which is about to be created or updated and the <code>pre_delete</code> signal to remove tree structure details for the object being deleted and its entire sub-tree of objects before it and they are deleted. Due to the use of signals, users don't have to add or modify <code>save</code> or <code>delete</code> methods on their models to have this management done for them, they just have to let django-mptt know which models they want it to manage.</p>

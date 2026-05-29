@@ -1,0 +1,55 @@
+How can I infer inputs to a function, given an output?
+
+Is there a way to generate a set of inputs, for a given output of a function? This may be a common thing in lisp/haskell world, but I'm not aware of it. Is this what mini-kanren does?
+
+I understand that there may not be a general solution to this problem, since the halting problem may apply here. Say the function implementation is constrained to remove unlimited recursion. Type inference engines obviously do something similar to figure out the types of variables, I would like to generate actual values.
+
+I'm thinking of a couple of scenarios where this might be useful:
+
+func blowup(x): 1/x
+
+
+I would like some sort of static checker to figure out that this function will cause problems if x=0.
+
+func launch(x): ...launch missle x miles...
+func isSafe(y): if x > 10 then true else false
+func main(): x=.1; if isSafe(x): launch(x)
+
+
+In this case, I would like to not only infer values of launch, but I would like to take isSafe as a constraint and tell me at compile time (since all information is available) that x of .1 not a good value.
+
+Btw, I'm not looking for a library to do this. What I would love is either the name of this concept (beyond the generic 'static checking') and reference material which describes this idea (easily read papers, books, etc.). I should also mention that I'm aware of tools such as quickcheck. I'm not looking for a probabilistic way of inferring values. I would like a deterministic way of inferring values as early as possible, even if that means that my solution limits the types of expressions I can express.
+
+• If this was practically possible, it would break cryptographic signing, because it would mean you would be able to infer the private key from a signed message. – svick Sep 8 '15 at 8:31
+• You can't; the function may not be injective. – Raphael Sep 8 '15 at 14:40
+
+In the worst case, this is impossible. However, there are techniques for inversion that can work on some programs. Of course, you shouldn't expect them to work on all programs given that the problem is hard.
+
+Here are a few standard approaches:
+
+• Theorem proving. Use the VCGen part of a theorem prover to generate a precondition formula, where if the formula is true, that implies that the function produces the desired output (or divides by zero, etc.). Then, use an automated solver to try to find a satisfying assignment to that formula.
+
+• Symbolic execution. Execute the function symbolically, and build up a symbolic expression that represents the output of the function, in terms of a bunch of variables (unknowns) that represent the inputs to the function. Then build a formula by setting that expression equal to the desired output, feed that formula to a SMT solver and ask the solver to find a satisfying assignment for the formula.
+
+• Concolic execution. Pick concrete values for the inputs to the function. Execute the function on those inputs and record what path it took. On the side, build up a symbolic expression that represents the output of the function, if it follows the same path. Build up a "path constraint", which is a formula that is the conjunction of all of the branch conditions followed: the path constraint is a formula over symbolic variables representing the inputs, where inputs that make the path constraint true will cause the function to execute the same path that was previously recorded. Then, write down a formula that represents the statement "the function takes that path, and its output is equal to the desired value", and feed this to a SMT solver or SAT solver and ask it to find a satisfying assignment. See concolic testing.
+
+These approaches have different tradeoffs and perform differently, but as you can see, they are similar conceptually. Here are some significant differences:
+
+• Theorem proving and symbolic execution can have problems with loops. For instance, theorem provers usually require you to supply a loop invariant for every loop. Concolic execution circumvents this by not trying to reason about all possible paths; only a single one.
+
+• Theorem proving and symbolic execution can have problems with state space explosion, as the number of possible paths through the function can be exponentially (or even infinitely) large. Concolic execution circumvents this by not trying to reason about all possible paths; only a single one.
+
+• Theorem proving can use more expressive logics, such as fist-order logic. Symbolic execution and concolic execution often use propositional logic or a SMT extension.
+
+You can find lots of reference material on these approaches. For instance, today they're taught in a number of advanced (e.g., graduate) program analysis courses, and there are many publications in the research literature on these topics.
+
+• In the worst case it is not only hard but impossible. – Andrej Bauer Sep 8 '15 at 16:29
+• @AndrejBauer, quite right. I've adjusted my answer accordingly, thank you. – D.W. Sep 8 '15 at 16:30
+
+To find possible input values (or at least a superset) given a set of possible outputs is called backward constraint propagation. This is done inside many kinds of program analysis: formal verification, compiler optimizers, defect search, ...
+
+It's more common for type checkers to do forward propagation. For example many languages require type annotations on function arguments and infer the types of expressions. Languages like ML that do full inference don't really distinguish between forward and backward propagation.
+
+There's no general rule to tell when backward constraint propagation can be useful. To take just one example, consider a cryptographic hash function with a fixed-size input string. From a theory of computation point of view, each hash value has a finite set of preimages and you can run a Turing machine with an obvious termination argument to enumerate them all. But once you take complexity into account, this enumeration is impractically slow; in fact the very definition of a cryptographic hash requires that this computation be intractable.
+
+• "backward constraint propagation" is a term I'm vaguely familiar with so you answer was almost exactly what I was looking for. However, D.W's has a bunch of terms I've never heard before and may turn out to be more informative. I wish I could accept both answers! – Shahbaz Sep 9 '15 at 23:07

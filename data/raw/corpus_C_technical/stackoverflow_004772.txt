@@ -1,0 +1,165 @@
+Question: <p>Here's what I would like to do:</p>
+
+<p>I'm taking pictures with a webcam at regular intervals.  Sort of like a time lapse thing.  However, if nothing has really changed, that is, the picture pretty much <em>looks</em> the same, I don't want to store the latest snapshot.</p>
+
+<p>I imagine there's some way of quantifying the difference, and I would have to empirically determine a threshold.  </p>
+
+<p>I'm looking for simplicity rather than perfection.
+I'm using python.</p>
+
+Answer: <h2>General idea</h2>
+
+<p>Option 1: Load both images as arrays (<code>scipy.misc.imread</code>) and calculate an element-wise (pixel-by-pixel) difference. Calculate the norm of the difference.</p>
+
+<p>Option 2: Load both images. Calculate some feature vector for each of them (like a histogram). Calculate distance between feature vectors rather than images.</p>
+
+<p>However, there are some decisions to make first.</p>
+
+<h2>Questions</h2>
+
+<p>You should answer these questions first:</p>
+
+<ul>
+<li><p>Are images of the same shape and dimension?</p>
+
+<p>If not, you may need to resize or crop them. PIL library will help to do it in Python.</p>
+
+<p>If they are taken with the same settings and the same device, they are probably the same.</p></li>
+<li><p>Are images well-aligned?</p>
+
+<p>If not, you may want to run cross-correlation first, to find the best alignment first. SciPy has functions to do it.</p>
+
+<p>If the camera and the scene are still, the images are likely to be well-aligned.</p></li>
+<li><p>Is exposure of the images always the same? (Is lightness/contrast the same?)</p>
+
+<p>If not, you may want <a href="http://en.wikipedia.org/wiki/Normalization_(image_processing)">to normalize</a> images.</p>
+
+<p>But be careful, in some situations this may do more wrong than good. For example, a single bright pixel on a dark background will make the normalized image very different.</p></li>
+<li><p>Is color information important?</p>
+
+<p>If you want to notice color changes, you will have a vector of color values per point, rather than a scalar value as in gray-scale image. You need more attention when writing such code.</p></li>
+<li><p>Are there distinct edges in the image? Are they likely to move?</p>
+
+<p>If yes, you can apply edge detection algorithm first (e.g. calculate gradient with Sobel or Prewitt transform, apply some threshold), then compare edges on the first image to edges on the second.</p></li>
+<li><p>Is there noise in the image?</p>
+
+<p>All sensors pollute the image with some amount of noise. Low-cost sensors have more noise. You may wish to apply some noise reduction before you compare images. Blur is the most simple (but not the best) approach here.</p></li>
+<li><p>What kind of changes do you want to notice?</p>
+
+<p>This may affect the choice of norm to use for the difference between images.</p>
+
+<p>Consider using Manhattan norm (the sum of the absolute values) or zero norm (the number of elements not equal to zero) to measure how much the image has changed. The former will tell you how much the image is off, the latter will tell only how many pixels differ.</p></li>
+</ul>
+
+<h2>Example</h2>
+
+<p>I assume your images are well-aligned, the same size and shape, possibly with different exposure. For simplicity, I convert them to grayscale even if they are color (RGB) images.</p>
+
+<p>You will need these imports:</p>
+
+<pre><code>import sys
+
+from scipy.misc import imread
+from scipy.linalg import norm
+from scipy import sum, average
+</code></pre>
+
+<p>Main function, read two images, convert to grayscale, compare and print results:</p>
+
+<pre><code>def main():
+    file1, file2 = sys.argv[1:1+2]
+    # read images as 2D arrays (convert to grayscale for simplicity)
+    img1 = to_grayscale(imread(file1).astype(float))
+    img2 = to_grayscale(imread(file2).astype(float))
+    # compare
+    n_m, n_0 = compare_images(img1, img2)
+    print "Manhattan norm:", n_m, "/ per pixel:", n_m/img1.size
+    print "Zero norm:", n_0, "/ per pixel:", n_0*1.0/img1.size
+</code></pre>
+
+<p>How to compare. <code>img1</code> and <code>img2</code> are 2D SciPy arrays here:</p>
+
+<pre><code>def compare_images(img1, img2):
+    # normalize to compensate for exposure difference, this may be unnecessary
+    # consider disabling it
+    img1 = normalize(img1)
+    img2 = normalize(img2)
+    # calculate the difference and its norms
+    diff = img1 - img2  # elementwise for scipy arrays
+    m_norm = sum(abs(diff))  # Manhattan norm
+    z_norm = norm(diff.ravel(), 0)  # Zero norm
+    return (m_norm, z_norm)
+</code></pre>
+
+<p>If the file is a color image, <code>imread</code> returns a 3D array, average RGB channels (the last array axis) to obtain intensity. No need to do it for grayscale images (e.g. <code>.pgm</code>):</p>
+
+<pre><code>def to_grayscale(arr):
+    "If arr is a color image (3D array), convert it to grayscale (2D array)."
+    if len(arr.shape) == 3:
+        return average(arr, -1)  # average over the last axis (color channels)
+    else:
+        return arr
+</code></pre>
+
+<p>Normalization is trivial, you may choose to normalize to [0,1] instead of [0,255]. <code>arr</code> is a SciPy array here, so all operations are element-wise:</p>
+
+<pre><code>def normalize(arr):
+    rng = arr.max()-arr.min()
+    amin = arr.min()
+    return (arr-amin)*255/rng
+</code></pre>
+
+<p>Run the <code>main</code> function:</p>
+
+<pre><code>if __name__ == "__main__":
+    main()
+</code></pre>
+
+<p>Now you can put this all in a script and run against two images. If we compare image to itself, there is no difference:</p>
+
+<pre><code>$ python compare.py one.jpg one.jpg
+Manhattan norm: 0.0 / per pixel: 0.0
+Zero norm: 0 / per pixel: 0.0
+</code></pre>
+
+<p>If we blur the image and compare to the original, there is some difference:</p>
+
+<pre><code>$ python compare.py one.jpg one-blurred.jpg 
+Manhattan norm: 92605183.67 / per pixel: 13.4210411116
+Zero norm: 6900000 / per pixel: 1.0
+</code></pre>
+
+<p>P.S. Entire <a href="http://gist.github.com/626356">compare.py</a> script.</p>
+
+<h2>Update: relevant techniques</h2>
+
+<p>As the question is about a video sequence, where frames are likely to be almost the same, and you look for something unusual, I'd like to mention some alternative approaches which may be relevant:</p>
+
+<ul>
+<li>background subtraction and segmentation (to detect foreground objects)</li>
+<li>sparse optical flow (to detect motion)</li>
+<li>comparing histograms or some other statistics instead of images</li>
+</ul>
+
+<p>I strongly recommend taking a look at  âLearning OpenCVâ book, Chapters 9 (Image parts and segmentation) and 10 (Tracking and motion). The former teaches to use Background subtraction method, the latter gives some info on optical flow methods. All methods are implemented in OpenCV library. If you use Python, I suggest to use OpenCV â¥ 2.3, and its <code>cv2</code> Python module.</p>
+
+<p>The most simple version of the background subtraction:</p>
+
+<ul>
+<li>learn the average value Î¼ and standard deviation Ï for every pixel of the background</li>
+<li>compare current pixel values to the range of (Î¼-2Ï,Î¼+2Ï) or (Î¼-Ï,Î¼+Ï)</li>
+</ul>
+
+<p>More advanced versions make take into account time series for every pixel and handle non-static scenes (like moving trees or grass).</p>
+
+<p>The idea of optical flow is to take two or more frames, and assign velocity vector to every pixel (dense optical flow) or to some of them (sparse optical flow). To estimate sparse optical flow, you may use <a href="http://en.wikipedia.org/wiki/Lucas%E2%80%93Kanade_method">Lucas-Kanade method</a> (it is also implemented in OpenCV). Obviously, if there is a lot of flow (high average over max values of the velocity field), then something is moving in the frame, and subsequent images are more different.</p>
+
+<p>Comparing histograms may help to detect sudden changes between consecutive frames. This approach was used in <a href="http://www.sciencedirect.com/science/article/pii/S0967066110000808">Courbon et al, 2010</a>:</p>
+
+<blockquote>
+  <p><em>Similarity of consecutive frames.</em> The distance between two consecutive frames is measured. If it is too high, it means that the second frame is corrupted and thus the image is eliminated. The <a href="https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence">KullbackâLeibler distance</a>, or mutual entropy, on the histograms of the two frames:</p>
+  
+  <p><img src="http://i.imgur.com/hdeh8ni.gif" alt="$$ d(p,q) = \sum_i p(i) \log (p(i)/q(i)) $$"></p>
+  
+  <p>where <em>p</em> and <em>q</em> are the histograms of the frames is used. The threshold is fixed on 0.2.</p>
+</blockquote>

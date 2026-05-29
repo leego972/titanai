@@ -1,0 +1,41 @@
+Question: <p>What would be the simplest way to daemonize a python script in Linux ? I need that this works with every flavor of Linux, so it should only use python based tools. </p>
+
+Answer: <p>See <a href="http://www.kohala.com/start/">Stevens</a> and also this <a href="http://code.activestate.com/recipes/278731/">lengthy thread on activestate</a> which I found personally to be both mostly incorrect and much to verbose, and I came up with this:</p>
+
+<pre><code>from os import fork, setsid, umask, dup2
+from sys import stdin, stdout, stderr
+
+if fork(): exit(0)
+umask(0) 
+setsid() 
+if fork(): exit(0)
+
+stdout.flush()
+stderr.flush()
+si = file('/dev/null', 'r')
+so = file('/dev/null', 'a+')
+se = file('/dev/null', 'a+', 0)
+dup2(si.fileno(), stdin.fileno())
+dup2(so.fileno(), stdout.fileno())
+dup2(se.fileno(), stderr.fileno())
+</code></pre>
+
+<p>If you need to stop that process again, it is required to know the pid, the usual solution to this is pidfiles. Do this if you need one</p>
+
+<pre><code>from os import getpid
+outfile = open(pid_file, 'w')
+outfile.write('%i' % getpid())
+outfile.close()
+</code></pre>
+
+<p>For security reasons you might consider any of these after demonizing</p>
+
+<pre><code>from os import setuid, setgid, chdir
+from pwd import getpwnam
+from grp import getgrnam
+setuid(getpwnam('someuser').pw_uid)
+setgid(getgrnam('somegroup').gr_gid)
+chdir('/')
+</code></pre>
+
+<p>You could also use <a href="http://en.wikipedia.org/wiki/Nohup">nohup</a> but that does not work well with <a href="http://docs.python.org/lib/module-subprocess.html">python's subprocess module</a></p>

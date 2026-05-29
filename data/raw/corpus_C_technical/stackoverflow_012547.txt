@@ -1,0 +1,98 @@
+Question: <p>What is the difference between the following class methods?</p>
+
+<p>Is it that one is static and the other is not?</p>
+
+<pre><code>class Test(object):
+  def method_one(self):
+    print "Called method_one"
+
+  def method_two():
+    print "Called method_two"
+
+a_test = Test()
+a_test.method_one()
+a_test.method_two()
+</code></pre>
+
+Answer: <p>Accurate explanation from Armin Ronacher above, expanding on his answers so that beginners like me understand it well:</p>
+
+<p>Difference in the methods defined in a class, whether static or instance method(there is yet another type - class method - not discussed here so skipping it), lay in the fact whether they are somehow bound to the class instance or not. For example, say whether the method receives a reference to the class instance during runtime</p>
+
+<pre><code>class C:
+    a = [] 
+    def foo(self):
+        pass
+
+C # this is the class object
+C.a # is a list object (class property object)
+C.foo # is a function object (class property object)
+c = C() 
+c # this is the class instance
+</code></pre>
+
+<p>The <code>__dict__</code> dictionary property of the class object holds the reference to all the properties and methods of a class object and thus </p>
+
+<pre><code>&gt;&gt;&gt; C.__dict__['foo']
+&lt;function foo at 0x17d05b0&gt;
+</code></pre>
+
+<p>the method foo is accessible as above. An important point to note here is that everything in python is an object and so references in the dictionary above are themselves pointing to other objects. Let me call them Class Property Objects - or as CPO within the scope of my answer for brevity.</p>
+
+<p>If a CPO is a descriptor, then python interpretor calls the <code>__get__()</code> method of the CPO to access the value it contains.</p>
+
+<p>In order to determine if a CPO is a descriptor, python interpretor checks if it implements the descriptor protocol. To implement descriptor protocol is to implement 3 methods</p>
+
+<pre><code>def __get__(self, instance, owner)
+def __set__(self, instance, value)
+def __delete__(self, instance)
+</code></pre>
+
+<p>for e.g. </p>
+
+<pre><code>&gt;&gt;&gt; C.__dict__['foo'].__get__(c, C)
+</code></pre>
+
+<p>where </p>
+
+<ul>
+<li><code>self</code> is the CPO (it could be an instance of list, str, function etc) and is supplied by the runtime</li>
+<li><code>instance</code> is the instance of the class where this CPO is defined (the object 'c' above) and needs to be explicity supplied by us</li>
+<li><code>owner</code> is the class where this CPO is defined(the class object 'C' above) and needs to be supplied by us. However this is because we are calling it on the CPO. when we call it on the instance, we dont need to supply this since the runtime can supply the instance or its class(polymorphism)</li>
+<li><code>value</code> is the intended value for the CPO and needs to be supplied by us</li>
+</ul>
+
+<p>Not all CPO are descriptors. For example </p>
+
+<pre><code>&gt;&gt;&gt; C.__dict__['foo'].__get__(None, C)
+&lt;function C.foo at 0x10a72f510&gt; 
+&gt;&gt;&gt; C.__dict__['a'].__get__(None, C)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+AttributeError: 'list' object has no attribute '__get__'
+</code></pre>
+
+<p>This is because the list class doesnt implement the descriptor protocol.</p>
+
+<p>Thus the argument self in <code>c.foo(self)</code> is required because its method signature is actually this <code>C.__dict__['foo'].__get__(c, C)</code> (as explained above, C is not needed as it can be found out or polymorphed)
+And this is also why you get a TypeError if you dont pass that required instance argument.</p>
+
+<p>If you notice the method is still referenced via the class Object C and the binding with the class instance is achieved via passing a context in the form of the instance object into this function. </p>
+
+<p>This is pretty awesome since if you chose to keep no context or no binding to the instance, all that was needed was to write a class to wrap the descriptor CPO and override its <code>__get__()</code> method to require no context. 
+This new class is what we call a decorator and is applied via the keyword <code>@staticmethod</code></p>
+
+<pre><code>class C(object):
+  @staticmethod
+  def foo():
+   pass
+</code></pre>
+
+<p>The absence of context in the new wrapped CPO <code>foo</code> doesnt throw an error and can be verified as follows:</p>
+
+<pre><code>&gt;&gt;&gt; C.__dict__['foo'].__get__(None, C)
+&lt;function foo at 0x17d0c30&gt;
+</code></pre>
+
+<p>Use case of a static method is more of a namespacing and code maintainability one(taking it out of a class and making it available throughout the module etc). </p>
+
+<p>It maybe better to write static methods rather than instance methods whenever possible, unless ofcourse you need to contexualise the methods(like access instance variables, class variables etc). One reason is to ease garbage collection by not keeping unwanted reference to objects.</p>

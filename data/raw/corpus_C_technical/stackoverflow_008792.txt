@@ -1,0 +1,49 @@
+Question: <p>I run a subprocess using:</p>
+
+<pre><code>  p = subprocess.Popen("subprocess", 
+                       stdout=subprocess.PIPE, 
+                       stderr=subprocess.PIPE, 
+                       stdin=subprocess.PIPE)
+</code></pre>
+
+<p>This subprocess could either exit immediately with an error on stderr, or keep running. I want to detect either of these conditions - the latter by waiting for several seconds.</p>
+
+<p>I tried this:</p>
+
+<pre><code>  SECONDS_TO_WAIT = 10
+  select.select([], 
+                [p.stdout, p.stderr], 
+                [p.stdout, p.stderr],
+                SECONDS_TO_WAIT)
+</code></pre>
+
+<p>but it just returns:</p>
+
+<pre><code>  ([],[],[])
+</code></pre>
+
+<p>on either condition. What can I do?</p>
+
+Answer: <p>This is a paraphrase on Evan's answer, but it takes into account the following :</p>
+
+<ol>
+<li>Explicitly canceling the Timer object : if the Timer interval would be long and the process will exit by its "own will" , this could hang your script :(</li>
+<li><p>There is an intrinsic race in the Timer approach (the timer attempt killing the process <em>just after</em> the process has died and this on Windows will raise an exception). </p>
+
+<pre><code>  DEVNULL = open(os.devnull, "wb")
+  process = Popen("c:/myExe.exe", stdout=DEVNULL) # no need for stdout
+
+  def kill_process():
+  """ Kill process helper"""
+  try:
+     process.kill()
+   except OSError:
+     pass  # Swallow the error
+
+  timer = Timer(timeout_in_sec, kill_process)
+  timer.start()
+
+  process.wait()
+  timer.cancel()
+</code></pre></li>
+</ol>

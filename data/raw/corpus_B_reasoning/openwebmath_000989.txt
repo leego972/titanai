@@ -1,0 +1,165 @@
+# Why does tikz produce output in plain tex when it does not in latex?
+
+This simple document testlatex.tex
+
+\documentclass{article}
+\usepackage{tikz}
+\begin{document}
+\end{document}
+
+
+when running latex testlatex produces No pages of output.
+
+But this document testtex.tex
+
+\input tikz
+\end
+
+
+when running tex testtex produces Output written on testtex.dvi (1 page, 3312 bytes).
+
+I would expect the second one to not produce any output either, why are they different?
+
+• Interesting. First I thought it may be because different engines are involved (in currently popular TeX distributions, latex runs pdfTeX, as we can see with latex --version, while tex runs something closer to Knuth's TeX). But this not the reason, because the question is reproducible with pdflatex and pdftex (the latter produces a blank page containing only the page number 1). (Similarly, what dvitype testtex.dvi shows is that the DVI file contains some PGF specials, some movements, then the page number.) My current guess is that it's because LaTeX uses a different output routine. – ShreevatsaR Mar 23 '18 at 20:12
+
+• \input tikz loads the file tikz.tex, while \usepackage{tikz} loads the file tikz.sty. Those files are different, and in turn load different files.
+• In particular, pgfrcs.tex has \input pgfutil-plain.def while pgfrcs.sty has \input pgfutil-latex.def
+• The code in pgfutil-plain.def has \openout which results in the creation of a whatsit node (and hence “output”, and the DVI file), while the code in pgfutil-latex.def piggybacks on LaTeX's aux file, which does \immediate\openout instead.
+
+## How to isolate the issue
+
+(This section just describes how the above was arrived at.)
+
+This is what I tried. By looking in the log file (or using kpsewhich), we can find the specific file that is being input, in the two cases. We can copy that file over to the current directory, and start editing it into something minimal: remove as much from it as possible, while the files still compile and exhibit the difference. They will probably input other files; copy them as well and repeat.
+
+By doing this recursively, I was able to reduce the two cases to the following:
+
+% tex testtex.tex
+This is TeX, Version 3.14159265 (TeX Live 2017) (preloaded format=tex)
+(./testtex.tex (./tikz.tex (./pgf.tex (./pgfcore.tex (./pgfsys.tex (./pgfrcs.tex (./pgfutil-common.tex) (./pgfutil-plain.def)) (./pgfsys.code.tex))))) [1] )
+Output written on testtex.dvi (1 page, 196 bytes).
+Transcript written on testtex.log.
+
+
+where most of the files simply \input the others as indicated in the log line above. The nontrivial files (after minimizing) are pgfrcs.tex:
+
+\input pgfutil-common.tex
+\input pgfutil-plain.def
+
+
+pgfutil-common.tex:
+
+\catcode\@=11\relax
+
+\newif\ifpgfutil@format@is@latex
+\newif\ifpgfutil@format@is@plain
+
+\newtoks\pgfutil@everybye
+
+
+pgfutil-plain.def:
+
+\pgfutil@format@is@plaintrue
+
+% The aux files, needed for reading back coordinates
+\csname newwrite\endcsname\pgfutil@auxout
+\csname openout\endcsname\pgfutil@auxout\jobname.pgf
+}
+
+
+pgfsys.code.tex:
+
+% Read aux file in plain and context mode:
+
+
+## Summary
+
+The file pgfrcs.tex has \input pgfutil-plain.def while the file pgfrcs.sty has \input pgfutil-latex.def, and those two .def files contain substantial differences.
+
+In particular, in the plain TeX case, at minimum we're running the following:
+
+\catcode\@=11\relax
+
+%%%%%%%%%% From pgfutil-plain.def < pgfrcs.tex < pgfsys.tex < pgfcore.tex < pgf.tex < tikz.tex
+% The aux files, needed for reading back coordinates
+\csname newwrite\endcsname\pgfutil@auxout
+\csname openout\endcsname\pgfutil@auxout\jobname.pgf
+}
+
+%%%%%%%%%% From pgfsys.code.tex < pgfsys.tex < pgfcore.tex < pgf.tex < tikz.tex
+
+\end
+
+
+and that's already enough to result in the creation of the .dvi file.
+
+(The answer of @egreg explains the further contents of the .dvi file—the PGF-related specials, that are needed to go into the PDF dictionary on every page—but not why a page is shipped out in the first place. To check this, we can simply remove the line \csname openout\endcsname\pgfutil@auxout\jobname.pgf from pgfutil-plain.def, and make absolutely no other changes, and see that your original testtex.tex does not result in the creation of a DVI file, even though the stuff that @egreg showed is still present in pgfutil-plain.def.)
+
+What the above shows is that we can find the difference already between:
+
+\input pgfsys
+\end
+
+
+(in plain TeX) and (in LaTeX):
+
+\documentclass{article}
+\usepackage{pgfsys}
+\begin{document}
+\end{document}
+
+
+Also, here's an even more minimal plain-TeX file that results in the creation of a DVI file:
+
+\newwrite\outfile
+\openout\outfile\jobname.pgf
+\end
+
+
+In the LaTeX case (in pgfutil-latex.def), there is a similar \AtBeginShipout and everything, but there's no \openout. Instead, it piggybacks on LaTeX's \@auxout. That one is defined, in latex.ltx (the definition of \document), using \immediate\openout\@mainaux\jobname.aux. And we can see that simply adding \immediate to our earlier minimal file does not result in the creation of a DVI file:
+
+\newwrite\outfile
+\immediate\openout\outfile\jobname.pgf
+\end
+
+• But I feel I'm still left asking why. Is it a bug that it's done this way in plain? Is it a temporary fix put in because it would be too much work to do it properly in plain? Is it possible to fix it so that it works the same in plain as in latex? What other differences are there between running tikz with plain vs latex? – nadder Mar 24 '18 at 15:14
+• @nadder (Answering backwards) • Looking at the many differences I found while trying to answer this, I would imagine there are dozens or hundreds of minor differences between TikZ in plain vs LaTeX. Often in LaTeX when something is needed the code can just require some corresponding package, while in plain either an equivalent plain-compatible package is used or some code is manually written for that part. (As here, for aux file, which is in LaTeX but was done in an ad-hoc way for plain.) I imagine that when some significant user-visible difference is noticed, they'd fix the code to be closer. – ShreevatsaR Mar 24 '18 at 16:23
+• @nadder (To emphasize, when running TikZ with plain a .pgf file is created, while with LaTeX an .aux file is created (in case of nonempty output). This is a user-visible difference but wouldn't be considered a bug.) • I don't off-hand foresee a problem with changing the \openout in pgfutil-plain.def to \immediate\openout… maybe someone just forgot the \immediate or didn't see why it's necessary. (It probably doesn't make a difference except for a document with no output, as here.) We could add \immediate in our local copy of pgfutil-plain.def, and try lots of TikZ examples. – ShreevatsaR Mar 24 '18 at 16:27
+• a new question arise here, why \documentclass{article} \newwrite\outfile \openout\outfile\jobname.pgf \begin{document} \end{document} don't shipout any page? – touhami Mar 28 '18 at 8:19
+• @touhami Good question! Maybe you can ask it as a new question… my guess is that it has something to do with LaTeX's output routine: the whatsit is indeed created and passed to the output routine, but in LaTeX's case it is then thrown away and no shipout happens. But I haven't looked into it, so not sure. – ShreevatsaR Mar 28 '18 at 13:52
+
+At some point, \pgfutil@abe is executed, which issues \unhbox.
+
+Here's the justification:
+
+272 \AtBeginShipout{%
+273   \setbox\AtBeginShipoutBox=\vbox{%
+274     \setbox0=\hbox{%
+275       \begingroup
+276                 % the boxes \pgfutil@abe ("every page") and \pgfutil@abb ("current page")
+277                 % are used to generate pdf objects / dictionaries which are
+278                 % required for the graphics which are somewhere in the "real"
+279                 % page content.
+280                 % BUT: these pdf objects MUST NOT be affected by text layout
+281                 % shifts! Consequently, we have to undo \hoffset and \voffset
+282                 % (which are h/v shifts to the page layout).
+283                 %
+284                 % Note that this of importance for shadings. To be more
+285                 % specific: try out shadings with standalone (which uses
+286                 % \hoffset) and with xdvipdfmx (which appears to be more
+287                 % fragile than pdflatex) - they break unless we undo \hoffset
+288                 % and \voffset.
+289                 \ifdim\hoffset=0pt \else \hskip-\hoffset\fi
+290         \pgfutil@abe
+291         \unhbox\pgfutil@abb
+292         \pgfutil@abc
+293         \global\let\pgfutil@abc\pgfutil@empty
+294                 \ifdim\hoffset=0pt \else \hskip+\hoffset\fi
+295       \endgroup
+296     }%
+
+• For completeness: why does this happen in plain TeX but not in LaTeX? It's because \AtBeginShipout works differently I guess? – ShreevatsaR Mar 23 '18 at 21:10
+• @ShreevatsaR That's quite possible – egreg Mar 23 '18 at 21:25
+• This (explains the contents of the DVI file but) turns out not to be the reason actually: the reason is \openout (in pgfutil-plain.def) versus \immediate\openout (in LaTeX). – ShreevatsaR Mar 24 '18 at 4:45
+• @ShreevatsaR In LaTeX no .pgf file is created, because the standard .aux file is used. – egreg Mar 24 '18 at 10:25
+• Yes right, that's what I found (mentioned as “piggyback” in my answer), and that's what I meant by “in LaTeX” (meant latex.ltx, specifically from ltfiles.dtx). The standard .aux file in LaTeX is created with \immediate\openout, while the .pgf file is created with \openout. Not sure why that is, though. – ShreevatsaR Mar 24 '18 at 16:18

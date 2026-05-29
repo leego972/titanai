@@ -1,0 +1,67 @@
+Question: <p>I have a Person model that has a foreign key relationship to Book.  Book has a number of fields, but I'm most concerned about "author" (a standard CharField).</p>
+
+<p>With that being said, in my PersonAdmin model, I'd like to display "book.author" using "list_display".  I've tried all of the obvious methods for doing so (see below), but nothing seems to work.  Any suggestions?</p>
+
+<pre><code>class PersonAdmin(admin.ModelAdmin):
+  list_display = ['book.author',]
+</code></pre>
+
+Answer: <p>If you have a lot of relation attribute fields to use in <code>list_display</code> and do not want create a function (and it's attributes) for each one, a dirt but simple solution would be override the <code>ModelAdmin</code> instace <code>__getattr__</code> method, creating the callables on the fly:</p>
+
+<pre class="lang-py prettyprint-override"><code>class DynamicLookupMixin(object):
+    '''
+    a mixin to add dynamic callable attributes like 'book__author' which
+    return a function that return the instance.book.author value
+    '''
+
+    def __getattr__(self, attr):
+        if ('__' in attr
+            and not attr.startswith('_')
+            and not attr.endswith('_boolean')
+            and not attr.endswith('_short_description')):
+
+            def dyn_lookup(instance):
+                # traverse all __ lookups
+                return reduce(lambda parent, child: getattr(parent, child),
+                              attr.split('__'),
+                              instance)
+
+            # get admin_order_field, boolean and short_description
+            dyn_lookup.admin_order_field = attr
+            dyn_lookup.boolean = getattr(self, '{}_boolean'.format(attr), False)
+            dyn_lookup.short_description = getattr(
+                self, '{}_short_description'.format(attr),
+                attr.replace('_', ' ').capitalize())
+
+            return dyn_lookup
+
+        # not dynamic lookup, default behaviour
+        return self.__getattribute__(attr)
+
+
+# use examples    
+
+@admin.register(models.Person)
+class PersonAdmin(admin.ModelAdmin, DynamicLookupMixin):
+    list_display = ['book__author', 'book__publisher__name',
+                    'book__publisher__country']
+
+    # custom short description
+    book__publisher__country_short_description = 'Publisher Country'
+
+
+@admin.register(models.Product)
+class ProductAdmin(admin.ModelAdmin, DynamicLookupMixin):
+    list_display = ('name', 'category__is_new')
+
+    # to show as boolean field
+    category__is_new_boolean = True
+</code></pre>
+
+<p>As <a href="https://gist.github.com/cauethenorio/9db40c59cf406bf328fd" rel="nofollow">gist here</a></p>
+
+<p>Callable especial attributes like <code>boolean</code> and <code>short_description</code> must be defined as <code>ModelAdmin</code> attributes, eg <code>book__author_verbose_name = 'Author name'</code> and <code>category__is_new_boolean = True</code>.</p>
+
+<p>The callable <code>admin_order_field</code> attribute is defined automatically.</p>
+
+<p>Don't forget to use the <a href="https://docs.djangoproject.com/en/1.9/ref/contrib/admin/#django.contrib.admin.ModelAdmin.list_select_related" rel="nofollow" title="list_select_related">list_select_related</a> attribute in your <code>ModelAdmin</code> to make Django avoid aditional queries.</p>

@@ -1,0 +1,62 @@
+# Effect of overlapping percentage on STFT output
+
+I know STFT is generally applied to non-stationary signals but I tried to apply it to a stationary signal to get a working knowledge.
+
+I created a stationary signal composed of three frequencies as below:
+
+x = 3*cos(2*pi*30*t + phi1) + 2*cos(2*pi*45*t - phi2) + 1*cos(2*pi*70*t + phi3);
+
+
+I then performed STFT (Short-Time Fourier transform) on this signal using hann window of length = 128.
+
+1. I have tried ranging the overlapping percentage from 75% to 0% (no overlap) but cannot see and difference in the spectrogram generated. Why could that be?
+
+2. On varying the length of the window (keeping overlapping percentage same), the bright lines in the spectrogram thickens or thins. Why could that be?
+
+I am using MATLAB's STFT function and documentation can be found here:1
+
+Edit:
+
+I tried a signal with varying frequency over time. As pointed out, decreasing overlap percentage results in coarser time grid.
+
+However, when increasing window size from 64 to 128 keeping overlap percentage same (75% for both), and 128-point FFT, in both cases the STFT is calculated for 65 frequencies (128/2 + 1). And the 64-hann window gives a better result. Does that mean that a smaller window gives better results almost everytime? Obviously, I understand that a smaller window would mean more computation cost.
+
+Another experiment made me realize that keeping everything constant (window size, overlap), and increasing the N in N-DFT gives better results.
+
+• Try a signal where frequency actually varies with times. Maybe an up sweep and down sweep. Aug 7 at 19:40
+
+My answers will be intuitive, I hope. There are more rigorous mathematical arguments that can be made, but your example is not stochastic or varying in frequency, so they are not necessary here.
+
+1. Incomplete but intuitive answer: The spectrum estimate does not appear to change with changing overlap because the spectrum is constant. But see below for more details on block-size, overlap, and time resolution versus frequency resolution.
+
+2. If you feed a block of $$N$$ samples to an FFT (the algorithm that outputs a discrete Fourier transform (DFT)), then the output has $$N$$ "frequency bins". As $$N$$ grows, you have more frequency bins, and you have finer resolution in frequency a finer grid of frequencies. Your example has just 3 constant frequencies to estimate, so as the frequency resolution grid of frequencies becomes finer, the "weight" will be concentrated in frequency bins closer and closer to the 3 frequencies. As a result, the lines in the spectrogram will be narrower as $$N$$ increases. You can also change the window; the thickness of the lines might change as you change the window.
+
+Note that as the block-size ($$N$$) increases, the waiting-time between feeding blocks of samples to the FFT increases. Hence, as you get greater frequency resolution a finer grid of frequencies, you have lesser time resolution a coarser grid of times. Overlapping blocks compensates for that a little bit: as the overlap increases, the waiting-time between FFTs shrinks. The cost is more computation.
+
+I offer the diagram below to address @Lobster3321's comment on this answer. The diagram has been corrected per @OverLordGoldDragon's comment on the location of the insertion of zeros for zero-padding.
+
+The diagram below gives a high-level view of the order of processing. If we had 0% overlap, then we would have a new column in the spectrogram after $$N$$ samples. With, 50% overlap, on the other hand, we have a new column of the spectrogram after just $$N/2$$ samples.
+
+• It needs pointing that "resolution" in your answer does not refer to the Heisenberg sense; there only the window matters. Aug 7 at 19:36
+• @OverLordGoldDragon : I was afraid that I had used an overloaded term. I will change it to something that is less ambiguous. Aug 7 at 19:38
+• Crossing out what's "wrong but related" or "you might think this", instead of deleting it entirely, is an interesting and I think effective approach. Aug 8 at 11:58
+• @JoeMack here, N is the windows size? Or is it the N from N-point DFT? As per the results that I'm seeing, it should be N from the N-point DFT. Please see details in edit. Would be really appreciative of your help. Aug 8 at 14:22
+• The window is center-padded, not right-padded. It's also confusing, if not incorrect, to call $M$ an interpolant and $N$ "original", where I presume $M$ is n_fft and $N$ is window length? which also is inconsistent with the rest of the answer. I think there's too much focus on the "windowed DFT" interpretation of STFT; STFT is complex bandpass convolutions, it utilizes no frequencies outside of DFT(x). Aug 8 at 22:50
+
+The DFT/FFT is a block transform, taking the inner-product of a signal vector with rows/columns of a DFT matrix. When applied in a block processing way, it makes sense to do this either back-to-back or with e.g. 50% overlap.
+
+I find it rewarding to take this to the extreme. If you see the DFT matrix not as a block matrix multiplication, but rather as a set of convolution kernels, one can do a convolution for every sample shift of the input signal. Inner-products that are shifted one sample at a time.
+
+With the understanding of maximally overlapped DFT processing as a bank of convolution filters, doing non-overlapped or 50% overlapped STFT is just a kind of degeneration. Namely, dropping most of the convolution results in order to reduce complexity.
+
+Short answer but I'm posting because the other answers have correct general descriptions but are missing the point past question 1:
+
+1. Congratulations, you've generated perfect sines and padded them correctly. Ordinarily you'd observe differences near boundaries. What's happening is, STFT of a pure sine is a perfectly horizontal line in time-frequency, since, well, it's "time vs frequency" and if the frequency never changes then it's a straight line. "Overlap" is alias for "hop size", i.e. stride of convolutions - it's identical to subsampling the STFT along time, like STFT_large_hop == STFT_small_hop[:, ::20]. If this is unclear, see top visual here, where the only difference is the window width doesn't change.
+
+2. Changing window length by itself won't do this. Odds are, you're feeding "length" argument to a generating function like scipy.signal.windows.hanning, which necessarily generate a wider window. The thinning is a consequence of greater frequency resolution, or wider in time window: better separability along frequency, worse along time.
+
+I also discourage the "windowed Fourier" interpretation of STFT as the sole or best one: STFT is convolution with complex bandpass filters, windowed DFT is one way to get there.
+
+Does that mean that a smaller window gives better results almost everytime?
+
+Narrower window is always superior for single-component signals (up to a limit that we likely won't encounter in practice) - i.e. one line you can draw in time-frequency, left-to-right, without lifting your hand. Details in this post.

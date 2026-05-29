@@ -1,0 +1,204 @@
+# \pdfstringdef turns accented characters into octal escape sequence
+
+The Question : How to make a glowing text?
+
+@'Symbol 1', interesting, I encapsulated your script into a new command (named '\glow') so I could highlight text just like with '\hl{}'. However the result of '\glow{This is a \hl{test}}' was not satisfactory due to the fact that the yellow box was rewritten multiple time above the glowing effect, hiding it.
+
+So I tried to modify your solution, print the original string first (say with '\hl{}'), use \pdfstringdef to remove the formatting and get a clean/plain string for the glowing string, then display it one last time above to get a clean text.
+
+Yet \pdfstringdef turns accented characters into octal sequences as seen here :
+
+How to strip a string of all formatting
+
+Here's a little tweaked version with transparency to "respect" highlight or other background effects. Yet the problem remains for accented characters or even parenthesis and alike :
+
+\documentclass{article}
+
+\usepackage{tikz}               % Graphique
+\usepackage{transparent}        % Transparence
+%\usepackage[outline]{contour}  % Contour
+
+\usepackage{xcolor}             % Couleurs par nom
+
+\usepackage{soul}               % \hl{}
+\usepackage{hyperref}           % \pdfstringdef
+
+% =============================================================================
+\makeatletter   % Autorise la modification des macros système
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+% /!\ UTILISATION DE 'PDFSTRINGDEF' POUR 'NETTOYER' LE TEXTE
+\newcommand{\glow}[2]{
+% Début liste de 'nettoyage' (rajouter les commandes à 'nettoyer')
+\pdfstringdefDisableCommands{\def\hl{}} % Nettoyage de '\hl{#1}'
+% Fin liste de 'nettoyage'
+\pdfstringdef\plainstr{#2}  % Extraction chaine 'nettoyée'
+%       #2%i                        % Texte avec mise en forme (fond) NOK
+\leavevmode                 % Mode horizontal (pas de passage à la ligne implicite)
+\pgfsys@beginscope          % = pdfliteral{q}
+\rlap{#2}%i             % Texte avec mise en forme (fond) 1x
+\pgfsetroundjoin        % = pdfliteral{1 j}
+\pgfsetroundcap         % = pdfliteral{1 J}
+\pdfliteral{1 Tr}%i     % no pgf alternative
+\foreach\ind in {10, ..., 1}{%i
+\pgfmathsetmacro\per{(11-\ind)*5}%i
+\iffalse
+% Couleur décroissante
+\color{#1!\per}%
+\else
+% Transparence cumulée
+\color{#1}%
+\transparent{0.1}%              % 10% max
+\fi
+\iftrue
+% Contour 'léger'
+\pgfsetlinewidth{\ind/2}        % light
+\else
+% Contour 'épais'
+\pgfsetlinewidth{(\ind/2)+1}    % heavy
+\fi
+%                   \rlap{#2}%i                         % x fois COULEUR avec mise en forme NOK
+\rlap{\plainstr}%i                  % x fois COULEUR sans mise en forme
+}%i
+\pgfsys@endscope            % = pdfliteral{Q}
+\plainstr                   % Texte sans mise en forme (dessus) NOIR
+%       #2%i                        % Texte avec mise en forme (dessus) NOIR
+}
+
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+\makeatother    % Bloque la modification des macros système
+% =============================================================================
+
+\begin{document}
+
+COMPILE AT LEAST TWICE !!!
+
+This is a test.
+
+This is another \hl{test}.
+
+\glow{green}{This one is supposed to glow without highlight.}
+
+\glow{cyan}{This one is also supposed to \hl{glow} preserving the highlight.}
+
+pdfstringdefDisableCommands and pdfstringdef removes the formatting.
+
+Then I overwrite the glowing string with a clean black string without hl{}.
+
+\glow{orange}{But accented characters are a hell to deal with.}
+
+\glow{red}{Bùt àccéntèd charaçters are a hell to deal wïth.}
+
+Even parenthesis gets "destroyed" in the process...
+
+\end{document}
+
+
+Btw I'm trying to mimic Word's text glowing function :
+
+Any solution ?
+
+PS : I cannot add the tags 'latex', or 'glow' or 'pdfstringdef' unless I have 300 "reputation"
+
+EDIT : with the solution provided, which work in general (accented characters are rendered correctly) I get a "feedback" effect now. I should investigate. "Not that elementary, my dear Watson".
+
+New contributor
+Kochise is a new contributor to this site. Take care in asking for clarification, commenting, and answering. Check out our Code of Conduct.
+• well yes that is the purpose of \pdfstringdef: it encode the string in a way needed inside a pdf. But please make your question self contained with a proper minimal example. I don't want to wander through various links trying to figure out what you are trying to do. – Ulrike Fischer yesterday
+• Edited, hope it helps to understand the issue. And no, I don't need octal representation when I use an UTF-8 file with \usepackage[utf8]{inputenc}, especially from something called \pdfstringdef or I would have used something like \getoctalsequence which is more explicit in its intentions. – Kochise yesterday
+• If you just want to expand some text to a string try \text_expand:n – Phelype Oleinik yesterday
+• \pdfstringdef is the wrong command. It is meant to produce a pdf string. Drop the idea to use it for your goal. – Ulrike Fischer yesterday
+• Probably, yet I still need something to strip all formatting to get a raw/plain string. Many people have the same need yet no clear answer to that.\\ I'll try with 'Phelype Oleinik' hint... (gosh, the hell to line feed in a comment) – Kochise yesterday
+
+Try with \text_purify:n (requires a rather current text system!)
+
+\documentclass{article}
+
+\usepackage{tikz}               % Graphique
+\usepackage{transparent}        % Transparence
+%\usepackage[outline]{contour}  % Contour
+
+\usepackage{xcolor}             % Couleurs par nom
+
+\usepackage{soul}               % \hl{}
+\usepackage{hyperref}           % \pdfstringdef
+
+% =============================================================================
+\makeatletter   % Autorise la modification des macros système
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+\ExplSyntaxOn
+\cs_set_eq:NN\textpurify\text_purify:n
+\ExplSyntaxOff
+% /!\ UTILISATION DE 'PDFSTRINGDEF' POUR 'NETTOYER' LE TEXTE
+\newcommand{\glow}[2]{
+% Début liste de 'nettoyage' (rajouter les commandes à 'nettoyer')
+%\pdfstringdefDisableCommands{\def\hl{}} % Nettoyage de '\hl{#1}'
+% Fin liste de 'nettoyage'
+\edef\plainstr{\textpurify{#2}}  % Extraction chaine 'nettoyée'
+%       #2%i                        % Texte avec mise en forme (fond) NOK
+\leavevmode                 % Mode horizontal (pas de passage à la ligne implicite)
+\pgfsys@beginscope          % = pdfliteral{q}
+\rlap{#2}%i             % Texte avec mise en forme (fond) 1x
+\pgfsetroundjoin        % = pdfliteral{1 j}
+\pgfsetroundcap         % = pdfliteral{1 J}
+\pdfliteral{1 Tr}%i     % no pgf alternative
+\foreach\ind in {10, ..., 1}{%i
+\pgfmathsetmacro\per{(11-\ind)*5}%i
+\iffalse
+% Couleur décroissante
+\color{#1!\per}%
+\else
+% Transparence cumulée
+\color{#1}%
+\transparent{0.1}%              % 10% max
+\fi
+\iftrue
+% Contour 'léger'
+\pgfsetlinewidth{\ind/2}        % light
+\else
+% Contour 'épais'
+\pgfsetlinewidth{(\ind/2)+1}    % heavy
+\fi
+%                   \rlap{#2}%i                         % x fois COULEUR avec mise en forme NOK
+\rlap{\plainstr}%i                  % x fois COULEUR sans mise en forme
+}%i
+\pgfsys@endscope            % = pdfliteral{Q}
+\plainstr                   % Texte sans mise en forme (dessus) NOIR
+%       #2%i                        % Texte avec mise en forme (dessus) NOIR
+}
+
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+\makeatother    % Bloque la modification des macros système
+% =============================================================================
+
+\begin{document}
+
+COMPILE AT LEAST TWICE !!!
+
+This is a test.
+
+This is another \hl{test}.
+
+\glow{green}{This one is supposed to glow without highlight.}
+
+\glow{cyan}{This one is also supposed to \hl{glow} preserving the highlight.}
+
+pdfstringdefDisableCommands and pdfstringdef removes the formatting.
+
+Then I overwrite the glowing string with a clean black string without hl{}.
+
+\glow{orange}{But accented characters are a hell to deal with.}
+
+\glow{red}{Bùt àccéntèd charaçters are a hell to deal wïth.}
+
+Even parenthesis gets "destroyed" in the process...
+
+\end{document}
+
+
+• Seems like that's the solution, yet a tricky one though :) I tried the '\text_expand:n' path but couldn't anything to work under pdflatex. How many latex distros are out there by the way ? Seems like more than Linux distros... – Kochise yesterday
+• Wow, can't even upvote your answer until I get "15 reputation". What kind of unwelcoming place is that ? Seriously ? – Kochise yesterday
+• I have windows, but this shouldn't matter, as long as it is current (which on linux could mean that you need to install a vanilla texlive). And it is not more tricky than your pdfstringdef version, both commands are quite similar (and \pdfstringdef is internally a very tricky and long command). And don't worry to much about the voting system, it is not really important if there is an upvote or not. – Ulrike Fischer yesterday
+• Ok, thanks for the explanations, I'm still rather new to the LaTeX inner working, it needs a good refresh/update because it's "tricky" to say the least. Heard something about LaTeX3 is in the pipes though... – Kochise yesterday
+• Btw the Word's rendering of the similar functionality is still superior IMHO, will have to understand how to create layers with alpha channel to get something more consistent without all these color bleeding due to transparent superposition :/ – Kochise yesterday

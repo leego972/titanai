@@ -1,0 +1,69 @@
+# Dot3 shader questions (spotlights, and light management)
+
+This topic is 4800 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+## Recommended Posts
+
+##### Share on other sites
+Hi,
+
+If you are unclear about spot lights in general, then the DX docs are not a bad place to get info on their workings - once you understand that it's quite simple to put spot light calculations inside a shader, but if you're still having trouble just say.
+
+On falloff, just put the inverse of the light's range into a shader constant, then compute the distance from the vertex to the light. The simplest falloff is linear, which you can achieve by doing something like this:
+
+Attenuation = 1.0 - (lightToVertDistance / lightRange)
+
+You will probably want to clamp this value between 0 and 1, then at the end of all your lighting calculations (for that one light), multiply the final colour by the attenuation.
+
+On your light management, is there no way you can have a loop in your shader? That'd simplify things a good deal and you can have static loops which are compiled out so it can be just a convenience tool for you, either that or you target higher end hardware and have "proper" loops but for lights (especially without shadowing) I think you could get away with the static loops.
+
+I don't think you need to worry about the number of uniform parameters, there are something like 96 vertex shader constants even on the lowest model, so that's not too much of a problem. If it bothers you break it into 4/4.
+
+Hope some of that helped,
+
+-Mezz
+
+##### Share on other sites
+Maybe with spotlight falloff, you meant the falloff to the sides of the spotlight cone, rather than distance attenutation ?
+
+In this case, it's easy. Each spotlight should have to angles define: the hotspot, and the cutoff. The light intensity is constant at maximum within the angle of the hotspot, and gradually falls off between hotspot and cutoff. 3DS Max calls them hotspot and falloff angles, iirc.
+
+Now, for efficiency reasons, store both as the cosine of the angle into two constant shader parameters:
+hotspot = cos(hotspotAngle);cutoff = cos(cutoffAngle);
+
+The cosine is perfect, since we're going to deal with dotproducts to finds the angle.
+
+Then you have a third shader parameter, a vector LightDirection, which denotes the central direction the spotlight points into. Imagine a vector along the central aiming axis of your light. The intensity factor used to control the falloff is found by comparing and interpolating angles relative to this direction with the hotspot and cutoff angles:
+// First, get the angle between the light vector and the aiming direction // of the spotlight, as a cosinefloat angle = dot(light_to_vertex_vector, LightDirection);// Now interpolate this angle with the hotspot and falloff angles as limits.// Angle below hotspot are going to be clamped to 1, angles beyond falloff are 0.float factor = smoothstep(cutoff, hotspot, angle);
+
+That's basically it.
+
+##### Share on other sites
+Thanks to both of you, I think that answers most of my questions...
+
+Only thing is, Should I just write a shader that loops through, say, 8 lights and applies calculations for all of them, regardless of whether or not they're black lights? I'm restricted to vs 1.1/NV20, so I can't branch on variables. It seems wasteful to do so if a vertex only has 3 lights on it, but I can't think of any alternative...
+
+##### Share on other sites
+It really depends on what you want from your system. The only way you're going to get optimal efficiency is to make different shaders which do a certain number of lights and then use them appropriately at runtime, of course this is heading towards the combinatorial explosion of shaders, which is somewhat messy and annoying. However, you can keep it relatively nice if you make a little "library function" of high level code that does your lighting, and then from your shader's "main" function call that with appropriate input parameters. Then shaders with different numbers of lights become:
+
+#include "MyLightingFuncs.vsh"VS_OUTPUT VSMain(VS_INPUT vsInput){    // fill out lighting parameters...    currentLightColour = ComputeLighting(lightingParameters);    // fill out light params again for next light...    currentLightColour += ComputeLighting(lightingParameters);    // etc.}
+
+Which is a bunch less code. Sorry for the HLSL notation it's the only language I know, but hopefully it shouldn't be too hard to understand the principle. The other alternative is to do as you said, compute light for black lights. It's up to you in the end ;)
+
+-Mezz
+
+##### Share on other sites
+Have you looked into using the fx files for different numbers of lights? I use the DX effect files, but I think they are very similar to the CgFX interfaces. The varying number of lights could just be built into a shader that takes an integer parameter like this:
+
+fragment VS( vertex IN, uniform int numLights){    for (int i = 0; i < numLights; i++)    {        // Perform lighting     }}
+
+Then you would build different techniques that set the different number of lights that are currently affecting the geometry that you are rendering:
+
+technique OneLight{    pass P0    {        VertexShader = compile vs_1_1 VS( 1 );        PixelShader  = compile ps_1_1 PS( );    }}technique TwoLights{    pass P0    {        VertexShader = compile vs_1_1 VS( 2 );        PixelShader  = compile ps_1_1 PS( );    }}
+
+This may not be an optimum solution since different versions of the shaders need to be compiled for each different number of lights, but I think the compiled shaders are cached.
+
+This is of course only if you want to use the fx interfaces, which may have a slight performance penalty as opposed to just using shaders, but I think its simplification is well worth the tradeoff.
+
+##### Share on other sites
+What can be typicly done is do 1 shader pass per light and then combine the passes via blending.

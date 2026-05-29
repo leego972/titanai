@@ -1,0 +1,200 @@
+Question: <p>Can someone explain to me the difference between doing:</p>
+
+<pre><code>class Child(SomeBaseClass):
+    def __init__(self):
+        super(Child, self).__init__()
+</code></pre>
+
+<p>and this:</p>
+
+<pre><code>class Child(SomeBaseClass):
+    def __init__(self):
+        SomeBaseClass.__init__(self)
+</code></pre>
+
+<p>I've seen <code>super</code> being used quite a lot in classes with only single inheritance. I can see why you'd use it in multiple inheritance but am unclear as to what the advantages are of using it in this kind of situation.</p>
+
+Answer: <p>When calling <code>super()</code> to resolve to a parent's version of a classmethod, instance method, or staticmethod, we want to pass the current class whose scope we are in as the first argument, to indicate which parent's scope we're trying to resolve to, and as a second argument the object of interest to indicate which object we're trying to apply that scope to.</p>
+
+<p>Consider a class hierarchy <code>A</code>, <code>B</code>, and <code>C</code> where each class is the parent of the one following it, and <code>a</code>, <code>b</code>, and <code>c</code> respective instances of each.</p>
+
+<pre><code>super(B, b) 
+# resolves to the scope of B's parent i.e. A 
+# and applies that scope to b, as if b was an instance of A
+
+super(C, c) 
+# resolves to the scope of C's parent i.e. B
+# and applies that scope to c
+
+super(B, c) 
+# resolves to the scope of B's parent i.e. A 
+# and applies that scope to c
+</code></pre>
+
+<h2>Using <code>super</code> with a staticmethod</h2>
+
+<p>e.g. using <code>super()</code> from within the <code>__new__()</code> method</p>
+
+<pre><code>class A(object):
+    def __new__(cls, *a, **kw):
+        # ...
+        # whatever you want to specialize or override here
+        # ...
+
+        return super(A, cls).__new__(cls, *a, **kw)
+</code></pre>
+
+<p>Explanation: </p>
+
+<p>1- even though it's usual for <code>__new__()</code> to take as its first param a reference to the calling class, it is <em>not</em> implemented in Python as a classmethod, but rather a staticmethod. That is, a reference to a class has to be passed explicitly as the first argument when calling <code>__new__()</code> directly:</p>
+
+<pre><code># if you defined this
+class A(object):
+    def __new__(cls):
+        pass
+
+# calling this would raise a TypeError due to the missing argument
+A.__new__()
+
+# whereas this would be fine
+A.__new__(A)
+</code></pre>
+
+<p>2- when calling <code>super()</code> to get to the parent class we pass the child class <code>A</code> as its first argument, then we pass a reference to the object of interest, in this case it's the class reference that was passed when <code>A.__new__(cls)</code> was called. In most cases it also happens to be a reference to the child class. In some situations it might not be, for instance in the case of multiple generation inheritances.</p>
+
+<pre><code>super(A, cls)
+</code></pre>
+
+<p>3- since as a general rule <code>__new__()</code> is a staticmethod, <code>super(A, cls).__new__</code> will also return a staticmethod and needs to be supplied all arguments explicitly, including the reference to the object of insterest, in this case <code>cls</code>.</p>
+
+<pre><code>super(A, cls).__new__(cls, *a, **kw)
+</code></pre>
+
+<p>4- doing the same thing without <code>super</code></p>
+
+<pre><code>class A(object):
+    def __new__(cls, *a, **kw):
+        # ...
+        # whatever you want to specialize or override here
+        # ...
+
+        return object.__new__(cls, *a, **kw)
+</code></pre>
+
+<h2>Using <code>super</code> with an instance method</h2>
+
+<p>e.g. using <code>super()</code> from within <code>__init__()</code></p>
+
+<pre><code>class A(object): 
+    def __init__(self, *a, **kw):
+        # ...
+        # you make some changes here
+        # ...
+
+        super(A, self).__init__(*a, **kw)
+</code></pre>
+
+<p>Explanation:</p>
+
+<p>1- <code>__init__</code> is an instance method, meaning that it takes as its first argument a reference to an instance. When called directly from the instance, the reference is passed implicitly, that is you don't need to specify it:</p>
+
+<pre><code># you try calling `__init__()` from the class without specifying an instance
+# and a TypeError is raised due to the expected but missing reference
+A.__init__() # TypeError ...
+
+# you create an instance
+a = A()
+
+# you call `__init__()` from that instance and it works
+a.__init__()
+
+# you can also call `__init__()` with the class and explicitly pass the instance 
+A.__init__(a)
+</code></pre>
+
+<p>2- when calling <code>super()</code> within <code>__init__()</code> we pass the child class as the first argument and the object of interest as a second argument, which in general is a reference to an instance of the child class.</p>
+
+<pre><code>super(A, self)
+</code></pre>
+
+<p>3- The call <code>super(A, self)</code> returns a proxy that will resolve the scope and apply it to <code>self</code> as if it's now an instance of the parent class. Let's call that proxy <code>s</code>. Since <code>__init__()</code> is an instance method the call <code>s.__init__(...)</code> will implicitly pass a reference of <code>self</code> as the first argument to the parent's <code>__init__()</code>.</p>
+
+<p>4- to do the same without <code>super</code> we need to pass a reference to an instance explicitly to the parent's version of <code>__init__()</code>.</p>
+
+<pre><code>class A(object): 
+    def __init__(self, *a, **kw):
+        # ...
+        # you make some changes here
+        # ...
+
+        object.__init__(self, *a, **kw)
+</code></pre>
+
+<h2>Using <code>super</code> with a classmethod</h2>
+
+<pre><code>class A(object):
+    @classmethod
+    def alternate_constructor(cls, *a, **kw):
+        print "A.alternate_constructor called"
+        return cls(*a, **kw)
+
+class B(A):
+    @classmethod
+    def alternate_constructor(cls, *a, **kw):
+        # ...
+        # whatever you want to specialize or override here
+        # ...
+
+        print "B.alternate_constructor called"
+        return super(B, cls).alternate_constructor(*a, **kw)
+</code></pre>
+
+<p>Explanation:</p>
+
+<p>1- A classmethod can be called from the class directly and takes as its first parameter a reference to the class. </p>
+
+<pre><code># calling directly from the class is fine,
+# a reference to the class is passed implicitly
+a = A.alternate_constructor()
+b = B.alternate_constructor()
+</code></pre>
+
+<p>2- when calling <code>super()</code> within a classmethod to resolve to its parent's version of it, we want to pass the current child class as the first argument to indicate which parent's scope we're trying to resolve to, and the object of interest as the second argument to indicate which object we want to apply that scope to, which in general is a reference to the child class itself or one of its subclasses.</p>
+
+<pre><code>super(B, cls_or_subcls)
+</code></pre>
+
+<p>3- The call <code>super(B, cls)</code> resolves to the scope of <code>A</code> and applies it to <code>cls</code>. Since <code>alternate_constructor()</code> is a classmethod the call <code>super(B, cls).alternate_constructor(...)</code> will implicitly pass a reference of <code>cls</code> as the first argument to <code>A</code>'s version of <code>alternate_constructor()</code></p>
+
+<pre><code>super(B, cls).alternate_constructor()
+</code></pre>
+
+<p>4- to do the same without using <code>super()</code> you would need to get a reference to the <em>unbound</em> version of <code>A.alternate_constructor()</code> (i.e. the explicit version of the function). Simply doing this would not work:</p>
+
+<pre><code>class B(A):
+    @classmethod
+    def alternate_constructor(cls, *a, **kw):
+        # ...
+        # whatever you want to specialize or override here
+        # ...
+
+        print "B.alternate_constructor called"
+        return A.alternate_constructor(cls, *a, **kw)
+</code></pre>
+
+<p>The above would not work because the <code>A.alternate_constructor()</code> method takes an implicit reference to <code>A</code> as its first argument. The <code>cls</code> being passed here would be its second argument.</p>
+
+<pre><code>class B(A):
+    @classmethod
+    def alternate_constructor(cls, *a, **kw):
+        # ...
+        # whatever you want to specialize or override here
+        # ...
+
+        print "B.alternate_constructor called"
+        # first we get a reference to the unbound 
+        # `A.alternate_constructor` function 
+        unbound_func = A.alternate_constructor.im_func
+        # now we call it and pass our own `cls` as its first argument
+        return unbound_func(cls, *a, **kw)
+</code></pre>

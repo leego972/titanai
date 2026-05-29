@@ -1,0 +1,278 @@
+Question: <p>What is the use of the <code>yield</code> keyword in Python? What does it do?</p>
+
+<p>For example, I'm trying to understand this code<sup><strong>1</strong></sup>:</p>
+
+<pre><code>def _get_child_candidates(self, distance, min_dist, max_dist):
+    if self._leftchild and distance - max_dist &lt; self._median:
+        yield self._leftchild
+    if self._rightchild and distance + max_dist &gt;= self._median:
+        yield self._rightchild  
+</code></pre>
+
+<p>And this is the caller:</p>
+
+<pre><code>result, candidates = list(), [self]
+while candidates:
+    node = candidates.pop()
+    distance = node._get_dist(obj)
+    if distance &lt;= max_dist and distance &gt;= min_dist:
+        result.extend(node._values)
+    candidates.extend(node._get_child_candidates(distance, min_dist, max_dist))
+return result
+</code></pre>
+
+<p>What happens when the method <code>_get_child_candidates</code> is called?
+A list is returned? A single element is returned? Is it called again? When will subsequent calls stop?</p>
+
+<hr>
+
+<p><sub>
+1. The code comes from Jochen Schulz (jrschulz), who made a great Python library for metric spaces. This is the link to the complete source: <a href="http://well-adjusted.de/~jrschulz/mspace/">Module mspace</a>.</sub></p>
+
+Answer: <blockquote>
+  <p><strong>What does the <code>yield</code> keyword do in Python?</strong></p>
+</blockquote>
+
+<h1>Answer Outline/Summary</h1>
+
+<ul>
+<li>A function with <a href="https://docs.python.org/reference/expressions.html#yieldexpr"><strong><code>yield</code></strong></a>, when called, <strong>returns a <a href="https://docs.python.org/2/tutorial/classes.html#generators">Generator</a>.</strong></li>
+<li>Generators are iterators because they implement the <a href="https://docs.python.org/2/library/stdtypes.html#iterator-types"><strong>iterator protocol</strong></a>, so you can iterate over them.</li>
+<li>A generator can also be <strong>sent information</strong>, making it conceptually a <strong>coroutine</strong>.</li>
+<li>In Python 3, you can <strong>delegate</strong> from one generator to another in both directions with <strong><code>yield from</code></strong>.</li>
+</ul>
+
+<h1>Generators:</h1>
+
+<p><strong><code>yield</code></strong> is only legal inside of a function definition, and <strong>the inclusion of <code>yield</code> in a function definition makes it return a generator.</strong></p>
+
+<p>The idea for generators comes from other languages (see footnote 1) with varying implementations. In Python's Generators, the execution of the code is <a href="https://docs.python.org/3.5/glossary.html#term-generator-iterator">frozen</a> at the point of the yield. When the generator is called (methods are discussed below) execution resumes and then freezes at the next yield.</p>
+
+<p><code>yield</code> provides an 
+easy way of <a href="https://docs.python.org/2/library/stdtypes.html#generator-types">implementing the iterator protocol</a>, defined by the following two methods: 
+<code>__iter__</code> and <code>next</code> (Python 2) or <code>__next__</code> (Python 3).  Both of those methods
+make an object an iterator that you could type-check with the <code>Iterator</code> Abstract Base 
+Class from the <code>collections</code> module.</p>
+
+<pre><code>&gt;&gt;&gt; def func():
+...     yield 'I am'
+...     yield 'a generator!'
+... 
+&gt;&gt;&gt; type(func)                 # A function with yield is still a function
+&lt;type 'function'&gt;
+&gt;&gt;&gt; gen = func()
+&gt;&gt;&gt; type(gen)                  # but it returns a generator
+&lt;type 'generator'&gt;
+&gt;&gt;&gt; hasattr(gen, '__iter__')   # that's an iterable
+True
+&gt;&gt;&gt; hasattr(gen, 'next')       # and with .next (.__next__ in Python 3)
+True                           # implements the iterator protocol.
+</code></pre>
+
+<p>The generator type is a sub-type of iterator:</p>
+
+<pre><code>&gt;&gt;&gt; import collections, types
+&gt;&gt;&gt; issubclass(types.GeneratorType, collections.Iterator)
+True
+</code></pre>
+
+<p>And if necessary, we can type-check like this:</p>
+
+<pre><code>&gt;&gt;&gt; isinstance(gen, types.GeneratorType)
+True
+&gt;&gt;&gt; isinstance(gen, collections.Iterator)
+True
+</code></pre>
+
+<p>A feature of an <code>Iterator</code> <a href="https://docs.python.org/2/glossary.html#term-iterator">is that once exhausted</a>, you can't reuse or reset it:</p>
+
+<pre><code>&gt;&gt;&gt; list(gen)
+['I am', 'a generator!']
+&gt;&gt;&gt; list(gen)
+[]
+</code></pre>
+
+<p>You'll have to make another if you want to use its functionality again (see footnote 2):</p>
+
+<pre><code>&gt;&gt;&gt; list(func())
+['I am', 'a generator!']
+</code></pre>
+
+<p>One can yield data programmatically, for example:</p>
+
+<pre><code>def func(an_iterable):
+    for item in an_iterable:
+        yield item
+</code></pre>
+
+<p>The above simple generator is also equivalent to the below - as of Python 3.3 (and not available in Python 2), you can use <a href="https://www.python.org/dev/peps/pep-0380/"><code>yield from</code></a>:</p>
+
+<pre><code>def func(an_iterable):
+    yield from an_iterable
+</code></pre>
+
+<p>However, <code>yield from</code> also allows for delegation to subgenerators, 
+which will be explained in the following section on cooperative delegation with sub-coroutines.</p>
+
+<h1>Coroutines:</h1>
+
+<p><code>yield</code> forms an expression that allows data to be sent into the generator (see footnote 3)</p>
+
+<p>Here is an example, take note of the <code>received</code> variable, which will point to the data that is sent to the generator:</p>
+
+<pre><code>def bank_account(deposited, interest_rate):
+    while True:
+        calculated_interest = interest_rate * deposited 
+        received = yield calculated_interest
+        if received:
+            deposited += received
+
+
+&gt;&gt;&gt; my_account = bank_account(1000, .05)
+</code></pre>
+
+<p>First, we must queue up the generator with the builtin function, <a href="https://docs.python.org/2/library/functions.html#next"><code>next</code></a>. It will 
+call the appropriate <code>next</code> or <code>__next__</code> method, depending on the version of
+Python you are using:</p>
+
+<pre><code>&gt;&gt;&gt; first_year_interest = next(my_account)
+&gt;&gt;&gt; first_year_interest
+50.0
+</code></pre>
+
+<p>And now we can send data into the generator. (<a href="https://www.python.org/dev/peps/pep-0342/">Sending <code>None</code> is 
+the same as calling <code>next</code></a>.) :</p>
+
+<pre><code>&gt;&gt;&gt; next_year_interest = my_account.send(first_year_interest + 1000)
+&gt;&gt;&gt; next_year_interest
+102.5
+</code></pre>
+
+<h2>Cooperative Delegation to Sub-Coroutine with <code>yield from</code></h2>
+
+<p>Now, recall that <code>yield from</code> is available in Python 3. This allows us to delegate
+coroutines to a subcoroutine:</p>
+
+<pre><code>def money_manager(expected_rate):
+    under_management = yield     # must receive deposited value
+    while True:
+        try:
+            additional_investment = yield expected_rate * under_management 
+            if additional_investment:
+                under_management += additional_investment
+        except GeneratorExit:
+            '''TODO: write function to send unclaimed funds to state'''
+        finally:
+            '''TODO: write function to mail tax info to client'''
+
+
+def investment_account(deposited, manager):
+    '''very simple model of an investment account that delegates to a manager'''
+    next(manager) # must queue up manager
+    manager.send(deposited)
+    while True:
+        try:
+            yield from manager
+        except GeneratorExit:
+            return manager.close()
+</code></pre>
+
+<p>And now we can delegate functionality to a sub-generator and it can be used
+by a generator just as above:</p>
+
+<pre><code>&gt;&gt;&gt; my_manager = money_manager(.06)
+&gt;&gt;&gt; my_account = investment_account(1000, my_manager)
+&gt;&gt;&gt; first_year_return = next(my_account)
+&gt;&gt;&gt; first_year_return
+60.0
+&gt;&gt;&gt; next_year_return = my_account.send(first_year_return + 1000)
+&gt;&gt;&gt; next_year_return
+123.6
+</code></pre>
+
+<p>You can read more about the precise semantics of <code>yield from</code> in <a href="https://www.python.org/dev/peps/pep-0380/#formal-semantics">PEP 380.</a></p>
+
+<h2>Other Methods: close and throw</h2>
+
+<p>The <code>close</code> method raises <code>GeneratorExit</code> at the point the function 
+execution was frozen. This will also be called by <code>__del__</code> so you 
+can put any cleanup code where you handle the <code>GeneratorExit</code>:</p>
+
+<pre><code>&gt;&gt;&gt; my_account.close()
+</code></pre>
+
+<p>You can also throw an exception which can be handled in the generator
+or propagated back to the user:</p>
+
+<pre><code>&gt;&gt;&gt; import sys
+&gt;&gt;&gt; try:
+...     raise ValueError
+... except:
+...     my_manager.throw(*sys.exc_info())
+... 
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 4, in &lt;module&gt;
+  File "&lt;stdin&gt;", line 2, in &lt;module&gt;
+ValueError
+</code></pre>
+
+<h1>Conclusion</h1>
+
+<p>I believe I have covered all aspects of the following question:</p>
+
+<blockquote>
+  <p><strong>What does the <code>yield</code> keyword do in Python?</strong></p>
+</blockquote>
+
+<p>It turns out that <code>yield</code> does a lot. I'm sure I could add even more 
+thorough examples to this. If you want more or have some constructive criticism, let me know by commenting
+below.</p>
+
+<hr>
+
+<h1>Appendix:</h1>
+
+<h2>Critique of the Top/Accepted Answer**</h2>
+
+<ul>
+<li>It is confused on what makes an <strong>iterable</strong>, just using a list as an example. See my references above, but in summary: an iterable has an <code>__iter__</code> method returning an <strong>iterator</strong>. An <strong>iterator</strong> provides a <code>.next</code> (Python 2 or <code>.__next__</code> (Python 3) method, which is implicitly called by <code>for</code> loops until it raises <code>StopIteration</code>, and once it does, it will continue to do so.</li>
+<li>It then uses a generator expression to describe what a generator is. Since a generator is simply a convenient way to create an <strong>iterator</strong>, it only confuses the matter, and we still have not yet gotten to the <code>yield</code> part.</li>
+<li>In <strong>Controlling a generator exhaustion</strong> he calls the <code>.next</code> method, when instead he should use the builtin function, <code>next</code>. It would be an appropriate layer of indirection, because his code does not work in Python 3.</li>
+<li>Itertools? This was not relevant to what <code>yield</code> does at all.</li>
+<li>No discussion of the methods that <code>yield</code> provides along with the new functionality <code>yield from</code> in Python 3. <strong>The top/accepted answer is a very incomplete answer.</strong></li>
+</ul>
+
+<h2>The <code>return</code> statement in a generator</h2>
+
+<p>In <a href="https://docs.python.org/2/reference/simple_stmts.html#the-return-statement">Python 2</a>:</p>
+
+<blockquote>
+  <p>In a generator function, the <code>return</code> statement is not allowed to include an <code>expression_list</code>. In that context, a bare <code>return</code> indicates that the generator is done and will cause <code>StopIteration</code> to be raised.</p>
+</blockquote>
+
+<p>An <code>expression_list</code> is basically any number of expressions separated by commas - essentially, in Python 2, you can stop the generator with <code>return</code>, but you can't return a value.</p>
+
+<p>In <a href="https://docs.python.org/3/reference/simple_stmts.html#the-return-statement">Python 3</a>: </p>
+
+<blockquote>
+  <p>In a generator function, the <code>return</code> statement indicates that the generator is done and will cause <code>StopIteration</code> to be raised. The returned value (if any) is used as an argument to construct <code>StopIteration</code> and becomes the <code>StopIteration.value</code> attribute.</p>
+</blockquote>
+
+<h2>Footnotes</h2>
+
+<ol>
+<li><p><sub>The languages CLU, Sather, and Icon were referenced in the proposal
+to introduce the concept of generators to Python. The general idea is
+that a function can maintain internal state and yield intermediate 
+data points on demand by the user. This promised to be <a href="https://www.python.org/dev/peps/pep-0255/">superior in performance 
+to other approaches, including Python threading</a>, which isn't even available on some systems.</sub></p></li>
+<li><p><sub> This means, for example, that <code>xrange</code> objects (<code>range</code> in Python 3) aren't <code>Iterator</code>s, even though they are iterable, because they can be reused. Like lists, their <code>__iter__</code> methods return iterator objects.</sub></p></li>
+<li><p><sub> 
+<code>yield</code> was originally introduced as a statement, meaning that it 
+could only appear at the beginning of a line in a code block. 
+Now <code>yield</code> creates a yield expression. 
+<a href="https://docs.python.org/2/reference/simple_stmts.html#grammar-token-yield_stmt">https://docs.python.org/2/reference/simple_stmts.html#grammar-token-yield_stmt</a> 
+This change was <a href="https://www.python.org/dev/peps/pep-0342/">proposed</a> to allow a user to send data into the generator just as
+one might receive it. To send data, one must be able to assign it to something, and
+for that, a statement just won't work.</sub></p></li>
+</ol>

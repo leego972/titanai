@@ -1,0 +1,64 @@
+Question: <p>I need a real DBA's opinion. Postgres 8.3 takes 200 ms to execute this query on my Macbook Pro while Java and Python perform the same calculation in under 20 ms (350,000 rows):</p>
+
+<pre><code>SELECT count(id), avg(a), avg(b), avg(c), avg(d) FROM tuples;
+</code></pre>
+
+<p>Is this normal behaviour when using a SQL database?</p>
+
+<p>The schema (the table holds responses to a survey):</p>
+
+<pre><code>CREATE TABLE tuples (id integer primary key, a integer, b integer, c integer, d integer);
+
+\copy tuples from '350,000 responses.csv' delimiter as ','
+</code></pre>
+
+<p>I wrote some tests in Java and Python for context and they crush SQL (except for pure python):</p>
+
+<pre><code>java   1.5 threads ~ 7 ms    
+java   1.5         ~ 10 ms    
+python 2.5 numpy   ~ 18 ms  
+python 2.5         ~ 370 ms
+</code></pre>
+
+<p>Even sqlite3 is competitive with Postgres despite it assumping all columns are strings (for contrast: even using just switching to numeric columns instead of integers in Postgres results in 10x slowdown)</p>
+
+<p>Tunings i've tried without success include (blindly following some web advice):</p>
+
+<pre><code>increased the shared memory available to Postgres to 256MB    
+increased the working memory to 2MB
+disabled connection and statement logging
+used a stored procedure via CREATE FUNCTION ... LANGUAGE SQL
+</code></pre>
+
+<p>So my question is, is my experience here normal, and this is what I can expect when using a SQL database?  I can understand that ACID must come with costs, but this is kind of crazy in my opinion.  I'm not asking for realtime game speed, but since Java can process millions of doubles in under 20 ms, I feel a bit jealous. </p>
+
+<p>Is there a better way to do simple OLAP on the cheap (both in terms of money and server complexity)?  I've looked into Mondrian and Pig + Hadoop but not super excited about maintaining yet another server application and not sure if they would even help.</p>
+
+<hr>
+
+<p>No the Python code and Java code do all the work in house so to speak.  I just generate 4 arrays with 350,000 random values each, then take the average.  I don't include the generation in the timings, only the averaging step.  The java threads timing uses 4 threads (one per array average), overkill but it's definitely the fastest.</p>
+
+<p>The sqlite3 timing is driven by the Python program and is running from disk (not :memory:)</p>
+
+<p>I realize Postgres is doing much more behind the scenes, but most of that work doesn't matter to me since this is read only data.</p>
+
+<p>The Postgres query doesn't change timing on subsequent runs.</p>
+
+<p>I've rerun the Python tests to include spooling it off the disk.  The timing slows down considerably to nearly 4 secs.  But I'm guessing that Python's file handling code is pretty much in C (though maybe not the csv lib?) so this indicates to me that Postgres isn't streaming from the disk either (or that you are correct and I should bow down before whoever wrote their storage layer!)</p>
+
+Answer: <p>Those are very detailed answers, but they mostly beg the question, how do I get these benefits without leaving Postgres given that the data easily fits into memory, requires concurrent reads but no writes and is queried with the same query over and over again.</p>
+
+<p>Is it possible to precompile the query and optimization plan? I would have thought the stored procedure would do this, but it doesn't really help.</p>
+
+<p>To avoid disk access it's necessary to cache the whole table in memory, can I force Postgres to do that?  I think it's already doing this though, since the query executes in just 200 ms after repeated runs.</p>
+
+<p>Can I tell Postgres that the table is read only, so it can optimize any locking code?</p>
+
+<p>I think it's possible to estimate the query construction costs with an empty table (timings range from 20-60 ms) </p>
+
+<p>I still can't see why the Java/Python tests are invalid.  Postgres just isn't doing that much more work (though I still haven't addressed the concurrency aspect, just the caching and query construction)</p>
+
+<p>UPDATE: 
+I don't think it's fair to compare the SELECTS as suggested by pulling 350,000 through the driver and serialization steps into Python to run the aggregation, nor even to omit the aggregation as the overhead in formatting and displaying is hard to separate from the timing.  If both engines are operating on in memory data, it should be an apples to apples comparison, I'm not sure how to guarantee that's already happening though.</p>
+
+<p>I can't figure out how to add comments, maybe i don't have enough reputation?</p>

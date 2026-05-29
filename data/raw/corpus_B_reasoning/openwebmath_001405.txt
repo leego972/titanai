@@ -1,0 +1,35 @@
+## Thursday, November 6, 2014
+
+### Speech enhancement 1: spectral subtraction, wiener filtering
+
+I am working today on my personnel project which needs some algorithms of speech enhancement or source separation to highlight the speech/singing voice part. I bumped into some classical enhancement methods, like, spectral subtraction, Wiener filter. These kinds of methods are designed to eliminate the noise component in noisy speech signal.
+
+1. Spectral subtraction
+It's funny how scientist at the years of 80s utilises this rudimentary method for de-noising. The principle is so simple: do FFT to the noisy speech ($X(k)$), do FFT to a pure noise ($N(k)$), subtract the magnitude of these two spectrum ($|\hat{S}(k)|=|X(k)| - |N(k)|$), and do IFFT to reconstruct the temporel signal by add the phase information of $X(k)$.
+
+More details can be referred to Boll's "Suppression of Acoustic Noise in Speech Using Spectral Subtraction". He included some pre/post processing method to improve the speech intelligibility, for instance, magnitude averaging, residual noise reduction, additional signal attenuation during nonspeech activity.
+
+Pure noise spectrum profile should be build before the spectral subtraction step, then each time VAD (voice activity detection) detect a noise frame, this profile will be updated. This is not a bad idea, huh? :D But his VAD detector compares only the residual spectrum and the noise profile (proportion $T$). When $T$ < -12 dB, the current frame is indicated as noise, otherwise, it's speech.
+
+I tested with this threshold $T$, and I found -12 dB might not be fit for all the signals:
+ click for enlarge
+It is clearly that when $T$ = -12, the subtractor did nothing but the attenuator took charge of all the works, because all the frames are indicated as noise frame. Personally, I prefer the sound without additional signal attenuation. (Please point me out if you think that I did something wrong with this algorithm :=) )
+
+The big disadvantage of this method is informed by author himself: it can't deal with the non stationary noise, that is, if the noise spectrum profile changes within the speech frames, this method fails.
+
+2. Two variations
+In article "Enhancement and Bandwidth Compression of Noisy Speech", we have two variations of this subtraction by using the power spectrum of $|X(k)|^2$ and $|N(k)|^2$:$$|\hat{S}(k)|=(|X(k)|^2-\alpha \mathbb{E}[|N(k)|^2])^{1/2}$$ $$|\hat{S}(k)|=\frac{1}{2}|X(k)|+\frac{1}{2}(|X(k)|^2-\mathbb{E}[|N(k)^2|])^{1/2}$$
+The author proved that these two formulas can be deduced from the parametric implicit Wiener filtering. I tried these two, the first one gives a reasonable result, but the second one is really bad. I think that's due to the noisy component $\frac{1}{2}|X(k)|$ in this formula.
+
+3. A priori SNR estimation Wiener filtering
+The Signal-to-noise ratio measure in frequency domaine Wiener filter could be a posteriori or a priori. If it's a posteriori, it could be easily computed by:$$SNR_{post}=\frac{|X(k)|^2}{\mathbb{E}|N(k)|^2}$$because we know $|X(k)|$ is the noisy spectrum and $\mathbb{E}|N(k)|^2$ is the average magnitude of noise signal when there is no speech activity. The two variations of parametric implicit Wiener filtering utilise exactly this a posteriori SNR ratio.
+
+The a priori one is defined by:$$SNR_{prio}=\frac{\mathbb{E}|S(k)|^2}{\mathbb{E}|N(k)|^2}$$However, we do know the $S(k)$ which is exactly the clean speech we want to obtain. Article "SPEECH ENHANCEMENT BASED ON A PRIORI SIGNAL TO NOISE ESTIMATION" introduced a iterative method to estimate the $SNR_{prio}$ which is called "decision-direct" estimate by the author.
+
+The Matlab code of this method written by Esfandiar Zavarehei can be easily download from his website (youpi!). He translated the formulas of the article into code except having changing some notations. For the reason of legibility, I changed them back.
+
+The "NoiseMargin" variable in his function "vad" is worth paying attention to. Because it indicates that a short-time frame would be considered as noise or speech. For instance, if the SNR ratio of noisy speech is 0dB, we assign 12dB to NoiseMargin, it turns out that almost all the frames will be indicated as noise.
+ A priori SNR estimation Wiener filter result, without pre/post processing
+The result of this method is more enjoyable to me than the last two, but it still has a some artificial traces.
+4. Matlab code
+https://github.com/ronggong/voiceenhance

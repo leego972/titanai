@@ -1,0 +1,83 @@
+Question: <p>I'm writing a log file viewer for a web application and for that I want to paginate through the lines of the log file.  The items in the file are line based with the newest item on the bottom.</p>
+
+<p>So I need a <code>tail()</code> method that can read <code>n</code> lines from the bottom and supports an offset.  What I came up with looks like this:</p>
+
+<pre><code>def tail(f, n, offset=0):
+    """Reads a n lines from f with an offset of offset lines."""
+    avg_line_length = 74
+    to_read = n + offset
+    while 1:
+        try:
+            f.seek(-(avg_line_length * to_read), 2)
+        except IOError:
+            # woops.  apparently file is smaller than what we want
+            # to step back, go to the beginning instead
+            f.seek(0)
+        pos = f.tell()
+        lines = f.read().splitlines()
+        if len(lines) &gt;= to_read or pos == 0:
+            return lines[-to_read:offset and -offset or None]
+        avg_line_length *= 1.3
+</code></pre>
+
+<p>Is this a reasonable approach?  What is the recommended way to tail log files with offsets?</p>
+
+Answer: <p>Posting an answer at the behest of commenters on <a href="/a/33811809/364696">my answer to a similar question</a> where the same technique was used to mutate the last line of a file, not just get it.</p>
+
+<p>For a file of significant size, <a href="https://docs.python.org/3/library/mmap.html" rel="nofollow"><code>mmap</code></a> is the best way to do this. To improve on the existing <code>mmap</code> answer, this version is portable between Windows and Linux, and should run faster (though it won't work without some modifications on 32 bit Python with files in the GB range, see the <a href="/a/33811809/364696">other answer for hints on handling this, and for modifying to work on Python 2</a>).</p>
+
+<pre><code>import io  # Gets consistent version of open for both Py2.7 and Py3.x
+import itertools
+import mmap
+
+def skip_back_lines(mm, numlines, startidx):
+    '''Factored out to simplify handling of n and offset'''
+    for _ in itertools.repeat(None, numlines):
+        startidx= mm.rfind(b'\n', 0, startidx)
+        if startidx&lt; 0:
+            break
+    return startidx
+
+def tail(f, n, offset=0):
+    # Reopen file in binary mode
+    with io.open(f.name, 'rb') as binf, mmap.mmap(binf.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        # len(mm) - 1 handles files ending w/newline by getting the prior line
+        startofline = skip_back_lines(mm, offset, len(mm) - 1)
+        if startofline &lt; 0:
+            return []  # Offset lines consumed whole file, nothing to return
+            # If using a generator function (yield-ing, see below),
+            # this should be a plain return, no empty list
+
+        endoflines = startofline + 1  # Slice end to omit offset lines
+
+        # Find start of lines to capture (add 1 to move from newline to beginning of following line)
+        startofline = skip_back_lines(mm, n, startofline) + 1
+
+        # Passing True to splitlines makes it return the list of lines without
+        # removing the trailing newline (if any), so list mimics f.readlines()
+        return mm[startofline:endoflines].splitlines(True)
+        # If Windows style \r\n newlines need to be normalized to \n, and input
+        # is ASCII compatible, can normalize newlines with:
+        # return mm[startofline:endoflines].replace(os.linesep.encode('ascii'), b'\n').splitlines(True)
+</code></pre>
+
+<p>This assumes the number of lines tailed is small enough you can safely read them all into memory at once; you could also make this a generator function and manually read a line at a time by replacing the final line with:</p>
+
+<pre><code>        mm.seek(startofline)
+        # Call mm.readline n times, or until EOF, whichever comes first
+        for line in itertools.islice(iter(mm.readline, b''), n):
+            yield line
+</code></pre>
+
+<p>Lastly, this read in binary mode (necessary to use <code>mmap</code>) so it gives <code>str</code> lines (Py2) and <code>bytes</code> lines (Py3); if you want <code>unicode</code> (Py2) or <code>str</code> (Py3), the iterative approach could be tweaked to decode for you and/or fix newlines:</p>
+
+<pre><code>        lines = itertools.islice(iter(mm.readline, b''), n)
+        if f.encoding:  # Decode if the passed file was opened with a specific encoding
+            lines = (line.decode(f.encoding) for line in lines)
+        if 'b' not in f.mode:  # Fix line breaks if passed file opened in text mode
+            lines = (line.replace(os.linesep, '\n') for line in lines)
+        for line in lines:
+            yield line
+</code></pre>
+
+<p>Note: I typed this all up on a machine where I lack access to Python to test. Please let me know if I typoed anything; this was similar enough to <a href="/a/33811809/364696">my other answer</a> that I <em>think</em> it should work, but the tweaks (e.g. handling an <code>offset</code>) could lead to subtle errors. Please let me know in the comments if there are any mistakes.</p>

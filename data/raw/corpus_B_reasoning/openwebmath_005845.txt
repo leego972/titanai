@@ -1,0 +1,75 @@
+# What exactly does XMMatrixPerspective{L,R}H do?
+
+There are generally three functions to create a perspective matrix in DirectXMath, XMMatrixPerspective{L,R}H, XMMatrixPerspectiveFov{L,R}H and XMMatrixPerspectiveOffCenter{L,R}H. I'm kind of confused what XMMatrixPerspective exactly does.
+
+I'm currently generating a perspective matrix using
+
+DirectX::XMMatrixPerspectiveFovRH(to_rad(80.0f), (float)winX / (float)winY, 0.1f, 100.0f);
+
+
+which works fine, I can see the cube I'm drawing in front of me. If I replace this with a DirectX::XMMatrixPerspectiveRH(winX, winY, 0.1f, 100.0f), I don't see anything on the screen. So the question is, what exactly does the matrix represent? What is it's field of view? And why don't I see my cube? If this function uses some sort of default fov value, I'd expect to see my cube - even if possibly stretched - as my view matrix looks straight at it.
+
+Unfortunately, the docs only say "creates a projection matrix" but nothing about how one is supposed to work with that matrix.
+
+E: I figured out, I'm not supposed to pass the window coordinates. It expects the size of the near-clipping plane. However after playing around for a bit with values, how is this function supposed to be used? I really can't see any reason to use this over the one where you pass in a fov.
+
+The DirectXMath library is all inline so you can look directly at the source.
+
+For example, here is the C version of XMMatrixPerspectiveLH:
+
+float TwoNearZ = NearZ + NearZ;
+float fRange = FarZ / (FarZ - NearZ);
+
+XMMATRIX M;
+M.m[0][0] = TwoNearZ / ViewWidth;
+M.m[0][1] = 0.0f;
+M.m[0][2] = 0.0f;
+M.m[0][3] = 0.0f;
+
+M.m[1][0] = 0.0f;
+M.m[1][1] = TwoNearZ / ViewHeight;
+M.m[1][2] = 0.0f;
+M.m[1][3] = 0.0f;
+
+M.m[2][0] = 0.0f;
+M.m[2][1] = 0.0f;
+M.m[2][2] = fRange;
+M.m[2][3] = 1.0f;
+
+M.m[3][0] = 0.0f;
+M.m[3][1] = 0.0f;
+M.m[3][2] = -fRange * NearZ;
+M.m[3][3] = 0.0f;
+return M;
+
+
+and here is the C version of XMMatrixPerspectiveFovLH:
+
+float Height = CosFov / SinFov;
+float Width = Height / AspectRatio;
+float fRange = FarZ / (FarZ-NearZ);
+
+XMMATRIX M;
+M.m[0][0] = Width;
+M.m[0][1] = 0.0f;
+M.m[0][2] = 0.0f;
+M.m[0][3] = 0.0f;
+
+M.m[1][0] = 0.0f;
+M.m[1][1] = Height;
+M.m[1][2] = 0.0f;
+M.m[1][3] = 0.0f;
+
+M.m[2][0] = 0.0f;
+M.m[2][1] = 0.0f;
+M.m[2][2] = fRange;
+M.m[2][3] = 1.0f;
+
+M.m[3][0] = 0.0f;
+M.m[3][1] = 0.0f;
+M.m[3][2] = -fRange * NearZ;
+M.m[3][3] = 0.0f;
+return M;
+
+
+The "FOV" version compute the size of the projection plane rectangle from the provided field-of-view and aspect ratio values, while the non-FOV version takes a project plane rectangle size directly. The FOV version is the one you most commonly use as it provides a 'physical camera like' control that's easier to understand.

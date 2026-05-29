@@ -1,0 +1,127 @@
+# Title
+
+Library Files Utilities
+
+Derick Eddington
+
+# Status
+
+This SRFI is currently in withdrawn'' status. To see an explanation of each status that a SRFI can hold, see here. To provide input on this SRFI, please mail to <srfi minus 104 at srfi dot schemers dot org>. See instructions here to subscribe to the list. You can access previous messages via the archive of the mailing list. You can access post-withdrawal messages via the archive of the mailing list.
+
+• Draft: 2009/09/22-2009/11/22
+• Revised: 2009/10/16
+• Revised: 2009/12/11
+• Draft extended: 2009/12/11-2010/1/11
+• Revised: 2010/01/24
+• Draft extended: 2010/03/04-2010/04/04
+• Withdrawn: 2010/05/23
+
+# Abstract
+
+This SRFI implements SRFI 103: Library Files as a library. It is useful for working with library files.
+
+# Rationale
+
+To assist at working with library files as defined by SRFI 103, this SRFI provides an API for working with the aspects of SRFI 103. E.g., a library manager application can use this SRFI to work with library files, or a Scheme system can use this SRFI as its means of finding external libraries.
+
+# Specification
+
+Implementations of this SRFI as an R6RS library must be named (srfi :104 library-files-utilities), and there must also be an alias named (srfi :104), following SRFI 97: SRFI Libraries.
+
+This specification refers to many aspects of SRFI 103: Library Files, and familiarity with it is assumed.
+
+### Requirements
+
+SRFI 39: Parameter Objects
+
+### Provided Bindings
+
+PARAMETER searched-directories
+
+The sequence of names of directories to search for library files. It must be a list, possibly empty, of non-empty strings. If the host Scheme system implements SRFI 103, the initial value is the system's sequence of searched-directory names, else it is the empty list. Mutating this parameter may or may not affect the sequence used by the host system. Mutating the sequence used by the host system may or may not affect this parameter.
+
+PARAMETER recognized-extensions
+
+The sequence of file-name extensions to recognize when searching for library files. It must be a list, possibly empty, of non-empty strings which do not contain the #\. character. If the host Scheme system implements SRFI 103, the initial value is the system's sequence of recognized file-name extensions, else it is the empty list. Mutating this parameter may or may not affect the sequence used by the host system. Mutating the sequence used by the host system may or may not affect this parameter.
+
+PARAMETER file-name-component-separator
+
+The separator of directory names in file names. It must be the #\/ or the #\\ character. The initial value is the host platform's file-name component separator. Mutating this parameter may or may not affect the separator used by the host Scheme system. Mutating the separator used by the host system may or may not affect this parameter.
+
+PROCEDURE (directories-from-env-var)
+
+Returns a list, possibly empty, of strings extracted from the current value of the SCHEME_LIB_PATH environment variable in the same order they occur in the variable. If the variable is not defined, #F is returned.
+
+PROCEDURE (extensions-from-env-var)
+
+Returns a list, possibly empty, of strings extracted from the current value of the SCHEME_LIB_EXTENSIONS environment variable in the same order they occur in the variable. If the variable is not defined, #F is returned.
+
+PROCEDURE (library-name->file-name library-name extension)
+
+Given a library name, which must be a non-empty list of symbols, return a non-empty string which is the relative library-file name which represents the library name. The file-name components are derived from the symbols, encoding characters as necessary. The current value of the file-name-component-separator parameter is used to join the file-name components. The second argument is the extension to use in the file name, and it must be a non-empty string which does not contain the #\. character.
+
+Examples:
+ (library-name->file-name '(foo) "ext") => "foo.ext" (library-name->file-name '(foo bar zab) "acme-ext") => "foo/bar/zab.acme-ext" (parameterize ((file-name-component-separator #\\)) (library-name->file-name '(:♥ λ*) "%")) => "%3A%♥\\λ%2A%.%"
+PROCEDURE (library-file-name-info file-name)
+
+Given a file name, which must be a non-empty string, if it is a correctly formed library-file name, return two values: (1) a non-empty list of symbols which is the library name derived from the file name, decoding characters as necessary; (2) a non-empty string which is the file-name extension, without the #\. character, from the file name. The file name should be a relative library-file name, because each file-name component, ignoring the extension, is used to make a library-name symbol. The current value of the file-name-component-separator parameter is used to recognize separate file-name components. If the file name is not a correctly formed library-file name, #F and #F are returned.
+
+Examples:
+ (library-file-name-info "foo.ext") => (foo) "ext" (library-file-name-info "f%3C%o%3A%o.ext") => (f (♥ λ) "%2A%%3A%" (parameterize ((file-name-component-separator #\\)) (library-file-name-info "foo\\bar\\zab.ext")) => (foo bar zab) "ext" (library-file-name-info "foo") => #F #F (library-file-name-info "foo.") => #F #F (library-file-name-info ".ext") => #F #F (library-file-name-info "fo:o.ext") => #F #F (library-file-name-info "fo%61%o.ext") => #F #F (library-file-name-info "fo%03A%o.ext") => #F #F (library-file-name-info "fo%3a%o.ext") => #F #F
+PROCEDURE (find-library-file-names library-name)
+
+Given a library name, which must be a non-empty list of symbols, find in the directories specified by the current value of the searched-directories parameter the file names which match the library name and have extensions specified by the current value of the recognized-extensions parameter, and return an association list describing the matching file names, their directories, and their ordering. Each association represents a searched directory which contains at least one match. No association is present for a searched directory which does not contain a match. The key of each association is a non-empty string which is the name of the directory the association represents. The associations are ordered the same as their keys are in the searched-directories parameter. The value of each association is a non-empty list of non-empty strings which are the matching file names from the association's directory, and these file names are relative to that directory, and they are ordered the same as their extensions are in the recognized-extensions parameter. If no matches are found, #F is returned.
+
+Example:
+Given this structure of directories and files:
+/sd/a/
+foo/
+bar.acme-ext
+bar.ext
+bar.other-ext
+zab.ext
+sd/b/
+foo/
+bar.png
+sd/c/
+foo/
+bar.ext
+(parameterize ((searched-directories '("sd/c" "sd/b" "/sd/a"))
+(recognized-extensions '("acme-ext" "ext")))
+(find-library-file-names '(foo bar)))
+=>
+(("sd/c"
+"foo/bar.ext")
+("/sd/a"
+"foo/bar.acme-ext"
+"foo/bar.ext"))
+
+# Reference Implementation
+
+The reference implementation is provided as an R6RS library. It requires some R6RS bindings, SRFI 39: Parameter Objects, and SRFI 98: An Interface to Access Environment Variables. It can be a built-in library of a Scheme system, or it can be an externally-imported library. As an externally-imported library, it uses system-specific library files. As a built-in library, the system-specific library files are not used and the main library's source code should be changed to not use them.
+
+A test program is provided as an R6RS program. It requires, in addition to the reference implementation, some R6RS bindings, SRFI 39: Parameter Objects, and SRFI 78: Lightweight Testing.
+
+The reference implementation and tests.
+
+# Issues
+
+(Section which points out things to be resolved. This will not appear in the final SRFI.)
+
+• TODO: Anything?
+
+# Acknowledgments
+
+I thank everyone who influenced and commented on this SRFI. I thank the editor for editing this SRFI.
+
+# References
+
+SRFI 103: Library Files
+Derick Eddington
+http://srfi.schemers.org/srfi-103/srfi-103.html
+SRFI 39: Parameter Objects
+Marc Feeley
+http://srfi.schemers.org/srfi-39/srfi-39.html
+Revised6 Report on the Algorithmic Language Scheme
+Michael Sperber, et al. (Editors)
+http://www.r6rs.org/

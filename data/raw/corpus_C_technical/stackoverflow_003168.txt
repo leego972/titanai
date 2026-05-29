@@ -1,0 +1,61 @@
+Question: <p>I am putting together a Samba-based server as a Primary Domain Controller, and ran into a cute little problem that should have been solved many times over.  But a number of searches did not yield a result.  I need to be able to remove an existing user from an existing group with a command line script.  It appears that the usermod easily allows me to add a user to a supplementary group with this command:</p>
+
+<pre><code>usermod -a -G supgroup1,supgroup2 username
+</code></pre>
+
+<p>Without the "-a" option, if the user is currently a member of a group which is not listed, the user will be removed from the group.  Does anyone have a perl (or Python) script that allows the specification of a user and group for removal?  Am I missing an obvious existing command, or well-known solution forthis?  Thanks in advance!</p>
+
+<p>Thanks to J.J. for the pointer to the Unix::Group module, which is part of Unix-ConfigFile.  It looks like the command deluser would do what I want, but was not in any of my existing repositories.  I went ahead and wrote the perl script using the Unix:Group Module.  Here is the script for your sysadmining pleasure.</p>
+
+<pre><code>#!/usr/bin/perl
+#
+# Usage:   removegroup.pl login group
+# Purpose: Removes a user from a group while retaining current primary and
+#          supplementary groups.
+# Notes:   There is a Debian specific utility that can do this called deluser,
+#          but I did not want any cross-distribution dependencies
+#
+# Date:   25 September 2008
+
+# Validate Arguments (correct number, format etc.)
+if ( ($#ARGV &lt; 1) || (2 &lt; $#ARGV) ) {
+  print "\nUsage: removegroup.pl login group\n\n";
+  print "EXIT VALUES\n";
+  print "     The removeuser.pl script exits with the following values:\n\n";
+  print "     0 success\n\n";
+  print "     1 Invalid number of arguments\n\n";
+  print "     2 Login or Group name supplied greater than 16 characters\n\n";
+  print "     3 Login and/or Group name contains invalid characters\n\n";
+  exit 1;
+}
+
+# Check for well formed group and login names
+if ((16 &lt; length($ARGV[0])) ||(16 &lt; length($ARGV[1])))
+{
+  print "Usage: removegroup.pl login group\n";
+  print "ERROR: Login and Group names must be less than 16 Characters\n";
+  exit 2;
+}
+
+if ( ( $ARGV[0] !~ m{^[a-z_]+[a-z0-9_-]*$}) || ( $ARGV[0] !~ m{^[a-z_]+[a-z0-9_-]*$} ) )
+{
+  print "Usage: removegroup.pl login group\n";
+  print "ERROR: Login and/or Group name contains invalid characters\n";
+  exit 3;
+}
+
+# Set some variables for readability
+$login=$ARGV[0];
+$group=$ARGV[1];
+
+# Requires the GroupFile interface from perl-Unix-Configfile
+use Unix::GroupFile;
+
+$grp = new Unix::GroupFile "/etc/group";
+$grp-&gt;remove_user("$group", "$login");
+$grp-&gt;commit();
+undef $grp;
+exit 0;
+</code></pre>
+
+Answer: <p>I found <a href="http://search.cpan.org/~ssnodgra/Unix-ConfigFile-0.06/GroupFile.pm" rel="nofollow">This</a> for you. It should do what you need. As far as I can tell Perl does not have any built in functions for removing users from a group. It has several for seeing the group id of a user or process.</p>

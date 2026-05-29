@@ -1,0 +1,69 @@
+# Writing an HTTP POST body that has new lines
+
+I am looking for general ways to simplify this. What it does is write a body and send an HTTP POST request to an endpoint. I had the method require a list just to append new lines for each string I build at an earlier point in time. The expected response is in JSON, so I'm also looking for ways to simplify capturing the response. If there are any small libraries that can do this I can consider using them.
+
+private void makeRequest(List<String> records) throws IOException
+{
+URL url = new URL("http://my-api.com/post-endpoint");
+HttpURLConnection connection = (HttpURLConnection)url.openConnection();
+connection.setDoOutput(true);
+connection.setRequestMethod("POST");
+try (OutputStream output = connection.getOutputStream()) {
+Iterator<String> iterator = records.iterator();
+while (iterator.hasNext()) {
+String json = iterator.next();
+output.write(json.getBytes(Charset.forName("UTF-8")));
+if (iterator.hasNext()) {
+output.write('\n');
+}
+}
+}
+
+String inputLine;
+StringBuilder response = new StringBuilder();
+
+while ((inputLine = in.readLine()) != null) {
+response.append(inputLine);
+}
+in.close();
+
+System.out.println("RESPONSE: " + response.toString());
+}
+
+
+### Iterating over a list
+
+Using an Iterator to iterate over a list is very old-fashioned. It's better to use the for-each syntax when possible:
+
+for (String record : records) {
+// ...
+}
+
+
+I noticed that the last element is treated differently from the others: a \n character is not appended after the last record. Is that really necessary? I doubt it. Trailing \n characters should not make the JSON invalid. Although the implementation may be correct to not print a trailing \n, it seems a bit pedantic.
+
+If for some reason you need to keep the special treatment of the last line, you can still use the for-each technique with twist:
+
+if (!records.isEmpty()) {
+output.write(records.get(0).getBytes(Charset.forName("UTF-8")));
+for (String record : records.subList(1, records.size())) {
+output.write('\n');
+output.write(record.getBytes(Charset.forName("UTF-8")));
+}
+}
+
+
+That is, instead of treating the last item specially, we treat the first item specially, and then use .subList to effectively work with the tail of the list. Note that .subList does not copy the content of the list, so it's not inefficient.
+
+And if you can use Java 8, then an even more compact solution is possible using String.join:
+
+output.write(String.join("\n", records).getBytes(Charset.forName("UTF-8")));
+
+
+### try-with-resources
+
+You used try-with-resources when writing to the output stream, but not when reading from the input stream. It's always good to use it whenever possible:
+
+StringBuilder response = new StringBuilder();
+
+• @mtj thanks for the reminder about joining. An even simpler solution is using String.join. – janos Sep 2 '17 at 9:09

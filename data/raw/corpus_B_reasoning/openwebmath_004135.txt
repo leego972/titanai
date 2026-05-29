@@ -1,0 +1,184 @@
+# FDE: Frozen Density Embedding¶
+
+The Frozen-Density-Embedding (FDE) option invokes calculation of the effective embedding potential introduced by Wesolowski and Warshel [184] in order to take into account the effect of the environment on the electronic structure of an embedded system. The embedding potential (Eq. 3 in Ref. [240]) depends explicitly on electron densities corresponding to the embedded subsystem (e.g. a solvated molecule) and its environment (e.g. solvent). For a detailed review, see Ref. [205]. The ADF implementation of the method is described in detail in Ref. [185, 217].
+
+A time-dependent linear-response generalization of this embedding scheme was derived in Ref. [186]. Its implementation in an approximate form, which assumes a localized response of the embedded system only (uncoupled FDE), is described in the supplementary material to Ref. [187]. For possible drawbacks and pitfalls in connection with this approximation, see Refs. [185, 190, 193].
+
+The theory of coupled excited states for subsystems is described in Refs. [296,297], and extended for general response properties in Ref. [298]. This theory (subsystem TDDFT, coupled FDE) allows to treat the mutual response of several subsystems, including the ones that are considered environment.
+
+A generalization of the FDE scheme to the calculation of NMR shieldings has been given in Ref. [218], where also the approximations involved and possible problems are discussed.
+
+With the exception of interaction energies, the current implementation in ADF only allows the calculation of molecular properties that only depend on the electron density and of response properties using TDDFT. For an application to the calculation of several molecular properties in solution and a comparison to the DRF model also available in ADF, see Ref. [190]. For further applications of the ADF implementation, see Ref. [189] (weakly interacting complexes), Refs. [185, 190-192] (solvent effects), and Refs. [206-207] (other environment effects).
+
+To invoke a frozen-density embedding calculation, two additional specifications in the input are required. First, one or more frozen fragments have to be included in the FRAGMENTS block, and second, the block key FDE has to be included. In the simplest case, this input should look like this:
+
+FRAGMENTS
+...
+FragType FragFile type=FDE
+...
+END
+
+FDE
+PW91K
+end
+
+
+In the FRAGMENTS block, for any fragment it is possible to specify the option type=FDE to indicate that the density of this fragment is kept frozen. This density is imported from the file FragFile. The frozen fragments have to be included in addition to the usual, non-frozen fragments. The atoms of the frozen fragments have to be included in the ATOMS block. As with normal fragments, the fragment found in the file will be rotated and translated to its position specified in the ATOMS block. For more details on specifying fragments, see the section ‘fragment files’. In the FDE input block, the recommended PW91k (also known as GGA97) approximant is recommended for the non-additive kinetic energy (the default is the local density approximant). A recommended alternative is NDSD. For all other options the defaults will be used.
+
+Please note that throughout the FDE part of the documentation, the word “approximant” is used instead of the more usual “functional” to emphasize that the exact functional is not known, also in the case of the kinetic energy functional. In the literature one may encounter both words used interchangeably.
+
+By including more than one frozen fragment, it is possible to use a frozen fragment that is a superposition of the densities of isolated molecules (this was possible in the previous version of ADF using the DENSPREP option). For a discussion and tests of the use of such approximate environment densities, see Ref. [185].
+
+There is no restriction on the use of symmetry in FDE calculations, and usually the correct symmetry will be detected automatically. However, in the preparation of frozen fragments that will be rotated and/or translated in the FDE calculation, one has to include the keyword NOSYMFIT for technical reasons.
+
+In the current implementation, only the electron density of the embedded (non-frozen) system is calculated. Therefore, with the exception of interaction energies, only properties that depend directly on the electron density (e.g. dipole moments) are available. In particular, the calculation of energy gradients is not implemented yet. All quantities given in the output refer (unless explicitly specified otherwise) to the non-frozen system only.
+
+To employ the extension of FDE to the calculation of NMR shieldings, the file TAPE10 has to be used in the FDE calculation (by including the option SAVE TAPE10), and subsequently the NMR shielding has to be calculated using the program NMR (not with EPR). The TDDFT extension of the FDE formalism allows the calculation of electronic excitation energies and polarizabilities. This extension is automatically activated if FDE is used in combination with the EXCITATIONS or the RESPONSE key. To allow the mutual response of several subsystems, see the section on [subsystem TDDFT].
+
+## Fragment-specific FDE options¶
+
+For each frozen fragment, several additional options can be applied. To do this, the fragment specification is used as a subblock key by appending a & sign. The subblock is terminated with SubEnd. This subblock key looks, in the most general form, as follows:
+
+FRAGMENTS
+...
+FragType FragFile type=FDE &
+{FDEOPTIONS [USEBASIS] [RELAX or FREEZEANDTHAW] [OPTIMIZE]}
+{FDEDENSTYPE [SCF | SCFexact | SCFfitted ]}
+{RELAXCYCLES n or FREEZEANDTHAWCYCLES n}
+{XC [LDA | GGA ggapotx ggapotc | MODEL SAOP]}
+SubEnd
+...
+END
+
+FDEOPTIONS
+FDEOPTIONS USEBASIS
+If the USEBASIS option is specified, the basis functions of this frozen fragment will be included in the calculation of the embedded subsystem. This allows to expand the density of the embedded subsystem using not only atom-centered basis sets localized in the embedded subsystem but also the ones in the environment Ref. [238]. In large-scale simulations using the embedding potential, this option is recommended to be used in the preparation stage to investigate the basis set dependence of the results (chapter 5.3 in Ref. [205]). This option is also an indispensable element in the procedure introduced in Ref. [238] to test approximants to the kinetic-energy component of the embedding potential introduced by Wesolowski and Warshel.
+FDEOPTIONS RELAX or FREEZEANDTHAW
+If the RELAX option (or equivalent FREEZEANDTHAW option) is specified, the density of this frozen fragment will be relaxed in freeze-and-thaw cycles [Ref. 240], i.e., the embedded subsystem is frozen, while this fragment is thawed. This is repeated, until convergence is reached or until the maximum number of iterations has been performed. By relaxing frozen fragments, it is possible to improve a given approximate environment density by including the polarization of the environment due to the embedded system. This option is recommended to be used in the preparation stage of a large-scale numerical simulation. The freeze-and-thaw calculations lead to a pair of electron densities (embedded system and environment) that minimizes the total energy. As a consequence, the electron density of the environment derived from the freeze-and-thaw calculations can be used as a reference to verify the adequacy of the assumed electron density for the environment in a large-scale simulation. Due to technical restrictions, freeze-and-thaw is not possible if an open-shell (unrestricted) fragment is present.
+FDEOPTIONS USEBASIS RELAX or FDEOPTIONS USEBASIS FREEZEANDTHAW
+It is further possible to combine USEBASIS and RELAX or FREEZEANDTHAW. In this case, the basis functions of the non-frozen fragment will be included when the density of the fragment is relaxed. This allows fully relaxed calculations with supermolecular expansion of the electron density of each subsystem. This option is to be used to test approximants to the kinetic-energy component of the embedding potential introduced by Wesolowski and Warshel by means of the procedure introduced in [Ref. 238].
+FDEOPTIONS OPTIMIZE
+
+If the key FDEOPTIONS OPTIMIZE is not specified, then only the active fragment is optimized in a Geometry Optimization run (the FDE fragments are not optimized). If you include FDEOPTIONS OPTIMIZE, then the corresponding FDE fragment will also be optimized. The OPTIMIZE key implicitly activates the option RELAX, which is necessary to evaluate the nuclear gradients of the respective fragment [Ref. 486]. The OPTIMIZE key only supports mono-molecular basis set expansions and can therefore NOT be combined with the USEBASIS option. For Geometry Optimizations the usage of the FULLGRID option is recommended. See the example Example: Geometry optimization ICW FDE/sSDFT.
+
+Note:: When performing geometry optimization ICW FDE one must:
+
+FDEDENSTYPE
+
+The FDEDENSTYPE option can be used to specify which density is read from the fragment file. The possible options are:
+
+FDEDENSTYPE SCF (or FDEDENSTYPE SCFexact)
+The exact density (not calculated using the fit functions) is used. This is the default.
+FDEDENSTYPE SCFfitted
+The fitted density is used. This is less accurate but can be significantly faster.
+RELAXCYCLES n or FREEZEANDTHAWCYCLES n
+This gives the maximum number of freeze-and-thaw cycles that are performed for this fragment. If the maximum number given in the FDE block is smaller, or if convergence is reached earlier, then fewer cycles are performed. For historical reasons, two equivalent keywords are available.
+XC
+
+The XC option can be used to select the exchange-correlation potential that is used for this fragment when it is relaxed. By default, the same potential as for the non-frozen system is used, but in some cases it might be preferable to use another approximation for certain fragments. An example is given in Ref. [189].
+
+XC LDA
+This option selects LDA as exchange-correlation potential for relaxing this fragment.
+XC GGA ggapotx ggapotc
+This selects a GGA potential for relaxing this fragment. The GGA potential is specified by giving the name of the exchange potential, followed by the name of the correlation potential. The available potentials are listed in the documentation for the XC key.
+XC MODEL SAOP
+This selects the model potential SAOP for relaxing this fragment.
+
+## Kinetic energy approximants¶
+
+The approximants to the kinetic energy dependent component of the embedding potential are described here.
+
+FDE
+{approximants to the kinetic energy dependent
+component of the embedding potential}
+{CJCORR [rho_cutoff]}
+{GGAPOTXFD exchange approximant}
+{GGAPOTCFD correlation approximant}
+end
+
+approximants to the kinetic energy dependent component of the embedding potential
+
+Several approximants to the kinetic-energy-dependent component of the effective potential given in Eq. (21) of [Ref. 184] are available. None of them is applicable if the embedded system is covalently bound to its environment. The user is recommended to look at the numerical value of the TSNAD(LDA) parameter which is given in the units of energy and can be considered as a measure of the overlap. The following rule of thumb should be applied: if this parameter is smaller than the estimated interaction energy between the embedded subsystem and the environment, then the available approximants are most probably adequate. If it exceeds this limit, the results can be less reliable. Printing TSNAD(LDA) is not done by default, as it can be quite time-consuming. Its printing is switched on by including “EXTPRINTENERGY”, and “PRINTRHO2”, and “FULLGRID” in the FDE input block. If no kinetic energy approximant is specified, by default the local-density approximation (Thomas-Fermi approximant) is used. For an assessment of approximants for weakly overlapping pairs of densities see Refs. [238, 239, 188, 241]. Based on these studies, the use of PW91k (= GGA97) is recommended.
+
+APPROXIMANTS TO BE USED IN NORMAL APPLICATIONS
+
+THOMASFERMI (default)
+Local-density-approximation form of vt[rhoA,rhoB] [237] derived from Thomas-Fermi expression for Ts[rho] [194, 195].
+GGA97 (or PW91K)
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [239] derived from the Lembarki-Chermette [197] approximant to Ts[rho]. This approximant is currently the recommended one based on the numerical analysis of its accuracy [188, 239] and the fact that the used enhancement factor disappears at large reduced density gradients, i.e. where the second-order gradient-expansion approximation fails [238, 241].
+NDSD
+Similarly to GGA97, the NDSD approximant is constructed by taking into account the asymptotic behavior of the functional vt[rhoA,rhoB] at small density gradients. In the construction of NDSD, the exact property of vt[rhoA,rhoB] at rho_A $$\rightarrow$$ 0 and for $$\int$$ rhoB = 2 given in Eq. A6 of Ref. [279] is also taken into account. The analysis of the accuracy of this potential [279] shows that NDSD is of the same or superior quality as GGA97. NDSD is, therefore, recommended as the successor of GGA97 to be used anywhere where the quality of the results depends directly on the accuracy of the potential vt[rhoA,rhoB], i.e., for obtaining electronic-structure-dependent properties. The analytical form of the corresponding approximant to the functional Tsnad [rho_A,rho_B]\$ exists (Eq. 23 in Ref. [279]). It is not possible, however, to obtain the analytical form of the corresponding parent functional for the kinetic energy Ts[rho]. To reflect this and the fact that, similarly to the GGA approximants to vt[rhoA,rhoB], the numerical values of only first- and second derivatives of density are needed, the label NDSD (Non-Decomposable Second Derivatives) is used.
+
+OBSOLETE APPROXIMANTS (can be used but GGA97 leads usually to a better embedding potential see [238, 239])
+
+LLP91
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [238] derived from Lee-Lee-Parr [Ref. 198] approximant to Ts[rho].
+PW86k
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [238] derived from the Fuentealba-Reyes approximant to Ts[rho] [242].
+THAKKAR92
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [239] derived from the Thakkar approximant to Ts[rho] [201].
+
+APPROXIMANTS WHICH MIGHT BE USEFUL ONLY FOR THEORY DEVELOPMENT
+
+The accuracy of some of these approximants was investigated in detail [239, 238, 188, 241]. Each of them was shown to lead to a qualitatively incorrect embedding potential. They shouldn’t be used in practical applications.
+
+COULOMB
+Neglecting completely vt[rhoA,rhoB] (vt[rhoA,rhoB] equals zero) together with the exchange-correlation component of the embedding potential introduced by Wesolowski and Warshel.
+TF9W
+The approximant to vt[rhoA,rhoB] [184] derived from the second-order gradient expansion [242]] for Ts[rho].
+WEIZ
+The approximant to vt[rhoA,rhoB] [241] derived from the von Weizsäcker approximant to Ts[rho] [186].
+OL91A
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [238] derived from the first Ou-Yang and Levy approximant to Ts[rho] [200].
+OL91B
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [239] derived from the second Ou-Yang and Levy approximant to Ts[rho] [200].
+E00
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [263] derived from a kinetic energy functional by Ernzerhof [264] which represents the gradient expansion approximation up to the fourth order.
+P92
+Generalized-gradient-approximation form of vt[rhoA,rhoB] [263] derived from a kinetic energy functional by Perdew [265] which represents the gradient expansion approximation up to the sixth order.
+
+LONG DISTANCE CORRECTIONS TO THE EFFECTIVE POTENTIAL
+
+CJCORR
+
+Option to switch on a long-distance correction. By default this option is not used. As was shown in Ref. [220], with the available approximate kinetic-energy approximants, the embedding potential has the wrong form in the limit of a large separation of the subsystems. In particular, it was shown that this can have serious consequences in the case of “supermolecular expansion of electron density of each subsystem” calculations (USEBASIS option). In Ref. [220], a correction is proposed that enforces the correct long-distance limit. (See also this reference for limitations of this correction.)
+
+CJCORR [rho_cutoff]
+This option switches on the long-distance correction. This option has to be used in combination with one of the above kinetic-energy approximants. By default, a density cut-off of 0.1 is employed.
+
+GGAPOTXFDGGAPOTCFD
+
+Option to specify the non-additive exchange-correlation approximant. By default, in the construction of the effective embedding potential the exchange-correlation approximant that was specified in the XC block is used. It is possible to specify a different approximant with the GGAPOTXFD and GGAPOTCFD options. This is particularly useful in combination with the use of model potentials like SAOP, that can not be used in the embedding potential because of their orbital dependence. (For a discussion, see Ref. [189].)
+
+GGAPOTXFD exchange approximant
+The exchange approximant is used in the construction of the embedding potential. The same exchange approximants as in the XC key are available.
+GGAPOTCFD correlation approximant
+The correlation approximant is used in the construction of the embedding potential. The same correlation approximants as in the XC key are available.
+
+## General FDE options¶
+
+In addition to the fragment-specific options and the kinetic energy approximants, there are also a number of options available in FDE calculations that will be described in the following.
+
+FDE
+{FULLGRID}
+{RELAXCYCLES n or FREEZEANDTHAWCYCLES n}
+{RELAXPOSTSCF or FREEZEANDTHAWPOSTSCF}
+{EXTPRINTENERGY}
+{PRINTRHO2}
+{ENERGY}
+{SDFTENERGY}
+{DIPOLE}
+end
+
+FULLGRID
+
+By default, FULLGRID is not used, and in FDE calculations the integration grid is generated as described in Ref. [185] by including only atoms of the frozen subsystem that are close to the embedded subsystem in the generation of the integration grid. The distance cutoff used is chosen automatically, based on the extent of the basis functions of the embedded subsystem. (It can also be chosen manually, see the option qpnear in the INTEGRATION key) This scheme results in an efficient and accurate integration grid. However, it is possible that the default integration scheme is not accurate enough. This can be the case for weakly interacting systems and when the distance between the frozen and the embedded system is large. It is therefore recommended to check the quality of the default integration grid by comparing to results obtained using the full supermolecular grid (FULLGRID option).
+
+If the subkey FULLGRID is included, all atoms of the frozen system are included in the generation of the integration grid. This results in the same grid that would be used in a supermolecular calculation of the combined frozen and embedded system. The integration grid generated by this option might be much larger than the default grid. This option should be used to check the quality of the default integration grid.
+
+RELAXCYCLES n or FREEZEANDTHAWCYCLES n
+Specifies the maximum number n of freeze-and-thaw iterations [Ref. 240] that are performed (for frozen fragments with the RELAX) option. If a smaller number of iterations is specified as a fragment-specific option, for this fragment this smaller number is used. Furthermore, if convergence is reached earlier, no more iterations will be performed.
+RELAXPOSTSCF or FREEZEANDTHAWPOSTSCF
+If this option is included, several post-SCF properties will be calculated after each freeze-and-thaw cycle [Ref. 240]. These are otherwise only calculated in the last cycle.
+EXTPRINTENERGYPRINTRHO2
+If the options EXTPRINTENERGY and PRINTRHO2 are included (both are needed and should be listed on separate lines), several additional quantities will be printed, including TSNAD(LDA). In order to obtain meanin

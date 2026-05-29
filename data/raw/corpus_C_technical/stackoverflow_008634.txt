@@ -1,0 +1,69 @@
+Question: <p>First, context: I'm trying to create a command-line-based tool (Linux) that
+requires login. Accounts on this tool have nothing to do with
+system-level accounts -- none of this looks at /etc/passwd.</p>
+
+<p>I am planning to store user accounts in a text file using the same format (roughly) as /etc/passwd.</p>
+
+<p>Despite not using the system-level password files, using crypt seemed
+to be a good practice to use, as opposed to storing passwords in
+cleartext. (While crypt is certainly better than storing passwords in
+cleartext, I'm open to other ways of doing this.)</p>
+
+<p>My crypt knowledge is based on this:
+<a href="https://docs.python.org/2/library/crypt.html" rel="nofollow">https://docs.python.org/2/library/crypt.html</a></p>
+
+<p>The documentation seems to ask for something that isn't possible: "it
+is recommended to use the full crypted password as salt when checking
+for a password."</p>
+
+<p>Huh? If I'm creating the crypted password (as in, when creating a user
+record) how can I use the crypted password as a salt? It
+doesn't exist yet. (I'm assuming that you must use the same salt for creating and checking a password.)</p>
+
+<p>I've tried using the plaintext password as a salt. This does
+work, but has two problems; one easily overcome, and one serious:</p>
+
+<p>1) The first two letters of the plaintext password are included in the
+crypted password. You can fix this by not writing the first two
+characters to the file:</p>
+
+<pre><code>user_record = '%s:%s:%s' % (user_name, crypted_pw[2:], user_type)
+</code></pre>
+
+<p>2) By using the plaintext password as the salt, you would seem to be
+reducing the amount of entropy in the system. Possibly I'm
+misunderstanding the purpose of the salt.</p>
+
+<p>The best practice I've been able to derive is to use the first two
+characters from the username as the salt. Would this be appropriate,
+or is there something I've missed that makes that a bad move?</p>
+
+<p>My understanding of a salt is that it prevents pre-computing password
+hashes from a dictionary. I could use a standard salt for all
+passwords (such as my initials, "JS,") but that seems to be less of a
+burden for an attacker than using two characters from each user's username.</p>
+
+Answer: <p>Python's crypt() is a wrapper for the system's crypt() function. From the Linux crypt() man page:</p>
+
+<pre>
+char *crypt(const char *key, const char *salt);
+
+key is a userâs typed password.
+salt is a two-character string chosen from the set [aâzAâZ0â9./]. 
+This string is used to perturb the algorithm in one of 4096 
+different ways.
+</pre>
+
+<p>Emphasis is on "<em>two-character</em> string". Now, if you look at crypt()'s behavior in Python:</p>
+
+<pre><code>&gt;&gt;&gt; crypt.crypt("Hello", "World")
+'Wo5pEi/H5/mxU'
+&gt;&gt;&gt; crypt.crypt("Hello", "ABCDE")
+'AB/uOsC7P93EI'
+</code></pre>
+
+<p>you discover that the first two characters of the result always coincide with the first two characters of the original salt, which indeed form the true two-character-salt itself.
+That is, the result of crypt() has the form 2char-salt + encrypted-pass.
+Hence, there is no difference in the result if instead of passing the two-character-salt or the original many-characters-salt you pass the whole encrypted password.</p>
+
+<p>Note: the set [aâzAâZ0â9./] contains 64 characters, and 64&#42;64=4096. Here's how <em>two</em> characters relate to "<em>4096</em> different ways".</p>

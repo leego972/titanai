@@ -1,0 +1,50 @@
+Question: <p>I am using Python and the <a href="http://twistedmatrix.com/trac/" rel="nofollow">Twisted</a> framework to connect to an FTP site to perform various automated tasks.  Our FTP server happens to be Pure-FTPd, if that's relevant.</p>
+
+<p>When connecting and calling the <strong>list</strong> method on an <strong>FTPClient</strong>, the resulting <strong>FTPFileListProtocol</strong>'s <strong>files</strong> collection does not contain any directories or file names that contain a space (' ').</p>
+
+<p>Has anyone else seen this?  Is the only solution to create a sub-class of FTPFileListProtocol and override its <strong>unknownLine</strong> method, parsing the file/directory names manually?</p>
+
+Answer: <p>Firstly, if you're performing automated tasks on a retrieived FTP listing then you should probably be looking at <code>NLST</code> rather than <code>LIST</code> as noted in <a href="http://tools.ietf.org/html/rfc959#page-33" rel="nofollow">RFC 959 section 4.1.3</a>:</p>
+
+<pre>
+ NAME LIST (NLST)
+ ...
+            This command is intended to return information that
+            can be used by a program to further process the
+            files automatically.
+
+</pre>
+
+<p>The <a href="http://twistedmatrix.com/documents/current/api/twisted.protocols.ftp.FTPClient.html#list" rel="nofollow">Twisted documentation</a> for <code>LIST</code> says:</p>
+
+<pre>
+It can cope with most common file listing formats.
+</pre>
+
+<p>This make me suspicious; I do not like solutions that "cope". <code>LIST</code> was intended for human consumption not machine processing.</p>
+
+<p>If your target server supports them then you should prefer <code>MLST</code> and <code>MLSD</code> as defined in <a href="http://tools.ietf.org/html/rfc3659#section-7" rel="nofollow">RFC 3659 section 7</a>:</p>
+
+<pre>
+7.  Listings for Machine Processing (MLST and MLSD)
+
+   The MLST and MLSD commands are intended to standardize the file and
+   directory information returned by the server-FTP process.  These
+   commands differ from the LIST command in that the format of the
+   replies is strictly defined although extensible.
+
+</pre>
+
+<p>However, these newer commands may not be available on your target server and I don't see  them in Twisted. Therefore <code>NLST</code> is probably your best bet.</p>
+
+<p>As to the nub of your problem, there are three likely causes:</p>
+
+<ol>
+<li>The processing of the returned results is incorrect (Twisted may be at fault, as you suggest, or perhaps elsewhere)</li>
+<li>The server is buggy and not sending a correct (complete) response</li>
+<li>The wrong command is being sent (unlikely with straight <code>NLST</code>/<code>LIST</code>, but some servers react differently if arguments are supplied to these commands)</li>
+</ol>
+
+<p>You can eliminate (2) and (3) and prove that the cause is (1) by looking at what is sent over the wire. If this option is not available to you as part of the Twisted API or the Pure-FTPD server logging configuration, then you may need to break out a network sniffer such as tcpdump, snoop or WireShark (assuming you're allowed to do this in your environment). Note that you will need to trace not only the control connection (port 21) but also the data connection (since that carries the results of the <code>LIST</code>/<code>NLST</code> command). WireShark is nice since it will perform the protocol-level analysis for you.</p>
+
+<p>Good luck.</p>

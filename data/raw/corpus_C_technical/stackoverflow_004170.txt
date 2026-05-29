@@ -1,0 +1,70 @@
+Question: <p>How can I find local IP addresses (i.e. 192.168.x.x or 10.0.x.x) in Python platform independently and using only the standard library?</p>
+
+Answer: <p>netifaces is available via pip and easy_install.  (I know, it's not in base, but it could be worth the install.)</p>
+
+<p>netifaces does have some oddities across platforms:</p>
+
+<ul>
+<li>The localhost/loop-back interface may not always be included (Cygwin).</li>
+<li>Addresses are listed per-protocol (e.g., IPv4, IPv6) and protocols are listed per-interface. On some systems (Linux) each protocol-interface pair has its own associated interface (using the interface_name:n notation) while on other systems (Windows) a single interface will have a list of addresses for each protocol.  In both cases there is a protocol list, but it may contain only a single element.</li>
+</ul>
+
+<p>Here's some netifaces code to play with:</p>
+
+<pre><code>import netifaces
+
+PROTO = netifaces.AF_INET   # We want only IPv4, for now at least
+
+# Get list of network interfaces
+# Note: Can't filter for 'lo' here because Windows lacks it.
+ifaces = netifaces.interfaces()
+
+# Get all addresses (of all kinds) for each interface
+if_addrs = [netifaces.ifaddresses(iface) for iface in ifaces]
+
+# Filter for the desired address type
+if_inet_addrs = [addr[PROTO] for addr in if_addrs if PROTO in addr]
+
+iface_addrs = [s['addr'] for a in if_inet_addrs for s in a if 'addr' in s]
+# Can filter for '127.0.0.1' here.
+</code></pre>
+
+<p>The above code doesn't map an address back to its interface name (useful for generating ebtables/iptables rules on the fly).  So here's a version that keeps the above information with the interface name in a tuple:</p>
+
+<pre><code>import netifaces
+
+PROTO = netifaces.AF_INET   # We want only IPv4, for now at least
+
+# Get list of network interfaces
+ifaces = netifaces.interfaces()
+
+# Get addresses for each interface
+if_addrs = [(netifaces.ifaddresses(iface), iface) for iface in ifaces]
+
+# Filter for only IPv4 addresses
+if_inet_addrs = [(tup[0][PROTO], tup[1]) for tup in if_addrs if PROTO in tup[0]]
+
+iface_addrs = [(s['addr'], tup[1]) for tup in if_inet_addrs for s in tup[0] if 'addr' in s]
+</code></pre>
+
+<p>And, no, I'm not in love with list comprehensions.  It's just the way my brain works these days.</p>
+
+<p>The following snippet will print it all out:</p>
+
+<pre><code>from __future__ import print_function  # For 2.x folks
+from pprint import pprint as pp
+
+print('\nifaces = ', end='')
+pp(ifaces)
+
+print('\nif_addrs = ', end='')
+pp(if_addrs)
+
+print('\nif_inet_addrs = ', end='')
+pp(if_inet_addrs)
+
+print('\niface_addrs = ', end='')
+pp(iface_addrs)
+</code></pre>
+
+<p>Enjoy!</p>

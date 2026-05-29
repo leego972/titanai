@@ -1,0 +1,28 @@
+Question: <p>Using python 2.4 and the built-in <code>ZipFile</code> library, I cannot read very large zip files (greater than 1 or 2 GB) because it wants to store the entire contents of the uncompressed file in memory.  Is there another way to do this (either with a third-party library or some other hack), or must I "shell out" and unzip it that way (which isn't as cross-platform, obviously).</p>
+
+Answer: <p>As of Python 2.6, you can use <a href="https://docs.python.org/2/library/zipfile.html#zipfile.ZipFile.open" rel="nofollow"><code>ZipFile.open()</code></a> to open a file handle on a file, and copy contents efficiently to a target file of your choosing:</p>
+
+<pre><code>import errno
+import os
+import shutil
+import zipfile
+
+TARGETDIR = '/foo/bar/baz'
+
+with open(doc, "rb") as zipsrc:
+    zfile = zipfile.ZipFile(zipsrc)
+    for member in zfile.infolist():
+       target_path = os.path.join(TARGETDIR, member.filename)
+       if target_path.endswith('/'):  # folder entry, create
+           try:
+               os.makedirs(target_path)
+           except (OSError, IOError) as err:
+               # Windows may complain if the folders already exist
+               if err.errno != errno.EEXIST:
+                   raise
+           continue
+       with open(target_path, 'wb') as outfile, zfile.open(member) as infile:
+           shutil.copyfileobj(infile, outfile)
+</code></pre>
+
+<p>This uses <a href="https://docs.python.org/2/library/shutil.html#shutil.copyfileobj" rel="nofollow"><code>shutil.copyfileobj()</code></a> to efficiently read data from the open zipfile object, copying it over to the output file.</p>

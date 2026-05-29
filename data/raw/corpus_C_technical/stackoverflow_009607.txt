@@ -1,0 +1,46 @@
+Question: <p>How can I build a numpy array out of a generator object?</p>
+
+<p>Let me illustrate the problem:</p>
+
+<pre><code>&gt;&gt;&gt; import numpy
+&gt;&gt;&gt; def gimme():
+...   for x in xrange(10):
+...     yield x
+...
+&gt;&gt;&gt; gimme()
+&lt;generator object at 0x28a1758&gt;
+&gt;&gt;&gt; list(gimme())
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+&gt;&gt;&gt; numpy.array(xrange(10))
+array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+&gt;&gt;&gt; numpy.array(gimme())
+array(&lt;generator object at 0x28a1758&gt;, dtype=object)
+&gt;&gt;&gt; numpy.array(list(gimme()))
+array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+</code></pre>
+
+<p>In this instance, gimme() is the generator whose output I'd like to turn into an array. However, the array constructor does not iterate over the generator, it simply stores the generator itself. The behaviour I desire is that from numpy.array(list(gimme())), but I don't want to pay the memory overhead of having the intermediate list and the final array in memory at the same time. Is there a more space-efficient way?</p>
+
+Answer: <p>Numpy arrays require their length to be set explicitly at creation time, unlike python lists. This is necessary so that space for each item can be consecutively allocated in memory. Consecutive allocation is the key feature of numpy arrays: this combined with native code implementation let operations on them execute much quicker than regular lists.</p>
+
+<p>Keeping this in mind, it is technically impossible to take a generator object and turn it into an array unless you either:</p>
+
+<p>(a) can predict how many elements it will yield when run:</p>
+
+<pre><code>my_array = numpy.zeros(predict_length())
+for i, el in enumerate(gimme()): my_array[i] = el
+</code></pre>
+
+<p>(b) are willing to store its elements in an intermediate list :</p>
+
+<pre><code>my_array = numpy.array(list(gimme()))
+</code></pre>
+
+<p>(c) can make two identical generators, run through the first one to find the total length, initialize the array, and then run through the generator again to find each element:</p>
+
+<pre><code>length = sum(1 for el in gimme())
+my_array = numpy.zeros(length)
+for i, el in enumerate(gimme()): my_array[i] = el
+</code></pre>
+
+<p>(a) is probably what you're looking for. (b) is space inefficient, and (c) is time inefficient (you have to go through the generator twice).</p>

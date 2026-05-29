@@ -1,0 +1,113 @@
+# Generalized algebraic data type
+
+In functional programming, a generalized algebraic data type (GADT, also first-class phantom type, guarded recursive datatype, or equality-qualified type) is a generalization of parametric algebraic data types.
+
+Overview 
+In a GADT, the product constructors (called data constructors in Haskell) can provide an explicit instantiation of the ADT as the type instantiation of their return value. This allows defining functions with a more advanced type behaviour. For a data constructor of Haskell 2010, the return value has the type instantiation implied by the instantiation of the ADT parameters at the constructor's application.
+
+-- A parametric ADT that is not a GADT
+data List a = Nil | Cons a (List a)
+
+integers :: List Int
+integers = Cons 12 (Cons 107 Nil)
+
+strings :: List String
+strings = Cons "boat" (Cons "dock" Nil)
+
+-- A GADT
+data Expr a where
+    EBool  :: Bool     -> Expr Bool
+    EInt   :: Int      -> Expr Int
+    EEqual :: Expr Int -> Expr Int  -> Expr Bool
+
+eval :: Expr a -> a
+eval e = case e of
+    EBool a    -> a
+    EInt a     -> a
+    EEqual a b -> (eval a) == (eval b)
+
+expr1 :: Expr Bool
+expr1 = EEqual (EInt 2) (EInt 3)
+
+ret = eval expr1 -- False
+
+They are currently implemented in the GHC compiler as a non-standard extension, used by, among others, Pugs and Darcs. OCaml supports GADT natively since version 4.00.
+
+The GHC implementation provides support for existentially quantified type parameters and for local constraints.
+
+History 
+An early version of generalized algebraic data types were described by  and based on pattern matching in ALF.
+
+Generalized algebraic data types were introduced independently by  and prior by  as extensions to ML's and Haskell's algebraic data types. Both are essentially equivalent to each other. They are similar to the inductive families of data types (or inductive datatypes) found in Coq's Calculus of Inductive Constructions and other dependently typed languages, modulo the dependent types and except that the latter have an additional positivity restriction which is not enforced in GADTs.
+
+ introduced extended algebraic data types which combine GADTs together with the existential data types and type class constraints.
+
+Type inference in the absence of any programmer supplied type annotations is undecidable and functions defined over GADTs do not admit principal types in general. Type reconstruction requires several design trade-offs and is an area of active research (; .
+
+In spring 2021, Scala 3.0 is released. This major update of Scala introduce the possibility to write GADTs with the same syntax as ADTs, which is not the case in other programming languages according to Martin Odersky.
+
+Applications 
+Applications of GADTs include generic programming, modelling programming languages (higher-order abstract syntax), maintaining invariants in data structures, expressing constraints in embedded domain-specific languages, and modelling objects.
+
+Higher-order abstract syntax 
+
+An important application of GADTs is to embed higher-order abstract syntax in a type safe fashion. Here is an embedding of the simply typed lambda calculus with an arbitrary collection of base types, tuples and a fixed point combinator:
+
+data Lam :: * -> * where
+  Lift :: a                     -> Lam a        -- ^ lifted value
+  Pair :: Lam a -> Lam b        -> Lam (a, b)   -- ^ product
+  Lam  :: (Lam a -> Lam b)      -> Lam (a -> b) -- ^ lambda abstraction
+  App  :: Lam (a -> b) -> Lam a -> Lam b        -- ^ function application
+  Fix  :: Lam (a -> a)          -> Lam a        -- ^ fixed point
+And a type safe evaluation function:
+eval :: Lam t -> t
+eval (Lift v)   = v
+eval (Pair l r) = (eval l, eval r)
+eval (Lam f)    = \x -> eval (f (Lift x))
+eval (App f x)  = (eval f) (eval x)
+eval (Fix f)    = (eval f) (eval (Fix f))
+The factorial function can now be written as:
+fact = Fix (Lam (\f -> Lam (\y -> Lift (if eval y == 0 then 1 else eval y * (eval f) (eval y - 1)))))
+eval(fact)(10)
+We would have run into problems using regular algebraic data types. Dropping the type parameter would have made the lifted base types existentially quantified, making it impossible to write the evaluator. With a type parameter we would still be restricted to a single base type. Furthermore, ill-formed expressions such as App (Lam (\x -> Lam (\y -> App x y))) (Lift True) would have been possible to construct, while they are type incorrect using the GADT. A well-formed analogue is App (Lam (\x -> Lam (\y -> App x y))) (Lift (\z -> True)). This is because the type of x is Lam (a -> b), inferred from the type of the Lam data constructor.
+
+See also
+ Type variable
+
+Notes
+
+Further reading 
+
+ Applications
+ 
+ 
+ 
+ 
+ Semantics
+ Patricia Johann and Neil Ghani (2008). "Foundations for Structured Programming with GADTs".
+ Arie Middelkoop, Atze Dijkstra and S. Doaitse Swierstra (2011). "A lean specification for GADTs: system F with first-class equality proofs". Higher-Order and Symbolic Computation.
+ Type reconstruction
+ 
+ 
+ 
+ 
+ 
+ 
+ Other
+ Andrew Kennedy and Claudio V. Russo. "Generalized algebraic data types and object-oriented programming". In Proceedings of the 20th annual ACM SIGPLAN conference on Object oriented programming, systems, languages, and applications. ACM Press, 2005.
+
+External links 
+
+Generalised Algebraic Datatype Page on the Haskell wiki
+Generalised Algebraic Data Types in the GHC Users' Guide
+Generalized Algebraic Data Types and Object-Oriented Programming
+GADTs – Haskell Prime – Trac
+Papers about type inference for GADTs, bibliography by Simon Peyton Jones
+Type inference with constraints, bibliography by Simon Peyton Jones
+Emulating GADTs in Java via the Yoneda lemma
+
+Functional programming
+Dependently typed programming
+Type theory
+Composite data types
+Data types

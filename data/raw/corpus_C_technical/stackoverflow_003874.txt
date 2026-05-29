@@ -1,0 +1,131 @@
+Question: <p>In my Django project I am using <code>Product.objects.all().order_by('order')</code> in a view, but it doesn't seem to be working properly.</p>
+
+<p>This is it's output:</p>
+
+ 
+     
+         
+            Product Name 
+            Sort 
+         
+     
+
+     
+
+             
+                Evolution 
+                2 
+             
+
+             
+                Polarity 
+                1 
+             
+
+             
+                Jumbulaya 
+                3 
+             
+
+             
+                Kalidascope 
+                4 
+             
+
+                
+
+
+<p>It should look like this:</p>
+
+ 
+     
+         
+            Product Name 
+            Sort 
+         
+     
+
+     
+         
+                Polarity 
+                1 
+            
+
+             
+                Evolution 
+                2 
+             
+
+
+
+             
+                Jumbulaya 
+                3 
+             
+
+             
+                Kalidascope 
+                4 
+             
+
+                
+
+
+<p><br/>
+But it doesn't. Any ideas?</p>
+
+<p>My view (for that output):</p>
+
+<pre><code>def debug(request):
+    order = Product.objects.all().order_by('order')
+    return render_to_response('cms/debug.html', {'order' : order, 'name' : name})
+</code></pre>
+
+<p>And the view responsible for saving the order field:</p>
+
+<pre><code>def manage_all(request):
+
+if request.method == 'POST':
+    PostEntries = len(request.POST)
+    x = 1       
+    while x &lt; PostEntries:
+        p = Product.objects.get(pk=x)
+        p.order = int(request.POST.get(str(x),''))
+        print "Itr: " + str(x)
+        x = x + 1
+    p.save()
+    print "Product Order saved"     
+    return HttpResponse("Saved")
+</code></pre>
+
+<p>And the model (without the boring bits):</p>
+
+<pre><code>class Product(models.Model):
+    name = models.CharField(max_length=100)
+    order = models.IntegerField(blank = True, null = True
+</code></pre>
+
+<p>Here is a 'live' example of the page <a href="http://massiveatom.com:8080/debug/" rel="nofollow">http://massiveatom.com:8080/debug/</a> Please note that that is only running on the dev server, so it may not always be up.</p>
+
+<p>I have asked in #django and they didn't seem to know what was going on. One thought was that the database/Django was being confused by the SQL command it is generating (<code>select * from table where 1 order by 'order'</code>), but I would prefer not to change the order field in the model.</p>
+
+<p>And I know there should be back-ticks surrounding order in the above SQL command, but the syntax parsing thingy kinda hated on it...</p>
+
+<p><strong>Edit:</strong> Each object has the correct value, so I don't really know why it isn't sorting it properly.</p>
+
+<p><strong>Edit 2:</strong> I don't know what was going on, but it turns out putting p.save() in the loop fixed it all...</p>
+
+Answer: <p>Your saving loop is wrong. You save Product outside of the loop. It should be:</p>
+
+<pre><code>if request.method == 'POST':
+    PostEntries = len(request.POST)
+    x = 1           
+    while x &lt; PostEntries:
+            p = Product.objects.get(pk=x)
+            p.order = int(request.POST.get(str(x),''))
+            print "Itr: " + str(x)
+            x = x + 1
+            p.save() # NOTE HERE &lt;- saving in loop instead of outside
+    print "Product Order saved"             
+    return HttpResponse("Saved")
+</code></pre>

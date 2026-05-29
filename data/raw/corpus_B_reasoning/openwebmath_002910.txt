@@ -1,0 +1,121 @@
+# Laplace equation with mixed boundary conditions
+
+I try to solve Laplace equation in 2D on square [2,3]x[2,3], with mixed boundary conditions, I did:
+
+ClearAll[y, x1, x2];
+pde = Laplacian[y[x1, x2], {x1, x2}];
+bc = {y[x1, 2] == 2 + x1, y[x1, 3] == 3 + x1};
+sol = NDSolve[{pde ==
+NeumannValue[-1, x1 == 2] + NeumannValue[1, x1 == 3], bc},
+y, {x1, 2, 3}, {x2, 2, 3}]
+
+Plot3D[Evaluate[y[x1, x2] /. sol], {x1, 2, 3}, {x2, 2, 3},
+PlotRange -> All, AxesLabel -> {"x1", "X2", "y[x1,x2]"},
+BaseStyle -> 12]
+
+
+The exact solution is y=x1+x2, the problem is the results is not high accurate when I evaluate the error.
+
+• The exact solution is y=x1+x2 Are you sure about this? How does this solution satisfy the Neumann boundary conditions? – Nasser Jun 25 at 20:09
+• @Nasser Erm. The function does satisfy the Neumann boundary condition: Its derivative in x1-direction is 1 and the sign flops stems from the fact that Neumann conditions are phrased in terms of outward normals... No? – Henrik Schumacher Jun 25 at 23:34
+• @user62716 Using NeumannValue requires one to do integration by parts and one has to be careful about the signs. Try switching the sign of the Laplacian to pde = -Laplacian[y[x1, x2], {x1, x2}];. Then it should work. – Henrik Schumacher Jun 25 at 23:40
+• @HenrikSchumacher is NeumannValue[-1, x1 == 2] different from saying that $\frac{\partial y}{\partial x_1}$ evaluated at $x_1=2$ is $-1$? And since the claim is that the solution is $y=x_1+x_2$ then $\frac{\partial y}{\partial x_1}=1$ this is evaluated at $x=2$ is $1$ and not $-1$?. How do you translate NeumannValue[-1, x1 == 2] to normal derivative then? I just did direct translation. May be we need a whole new topic on this. On top of all of this, moving NeumannValue from RHS to LHS changes the solution. I never liked NeumannValue and prefer to use normal derivatives... – Nasser Jun 26 at 0:46
+• @Nasser $\frac{\partial y}{\partial \nu} (2,x_2) = - \frac{\partial y}{\partial x_1} (2,x_2)$ because the outward normal at the point $(2,x_2)$ is $\nu = (-1 , 0)$. But I agree that NeumannValue is a bit counter intuitive, but it makes perfect sense in regard of the weak formulation that is used in FEM. – Henrik Schumacher Jun 26 at 4:59
+
+Relatively recently, Wolfram has created a nice Heat Transfer Tutorial and a Heat Transfer Verification Manual. I model with many codes and I usually start the Verification and Validation manual and build complexity from there. It is always embarrassing to build a complex model and find that your setup does not pass verification.
+
+The Laplace equation is special case of the heat equation so we should be able to use a verified example as a template for a properly constructed model.
+
+For NeumannValue's, if the flux is into the domain, it is positive. If the flux is out of the domain, it is negative.
+
+At the tutorial link, they define a function HeatTransferModel to create operators for a variety of heat transfer cases that I shall reproduce here:
+
+ClearAll[HeatTransferModel]
+HeatTransferModel[T_, X_List, k_, ρ_, Cp_, Velocity_, Source_] :=
+Module[{V, Q, a = k},
+V = If[Velocity === "NoFlow",
+Q = If[Source === "NoSource", 0, Source];
+If[FreeQ[a, _?VectorQ], a = a*IdentityMatrix[Length[X]]];
+If[VectorQ[a], a = DiagonalMatrix[a]];
+a = PiecewiseExpand[Piecewise[{{-a, True}}]];
+Inactive[Div][a.Inactive[Grad][T, X], X] + V - Q]
+
+
+If we follow the recipe of tutorial, we should be able to construct and solve a PDE system free of sign errors as I show in the following workflow.
+
+(* Create a Domain *)
+Ω2D = Rectangle[{2, 2}, {3, 3}];
+(* Create parametric PDE operator *)
+pop = HeatTransferModel[y[x1, x2], {x1, x2}, k, ρ, Cp, "NoFlow",
+"NoSource"];
+(* Replace k parameter *)
+op = pop /. {k -> 1};
+(* Setup flux conditions *)
+nv2 = NeumannValue[-1, x1 == 2];
+nv3 = NeumannValue[1, x1 == 3];
+(* Setup Dirichlet Conditions *)
+dc2 = DirichletCondition[y[x1, x2] == 2 + x1, x2 == 2];
+dc3 = DirichletCondition[y[x1, x2] == 3 + x1, x2 == 3];
+(* Create PDE system *)
+pde = {op == nv2 + nv3, dc2, dc3};
+(* Solve and Plot *)
+yfun = NDSolveValue[pde, y, {x1, x2} ∈ Ω2D]
+Plot3D[Evaluate[yfun[x1, x2]], {x1, x2} ∈ Ω2D,
+PlotRange -> All, AxesLabel -> {"x1", "x2", "y[x1,x2]"},
+BaseStyle -> 12]
+
+
+You can test that the solution matches that exact solution over the entire range:
+
+Manipulate[
+Plot[{x1 + x2, yfun[x1, x2]}, {x1, 2, 3}, PlotRange -> All,
+AxesLabel -> {"x1", "y[x1,x2]"}, BaseStyle -> 12,
+PlotStyle -> {Red,
+Directive[Green, Opacity[0.75], Thickness[0.015], Dashed]}], {x2,
+2, 3}, ControlPlacement -> Top]
+
+
+• Dear Tim Laska, thank you for your great help, can we evaluate the error and plot it? – user62716 Jun 26 at 9:47
+• I did it plot = Plot3D[ Abs[yfun[x1, x2] - (x1 + x2)], {x1, x2} [Element] [CapitalOmega]2D, PlotRange -> All, AxesLabel -> {"x1", "x2", "y[x1,x2]"}, PlotLabel -> err] – user62716 Jun 26 at 10:03
+• Dear Tim Laska, I have other problem, Poisson equation with variable coefficients,shall post it in new question or here? – user62716 Jun 26 at 11:48
+• @user62716 You should open a new question as it appears that you have. I will try to take a look at your other question when I can. – Tim Laska Jun 26 at 13:45
+• Thank you Tim, I will be waiting. Best regards – user62716 Jun 26 at 13:50
+
+By reversing the sign of the derivative on the left side from that given in NeumannValue, this can be solved by Mathematica analytically as well.
+
+ClearAll[y, x1, x2];
+pde = Laplacian[y[x1, x2], {x1, x2}] == 0;
+
+bc = {y[x1, 2] == 2 + x1,
+y[x1, 3] == 3 + x1,
+Derivative[1, 0][y][2, x2] == 1,
+Derivative[1, 0][y][3, x2] == 1};
+
+solA = DSolve[{pde, bc}, y[x1, x2], {x1, x2}];
+solA = solA /. {K[1] -> n,Infinity -> 20};
+solA = Activate[solA];
+
+
+Plot3D[y[x1, x2] /. solA, {x1, 2, 3}, {x2, 2, 3}, PlotRange -> All,
+AxesLabel -> {"x1", "X2", "y[x1,x2]"}, BaseStyle -> 12]
+
+
+The BC as given above are correct, and Mathematica's analytical solution is correct also, but I agree it can be simpler.
+
+There might be a way to simplify the infinite Fourier sum given, but I could not find it.
+
+To show the above formulation is correct, here is Maple's solution, using same B.C. Maple as above to give the simpler form of the solution, which is $$y=x_1+x_2$$.
+
+restart;
+pde:=VectorCalculus:-Laplacian(y(x1,x2),[x1,x2])=0;
+bc:=y(x1,2)=2+x1,y(x1,3)=3+x1,D[1](y)(2,x2)=1,D[1](y)(3,x2)=1;
+sol:=pdsolve([pde,bc],y(x1,x2))
+
+
+We just have to remember, that negative NeumannValue on left edge, means positive derivative on that edge.
+
+• Dear Nasser, thank you for your comments, the normal derivative at left side is -1 not 1, the above analytic solution is complicated since the exact is just y=x1+x2....thanks – user62716 Jun 26 at 9:38
+• the normal derivative at left side is -1 not 1 no. It is +1. you set NeumannValue to be -1. Since NeumannValue points outwards, then this means the deivative is +1. Since -1 outwards, means +1 inwards. In addition, if you change the derivative (not NeumannValue) in the code I posted from +1 to -1 you will see the solution is no longer y=x1+x2 but becomes non-linear. You can compare this solution with the numerical solution. Do you see any difference? I agree the solution has complicated Fourier series sum, but this is what Mathemtica gave for the analytical solution. – Nasser Jun 26 at 10:01
+• Dear Nasser, I still can not understand you, @Nasser ∂y∂ν(2,x2)=−∂y∂x1(2,x2) because the outward normal at the point (2,x2) is ν=(−1,0) so it is -1 on the left outwards. – user62716 Jun 26 at 11:16
+• Dear Nasser, the code of Tim Laska is working, I highly appreciate you and you always help me and provide perfect answer. – user62716 Jun 26 at 11:19
+• @user62716 you can see from the solution itself, i.e. from just looking at the plot, that the derivative is positive on the left edge. No math is needed if we look at the solution. The slope is moving upwards. So positive slope. You can also see from Maple solution I posted, that I used positive derivative to get same solution $x_1+x_2$ right there. NeumannValue is not the same as derivative. That is what the whole confusion was about. – Nasser Jun 26 at 11:33

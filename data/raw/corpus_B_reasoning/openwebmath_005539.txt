@@ -1,0 +1,134 @@
+# "Rounding" a square wave's corners?
+
+I'm trying to create a keying envelope for sending morse code without nasty clicking and the consequential excess bandwidth.
+
+My current plan is to take the switching (essentially a square, but not-constant frequency, wave) and "round the corners". To illustrate with a diagram:
+
+(1) indicates the keying waveform (2) indicates what I get with a simple RC network, and (3) indicates what I'd like to achieve. The circles highlight the "problem region". In (2) these regions are sharp and will cause clicks and excess bandwidth, in (3) they're a more gentle rate of change.
+
+The result needs to be achieved reasonably simply without an excess of components (preferably with passive ones, and certainly without resorting to a CPU and D/A converter--which is the only reliable approach I've managed to think up so far). If it can't be done reasonably simply, I'll just have to live with the clicks, perhaps trying to limit them with output filters on the transmitter to suppress the spurious emissions.
+
+I'm fairly sure this doesn't work as a simple low-pass filter; if I just use a simple L-type R/C filter, I get the effect in (2). If I make it an L/C filter, the thing rings like a bell (not really surprising, of course) and does no better. Or perhaps I simply haven't recognized the right time constant for it.
+
+Is there a simple approach? I'm starting to suspect there isn't. But, often when I feel that way, I'm just missing the obvious.
+
+• Doing this with a passive filter is impossible without inventing time travel, as the filter would be non-causal. Jan 30 at 18:45
+• @Hearth: I think you can take the time axis in the sketch to be unimportant. One can certainly round of both corners with a 2nd-order filter. Jan 30 at 18:48
+• Useful search terms : Gaussian or Bessel filter. Jan 30 at 19:13
+• @Hearth If you can tolerate a small delay, (ideally flat group delay, i.e. same delay on all frequency components), yes you can. Jan 30 at 19:15
+• @IanBland with the exception of my answer Jan 31 at 4:37
+
+You need temporal filtering, and that's best achieved by Bessel and Gaussian filters. Bessel has linear phase, Gaussian has the lowest time delay, but in your case Gaussian would be preferred. For both filters approximations are used, because Bessel is $$\\exp(-st)\$$, while the Gaussian is $$\\exp(-t^2)\$$.
+
+For your case, both could be implemented with passive filters, but you'll need LC, because simple RC will not do it. One answer suggests using that and, with enough stages you will converge towards a Gaussian, but that will only happen after many stages, whereas the approximation of the Gaussian filter is done, typically, using MacLaurin series. You'll also need a 4th order, or higher, for the best results, because a simple 2nd order will not make the pulses smooth enough.
+
+If you're willing to consider the LC approach, you'll have to decide the input and output loads -- that's the sin of the passive filters. For an equally terminated 50 Ω Cauer ladder, you get this set of normalized values -- choose whichever one you want. I used the 2nd because it has the more sensible values for the inductors:
+
+[L2=26.49682875264271,L1=112.1909090909091,C2=0.003541405021327631,C1=0.01863151013292656]
+[L2=35.02617328519855,L1=20.4061135371179,C2=0.005490132961363412,C1=0.04998496692723993]
+[L2=124.9624060150376,L1=13.72533333333333,C2=0.008162446057605459,C1=0.01401046936172085]
+[L2=46.57877813504823,L1=8.853512705530642,C2=0.04487636709462672,C1=0.01059873200624362]
+
+
+You can probably find tables for these. The elements are as shown below (with one of the 4 results):
+
+The best results would have been achieved with a raised cosine filter, but good luck making that in the analog way. Gaussian is the best option, though, because of its (approximated) symmetrical impulse response, which gives you clean, bandlimited pulses. Note that this is a 4th order and the output is still not as symmetrical as you might want. If you need a 5th or 6th order, your best bet is to find those tables, because I'm trying to solve the equations and wxMaxima keeps on crunching.
+
+If you want to add active filtering, then you can use this normalized transfer function and then this site to design each 2nd order section, separately:
+
+$$H(s)=\dfrac{3.63465}{s^2+2.83724s+3.63465}\cdot\dfrac{2.80538}{s^2+3.2559s+2.80538}$$
+
+I wanted to continue this yesterday, but it was late. You can have an 8th order Gaussian filter using only one (quad-)opamp. Here is the response of one made with LT1058 (blue), compared to its ideal counterpart (red), driven by a 1 Hz square pulse:
+
+The response has a slight overshoot and that's due to the component tolerances and non-idealities of the opamp. It may be slightly worse on the breadboard (those caps will not be all the same). Scaling the values is done very easily: divide them by the frequency. E.g. if your frequency is 1 kHz, either scale the resistors to be 1000x less, or the capacitors.
+
+I don't recommend going too low with the resistors because the currents might end up larger than what the opamp can source/sink; about the same thing with the capacitors: don't make them too large because their reactance may get too low and you'll have the same current problem. Common values are 1 kΩ or larger, or 1...10 μF or lesser. The reverse is also true: too large resistors means more noise and offset, too small capacitors means they will be comparable with the opamp's and PCB's parasitics.
+
+For brevity, here is the normalized transfer function:
+
+\begin{align} H(s)=&\dfrac{7.41638}{s^2+2.99117s+7.41638}\cdot\dfrac{5.55929}{s^2+3.65986s+5.55929} \\ {}&\cdot\dfrac{4.75899}{s^2+4.01438s+4.75899}\cdot\dfrac{4.43336}{s^2+4.17382*s+4.43336} \end{align}
+
+As I said in the beginning,  from the perspective of the ISI and, thus, the symmetry of the impulse [/edit], Gaussian is what you need here, not Bessel, because Bessel deals with linear phase (flat group delay), which gives slight overshoot when dealing with pulses. Here is an ideal 8th order Bessel (blue) compared to the Gaussian (red) counterpart:
+
+As you can see, there is only a slight overshoot (and the delay is slightly greater), so you may be tempted to say "it's fine", until you look at the differences between the (quasi-)real setup and the ideal one, above -- that's when you'll realize that the differences will be amplified. Ultimately, it will be up to the breadboard implementation and that will bring discrepancies between elements that will -- most likely -- make both the Bessel and the Gaussian responses come close enough. Since in the OP there are no special requirements, only some vague notions about pulse shaping, both will make good choices. To show what I mean, here is a Monte Carlo analysis of 100 steps looks like for 1% resistors and 5% capacitors (left), and for 5% resistors and 10% capacitors:
+
+Also, here's a random input with pulses of variable widths and how they are filtered by both Bessel (blue) and Gaussian (red) ideal filters, with fc=1.25 Hz:
+
+• This looks great, if I can work out the values and match them to the impedances. I will give it a try, thank you! Jan 31 at 1:46
+• Considering this is only Morse Code , these recommendations would be very relevant if this question actually had critical specs or one was attempting to null ISI with the most baud/Hz BW. Neither of these conditions exist but might in other examples. I think if Bessel has < 1% overshoot that would not justify declaring it unsuitable considering component tolerance errors on any filter. yet lower damping is better. Jan 31 at 22:11
+• @TonyStewartEE75 Re-reading now I realized that my words can be understood to mean dismissal of Bessel, but that's not what I meant to say. So I edited the last paragraph, and added the italicized specification right before the last picture. My English can get awkward sometimes. Feb 1 at 11:47
+• That reads much better. I wonder if Nyquist criteria ought to be mentioned for relevance as I eluded to this "The breakpoint should be defined by the desired multiple of the shortest time interval for any Code that you must specify." One never knows if a future criteria is needed for -3dB Bandwidth or -20dB skirt steepness for adjacent channel interference in a narrow band modulation scheme. Just "looking good" might be imprecise yet temporarily adequate or not. Good show on Monte Carlo, yet we know the filter with the lowest Q has the lowest sensitivity to tolerance errors, as Q is gain. Feb 1 at 12:18
+• @TonyStewartEE75 In all honesty, if we go down that path we may as well copy-paste a book or two. There's already a good deal of information, given the OP's input. As for the Monte Carlo, that's mostly to give the OP an idea of how it will turn up, compared to the ideal case (in case OP expects a perfect envelope). Feb 1 at 12:59
+
+With the right low pass filter, you can achieve what you are after.
+
+For your simple RC, the reason the leading edges of the square wave are so different than the falling edges are because of the differences in the “group delay” vs frequency for this kind of filter. Filters that have more of a constant delay in their passband will have more symmetrical rises and falls.
+
+By the way, an RLC filter does not necessarily have ringing, you just designed one too high a “Q”.
+
+One kind of low pass filter with a more constant delay in the passband is called a “Bessel” filter. For a single section RLC, this is just a filter with a lower “Q” than a traditional maximally flat filter. If you are willing to use several inductors and several capacitors in your filter, you can design one with a nicer response.
+
+• Or an op-amp based 2nd-order lowpass filter. Jan 30 at 18:57
+• Filtering with Active LPF circuits are easy with dual or quad Op Amps and RC components.
+
+• Using the constant time delay of Bessel Filters are easy to synthesize.
+
+ADDED: FALSTAD Circuits> Active Filter> LPF then selected Options Phase> moved sliders to 10Hz, 2 stage. > select all > copy and pasted in http://www.Falstad.com/circuit or http://www.falstad.com/circuit/circuitjs.html > blank circuit or delete it > paste (^V) , then I scaled Rx1k and C/1k (optional)
+
+• The breakpoint should be defined by the desired multiple of the shortest time interval for any Code that you must specify.
+• With Morse Code intervals defined as "dit" "silent space" and "dah", I believe the "dit" is the shortest interval and will vary depending on skill of the sender.
+• this assumption may be scaled up or down, but let's define the shortest "dit" interval = 100 ms
+• Let's define the LPF breakpoint as $$\f=1/T_{dit}\$$ with a 4th order Gaussian. (4 caps + 2 Op Amps)
+
+Simulation Proof of concept < link fixed
+
+Since there was no spec for smooth, there is no acceptance criteria.
+
+Linear Phase of Bessel $$\d\phi/df\$$ here yields a flat response for Group Delay of 33 ms up to 10Hz ( then reduces after this)
+
+For the keen students of Bessel Filters;
+
+https://web.archive.org/web/20140224083044/http://www.rane.com/note147.html
+
+• This looks great! Perhaps a tad more complex than I was hoping, but heck, it clearly works and in the big scheme, one LM385 dual op-amp and some passives is not a big deal, thank you! Jan 31 at 1:26
+• Did you try the simulation Morse Code switch to see how it feels and looks? Jan 31 at 4:12
+• The first link in this answer (to the "simulation proof of concept") is broken. Jan 31 at 14:43
+• oops TY @AndersonGreen tinyurl.com/y9w5f8q7 Jan 31 at 22:42
+• Sorry I used www/falstad.com/afilter then chose > Filter> active> Bessel> 10 Hz sliders> 2 stage (order=4) then scaled Rx1k and C/1k Added link above @flawr then option add Phase Feb 1 at 22:12
+
+A simple way should be with two integrators with clamped output. I am not sure is this is what you need, anyhow you have to adjust time constants and clamp levels.
+
+Rather than switch a constant voltage into an R-C, switch a constant current into a C. Linear Tech and others have driver chips with controlled rise/fall times to reduce emissions. You can do the same with an opamp. Properly done, you will get a symmetrical trapezoid instead of a square wave shape. This does not completely eliminate the corners, but it does reduce the energy in the odd-order harmonics.
+
+And as stated elsewhere, an R-L-C filter does not automatically ring. With proper impedance control and damping, you can get the corner modification you want. Tektronics video test gear did this in the 60's. The sync pulses were so pretty, a scope shot looked like an artist's rendering.
+
+In (2) these regions are sharp and will cause clicks and excess bandwidth
+
+False assumption.
+
+You have already limited the high-frequency content of your signal. A second or third order RC filter is still better, but your next stages can do this for you anyway.
+
+Playing with phases of different harmonics in the already filtered signal in (2), you can convert your "front sharpness" into "trailing sharpness" or into something in between like waveform (3), without changing the freq/amplitude spectrum at all.
+
+Don't believe me? Just get all the phases off by 180° - i.e. play it backwards.
+
+On the other hand, if you are really into CW / morse code and your listeners are human, take my word as a medicore telegraphist and please, pretty please, adhere to waveform (2). It is way easier to listen to than (3).
+
+Beware of the next stages as well. A typical CW-related circuit tends to carelessly voltage-limit the signal (it is Morse code, isn't it, what can go wrong?) negating your bandwidth-limiting ambitions. This can happen all the way to the final amplifier that feeds the antenna. It is enticing to force it into class D mode and get both power and efficiency "for free" (except for the clicks).
+
+(You can even force your final amplifier into class D for the flat part of your dit/dah AND in the same time limit as the clicks, but it requires some fine tuning of the signal levels.)
+
+• You need to add even harmonics and shift those phases to round both edges. Yes plot 2 has more BW and thus is easier to detect. (higher SNR yields lower BER.) Feb 1 at 13:01
+
+Stacking 4 buffered RC low pass filters appear to work in that effect. You could use a TL074 chip or similar. I guess that accounts for 4th order filter:
+
+I would start in a different direction: use two PWM waves to approximate a sine wave. This article discusses that: walking ring sine wave generator
+
+Basically, you generate a three-level rectangular wave. The first overtone is 6x the frequency, so it's easy to filter. You can go farther and use 4 PWM outputs; the first overtone is 10x the freq.
+
+There's lots of interesting articles from a search for "ring counter sine wave generator".
+
+The best is Don Lancasters article here (from 1976!) : https://www.tinaja.com/glib/rad_elec/digital_sinewaves_11_76.pdf
+
+• I'm probably missing something here, but the "original square wave" (i.e. element (1) in my diagram is hand-generated morse code. Does your proposal relate to that? Thanks anyway, I'm loving (although more than slightly overwhelmed by) the discussions that I'm learning so much from. Feb 1 at 18:11
+• No, you are correct... somehow I went from that to "make sine waves". (which I also want to do to make Morse code). My screw-up. I apologize for the answer to the wrong problem! :-/ Feb 3 at 2:26

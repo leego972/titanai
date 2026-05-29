@@ -1,0 +1,25 @@
+Question: <p>A common task in programs I've been working on lately is modifying a text file in some way. (Hey, I'm on Linux. Everything's a file. And I do large-scale system admin.)</p>
+
+<p>But the file the code modifies may not exist on my desktop box. And I probably don't want to modify it if it IS on my desktop.</p>
+
+<p>I've read about unit testing in Dive Into Python, and it's pretty clear what I want to do when testing an app that converts decimal to Roman Numerals (the example in DintoP). The testing is nicely self-contained. You don't need to verify that the program PRINTS the right thing, you just need to verify that the functions are returning the right output to a given input.</p>
+
+<p>In my case, however, we need to test that the program is modifying its environment correctly. Here's what I've come up with:</p>
+
+<p>1) Create the "original" file in a standard location, perhaps /tmp.</p>
+
+<p>2) Run the function that modifies the file, passing it the path to the file in /tmp.</p>
+
+<p>3) Verify that the file in /tmp was changed correctly; pass/fail unit test accordingly.</p>
+
+<p>This seems kludgy to me. (Gets even kludgier if you want to verify that backup copies of the file are created properly, etc.)  Has anyone come up with a better way?</p>
+
+Answer: <p>You're talking about testing too much at once.  If you start trying to attack a testing problem by saying "Let's verify that it modifies its environment correctly", you're doomed to failure.  Environments have dozens, maybe even millions of potential variations.</p>
+
+<p>Instead, look at the pieces ("units") of your program.  For example, are you going to have a function that determines where the files are that have to be written?  What are the inputs to that function?  Perhaps an environment variable, perhaps some values read from a config file?  Test that function, and don't actually do anything that modifies the filesystem.  Don't pass it "realistic" values, pass it values that are easy to verify against.  Make a temporary directory, populate it with files in your test's <code>setUp</code> method.</p>
+
+<p>Then test the code that writes the files.  Just make sure it's writing the right contents file contents.  Don't even write to a real filesystem!  You don't need to make "fake" file objects for this, just use Python's handy <code>StringIO</code> modules; they're "real" implementations of the "file" interface, they're just not the ones that your program is actually going to be writing to.</p>
+
+<p>Ultimately you will have to test the final, everything-is-actually-hooked-up-for-real top-level function that passes the real environment variable and the real config file and puts everything together.  But don't worry about that to get started.  For one thing, you will start picking up tricks as you write individual tests for smaller functions and creating test mocks, fakes, and stubs will become second nature to you.  For another: even if you can't quite figure out how to test that one function call, you will have a very high level of confidence that everything which it is calling works perfectly.  Also, you'll notice that test-driven development forces you to make your APIs clearer and more flexible.  For example: it's much easier to test something that calls an <code>open()</code> method on an object that came from somewhere abstract, than to test something that calls <code>os.open</code> on a string that you pass it.  The <code>open</code> method is flexible; it can be faked, it can be implemented differently, but a string is a string and <code>os.open</code> doesn't give you any leeway to catch what methods are called on it.</p>
+
+<p>You can also build testing tools to make repetitive tasks easy.  For example, twisted provides facilities for creating temporary files for testing <a href="http://twistedmatrix.com/documents/8.1.0/api/twisted.trial.unittest.TestCase.html#mktemp">built right into its testing tool</a>.  It's not uncommon for testing tools or larger projects with their own test libraries to have functionality like this.</p>

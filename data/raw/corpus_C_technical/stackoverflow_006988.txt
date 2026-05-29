@@ -1,0 +1,59 @@
+Question: <p>ok so my issue is i have the string '\222\222\223\225' which is stored as latin-1 in the db.  What I get from django (by printing it) is the following string, 'Ã¢Ã¢Ã¢Ã¢Â¢' which I assume is the UTF conversion of it.  Now I need to pass the string into a function that 
+does this operation: </p>
+
+<pre><code>strdecryptedPassword + chr(ord(c) - 3 - intCounter - 30)
+</code></pre>
+
+<p>I get this error:  </p>
+
+<blockquote>
+  <p>chr() arg not in range(256)</p>
+</blockquote>
+
+<p>If I try to encode the string as latin-1 first I get this error:</p>
+
+<blockquote>
+  <p>'latin-1' codec can't encode characters in position 0-3: ordinal not
+  in range(256)</p>
+</blockquote>
+
+<p>I have read a bunch on how character encoding works, and there is something I am missing because I just don't get it!</p>
+
+Answer: <p>As Vinko notes, Latin-1 or ISO 8859-1 doesn't have printable characters for the octal string you quote.  According to my notes for 8859-1, "C1 Controls (0x80 - 0x9F) are from ISO/IEC 6429:1992. It does not define names for 80, 81, or 99".  The code point names are as Vinko lists them:</p>
+
+<pre><code>\222 = 0x92 =&gt; PRIVATE USE TWO
+\223 = 0x93 =&gt; SET TRANSMIT STATE
+\225 = 0x95 =&gt; MESSAGE WAITING
+</code></pre>
+
+<p>The correct UTF-8 encoding of those is (Unicode, binary, hex):</p>
+
+<pre><code>U+0092 = %11000010 %10010010 = 0xC2 0x92
+U+0093 = %11000010 %10010011 = 0xC2 0x93
+U+0095 = %11000010 %10010101 = 0xC2 0x95
+</code></pre>
+
+<p>The LATIN SMALL LETTER A WITH CIRCUMFLEX is ISO 8859-1 code 0xE2 and hence Unicode U+00E2; in UTF-8, that is %11000011 %10100010 or 0xC3 0xA2.</p>
+
+<p>The CENT SIGN is ISO 8859-1 code 0xA2 and hence Unicode U+00A2; in UTF-8, that is %11000011 %10000010 or 0xC3 0x82.</p>
+
+<p>So, whatever else you are seeing, you do not seem to be seeing a UTF-8 encoding of ISO 8859-1.  All else apart, you are seeing but 5 bytes where you would have to see 8.</p>
+
+<p><em>Added</em>:
+The previous part of the answer addresses the 'UTF-8 encoding' claim, but ignores the rest of the question, which says:</p>
+
+<pre><code>Now I need to pass the string into a function that does this operation:
+
+    strdecryptedPassword + chr(ord(c) - 3 - intCounter - 30)
+
+I get this error: chr() arg not in range(256).  If I try to encode the
+string as Latin-1 first I get this error: 'latin-1' codec can't encode
+characters in position 0-3: ordinal not in range(256).
+</code></pre>
+
+<p>You don't actually show us how intCounter is defined, but if it increments gently per character, sooner or later '<code>ord(c) - 3 - intCounter - 30</code>' is going to be negative (and, by the way, why not combine the constants and use '<code>ord(c) - intCounter - 33</code>'?), at which point, <code>chr()</code> is likely to complain.  You would need to add 256 if the value is negative, or use a modulus operation to ensure you have a positive value between 0 and 255 to pass to <code>chr()</code>.  Since we can't see how intCounter is incremented, we can't tell if it cycles from 0 to 255 or whether it increases monotonically.  If the latter, then you need an expression such as:</p>
+
+<pre><code>chr(mod(ord(c) - mod(intCounter, 255) + 479, 255))
+</code></pre>
+
+<p>where 256 - 33 = 223, of course, and 479 = 256 + 223.  This guarantees that the value passed to <code>chr()</code> is positive and in the range 0..255 for any input character c and any value of intCounter (and, because the <code>mod()</code> function never gets a negative argument, it also works regardless of how <code>mod()</code> behaves when its arguments are negative).</p>

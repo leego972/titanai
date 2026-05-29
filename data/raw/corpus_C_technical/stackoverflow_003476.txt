@@ -1,0 +1,40 @@
+Question: <p>I want to write tests that can show whether or not the database is in sync with my models.py file. Actually I have already written them, only to find out that django creates a new database each time the tests are run based on the models.py file. 
+Is there any way I can make the <strong>models.py test</strong> use the existing database schema? The one that's in mysql/postgresql, and not the one that's in /myapp/models.py ?</p>
+
+<p>I don't care about the data that's in the database, I only care about it's <strong>schema</strong> i.e. I want my tests to notice if a table in the database has less fields than the schema in my models.py file. </p>
+
+<p>I'm using the unittest framework (actually the django extension to it) if this has any relevance.</p>
+
+<p>thanks</p>
+
+Answer: <p>What we did was override the default test_runner so that it wouldn't create a new database to test against.  This way, it runs the test against whatever our current local database looks like.  But be very careful if you use this method because any changes to data you make in your tests will be permanent.  I made sure that all our tests restores any changes back to their original state, and keep our pristine version of our database on the server and backed up.</p>
+
+<p>So to do this you need to copy the run_test method from django.test.simple to a location in your project -- I put mine in myproject/test/test_runner.py</p>
+
+<p>Then make the following changes to that method:</p>
+
+<pre><code>// change
+old_name = settings.DATABASE_NAME
+from django.db import connection
+connection.creation.create_test_db(verbosity, autoclobber=not interactive)
+result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+connection.creation.destroy_test_db(old_name, verbosity)
+
+// to:
+result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+</code></pre>
+
+<p>Make sure to do all the necessary imports at the top and then in your settings file set the setting:</p>
+
+<pre><code>TEST_RUNNER = 'myproject.test.test_runner.run_tests'
+</code></pre>
+
+<p>Now when you run ./manage.py test Django will run the tests against the current state of your database rather than creating a new version based on your current model definitions.</p>
+
+<p>Another thing you can do is create a copy of your database locally, and then do a check in your new run_test() method like this:</p>
+
+<pre><code>if settings.DATABASE_NAME != 'my_test_db': 
+    sys.exit("You cannot run tests using the %s database. Please switch DATABASE_NAME to my_test_db in settings.py" % settings.DATABASE_NAME)
+</code></pre>
+
+<p>That way there's no danger of running tests against your main database.</p>

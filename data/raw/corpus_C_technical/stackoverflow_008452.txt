@@ -1,0 +1,61 @@
+Question: <p>I have a few Munin plugins which report stats from an Autonomy database. They all use a small library which scrapes the XML status output for the relevant numbers.</p>
+
+<p>I'm trying to bundle the library and plugins into a Puppet-installable RPM. The actual RPM-building should be straightforward; once I have a <code>distutils</code>-produced distfile I can make it into an RPM based on a .spec file pinched from the Dag or EPEL repos [1]. It's the <code>distutils</code> bit I'm unsure of -- in fact I'm not even sure my library is correctly written for packaging. Here's how it works:</p>
+
+<p>idol7stats.py:</p>
+
+<pre><code>import datetime
+import os
+import stat
+import sys
+import time
+import urllib
+import xml.sax
+
+class IDOL7Stats:
+  cache_dir = '/tmp'
+
+  def __init__(self, host, port):
+    self.host = host
+    self.port = port
+
+  # ...
+
+  def collect(self):
+    self.data = self.__parseXML(self.__getXML())
+
+  def total_slots(self):
+    return self.data['Service:Documents:TotalSlots']
+</code></pre>
+
+<p>Plugin code:</p>
+
+<pre><code>from idol7stats import IDOL7Stats
+a = IDOL7Stats('db.example.com', 23113)
+a.collect()
+print a.total_slots()
+</code></pre>
+
+<p>I guess I want idol7stats.py to wind up in <code>/usr/lib/python2.4/site-packages/idol7stats</code>, or something else in Python's search path. What <code>distutils</code> magic do I need? This:</p>
+
+<pre><code>from distutils.core import setup
+
+setup(name = 'idol7stats',
+  author = 'Me',
+  author_email = 'me@example.com',
+  version = '0.1',
+  py_modules = ['idol7stats'])
+</code></pre>
+
+<p>almost works, except the code goes in <code>/usr/lib/python2.4/site-packages/idol7stats.py</code>, not a subdirectory. I expect this is down to my not understanding the difference between modules/packages/other containers in Python.</p>
+
+<p>So, what's the rub?</p>
+
+<p>[1] Yeah, I could just plonk the library in <code>/usr/lib/python2.4/site-packages</code> using RPM but I want to know how to package Python code.</p>
+
+Answer: <p>You need to create a <em>package</em> to do what you want.  You'd need a directory named <code>idol7stats</code> containing a file called <code>__init__.py</code> and any other library modules to package.  Also, this will affect your scripts' imports; if you put <code>idol7stats.py</code> in a package called <code>idol7stats</code>, then your scripts need to "<code>import idol7stats.idol7stats</code>".</p>
+
+<p>To avoid that, you could just rename <code>idol7stats.py</code> to <code>idol7stats/__init__.py</code>, or you could put this line into <code>idol7stats/__init__.py</code> to "massage" the imports into the way you expect them:</p>
+
+<pre><code>from idol7stats.idol7stats import *
+</code></pre>

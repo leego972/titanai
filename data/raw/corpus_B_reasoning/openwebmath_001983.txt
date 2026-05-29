@@ -1,0 +1,103 @@
+# Confidence interval of RMSE
+
+I have taken a sample of $n$ data points from a population. Each of these points has a true value (known from ground truth) and an estimated value. I then calculate the error for each sampled point and then calculate the RMSE of the sample.
+
+How can I then infer some sort of confidence interval around this RMSE, based upon the sample size $n$?
+
+If I was using the mean, rather than the RMSE, then I wouldn't have a problem doing this as I can use the standard equation
+
+$m = \frac{Z \sigma}{\sqrt{n}}$
+
+but I don't know whether this is valid for RMSE rather than the mean. Is there some way that I can adapt this?
+
+(I have seen this question, but I don't have issues with whether my population is normally-distributed, which is what the answer there deals with)
+
+• What specifically are you computing when you "calculate the RMSE of the sample"? Is it the RMSE of the true values, of the estimated values, or of their differences?
+– whuber
+Nov 29, 2013 at 18:29
+• I'm calculating the RMSE of the differences, that is, calculating the square root of the mean of the squared differences between the true and estimated values. Nov 29, 2013 at 18:30
+• If you know the 'ground truth' (though I am not sure what that actually means), why would you need the uncertainty in RMSE? Are you trying to construct some kind of inference about cases where you don't have the ground truth? Is this a calibration issue? Dec 2, 2013 at 16:11
+• @Glen_b: Yup, that's exactly what we're trying to do. We don't have the ground truth for the entire population, just for the sample. We are then calculating an RMSE for the sample, and we want to have the confidence intervals on this as we are using this sample to infer the RMSE of the population. Dec 2, 2013 at 19:19
+• Possible duplicate of SE of RMSE in R Dec 3, 2013 at 10:48
+
+I might be able to give an answer to your question under certain conditions.
+
+Let $$x_{i}$$ be your true value for the $$i^{th}$$ data point and $$\hat{x}_{i}$$ the estimated value. If we assume that the differences between the estimated and true values have
+
+1. mean zero (i.e. the $$\hat{x}_{i}$$ are distributed around $$x_{i}$$)
+
+3. and all have the same standard deviation $$\sigma$$
+
+in short:
+
+$$\hat{x}_{i}-x_{i} \sim \mathcal{N}\left(0,\sigma^{2}\right),$$
+
+then you really want a confidence interval for $$\sigma$$.
+
+If the above assumptions hold true $$\frac{n\mbox{RMSE}^{2}}{\sigma^{2}} = \frac{n\frac{1}{n}\sum_{i}\left(\hat{x_{i}}-x_{i}\right)^{2}}{\sigma^{2}}$$ follows a $$\chi_{n}^{2}$$ distribution with $$n$$ (not $$n-1$$) degrees of freedom. This means
+
+\begin{align} P\left(\chi_{\frac{\alpha}{2},n}^{2}\le\frac{n\mbox{RMSE}^{2}}{\sigma^{2}}\le\chi_{1-\frac{\alpha}{2},n}^{2}\right) = 1-\alpha\\ \Leftrightarrow P\left(\frac{n\mbox{RMSE}^{2}}{\chi_{1-\frac{\alpha}{2},n}^{2}}\le\sigma^{2}\le\frac{n\mbox{RMSE}^{2}}{\chi_{\frac{\alpha}{2},n}^{2}}\right) = 1-\alpha\\ \Leftrightarrow P\left(\sqrt{\frac{n}{\chi_{1-\frac{\alpha}{2},n}^{2}}}\mbox{RMSE}\le\sigma\le\sqrt{\frac{n}{\chi_{\frac{\alpha}{2},n}^{2}}}\mbox{RMSE}\right) = 1-\alpha. \end{align}
+
+Therefore, $$\left[\sqrt{\frac{n}{\chi_{1-\frac{\alpha}{2},n}^{2}}}\mbox{RMSE},\sqrt{\frac{n}{\chi_{\frac{\alpha}{2},n}^{2}}}\mbox{RMSE}\right]$$ is your confidence interval.
+
+Here is a python program that simulates your situation
+
+from scipy import stats
+from numpy import *
+s = 3
+n=10
+c1,c2 = stats.chi2.ppf([0.025,1-0.025],n)
+y = zeros(50000)
+for i in range(len(y)):
+y[i] =sqrt( mean((random.randn(n)*s)**2))
+
+print "1-alpha=%.2f" % (mean( (sqrt(n/c2)*y < s) & (sqrt(n/c1)*y > s)),)
+
+
+Hope that helps.
+
+If you are not sure whether the assumptions apply or if you want to compare what I wrote to a different method, you could always try bootstrapping.
+
+• I think you are wrong - he wants CI for RMSE, not $\sigma$. And I want it too :) Dec 3, 2013 at 10:54
+• I don't think I am wrong. Just think about it like this: The MSE is actually the sample variance since $\mbox{MSE} = \hat\sigma^2 = \frac{1}{n}\sum_{i=1}^n (x_i-\hat x_i)^2$. The only difference is that you divide by $n$ and not $n-1$ since you are not subtracting the sample mean here. The RMSE would then correspond to $\sigma$. Therefore, the population RMSE is $\sigma$ and you want a CI for that. That's what I derived. Otherwise I must completely misunderstand your problem. Dec 3, 2013 at 16:37
+• Your assumption of an unbiased estimator is quite strong. Moreover, your confidence interval should be with $n-1$.
+– Sam
+Jun 26, 2020 at 15:03
+• I encoded an example using this technique in R: gist.github.com/brshallo/7eed49c743ac165ced2294a70e73e65e Mar 17, 2021 at 18:48
+• The link to the Purdue university website is no longer valid, so an edit has removed it. If you happen to recall which resource you were referring to, please edit a full citation into the post. Thanks!
+– Sycorax
+Dec 20, 2021 at 22:27
+
+The reasoning in the answer by fabee seems correct if applied to the STDE (standard deviation of the error), not the RMSE. Using similar nomenclature, $i=1,\,\ldots,\,n$ is an index representing each record of data, $x_i$ is the true value and $\hat{x}_i$ is a measurement or prediction.
+
+The error $\epsilon_i$, BIAS, MSE (mean squared error) and RMSE are given by: $$\epsilon_i = \hat{x}_i-x_i\,,\\ \text{BIAS} = \overline{\epsilon} = \frac{1}{n}\sum_{i=1}^{n}\epsilon_i\,,\\ \text{MSE} = \overline{\epsilon^2} = \frac{1}{n}\sum_{i=1}^{n}\epsilon_i^2\,,\\ \text{RMSE} = \sqrt{\text{MSE}}\,.$$
+
+Agreeing on these definitions, the BIAS corresponds to the sample mean of $\epsilon$, but MSE is not the biased sample variance. Instead: $$\text{STDE}^2 = \overline{(\epsilon-\overline{\epsilon})^2} = \frac{1}{n}\sum_{i=1}^{n}(\epsilon_i-\overline{\epsilon})^2\,,$$ or, if both BIAS and RMSE were computed, $$\text{STDE}^2 = \overline{(\epsilon-\overline{\epsilon})^2}=\overline{\epsilon^2}-\overline{\epsilon}^2 = \text{RMSE}^2 - \text{BIAS}^2\,.$$ Note that the biased sample variance is being used instead of the unbiased, to keep consistency with the previous definitions given for the MSE and RMSE.
+
+Thus, in my opinion the confidence intervals established by fabee refer to the sample standard deviation of $\epsilon$, STDE. Similarly, confidence intervals may be established for the BIAS based on the z-score (or t-score if $n<30$) and $\left.\text{STDE}\middle/\sqrt{n}\right.$.
+
+• You are right, but missed a part of my answer. I basically assumed that BIAS=0 (see assumption 1). In that case, $RMSE^2 = STDE^2$ as you derived. Since both $RMSE^2$ and $BIAS^2$ are $\chi^2$ and there exists a close form solution for the sum of two $\chi^2$ RVs, you can probably derive a close form confidence interval for the case when assumption 1 is dropped. If you do that and update your answer, I'll definitely upvote it. Nov 14, 2015 at 3:25
+
+Following Faaber 1999, the uncertainty of RMSE is given as $$\sigma (\hat{RMSE})/RMSE = \sqrt{\frac{1}{2n}}$$ where $n$ is the number of datapoints.
+
+Borrowing code from @Bryan Shalloway's link (https://gist.github.com/brshallo/7eed49c743ac165ced2294a70e73e65e, which is in the comment in the accepted answer), you can calculate this in R with the RMSE value and the degrees of freedom, which @fabee suggests is n (not n-1) in this case.
+
+The R function:
+
+rmse_interval <- function(rmse, deg_free, p_lower = 0.025, p_upper = 0.975){
+tibble(.pred_lower = sqrt(deg_free / qchisq(p_upper, df = deg_free)) * rmse,
+.pred_upper = sqrt(deg_free / qchisq(p_lower, df = deg_free)) * rmse)
+}
+
+
+A practical example: If I had an RMSE value of 0.3 and 1000 samples were used to calculate that value, I can then do
+
+rmse_interval(0.3, 1000)
+
+
+which would return:
+
+    # A tibble: 1 x 2
+.pred_lower .pred_upper
+<dbl>       <dbl>
+1       0.287       0.314

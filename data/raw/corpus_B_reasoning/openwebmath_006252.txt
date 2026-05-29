@@ -1,0 +1,244 @@
+# Tikz: drawing a line to the edge of a circle
+
+If I wanted to draw a line to the edge of a circle, I could simple do the following
+
+\pgfmathsetmacro{\a}{2}
+\draw (0, 0) circle (\a cm);
+\draw[-latex] (0, 0) -- ({\a * cos(angle)}, {\a * sin(angle)});
+
+
+where angle is what ever I specified.
+
+So the problem I am facing is that I want to draw two sets of 3 lines. One set will correspond to the smaller circles and the other to the larger circles. The problem is the circles aren't define as above. Additionally, I want to specify different angles for each line.
+
+The code for the circles in question is
+
+\documentclass[tikz,convert=false]{standalone}
+\usetikzlibrary{through,calc,intersections}
+\makeatletter
+% needs to be used after 'circle through'!
+% this can be avoided by slightly changing the source
+\pgfmathsetlengthmacro\pgf@tempa{\pgfkeysvalueof{/pgf/minimum width}+2*(#1)}%
+\pgfset{/pgf/minimum width/.expanded=\pgf@tempa}%
+}%
+}}
+\tikzset{
+special style/.code={%
+\if#1\tikz@nonactiveexlmark
+\pgfkeysalso{@special style}%
+\else
+\pgfkeysalso{style/.expanded=#1}%
+\fi
+},
+@special style/.style={draw=none,fill=none}
+}
+\makeatother
+\begin{document}
+\begin{tikzpicture}[scale = .7,
+every label/.append style = {font = \small},
+dot/.style = {fill, outer sep = +0pt, inner sep = +0pt,
+shape = circle, draw = none, label = {#1}},
+dot/.default =,
+small dot/.style = {minimum size = 2.5pt, dot = {#1}},
+small dot/.default =,
+big dot/.style = {minimum size = 5pt, dot = {#1}},
+big dot/.default =
+]
+\begin{scope}[rotate around ={-23.9625:(.75, -1)}]
+\begin{scope}
+\clip(-1, -4) rectangle (.5, 4);
+\draw [samples = 50, domain = -0.99:0.99, xshift = 1cm, red, thick]
+plot ({0.8 * (-1 - (\x)^2) / (1 - (\x)^2)},
+{1.83 * (-2) * (\x) / (1 - (\x)^2)});
+\end{scope}
+\node[scale = .75, small dot = {below: $$P_1$$}] (P1) at (3, 0) {};
+\node[scale = .75, small dot = {above, left = 3.5pt: $$P_2$$}] (P2) at
+(-1, 0) {};
+\node[scale = .75, small dot = {below, right = 5pt: $$F$$}] (F)
+at (.75, -1) {};
+\path[blue] (F) edge (P1) edge (P2) (P1) edge (P2);
+\path ($(P1)!.7!(P2)$) coordinate (Fm) node[small dot =
+{below = 10pt, right = 3pt: $$F_m^*$$}] {};
+\foreach \cPoint in {1, 2}
+{.0cm, .4cm, .8cm}
+\node[draw, red,
+name path global/.expanded = \cPoint:\cRadius] at
+(P\cPoint.center) (\cPoint:\cRadius) [circle through = (Fm),
+\foreach \cRadius in {1, 2} {
+\tikzset{name intersections = {of/.expanded = {1:\cRadius} and
+\foreach \cSolution in {1, 2}
+\node[black, scale = .5, big dot =
+{right, below = 5pt: $\ifnum\cSolution = 1\expandafter\tilde F\else F\fi^*_\cRadius$}]
+}
+\end{scope}
+\end{tikzpicture}
+\end{document}
+
+
+So for the bigger circles, I want to draw lines in decreasing order from 70, 35, and 0 degrees from the P1, and for the smaller circles, -225, -180, and -145 degrees again in increasing line length order.
+
+-
+@dustin The \tikzset with the definition of the special style is not needed anymore. This was only in it to simply hide a circle with the option ! (which should have been done better and should have been better explained, I apologize). The circles are in fact nodes with the names 1:0, 1:1, 1:2 and 2:0, 2:1 and 2:2. You can use {1:0}.<some angle> to access a point on the circle. Example: \draw ({1:2}.70) -- ({1:1}.35) -- ({1:0}.0); –  Qrrbrbirlbel Jun 16 '13 at 21:09
+@Qrrbrbirlbel I understand now. If you want to make your comment and answer, I will accept it. –  dustin Jun 16 '13 at 21:18
+@dustin Are the big ones (the 1 comes from the center dot: P1). By the way, while ({\a * cos(angle)}, {\a * sin(angle)}) is mathematical correct, TikZ offers a much simpler input: (angle:\a), the polar coordinate syntax. This also explains why the node names in my example above need to be enclosed in braces. I’ll post an answer soon. –  Qrrbrbirlbel Jun 16 '13 at 21:18
+
+This is going to be a very long answer (both in length and detailedness).
+Keep calm and keep reading. :)
+
+## How to access a coordinate on a circle/an ellipse: polar coordinates
+
+While you can access a coordinate on a circle (or an ellipse with different radii) by using
+
+({<x radius> * cos(<angle>)}, {<y radius> * sin(<angle>)})
+
+
+TikZ offers a much simpler input with polar coordinates. Its implicit form is:
+
+• (<angle>:<radius>) for a coordinate on a circle and
+• (<angle>:<x radius> and <y radius>) for a coordinate on an ellipse.
+
+## How to access a coordinate on a circle/an ellipse which center does not lie in the origin: shifting/calculations
+
+Of course, in this way, we can only access coordinates on circles/ellipses which center is located in the origin. The shift key comes in handy when you want to access other polar coordinates. The sequences (the first without, the second with the calc library)
+
+\draw[shift=(P1)] (120:1cm) -- (50:.5cm) -- (40:.2cm);
+\draw ($(P1)+(120:1cm)$) -- ($(P1)+(50:.5cm)$) -- ($(P1)+(40:.2cm)$);
+
+
+would connect coordinates that lie on circles around (P1).
+
+## How to access a polar coordinate on a (circular) node: the endless possibilities of nodes
+
+But do we actually know the exact radii? No, we also have never specified them at all.
+The through library makes it possible to draw circles through points without specifying a radius. We could certainly use the calc library and its let … in … path operator to calculate it, but we don’t need to.
+
+Besides (compass) anchors like north and south east every shape also includes (or should include) a definition for its border.
+To make a long story short (it’s rather different for other shapes that are not circle or ellipse): All coordinate on a circular node are easily accessible:
+
+(<node name>.<angle>)
+
+
+The created circles in our examples are circle nodes named:
+
+• for circles around (P1)
+• 1:0 (extra radius = .0cm)
+• 1:1 (extra radius = .4cm)
+• 1:2 (extra radius = .8cm)
+• for circles around (P2)
+• 2:0 (extra radius = .0cm)
+• 2:1 (extra radius = .4cm)
+• 2:2 (extra radius = .8cm)
+
+(There is something else to consider when connection nodes in this or any other way: The default value of outer xsep and outer ysep is set to .5\pgflinewidth which means that the accessed anchors/angles lie on the outside of the border of the path (a line has a width!). This does not apply here since circle through also sets both outer separators to zero making it more like the typical circle/ellipse path operators.)
+
+### Note to myself: Think ahead! ;)
+
+But why does
+
+\draw (1:2.70) -- (1:1.35) -- (1:0.0);
+
+
+give such faulty output?
+
+Well, when TikZ parses coordinates it checks for various text sequences that implicit certain coordinates.
+
+After checking for coordinate systems (cs:), intersections (intersections), coordinates perpendicular and horizontal to other coordinates (|- and -|), it checks first for polar (:), then for Cartesian coordinates (,). If none of these apply, only now the coordinate is interpreted as a node specifcation. (So the coordinates above are interpreted as polar coordinates with angles 1 and radii of 2.7,1.35and0.0.)
+
+We can solve this by:
+
+• protecting the : from the parser:
+
+\draw ({1:2}.70) -- ({1:1}.35) -- ({1:0}.0);
+
+• using the explicit form of the node coordinates:
+
+\draw (node cs: name=1:2,  angle=70) --
+(node cs: name=1:1, anchor=35) --
+(node cs: name=1:0, anchor=east);
+
+
+The options angle and anchor interchangeable.
+
+• not using : in the first place (recommended).
+Naming the nodes from 1-0 through 2-2 makes it easier to use the implicit form:
+
+\draw (1-2.70) -- (1-1.35) -- (1-0.0);
+\draw (2-2.-225) -- (2-1.-180) -- (2-0.-145);
+
+
+I hope, I have understood you correctly regarding what points you want to connect. Or are you looking for the following?
+
+\path (P1) edge (1-2.70) edge (1-1.35) edge (1-0.0)
+(P2) edge (2-2.-225) edge (2-1.-180) edge (2-0.-145);
+
+
+Note: I have used : in the previous answer to have the same names for the nodes as for their paths. Using - in the path names has failed in some stage of answering, : worked somehow. Now, it works again with -. Color me puzzled.
+
+## Code
+
+\documentclass[tikz,convert=false]{standalone}
+\usetikzlibrary{through,calc,intersections}
+\makeatletter
+% needs to be used after 'circle through'!
+% this can be avoided by slightly changing the source
+\pgfmathsetlengthmacro\pgf@tempa{\pgfkeysvalueof{/pgf/minimum width}+2*(#1)}%
+\pgfset{/pgf/minimum width/.expanded=\pgf@tempa}%
+}%
+}}
+\makeatother
+\begin{document}
+\begin{tikzpicture}[scale = .7,
+every label/.append style = {font = \small},
+dot/.style = {fill, outer sep = +0pt, inner sep = +0pt,
+shape = circle, draw = none, label = {#1}},
+dot/.default =,
+small dot/.style = {minimum size = 2.5pt, dot = {#1}},
+small dot/.default =,
+big dot/.style = {minimum size = 5pt, dot = {#1}},
+big dot/.default =
+]
+\begin{scope}[rotate around ={-23.9625:(.75, -1)}]
+\begin{scope}
+\clip(-1, -4) rectangle (.5, 4);
+\draw [samples = 50, domain = -0.99:0.99, xshift = 1cm, red, thick]
+plot ({0.8 * (-1 - (\x)^2) / (1 - (\x)^2)},
+{1.83 * (-2) * (\x) / (1 - (\x)^2)});
+\end{scope}
+\node[scale = .75, small dot = {below: $$P_1$$}] (P1) at (3, 0) {};
+\node[scale = .75, small dot = {above, left = 3.5pt: $$P_2$$}] (P2) at
+(-1, 0) {};
+\node[scale = .75, small dot = {below, right = 5pt: $$F$$}] (F)
+at (.75, -1) {};
+\path[blue] (F) edge (P1) edge (P2) (P1) edge (P2);
+\path ($(P1)!.7!(P2)$) coordinate (Fm) node[small dot =
+{below = 10pt, right = 3pt: $$F_m^*$$}] {};
+\foreach \cPoint in {1, 2}
+{.0cm, .4cm, .8cm}
+\node[draw, red,
+name path global/.expanded = \cPoint-\cRadius] at
+(P\cPoint.center) (\cPoint-\cRadius) [circle through = (Fm),
+\foreach \cRadius in {1, 2} {
+\tikzset{name intersections = {of/.expanded = {1-\cRadius} and
+\foreach \cSolution in {1, 2}
+\node[black, scale = .5, big dot =
+{right, below = 5pt: $\ifnum\cSolution = 1\relax\tilde F\else F\fi^*_\cRadius$}]
+}
+\end{scope}
+
+\draw (1-2.70) -- (1-1.35) -- (1-0.0);
+\draw (2-2.-225) -- (2-1.-180) -- (2-0.-145);
+% or
+\path (P1) edge (1-2.70) edge (1-1.35) edge (1-0.0)
+(P2) edge (2-2.-225) edge (2-1.-180) edge (2-0.-145);
+\end{tikzpicture}
+\end{document}
+
+
+## Output
+
+### Connecting coordinates on the circle with the center point
+
+-
+From your first comment, I knew what I needed to do. You don't have the lines I was looking to create but I was able to create it from that comment. If you want to see the code or what the intent was, just ask. –  dustin Jun 17 '13 at 1:05
+@dustin That’s okay. I have updated my answer with an image of the other idea how I understood your request. Maybe that’s it. Or not. At least I could help you. :)` –  Qrrbrbirlbel Jun 17 '13 at 1:13
+That was the intent. –  dustin Jun 17 '13 at 1:14

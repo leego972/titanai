@@ -1,0 +1,123 @@
+# Zero-suppressed decision diagram
+
+A zero-suppressed decision diagram (ZSDD or ZDD) is a particular kind of binary decision diagram (BDD) with fixed variable ordering. This data structure provides a canonically compact representation of sets, particularly suitable for certain combinatorial problems. Recall the Ordered Binary Decision Diagram (OBDD) reduction strategy, i.e. a node is replaced with one of its children if both out-edges point to the same node. In contrast, a node in a ZDD is replaced with its negative child if its positive edge points to the terminal node 0. This provides an alternative strong normal form, with improved compression of sparse sets. It is based on a reduction rule devised by Shin-ichi Minato in 1993.
+
+Background
+In a binary decision diagram, a Boolean function can be represented as a rooted, directed, acyclic graph, which consists of several decision nodes and terminal nodes. In 1993, Shin-ichi Minato from Japan modified Randal Bryant's BDDs for solving combinatorial problems. His "Zero-Suppressed" BDDs aim to represent and manipulate sparse sets of bit vectors. If the data for a problem are represented as bit vectors of length n, then any subset of the vectors can be represented by the Boolean function over n variables yielding 1 when the vector corresponding to the variable assignment is in the set.
+
+According to Bryant, it is possible to use forms of logic functions to express problems involving sum-of-products. Such forms are often represented as sets of "cubes", each denoted by a string containing symbols 0, 1, and -. For instance, the function  can be illustrated by the set  . By using bits 10, 01, and 00 to denote symbols 1, 0, and – respectively, one can represent the above set with bit vectors in the form of . Notice that the set of bit vectors is sparse, in that the number of vectors is fewer than 2, which is the maximum number of bit vectors, and the set contains many elements equal to zero. In this case, a node can be omitted if setting the node variable to 1 causes the function to yield 0. This is seen in the condition that a 1 at some bit position implies that the vector is not in the set. For sparse sets, this condition is common, and hence many node eliminations are possible. 
+
+Minato has proved that ZDDs are especially suitable for combinatorial problems, such as the classical problems in two-level logic minimization, knight's tour problem, fault simulation, timing analysis, the N-queens problem, as well as weak division. By using ZDDs, one can reduce the size of the representation of a set of n-bit vectors in OBDDs by at most a factor of n. In practice, the optimization is statistically significant.
+
+Definitions
+We define a Zero-Suppressed Decision Diagram (ZDD)  to be any directed acyclic graph such that: 
+1.	A terminal node is either: 
+	The special ⊤ node which represents the unit family  (i.e., the empty set), or
+	The special ⊥ node which represents the empty family .
+2.	Each nonterminal node satisfies the following conditions:
+a.	The node is labelled with a positive integer v. This label does not have to be unique. 
+b.	The node has an out-degree of 2. One of the outgoing edges is named "LO", and the other "HI". (In diagrams, one may draw dotted lines for LO edges and solid lines for HI edges)
+c.	A destination node is either terminal or labelled with an integer strictly larger than v. Thus one can omit arrowheads in diagrams because the edge directions can be inferred from the labels. 
+d.	The HI edge never points to the ⊥ node. 
+3.	There is exactly one node with zero in-degree—the root node. The root node is either terminal or labelled by the smallest integer in the diagram.
+4.	If two nodes have the same label, then their LO or HI edges point to different nodes. In other words, there are no redundant nodes. 
+
+We call Z an unreduced ZDD, if a HI edge points to a ⊥ node or condition 4 fails to hold. 
+
+In computer programs, Boolean functions can be expressed in bits, so the ⊤ node and ⊥ node can be represented by 1 and 0. From the definition above, we can represent combination sets efficiently by applying two rules to the BDDs:
+1.Eliminate all the nodes whose 1-edge points to the 0-terminal node (Figure 1). Then connect the edge to the other subgraph directly.
+2.Share all equivalent sub-graphs the same as for original BDDs.
+If the number and the order of input variables are fixed, a zero-suppressed BDD represents a Boolean function uniquely (as proved in Figure 2, it is possible to use a BDD to represent a Boolean binary tree).
+
+Representing a family of sets
+
+Let F be a ZDD. Let v be its root node. Then:
+1.	If v = ⊥ , then there can be no other nodes, and F represents Ø, the empty family. 
+2.	If v = ⊤, then there can be no other nodes, and F represents the family containing just the empty set { Ø }. We call this a unit family, and denote it by .
+3.	If v has two children. Let v0 be the LO node, and v1 be the HI node. Let Fi be the family represented by the ZDD rooted at vi, which can be shown by proof of induction. Then F represents the family 
+
+One may represent the LO branch as the sets in F that don't contain v:
+
+And the HI branch as the sets in F that do contain v:
+
+Example
+
+Figure 3: The family . We may call this , an elementary family. Elementary families consist of the form , and are denoted by .
+
+Figure 4: The family 
+
+Figure 5: The family 
+
+Figure 6: The family
+
+Features
+One feature of ZDDs is that the form does not depend on the number of input variables as long as the combination sets are the same. It is unnecessary to fix the number of input variables before generating graphs. ZDDs automatically suppress the variables for objects which never appear in combination, hence the efficiency for manipulating sparse combinations. 
+Another advantage of ZDDs is that the number of 1-paths in the graph is exactly equal to the number of elements in the combination set. In original BDDs, the node elimination breaks this property. Therefore, ZDDs are better than simple BDDs to represent combination sets. It is, however, better to use the original BDDs when representing ordinary Boolean functions, as shown in Figure 7.
+
+Basic operations
+Here we have the basic operations for ZDDs, as they are slightly different from those of the original BDDs. One may refer to Figure 8 for examples generated from the table below. 
+Empty()               	returns ø (empty set)
+Base()			returns{0}
+Subset1(P, var)	        returns the subset of P such as var = 1 
+Subset0(P, var)	        returns the subset of P such as var = 0
+Change(P, var)	        returns P when var is inverted
+Union(P, Q)		returns ()
+Intsec(P, Q)		returns ()
+Diff(P, Q)		returns ()
+Count(P)		returns . (number of elements)
+
+In ZDDs, there is no NOT operation, which is an essential operation in original BDDs. The reason is that the complement set  cannot be computed without defining the universal set . In ZDDs,  can be computed as Diff(U, P).
+
+Algorithms
+Suppose , we can recursively compute the number of sets in a ZDD, enabling us to get the 34th set out a 54-member family. Random access is fast, and any operation possible for an array of sets can be done with efficiency on a ZDD. 
+
+According to Minato, the above operations for ZDDs can be executed recursively like original BDDs. To describe the algorithms simply, we define the procedure Getnode(top, P0, P1) that returns a node for a variable top and two subgraphs P0 and P1. We may use a hash table, called uniq-table, to keep each node unique. Node elimination and sharing are managed only by Getnode(). 
+
+  Getnode (top, P0, P1) {
+    if (P1 == ø) return P0; /* node elimination */
+    P = search a node with (top, P0, P1 ) in uniq-table; if (P exist) return P; /* node sharing */
+    P = generate a node with (top, P0, P1 );
+    append P to the uniq-table;
+    return P; 
+  }
+
+Using Getnode(), we can then represent other basic operations as follows:
+
+  Subset1 (P, var) {
+    if (P.top < var) return ø; 
+    if (P.top == var) return P1; 
+    if (P.top > var)
+      return Getnode (P.top, Subset1(P0, var), Subset1(P1, var));
+  } 
+
+  Subset0 (P, var) {
+    if (P.top < var) return ø; 
+    if (P.top == var) return P0; 
+    if (P.top > var)
+      return Getnode (P.top, Subset0(P0, var), Subset0(P1, var));
+  } 
+
+  Change (P, var) {
+    if (P.top < var) return Getnode (var, ø, P); 
+    if (P.top == var) return Getnode (var, P1, P0);
+    if (P.top > var)
+      return Getnode (P.top, Change(P0, var), Change(P1, var));
+  }
+ 
+  Union (P, Q) {
+    if (P == ø) return Q; 
+    if (Q == ø) return P;
+    if (P == Q) return P;
+    if (P.top > Q.top) return Getnode (P.top, Union(P0, Q), P1);
+    if (P.top < Q.top) return Getnode (Q.top, Union(P, Q0), Q1);
+    if (P.top == Q.top) 
+      return Getnode (P.top, Union(P0, Q0), Union(P1, Q1));
+  }
+
+  Intsec (P, Q) {
+    if (P == ø) return ø; 
+    if (Q == ø) return ø;
+    if (P == Q) return P;
+    if (P.top > Q.top) return Intsec(P0, Q);
+    if (P.top < Q.top) return Intsec (P, Q0);
+    if (P.top == Q.top)

@@ -1,0 +1,318 @@
+# Combinatorial Generation Using Coroutines With Examples in Python
+
+## 1   Introduction
+
+Why is it that, for me, combinatorics arouses feelings of pure pleasure, yet, for many others it evokes feelings of pure panic? - Don Knuth, The Art of Computer Programming, Vol. 4
+
+The goal of combinatorial generation (or searching as Knuth calls it) is to exhaustively produce a set of combinatorial objects, one at a time, often subject to some constraints, and often in a certain required order. Both [KNUTH-4A] and [RUSKEY] provide excellent introductions to the subject of combinatorial generation. Combinatorial generation problems encompass a wide range of problems, from relatively simple (e.g. generating all subsets or all permutations) to rather complex (e.g. generating all ideals of a poset in Gray order).
+
+Algorithms for combinatorial generation are often divided into iterative and recursive categories. Iterative algorithms have traditionally been considered superior in performance due to the overhead of repetitive function calls in recursive algorithms. Arguably, this advantage is less noticeable when recursion is used properly (no redundant subtrees in the recursion tree) and modern compilers are used. Recursive algorithms, on the other hand, often have the advantage of being easier to read and understand.
+
+These two types of algorithms can be further considered as ways of approaching a combinatorial generation problem. That is, there are a few problem-solving strategies that work naturally with each type of algorithm. For example, with recursion, the main strategy involves reducing the problem to a subproblem. Similarly, with iterative algorithms the strategy of finding the next object in lexicographic order is quite commonly used and is rather powerful. Approaches that use the algebraic or arithmetic properties of the objects generated are also often used in iterative algorithms. We will see some examples of all of these in this article.
+
+Coroutines, which can be seen as a generalization of functions, can encompass both recursive and iterative algorithms. As such, they provide an ideal mechanism for combinatorial generation. In fact, one of the most popular coroutine use patterns in modern programming languages is the generator pattern, which we will discuss in next section. As the name suggests, generators provide the perfect mechanism for implementing combinatorial generation algorithms, recursive or iterative.
+
+In addition, since coroutines are a generalization of functions, we can exploit their generality to come up with combinatorial generation algorithms that are arguably somewhere between recursive and iterative. These algorithms introduce a new strategy for approaching combinatorial generation, which can be taken as a third approach, in addition to recursive and iterative approaches.
+
+This article is intended to provide an introduction to combinatorial generation using coroutines. Most of the discussion in this article will be through examples. Performance is discussed in a few of the examples as well. The main ideas presented here are either directly taken from those in [KR], or inspired by them. Most of the article is written with an intermediate or advanced programmer with a modest level of familiarity with combinatorics and combinatorial generation as the audience in mind, though the last few examples involve combinatorial objects beyond the basics.
+
+Examples are all in Python, and all the source code included here is available at https://github.com/sahands/coroutine-generation for any readers who wish to experiment with the code interactively. You can also see the Prezi slides for this project here.
+
+A Note on Python 2 v.s. Python 3
+All the code in this article is written to be compatible with Python 2.5 to 3.3. However, I make the general assumption that Python 3 is in use, and as such make no effort to write code that would be more efficient in Python 2. For example, I use range instead of xrange, since in Python 3 xrange is removed and range returns an iterator instead of a list. However, in favour of compatibility with Python 2, no Python 3 specific feature (e.g. yield from) is used.
+
+## 2   Coroutines and Their Implementation in Python
+
+### 2.1   Basic Definition
+
+As mentioned in the introduction, coroutines are a generalization of functions. Assume A is a function that calls B. In terms of the flow of execution, this involves A pausing its execution and passing the flow to B. As such, A can then be seen to be in a "paused" state until B finishes and returns execution back to the caller, A in this case. Coroutines generalize functions by allowing for any coroutine to pause its execution and yield a result at any point, and for any other coroutine to pass the execution to any other paused coroutine to continue. To achieve this, coroutines need to remember their state so they can continue exactly where they left off when resumed. The coroutine's "state" here refers to the values of local variables, as well as where in the coroutine's code the execution was paused.
+
+In other words, coroutines are functions that allow for multiple entry points, that can yield multiple times, and resume their execution when called again. On top of that, coroutines can transfer execution to any other coroutine instead of just the coroutine that called them. Functions, being special cases of coroutines, have a single entry point, can only yield once, and can only transfer execution back to the caller coroutine.
+
+### 2.2   Python Generators
+
+In Python, generators, which are basic coroutines with a few restrictions, were introduced in [PEP-255]. The syntax for defining coroutines in Python is very similar to that of functions, with the main different being that instead of return the keyword yield is used to pause the execution and return the execution to the caller. The syntax for using generators is rather different from functions though, and is in fact closer to how classes are treated in Python: calling a generator function returns a newly created "generator object", which is is an instance of the coroutine independent of other instances. To call the generator, the next built-in function is used, and the generator object is passed to next as the parameter. Here is a very simple example demonstrating how a very simple function as be implemented as a coroutine using a generator in Python:
+
+def add_func(a, b):
+return a + b
+
+yield a + b
+
+# Usage:
+print(x)
+
+# Equivalent to:
+print(x)
+
+# Further calls such as the following to adder will result in a StopIteration
+# being raised.
+
+
+Of course, the above example is meant to contrast the syntactic differences of generators and functions. The particular use of a coroutine demonstrated above is of course completely unnecessary. Let us look at a somewhat more interesting example, taken, with minor modification, from [PEP-255]:
+
+def fib():
+a, b = 0, 1
+while True:
+yield b
+a, b = b, a + b
+
+# Usage:
+f = fib()  # Create a new "instance" of the generator coroutine
+print(next(f))  # Prints 1
+print(next(f))  # Prints 1
+print(next(f))  # Prints 2
+print(next(f))  # Prints 3
+print(next(f))  # Prints 5
+
+
+Here we have a generator that yields the numbers in the Fibonacci sequence ad infinitum. Each call to the generator slides the a and b variables ahead in the sequence, and then execution is paused and b is yielded.
+
+### 2.3   Recursive Generators
+
+Before continuing, let us look at a simple example of a recursive algorithm implemented using coroutines as well. In this example, we create a very minimalistic binary tree and then print its post-order traversal. Notice how generators can be recursive, and how they implement the iterator interface which allows them to be used inside for loops and generator expressions.
+
+def postorder(tree):
+if not tree:
+return
+
+for x in postorder(tree['left']):
+yield x
+
+for x in postorder(tree['right']):
+yield x
+
+yield tree['value']
+
+# Usage:
+tree = lambda: defaultdict(tree)
+
+# Let's build a simple tree representing (1 + 3) * (4 - 2)
+T = tree()
+T['value'] = '*'
+T['left']['value'] = '+'
+T['left']['left']['value'] = '1'
+T['left']['right']['value'] = '3'
+T['right']['value'] = '-'
+T['right']['left']['value'] = '4'
+T['right']['right']['value'] = '2'
+
+postfix = ' '.join(str(x) for x in postorder(T))
+print(postfix)  # Prints 1 3 + 4 2 - *
+
+
+In Python 3, with [PEP-380], the above can be made even simpler by using the yield from statement:
+
+def postorder(tree):
+if not tree:
+return
+yield from postorder(tree['left'])
+yield from postorder(tree['right'])
+yield tree['value']
+
+
+However, the shorter and nicer Python 3 syntax will not be used for the rest of the article to keep the code Python 2 compatible.
+
+### 2.4   PEP 342 and the Enhanced yield Keyword
+
+Python generators were further generalized to allow for more flexible coroutines in [PEP-342]. Prior to the enhancements in [PEP-342], Python's generators were coroutines that could not accept new parameters after the initial parameters were passed to the coroutine. With [PEP-342]'s send method, a coroutine's execution can resume with further data passed to it as well. This is implemented by allowing the yield keyword to be used not just as a statement but also as an expression, the evaluation of which results in the coroutine pausing until a value is passed to it via send, which will be the value that the yield expression evaluates to. In this article, we will only need to use the generator pattern, and will only use yield as a statement meaning the send method will not be used.
+
+### 2.5   Clarification Regarding Terminology
+
+It is important to mention that in some Python literature the word "coroutine" has come to mean specifically coroutines that use yield as an expression and hence require the use of send to operate. See [BEAZLEY] for example (which, by the way, is an excellent introduction to coroutines and their uses in IO operations, parsing, and more). I believe this is somewhat inaccurate, since coroutines are a general concept, and functions, generators with next or send or both, all fall under coroutines. (That is, on an abstract level, the set of coroutines contains the set of generators and functions, and more.)
+
+In this article, I use the word "coroutine" in its generality, as defined in the first paragraph of this section, in accordance with how Knuth defines the word in [KNUTH-1]. I also will more or less use it interchangeably with the word "generator", since we will only use coroutines that are generators in this article.
+
+I will refer the readers interested in the enhanced yield keyword and its use to [BEAZLEY].
+
+### 2.6   A Final Note on Coroutines in Python
+
+Before we move on, it is important to note that even with [PEP-342], Python's generators do not implement coroutines in full generality. To quote [PY-1]:
+
+All of this makes generator functions quite similar to coroutines; they yield multiple times, they have more than one entry point and their execution can be suspended. The only difference is that a generator function cannot control where should the execution continue after it yields; the control is always transferred to the generator's caller.
+
+So unlike the way Knuth defines and uses coroutines, Python's generators are not completely symmetric; an executing generator object is still coupled to the caller, which creates asymmetry. However, this limitation will not be an issue for our purposes here.
+
+## 3   Motivating Example: Multi-Radix Numbers
+
+We start our exploration of coroutine-based combinatorial generation with a simple example: multi-radix numbers. The goal here is to provide a short and simple example of the common approaches to solving combinatorial generation problems, and then introduce the coroutine-based approach so as to emphasize the differences and advantages of each approach. The first approach will be based on arithmetical properties of the objects we are generating, the second will be a recursive solution based on a reduction to a subproblem, third will be an iterative approach based on explicitly finding the next lexicographic item, and finally, the fourth approach will be the coroutine-based one
+
+### 3.1   Problem Definition
+
+Our goal in this section will be to produce the set of multi-radix numbers in lexicographic (dictionary) order given a multi-radix base $M$ . More specifically, given a list $M$ of positive numbers, produce all lists $a$ of the same length as $M$ such that $0 \le a[i] < M[i]$ , in lexicographic order. Here is an example:
+
+>>> M = [3, 2, 4]
+...     print(a)
+...
+[0, 0, 0]
+[0, 0, 1]
+[0, 0, 2]
+[0, 0, 3]
+[0, 1, 0]
+[0, 1, 1]
+[0, 1, 2]
+[0, 1, 3]
+[1, 0, 0]
+[1, 0, 1]
+[1, 0, 2]
+[1, 0, 3]
+[1, 1, 0]
+[1, 1, 1]
+[1, 1, 2]
+[1, 1, 3]
+[2, 0, 0]
+[2, 0, 1]
+[2, 0, 2]
+[2, 0, 3]
+[2, 1, 0]
+[2, 1, 1]
+[2, 1, 2]
+[2, 1, 3]
+
+
+In other words, the combinatorial set of objects being generated is the Cartesian product
+
+$\prod_{i=0}^{n-1} \{0, 1, \ldots, m_i - 1\}$
+
+where $M = [m_0, \ldots, m_{n-1}]$ . So those of you familiar with Python's itertools module might already have thought of a quick solution to the problem:
+
+from itertools import product
+
+return product(*(range(x) for x in M))
+
+
+This, of course, is not an algorithm as much as it is delegating the task! Nonetheless, it is a good start and we will use it as a base-line for performance comparisons of the rest of the algorithms. We will also briefly look at how Python's itertools.product function is implemented internally after we discuss our algorithms.
+
+### 3.2   An Algorithm Based on Arithmetic
+
+To start with our first solution, let's observe that with $M = [2] * n$ , the problem is reduced to counting in binary:
+
+>>> M = [2, 2, 2]
+...     print(a)
+...
+[0, 0, 0]
+[0, 0, 1]
+[0, 1, 0]
+[0, 1, 1]
+[1, 0, 0]
+[1, 0, 1]
+[1, 1, 0]
+[1, 1, 1]
+
+
+This observation leads to the following iterative solution: simply start from zero and count to $(\prod m_i) - 1$ , and covert the numbers to the multi-radix base given by $M$ , similar to how we convert numbers to binary. This results in the following code.
+
+from operator import mul
+from functools import reduce
+
+n = len(M)
+for i in range(1, n + 1):
+x, a[-i] = divmod(x, M[-i])
+return a
+
+n = len(M)
+a = [0] * n
+last = reduce(mul, M, 1)
+for x in range(last):
+
+
+We can classify this algorithm as an iterative algorithm that relies on the arithmetical properties of the objects we are generating. Because of this, it it does not have a very combinatorial feel to it. It also happens to be quite slow, especially in Python, since every number in $a$ is recalculated each time, and multiple divisions have to happen per generated object.
+
+### 3.3   A Recursive Algorithm Based on Reduction to Subproblems
+
+Next approach is the recursive one. To use recursion, we need to reduce the problem to a subproblem. Say $M$ has $n$ items in it, so we are producing multi-radix numbers with $n$ digits. Let $M' = [M[0], M[1], \ldots, M[n-2]]$ . That is, $M'$ is the first $n-1$ elements of $M$ . Then if we have a list of multi-radix numbers for $M'$ in lexicographic order, we can extend that list to a list of lexicographic numbers for $M$ by appending $0$ to $M[n-1] - 1$ to each element of the list. This approach leads to the following recursive code:
+
+def multiradix(M, n, a, i):
+if i < 0:
+yield a
+else:
+for __ in multiradix(M, n, a, i - 1):
+# Extend each multi-radix number of length i with all possible
+# 0 <= x < M[i] to get a multi-radix number of length i + 1.
+for x in range(M[i]):
+a[i] = x
+yield a
+
+n = len(M)
+a = [0] * n
+return multiradix(M, n, a, n - 1)
+
+
+Quite simple and elegant, and as we will see, quite fast as well.
+
+### 3.4   An Iterative Algorithm
+
+Now, let's look at the iterative approach. Since our goal is to go from one given multi-radix number to the next in lexicographic order, we can start scanning from right to left until we find an index in $a$ that we can increment, do the incrementation, and then set everything to the right of that index to $0$ . For example, if our multi-radix number system is simply given by $M = [10] * 4$ , so we simply have decimal numbers of $4$ digits, and our current $a$ is $0399$ then scanning from right to left tells us that $3$ is the first number that can be incremented, so we increment $3$ getting $0499$ and then set everything to the right of $4$ to $0$ getting $0400$ which is the next number in lexicographic order. We can also just set numbers that can not be incremented to zero as we do the scanning for the first number to increment, which will save us from having two loops. This approach results in the following code:
+
+def multiradix_iterative(M):
+n = len(M)
+a = [0] * n
+while True:
+yield a
+# Find right-most index k such that a[k] < M[k] - 1 by scanning from
+# right to left, and setting everything to zero on the way.
+k = n - 1
+while a[k] == M[k] - 1:
+a[k] = 0
+k -= 1
+if k < 0:
+# Last lexicographic item
+return
+a[k] += 1
+
+
+### 3.5   A Coroutine-Based Algorithm
+
+Finally, let's look at the coroutine-based algorithm. The basic idea here is very similar to the previous iterative algorithm, but the execution is very different.
+
+To explain this algorithm, I will borrow Knuth's style of explaining his coroutine-based algorithms in [KR]. Picture a line of $n + 1$ friendly trolls. Each troll, with the exception of the first troll holds, a number in his hand. The trolls will behave in the following manner. When a troll is poked, if the number in his hand is strictly less than $m_i - 1$ (meaning the number can be increased) he simply increments the number and yells out "done". If the number in his hand is equal to $m_i - 1$ then he changes the number to $0$ and then pokes the previous troll without yelling anything. The first troll in line is special; whenever poked, he simply yells out "last" without doing anything else.
+
+We will call the last troll in line (corresponding to index $n - 1$ ) the lead troll. The algorithm will start with all trolls holding the number $0$ in their hands. Each time we need the next item generated, we poke the lead troll. If we hear "done" then we know we have a new item. If we hear "last" then we know that we are at the end of the generation task.
+
+In the implementation of the above idea, each troll becomes a coroutine. Yelling out "done" will be yielding True and yelling out "last" will yielding False. Troll number $-1$ is a special nobody coroutine that simply yields False repeatedly:
+
+def nobody():
+while True:
+yield False
+
+
+The rest of the trolls are instances of the troll coroutine in the code given below. Each troll creates the troll previous to it in line, until we get to troll number $0$ , which creates a nobody coroutine as its previous troll.
+
+from nobody import nobody
+
+def troll(M, a, i):
+previous = troll(M, a, i - 1) if i > 0 else nobody()
+while True:
+if a[i] == M[i] - 1:
+a[i] = 0
+yield next(previous)  # Poke the previous troll
+else:
+a[i] += 1
+yield True
+
+n = len(M)
+a = [0] * n
+lead = troll(M, a, n - 1)
+yield a
+yield a
+
+
+### 3.6   Discussion
+
+In the previous sections we saw four algorithms that solve the problem of generating multi-radix numbers in lexicographic order. The four algorithms were
+
+• multiradix_counting: an iterative algorithm based on arithmetic,
+• multiradix_recursive: a recursive algorithm that reduced the problem to a subproblem,
+• multiradix_iterative: an iterative algorithm that explicitly produced the next item in lexicographic order,
+
+We also saw how to solve the problem using Python's built-in itertools.product function. The latest was implemented as multiradix_product. Let's look at a simple performance comparison of the five by having them generate all multi-radix numbers with $M = [10] * 7$ , in other words, the digits of all 7-digit numbers in base ten. The result is shown below.
+
+Testing multiradix_product:
+Function test_generator took 0.472 seconds to run.
+
+Function test_generator took 26.281 seconds to run.
+
+Function test_generator took 1.721 seconds to run.
+
+Function test_generator took 3.687 seconds to run.
+
+Function test_genera

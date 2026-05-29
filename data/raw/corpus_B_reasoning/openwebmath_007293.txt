@@ -1,0 +1,149 @@
+# [tex-live] strange discrepancy in running time of etex between TL2015 and TL2017
+
+jfbu jfbu at free.fr
+Fri Jul 28 09:15:32 CEST 2017
+
+Le 28 juil. 2017 at 03:26, Reinhard Kotucha <reinhard.kotucha at web.de> :
+
+> On 2017-07-27 at 08:58:43 +0200, jfbu wrote:
+>
+>> Thanks a lot for trying out, the most likely cause is that the
+>>
+>> def\x{3.141592653589793238462....
+>>
+>> line got hard-wrapped somehow so that it occupies multiple lines
+>>
+>> (it should be on only one line)
+>>
+>> and this means the \x has spaces in it and the \ifx test fails
+>> because the \Z computed by \fdef\Z {\Machin {1000}} contains
+>> the first 1000 digits of Pi with no spaces.
+>
+> The problem was that the value of \x contained three spurious
+> characters (numbers are code points):
+>
+>  0039: DIGIT NINE
+>  0032: DIGIT TWO
+>  0037: DIGIT SEVEN
+>  0038: DIGIT EIGHT
+>  0037: DIGIT SEVEN
+>  0021: EXCLAMATION MARK
+>  000A: <control> LINE FEED (LF)
+>  0020: SPACE
+>  0036: DIGIT SIX
+>  0036: DIGIT SIX
+>  0031: DIGIT ONE
+>  0031: DIGIT ONE
+>  0031: DIGIT ONE
+>
+> I do not know where these characters had been inserted.  But if you
+> send code by mail which contains non-ASCII characters and/or where
+> linebreaks matter, I strongly recommend to send the file as an email
+> attachment.  It's also advisable to gzip the file because it's marked
+> as "application/octet-stream" then by your mail client.
+
+Thanks for confirming the corruption of \x
+
+visiting with Firefox
+
+http://tug.org/pipermail/tex-live/2017-July/040488.html
+
+I don't see the extra ! CTRL-J SPACE. But certainly I should have
+sent the file as binary to avoid any such problem with a line of
+1000 or so characters.
+
+On arXiv of old years, and even on CTAN, one could find
+many many latex file or dtx files containing "> From" at start
+of lines. The original had only "From" and the mailer inserted the "> ".
+
+People collaborating on a paper send versions by mail, hence
+it might even be that a very large proportion of math papers in the
+nineties got corrugated in this way.
+
+(I have forgotten now, perhaps it was in fact also related to ftp
+transfers)
+
+>
+> You can trust \pdfelapsedtime because it just uses system calls but I
+> don't know which system call is used by pdftex.  It seems that it's
+> based on gettimeofday(2).
+
+I have lots of experimenting with \pdfelapsedtime on Mac OS and
+also a bit on Linux, and it has always stricken me as quite fluctuating
+even when used for durations of tens of seconds.
+
+One such source is definitely deep in the CPU management, because
+on my laptop I have a specific phenomenon which I do not observe
+on a Mac desktop regarding computation times when running into
+minutes: for very lengthy things (5mns+) my laptop *slows down*
+in comparison to the desktop or the Linux machine
+
+>
+> Luatex provides os.clock() and os.gettimeofday().
+>
+> os.clock() counts CPU cycles of the current process with a resolution
+> of 10 ms.  It disregards CPU cycles used by sub-processes or other
+> processes running at the same time.
+>
+> os.gettimeofday(), as its name implies, just returns the current time
+> and is less reliable when a cronjob is running or Emacs creates an
+> auto-backup.  The resolution is system dependent (1µs on Linux and
+> 500µs on Windows).  Don't be confused by the many decimal digits.
+> Most of them are just rounding errors which are almost always
+> introduced when binary numbers are converted to the decimal system.
+>
+>  https://www.tug.org/TUGboat/tb28-3/tb90beebe.pdf
+
+Thanks for the link I will check it out.
+
+>
+> If you are using \pdfelapsedtime, os.clock(), or os.gettimeofday(), it
+> doesn't matter whether any files are cached already, at least if your
+> input file resets the counter at the beginning and you avoid \input.
+> IMO it's best to use os.clock() on LuaTeX for benchmarks despite its
+> low resolution.  The problem you reported is OS/X specific but in most
+> cases a resolution of 10 ms is sufficient on a Raspberry Pi.
+>
+> If you are using time(1), which depends on gettimeofday(2), you have
+> to run the script several times because other processes might run in
+> the background.  It's also advisable to install a system monitor like
+> xosview.
+
+When I need to be a bit serious and not only get a general impression
+I indeed try to run the test in a controlled environment:
+
+- turn off the wifi, hence all internet
+
+- kill all apps beyond Terminal
+
+- run on house electric power, not on batteries
+
+In my experience on Mac OSes, \pdfelapsedtime has some
+significant fluctuations when I use it multiple times in the same
+TeX job,
+
+Some years ago I was usually simply sending \the\pdfelapsedtime
+to PDF output
+and I noticed I should do a \noindent before \pdfresettimer
+to get things a bit stabilized between multiple uses
+of \pdfelapsedtime in same TeX run
+
+nowadays I work more likely with log or terminal output,
+and when I want to get serious I do not use Emacs AUCTeX,
+because I noticed that it significantly slows down compilation
+time, presumably from its on-the-fly parsing of log output,
+when this log output is voluminous (which in LaTeX it always
+is to some extent)
+
+With "time", I get relatively stable and coherent results with
+the occasional extravagancy when the system did something
+strange like sending to the NSA or to my ISP provider
+all my private data, or perhaps my computer is talking with
+Apple servers or whatever Google Analytics.
+
+But globally "time" has always given me more coherent results
+than "\pdfelapsedtime".
+
+Best,
+
+Jean-Francois

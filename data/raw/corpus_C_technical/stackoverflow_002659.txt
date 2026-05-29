@@ -1,0 +1,134 @@
+Question: <p>I want to use a WSDL SOAP based web service in Python. I have looked at the <a href="http://diveintopython.net/soap_web_services/">Dive Into Python</a> code but the SOAPpy module does not work under Python 2.5.</p>
+
+<p>I have tried using <a href="https://fedorahosted.org/suds">suds</a> which works partly, but breaks with certain types (suds.TypeNotFound: Type not found: 'item').</p>
+
+<p>I have also looked at <a href="http://trac.optio.webfactional.com/wiki">Client</a> but this does not appear to support WSDL.</p>
+
+<p>And I have looked at <a href="http://pywebsvcs.sourceforge.net/zsi.html">ZSI</a> but it looks very complex. Does anyone have any sample code for it?</p>
+
+<p>The WSDL is <a href="https://ws.pingdom.com/soap/PingdomAPI.wsdl">https://ws.pingdom.com/soap/PingdomAPI.wsdl</a> and works fine with the PHP 5 SOAP client.</p>
+
+Answer: <p>I recently stumbled up on the same problem. Here is the synopsis of my solution.
+<em>(If you need to see the whole discussion, here is the link for complete discussion of the solution:
+<a href="http://tedbelay.blogspot.com/2014/12/soap-web-service-client-in-python-27.html">http://tedbelay.blogspot.com/2014/12/soap-web-service-client-in-python-27.html</a>)</em></p>
+
+<p><strong>Basic constituent code blocks needed</strong></p>
+
+<p>The following are the required basic code blocks of your client application</p>
+
+<ol>
+<li>Session request section: request a session with the provider</li>
+<li>Session authentication section: provide credentials to the provider </li>
+<li>Client section: create the Client </li>
+<li>Security Header section: add the WS-Security Header to the Client </li>
+<li>Consumption section: consume available operations (or methods) as needed</li>
+</ol>
+
+<p><strong>What modules do you need?</strong></p>
+
+<p>Many suggested to use Python modules such as urllib2 ; however, none of the modules work-at least for this particular project.</p>
+
+<p>So, here is the list of the modules you need to get. 
+First of all, you need to download and install the latest version of suds from the following link:</p>
+
+<blockquote>
+  <p>pypi.python.org/pypi/suds-jurko/0.4.1.jurko.2</p>
+</blockquote>
+
+<p>Additionally, you need to download and install requests and suds_requests modules from the following links respectively ( disclaimer: I am new to post in here, so I can't post more than one link for now).</p>
+
+<blockquote>
+  <p>pypi.python.org/pypi/requests</p>
+  
+  <p>pypi.python.org/pypi/suds_requests/0.1</p>
+</blockquote>
+
+<p>Once you successfully download and install these modules, you are good to go.</p>
+
+<p><strong>The code</strong></p>
+
+<p>Following the steps outlined earlier, the code looks like the following:
+Imports:</p>
+
+<pre><code>import logging
+from suds.client import Client
+from suds.wsse import *
+from datetime import timedelta,date,datetime,tzinfo
+import requests
+from requests.auth import HTTPBasicAuth
+import suds_requests
+</code></pre>
+
+<p>Session request and authentication:</p>
+
+<pre><code>username=input('Username:')
+password=input('password:')
+session = requests.session()
+session.auth=(username, password)
+</code></pre>
+
+<p>Create the Client:</p>
+
+<pre><code>client = Client(WSDL_URL, faults=False, cachingpolicy=1, location=WSDL_URL, transport=suds_requests.RequestsTransport(session))
+</code></pre>
+
+<p>Add WS-Security Header:</p>
+
+<pre><code>...
+addSecurityHeader(client,username,password)
+....
+
+def addSecurityHeader(client,username,password):
+    security=Security()
+    userNameToken=UsernameToken(username,password)
+    timeStampToken=Timestamp(validity=600)
+    security.tokens.append(userNameToken)
+    security.tokens.append(timeStampToken)
+    client.set_options(wsse=security)
+</code></pre>
+
+<p>Please note that this method creates the security header depicted in Fig.1. So, your implementation may vary depending on the correct security header format provided by the owner of the service you are consuming.</p>
+
+<p>Consume the relevant method (or operation) :</p>
+
+<pre><code>result=client.service.methodName(Inputs)
+</code></pre>
+
+<p><strong>Logging</strong>:</p>
+
+<p>One of the best practices in such implementations as this one is logging to see how the communication is executed. In case there is some issue, it makes debugging easy. The following code does basic logging. However, you can log many aspects of the communication in addition to the ones depicted in the code.</p>
+
+<pre><code>logging.basicConfig(level=logging.INFO) 
+logging.getLogger('suds.client').setLevel(logging.DEBUG) 
+logging.getLogger('suds.transport').setLevel(logging.DEBUG)
+</code></pre>
+
+<p><strong>Result:</strong></p>
+
+<p>Here is the result in my case. Note that the server returned HTTP 200. This is the standard success code for HTTP request-response.</p>
+
+<pre><code>(200, (collectionNodeLmp){
+   timestamp = 2014-12-03 00:00:00-05:00
+   nodeLmp[] = 
+      (nodeLmp){
+         pnodeId = 35010357
+         name = "YADKIN"
+         mccValue = -0.19
+         mlcValue = -0.13
+         price = 36.46
+         type = "500 KV"
+         timestamp = 2014-12-03 01:00:00-05:00
+         errorCodeId = 0
+      },
+      (nodeLmp){
+         pnodeId = 33138769
+         name = "ZION 1"
+         mccValue = -0.18
+         mlcValue = -1.86
+         price = 34.75
+         type = "Aggregate"
+         timestamp = 2014-12-03 01:00:00-05:00
+         errorCodeId = 0
+      },
+ })
+</code></pre>

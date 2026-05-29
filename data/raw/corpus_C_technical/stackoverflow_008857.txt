@@ -1,0 +1,97 @@
+Question: <p>I'm trying to make a proxy object in IronPython, which should dynamically present underlying structure. The proxy itself shouldn't have any functions and properties, I'm trying to catch all the calls in the runtime. Catching the function calls is easy, I just need to define <strong>getattr</strong>() function for my object, and check does appropriate function exists in the underlying layer, and return some function-like object.</p>
+
+<p>I have problems with properties - I don't know how to distinguish the calling context, is my property called as a lvalue or rvalue:</p>
+
+<p>o = myproxy.myproperty # *I need to call underlying.myproperty_get()*</p>
+
+<p>or</p>
+
+<p>myproxy.myproperty = o # *I need to call underlying.myproperty_set(o)*</p>
+
+<p>I looked at the list of special functions in Python, but I didn't found anything appropriate.</p>
+
+<p>I also tried to make property in the object on the fly, with combination of exec() and builtin property() function, but I found that IronPython 1.1.2 lacks of entire 'new' module (which is present in IronPython 2.x beta, but I'll rather use IP 1.x, because of .NET 2.0 framework).</p>
+
+<p>Any ideas?</p>
+
+Answer: <p>The usual implementation of what you want in python would be this:</p>
+
+<pre><code>class CallProxy(object):
+    'this class wraps a callable in an object'
+    def __init__(self, fun):
+        self.fun = fun
+
+    def __call__(self, *args, **kwargs):
+        return self.fun(*args, **kwargs)
+
+class ObjProxy(object):
+    ''' a proxy object intercepting attribute access
+    '''
+    def __init__(self, obj):
+        self.__dict__['_ObjProxy__obj'] = obj
+
+    def __getattr__(self, name):
+        attr = getattr(self.__obj, name)
+        if callable(attr):
+            return CallProxy(attr)
+        else:
+            return attr
+
+    def __setattr__(self, name, value):
+        setattr(self.__obj, name, value)
+</code></pre>
+
+<p>I wrote a test to prove that this behaves as expected:</p>
+
+<pre><code>#keep a list of calls to the TestObj for verification
+call_log = list()
+class TestObj(object):
+    ''' test object on which to prove
+        that the proxy implementation is correct
+    '''
+    def __init__(self):
+        #example attribute
+        self.a = 1
+        self._c = 3
+
+    def b(self):
+        'example method'
+        call_log.append('b')
+        return 2
+
+    def get_c(self):
+        call_log.append('get_c')
+        return self._c
+    def set_c(self, value):
+        call_log.append('set_c')
+        self._c = value
+    c = property(get_c, set_c, 'example property')
+
+def verify(obj, a_val, b_val, c_val):
+    'testing of the usual object semantics'
+    assert obj.a == a_val
+    obj.a = a_val + 1
+    assert obj.a == a_val + 1
+    assert obj.b() == b_val
+    assert call_log[-1] == 'b'
+    assert obj.c == c_val
+    assert call_log[-1] == 'get_c'
+    obj.c = c_val + 1
+    assert call_log[-1] == 'set_c'
+    assert obj.c == c_val + 1
+
+def test():
+    test = TestObj()
+    proxy = ObjProxy(test)
+    #check validity of the test
+    verify(test, 1, 2, 3)
+    #check proxy equivalent behavior
+    verify(proxy, 2, 2, 4)
+    #check that change is in the original object
+    verify(test, 3, 2, 5)
+
+if __name__ == '__main__':
+    test()
+</code></pre>
+
+<p>This executes on CPython without any assert throwing an exception. IronPython should be equivalent, otherwise it's broken and this test should be added to its unit test suite.</p>

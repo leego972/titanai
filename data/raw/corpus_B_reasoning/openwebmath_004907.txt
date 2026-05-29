@@ -1,0 +1,355 @@
+# ltlcross
+
+ltlcross is a tool for cross-comparing the output of LTL-to-automata translators. It is actually a Spot-based clone of LBTT, the LTL-to-Büchi Translator Testbench, that essentially performs the same sanity checks.
+
+The main differences with LBTT are:
+
+• support for PSL formulas in addition to LTL
+• support for (non-alternating) automata with any type of acceptance condition,
+• support for weak alternating automata,
+• additional intersection checks with the complement allowing to check equivalence of automata more precisely,
+• more statistics, especially:
+• the number of logical transitions represented by each physical edge,
+• the number of deterministic states and automata
+• the number of SCCs with their various strengths (nonaccepting, terminal, weak, strong)
+• the number of terminal, weak, and strong automata
+• an option to reduce counterexamples by attempting to mutate and shorten troublesome formulas (option --grind),
+• statistics output in CSV for easier post-processing,
+• more precise time measurement (LBTT was only precise to 1/100 of a second, reporting most times as "0.00s").
+
+Although ltlcross performs similar sanity checks as LBTT, it does not implement any of the interactive features of LBTT. In our almost 10-year usage of LBTT, we never had to use its interactive features to understand bugs in our translation. Therefore ltlcross will report problems, maybe with a conterexample, but you will be on your own to investigate and fix them (the --grind option may help you reduce the problem to a shorter formula).
+
+The core of ltlcross is a loop that does the following steps:
+
+• Input a formula
+• Translate the formula and its negation using each configured translator. If there are 3 translators, the positive and negative translations will be denoted P0, N0, P1, N1, P2, N2.
+• Optionally build complemented automata denoted Comp(P0), Comp(N0), etc. (By default, this is done only for small automata, but see options -D, --determinize-max-states and --determinize-max-edges.)
+• Perform sanity checks between all these automata to detect any problem.
+• Optionally build the products of these automata with a random state-space (the same state-space for all translations). (If the --products=N option is given, N products are performed instead.)
+• Gather statistics if requested.
+
+## Formula selection
+
+Formulas to translate should be specified using the common input options. Standard input is read if it is not connected to a terminal, and no -f or -F options are given.
+
+## Configuring translators
+
+### Translator specifications
+
+Each translator should be specified as a string that use some of the following character sequences:
+
+%%                         a single %
+%f,%s,%l,%w                the formula as a (quoted) string in Spot, Spin,
+LBT, or Wring's syntax
+%F,%S,%L,%W                the formula as a file in Spot, Spin, LBT, or
+Wring's syntax
+%O                         the automaton output in HOA, never claim, LBTT, or
+ltl2dstar's format
+
+
+
+For instance here is how we could cross-compare the never claims output by spin and ltl2tgba for the formulas GFa and X(a U b).
+
+ltlcross -f 'GFa' -f 'X(a U b)' 'ltl2tgba -s %s >%O' 'spin -f %s >%O'
+
+
+When ltlcross executes these commands, %s will be replaced by the formula in Spin's syntax, and %O will be replaced by a temporary file into which the output of the translator is redirected before it is read back by ltlcross.
+
+To handle tools that do not support some LTL operators, the character sequences %f, %s, %l, %w, %F, %S, %L, and %W can be "infixed" by a bracketed list of operators to rewrite away. For instance if a tool reads LTL formulas from a file in LBT's syntax, but does not support operators M (strong until) and W (weak until), use %[WM]L instead of just %L; this way operators W and M will be rewritten using the other supported operators.
+
+ltlcross can only read four kinds of output:
+
+Files in any of these format should be indicated with %O. (Past versions of ltlcross used different letters for each format, but the four parsers have been merged into a single one.)
+
+Of course all configured tools need not use the same % sequences. The following list shows some typical configurations for some existing tools:
+
+• 'spin -f %s >%O'
+• 'ltl2ba -f %s >%O'
+• 'ltl3ba -M0 -f %s >%O' (less deterministic output, can be smaller)
+• 'ltl3ba -M1 -f %s >%O' (more deterministic output)
+• 'modella -r12 -g -e %[MWei^]L %O'
+• '/path/to/script4lbtt.py %L %O' (script supplied by ltl2nba for its interface with LBTT)
+• 'ltl2tgba -s %f >%O' (smaller output, Büchi automaton)
+• 'ltl2tgba -s -D %f >%O' (more deterministic output, Büchi automaton)
+• 'ltl2tgba -H %f >%O' (smaller output, TGBA)
+• 'ltl2tgba -H -D %f >%O' (more deterministic output, TGBA)
+• 'lbt <%L >%O'
+• 'ltl2dstar --ltl2nba=spin:path/to/ltl2tgba@-sD --output-format=hoa %[MW]L %O' deterministic Rabin output in HOA, as supported since version 0.5.2 of ltl2dstar.
+• 'ltl2dstar --ltl2nba=spin:path/to/ltl2tgba@-sD --automata=streett --output-format=hoa %[MW]L %O' deterministic Streett output in HOA, as supported since version 0.5.2 of ltl2dstar.
+• 'ltl2dstar --ltl2nba=spin:path/to/ltl2tgba@-sD %[MW]L %O' (Rabin output in DSTAR format, as supported in older versions of ltl2dstar.
+• 'ltl2dstar --ltl2nba=spin:path/to/ltl2tgba@-sD %L - | dstar2tgba -s >%O' (external conversion from Rabin to Büchi done by dstar2tgba for more reduction of the Büchi automaton than what ltlcross would provide)
+• 'java -jar Rabinizer.jar -ltl2dstar %[MW]F %O; mv %O.dst %O' (Rabinizer uses the last %O argument as a prefix to which it always append .dst, so we have to rename %O.dst as %O so that ltlcross can find the file)
+• 'java -jar rabinizer3.1.jar -in=formula -silent -out=std -format=hoa -auto=tr %[MWRei^]f >%O' (rabinizer 3.1 can output automata in the HOA format)
+• 'ltl3dra -f %s >%O' (The HOA format is the default for ltl3dra.)
+• 'ltl3tela -f %s >%O' (The HOA format is the default for ltl3tela.)
+
+To simplify the use of some of the above tools, a set of predefined shorthands are available. Those can be listed with the --list-shorthands option.
+
+ltlcross --list-shorthands
+
+If a COMMANDFMT does not use any %-sequence, and starts with one of
+the following words, then the string on the right is appended.
+
+delag        %f>%O
+lbt          <%L>%O
+ltl2ba       -f %s>%O
+ltl2da       %f>%O
+ltl2dgra     %f>%O
+ltl2dpa      %f>%O
+ltl2dra      %f>%O
+ltl2dstar    --output-format=hoa %[MW]L %O
+ltl2ldba     %f>%O
+ltl2na       %f>%O
+ltl2nba      %f>%O
+ltl2ngba     %f>%O
+ltl2tgba     -H %f>%O
+ltl3ba       -f %s>%O
+ltl3dra      -f %s>%O
+ltl3hoa      -f %f>%O
+ltl3tela     -f %f>%O
+modella      %[MWei^]L %O
+spin         -f %s>%O
+
+Any {name} and directory component is skipped for the purpose of
+matching those prefixes.  So for instance
+'{DRA} ~/mytools/ltl2dstar-0.5.2'
+will be changed into
+'{DRA} ~/mytools/ltl2dstar-0.5.2 --output-format=hoa %[MW]L %O'
+
+
+What this implies is that running ltlcross ltl2ba ltl3ba ... is the same as running ltlcross 'ltl2ba -f %s>%O' 'ltl3ba -f %s>%O' ...
+
+Because only the prefix of the actual command is checked, you can still specify some options. For instance ltlcross 'ltl2tgba -D' ... is short for ltlcross 'ltl2tgba -D -H %F>%O' ...
+
+### Trusted and untrusted translators
+
+By default, all translators specified are not trusted. This means that ltlcross will cross-compare the output of all translators, possibly yielding a quadratic number of tests.
+
+It is possible to declare that certain translators should be trusted by specifying them with the --reference=COMMANDFMT option. This has a few implications:
+
+• the automata output by reference translators are not tested
+• a pair of positive and negative reference automata are selected from the reference translators (the smallest automata, in case multiple references are available), and all other translators will only be compared to these reference automata.
+
+Consequently, the number of test performed is now linear in the number of untrusted references. The easiest way to observe the effect of --reference is to run the ltlcross with the --verbose option, with and without some --reference translators.
+
+## Detecting problems
+
+If a translator exits with a non-zero status code, or fails to output an automaton ltlcross can read, and error will be displayed and the result of the translation will be discarded.
+
+Otherwise ltlcross performs the following checks on all translated formulas ($$P_i$$ and $$N_i$$ designate respectively the translation of positive and negative formulas by the ith translator).
+
+• Intersection check: $$P_i\otimes N_j$$ must be empty for all pairs of $$(i,j)$$.
+
+A single failing translator might generate a lot of lines of the form:
+
+error: P0*N1 is nonempty; both automata accept the infinite word:
+cycle{p0 & !p1}
+error: P1*N0 is nonempty; both automata accept the infinite word:
+p0; !p1; cycle{p0 & p1}
+error: P1*N1 is nonempty; both automata accept the infinite word:
+p0; cycle{!p1 & !p0}
+error: P1*N2 is nonempty; both automata accept the infinite word:
+p0; !p1; cycle{p0 & p1}
+error: P1*N3 is nonempty; both automata accept the infinite word:
+p0; !p1; cycle{p0 & p1}
+error: P1*N4 is nonempty; both automata accept the infinite word:
+p0; cycle{!p1 & !p0}
+error: P2*N1 is nonempty; both automata accept the infinite word:
+p0; !p1; !p0; cycle{!p1 & !p0; p0 & !p1; !p1; !p1; p0 & !p1}
+error: P3*N1 is nonempty; both automata accept the infinite word:
+p0; !p1; !p1 & !p0; cycle{p0 & !p1}
+error: P4*N1 is nonempty; both automata accept the infinite word:
+p0; !p1; !p1 & !p0; cycle{p0 & !p1}
+
+
+
+In this example, translator number 1 looks clearly faulty (at least the other 4 translators do not contradict each other).
+
+Examples of infinite words that are accepted by both automata always have the form of a lasso: a (possibly empty) finite prefix followed by a cycle that should be repeated infinitely often. The cycle part is denoted by cycle{...}.
+
+• Complemented intersection check. If $$P_i$$ and $$N_i$$ are deterministic or if they are small enough, ltlcross attempts to build their complements, $$Comp(P_i)$$ and $$Comp(N_i)$$.
+
+Complementation is not always attempted, especially when it requires a determinization-based construction. The conditions specifying when the complement automata are constructed can be modified with the --determinize-max-states=N and --determinize-max-edges=M options, which abort the complementation if it would produce an automaton with more than N states (500 by default) or more than M edges (5000 by default). Alternatively, use --determinize (a.k.a. -D) to force the complementation of all automata.
+
+If both complement automata could be computed, ltlcross ensures that $$Comp(P_i)\otimes Comp(N_i)$$ is empty.
+
+If only one automaton has been complemented, for instance $$P_i$$, ltlcross checks that $$P_j\otimes Comp(P_i)$$ for all $$j \ne i$$; likewise if it's $$N_i$$ that is deterministic.
+
+When validating a translator with ltlcross without using the --determinize option we highly recommend to include a translator with good deterministic output to augment test coverage. Using 'ltl2tgba -D %f >%O' will produce deterministic automata for all obligation properties and many recurrence properties. Using 'ltl2tgba -PD %f >%O' will systematically produce a deterministic Parity automaton (that ltlcross can complement easily).
+
+• Cross-comparison checks: for some state-space $$S$$, all $$P_i\otimes S$$ are either all empty, or all non-empty. Similarly all $$N_i\otimes S$$ are either all empty, or all non-empty.
+
+A cross-comparison failure could be displayed as:
+
+error: {P0,P2} disagree with {P1} when evaluating the state-space
+the following word(s) are not accepted by {P1}:
+P0 accepts: p0 & !p1 & !p2 & p3; p0 & p1 & !p2 & p3; p0 & p1 & p2 & p3; cycle{p0 & p1 & p2 & p3; p0 & p1 & !p2 & !p3; p0 & p1 & p2 & !p3; p0 & p1 & !p2 & !p3}
+P2 accepts: p0 & !p1 & !p2 & p3; cycle{p0 & p1 & !p2 & !p3; p0 & p1 & p2 & p3; p0 & p1 & !p2 & p3}
+
+
+
+If --products=N is used with N greater than one, the number of the state-space is also printed. This number is of no use by itself, except to explain why you may get multiple disagreement between the same sets of automata.
+
+These products tests may sometime catch errors that were not captured by the first two tests if one non-deterministic automaton recognize less words than what it should. If the input automata are all deterministic or the --determinize option is used, this test is redundant and can be disabled. (In fact, the --determinize option implies option --product=0 to do so.)
+
+• Consistency check:
+
+For each $$i$$, the products $$P_i\otimes S$$ and $$N_i\otimes S$$ actually cover all states of $$S$$. Because $$S$$ does not have any deadlock, any of its infinite path must be accepted by $$P_i$$ or $$N_i$$ (or both).
+
+An error in that case is displayed as
+
+error: inconsistency between P1 and N1
+
+
+
+If --products=N is used with N greater than one, the number of the state-space in which the inconsistency was detected is also printed.
+
+This test may catch errors that were not captured by the first two tests if one non-deterministic automaton recognize less words than what it should. If the input automata are deterministic or the --determinize option is used, this test is redundant and can be disabled. (In fact, the --determinize option implies option --product=0 to do so.)
+
+The above checks are similar to those that are performed by LBTT, except for the complemented intersection check, which is only done in ltlcross.
+
+If any problem was reported during the translation of one of the formulas, ltlcheck will exit with an exit status of 1. Statistics (if requested) are output nonetheless, and include any faulty automaton as well.
+
+## Getting statistics
+
+Detailed statistics about the result of each translation, and the product of that resulting automaton with the random state-space, can be obtained using the --csv=FILE or --json=FILE option.
+
+### CSV or JSON output (or both!)
+
+The following compare ltl2tgba, spin, and lbt on three random formulas (where W and M operators have been rewritten away because they are not supported by spin and lbt).
+
+randltl -n 3 a b |
+ltlfilt --remove-wm |
+ltlcross --csv=results.csv \
+'ltl2tgba -s %f >%O' \
+'spin -f %s >%O' \
+'lbt < %L >%O'
+
+-:1: 0
+Running [P0]: ltl2tgba -s '0' >'lcr-o0-MWRc3C'
+Running [P1]: spin -f 'false' >'lcr-o1-IHykCs'
+Running [P2]: lbt < 'lcr-i0-cYTPbi' >'lcr-o2-0mcmL7'
+Running [N0]: ltl2tgba -s '1' >'lcr-o0-4qenlX'
+Running [N1]: spin -f 'true' >'lcr-o1-u5jYZM'
+Running [N2]: lbt < 'lcr-i0-WwhWEC' >'lcr-o2-ukaVjs'
+Performing sanity checks and gathering statistics...
+
+-:2: !(F(!(p0)))
+Running [P0]: ltl2tgba -s '!(F(!(p0)))' >'lcr-o0-atua0h'
+Running [P1]: spin -f '!(<>(!(p0)))' >'lcr-o1-CEVXK7'
+Running [P2]: lbt < 'lcr-i1-gxM8vX' >'lcr-o2-8MzkhN'
+Running [N0]: ltl2tgba -s 'F(!(p0))' >'lcr-o0-g0I12C'
+Running [N1]: spin -f '<>(!(p0))' >'lcr-o1-E0hlTs'
+Running [N2]: lbt < 'lcr-i1-c6a1Ji' >'lcr-o2-ahTHA8'
+Performing sanity checks and gathering statistics...
+
+-:3: F((G(p0)) | (F(p1)))
+Running [P0]: ltl2tgba -s 'F((G(p0)) | (F(p1)))' >'lcr-o0-s7QnuY'
+Running [P1]: spin -f '<>(([](p0)) || (<>(p1)))' >'lcr-o1-00iXsO'
+Running [P2]: lbt < 'lcr-i2-o2JXrE' >'lcr-o2-0t7Yqu'
+Running [N0]: ltl2tgba -s '!(F((G(p0)) | (F(p1))))' >'lcr-o0-o55wqk'
+Running [N1]: spin -f '!(<>(([](p0)) || (<>(p1))))' >'lcr-o1-UwpMua'
+Running [N2]: lbt < 'lcr-i2-cZBdA0' >'lcr-o2-eNJFFQ'
+Performing sanity checks and gathering statistics...
+
+No problem detected.
+
+
+After this execution, the file results.csv contains the following:
+
+formula
+tool
+exit_status
+exit_code
+time
+states
+edges
+transitions
+acc
+scc
+nondet_states
+nondet_aut
+complete_aut
+product_states
+product_transitions
+product_scc
+0 ltl2tgba -s %f >%O ok 0 0.0273999 1 1 0 1 1 0 0 0 1 0 1
+0 spin -f %s >%O ok 0 0.00195725 2 2 1 1 2 0 0 0 1 0 1
+0 lbt < %L >%O ok 0 0.00275329 1 0 0 0 1 0 0 0 1 0 1
+1 ltl2tgba -s %f >%O ok 0 0.027268 1 1 1 1 1 0 0 1 200 4199 1
+1 spin -f %s >%O ok 0 0.00188659 2 2 2 1 2 0 0 1 201 4220 2
+1 lbt < %L >%O ok 0 0.00281626 3 3 3 0 3 0 0 1 222 4653 23
+!(F(!(p0))) ltl2tgba -s %f >%O ok 0 0.0277402 1 1 1 1 1 0 0 0 200 2059 1
+!(F(!(p0))) spin -f %s >%O ok 0 0.00199805 1 1 1 1 1 0 0 0 200 2059 1
+!(F(!(p0))) lbt < %L >%O ok 0 0.00281056 2 2 2 0 2 0 0 0 201 2071 2
+F(!(p0)) ltl2tgba -s %f >%O ok 0 0.0274115 2 3 4 1 2 0 0 1 400 8264 2
+F(!(p0)) spin -f %s >%O ok 0 0.00194443 2 3 5 1 2 1 1 1 400 10337 2
+F(!(p0)) lbt < %L >%O ok 0 0.00283659 4 6 10 1 4 2 1 1 601 14497 203
+F((G(p0)) | (F(p1))) ltl2tgba -s %f >%O ok 0 0.0294767 3 5 11 1 3 1 1 0 600 11358 3
+F((G(p0)) | (F(p1))) spin -f %s >%O ok 0 0.00233339 4 8 24 1 4 2 1 0 800 24920 4
+F((G(p0)) | (F(p1))) lbt < %L >%O ok 0 0.00291947 9 17 52 2 9 4 1 0 1601 41559 805
+!(F((G(p0)) | (F(p1)))) ltl2tgba -s %f >%O ok 0 0.0285971 2 4 4 1 1 0 0 0 395 3964 1
+!(F((G(p0)) | (F(p1)))) spin -f %s >%O ok 0 0.00699975 2 3 5 1 1 1 1 0 396 4964 1
+!(F((G(p0)) | (F(p1)))) lbt < %L >%O ok 0 0.00290436 3 6 9 1 2 3 1 0 397 5957 2
+
+Although we only supplied 2 random generated formulas, the output contains 4 formulas because ltlcross had to translate the positive and negative version of each.
+
+If we had used the option --json=results.json instead of (or in addition to) --cvs=results.csv, the file results.json would have contained the following JSON output.
+
+{
+"tool": [
+"ltl2tgba -s %f >%O",
+"spin -f %s >%O",
+"lbt < %L >%O"
+],
+"formula": [
+"0",
+"1",
+"!(F(!(p0)))",
+"F(!(p0))",
+"F((G(p0)) | (F(p1)))",
+"!(F((G(p0)) | (F(p1))))"
+],
+"fields":  [
+"formula","tool","exit_status","exit_code","time","states","edges","transitions","acc","scc","nondet_states","nondet_aut","complete_aut","product_states","product_transitions","product_scc"
+],
+"inputs":  [ 0, 1 ],
+"results": [
+[ 0,0,"ok",0,0.0273999,1,1,0,1,1,0,0,0,1,0,1 ],
+[ 0,1,"ok",0,0.00195725,2,2,1,1,2,0,0,0,1,0,1 ],
+[ 0,2,"ok",0,0.00275329,1,0,0,0,1,0,0,0,1,0,1 ],
+[ 1,0,"ok",0,0.027268,1,1,1,1,1,0,0,1,200,4199,1 ],
+[ 1,1,"ok",0,0.00188659,2,2,2,1,2,0,0,1,201,4220,2 ],
+[ 1,2,"ok",0,0.00281626,3,3,3,0,3,0,0,1,222,4653,23 ],
+[ 2,0,"ok",0,0.0277402,1,1,1,1,1,0,0,0,200,2059,1 ],
+[ 2,1,"ok",0,0.00199805,1,1,1,1,1,0,0,0,200,2059,1 ],
+[ 2,2,"ok",0,0.00281056,2,2,2,0,2,0,0,0,201,2071,2 ],
+[ 3,0,"ok",0,0.0274115,2,3,4,1,2,0,0,1,400,8264,2 ],
+[ 3,1,"ok",0,0.00194443,2,3,5,1,2,1,1,1,400,10337,2 ],
+[ 3,2,"ok",0,0.00283659,4,6,10,1,4,2,1,1,601,14497,203 ],
+[ 4,0,"ok",0,0.0294767,3,5,11,1,3,1,1,0,600,11358,3 ],
+[ 4,1,"ok",0,0.00233339,4,8,24,1,4,2,1,0,800,24920,4 ],
+[ 4,2,"ok",0,0.00291947,9,17,52,2,9,4,1,0,1601,41559,805 ],
+[ 5,0,"ok",0,0.0285971,2,4,4,1,1,0,0,0,395,3964,1 ],
+[ 5,1,"ok",0,0.00699975,2,3,5,1,1,1,1,0,396,4964,1 ],
+[ 5,2,"ok",0,0.00290436,3,6,9,1,2,3,1,0,397,5957,2 ]
+]
+}
+
+
+Here the fields table describes the columns of the results table. The inputs tables lists the columns that are considered as inputs for the experiments. The values in the columns corresponding to the fields formula and tool contains indices relative to the formula and tool tables. This format is more compact when dealing with lots of translators and formulas, because they don't have to be repeated on each line as in the CSV version.
+
+JSON data can be easily processed in any language. For instance the following Python3 script averages each column (except the first four) for each tool, and presents the results in a form that can almost be copied into a LaTeX table (the % in the tool names have to be taken care of). Note that for simplicity we assume that the first two columns are inputs, instead of reading the inputs field.
+
+#!/usr/bin/python3
+import json
+datacols = range(4, len(data["fields"]))
+# Index results by tool
+results = { t:[] for t in range(0, len(data["tool"])) }
+for l in data["results"]:
+results[l[1]].append(l)
+# Average columns for each tool, and display them as a table
+print("%-18s & count & %s \\\\" % ("tool", " & ".join(data["fields"][4:])))
+for i in range(0, len(data["tool"])):
+c = len(results[i])
+sums = ["%6.1f" % (sum([x[j] for x in results[i]])/c)

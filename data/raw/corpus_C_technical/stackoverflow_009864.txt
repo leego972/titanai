@@ -1,0 +1,82 @@
+Question: <p>I'm using the <a href="http://docs.python.org/library/subprocess.html">subprocess module</a> to start a subprocess and connect to it's output stream (stdout). I want to be able to execute non-blocking reads on its stdout. Is there a way to make .readline non-blocking or to check if there is data on the stream before I invoke <code>.readline</code>? I'd like this to be portable or at least work under Windows and Linux.</p>
+
+<p>here is how I do it for now (It's blocking on the <code>.readline</code> if no data is avaible):</p>
+
+<pre><code>p = subprocess.Popen('myprogram.exe', stdout = subprocess.PIPE)
+output_str = p.stdout.readline()
+</code></pre>
+
+Answer: <p>Python 3.4 introduces new <a href="http://www.python.org/dev/peps/pep-0411/">provisional API</a> for asynchronous IO -- <a href="http://docs.python.org/3/library/asyncio.html"><code>asyncio</code> module</a>. </p>
+
+<p>The approach is similar to <a href="http://stackoverflow.com/a/5750194/4279"><code>twisted</code>-based answer by @Bryan Ward</a> -- define a protocol and its methods are called as soon as data is ready:</p>
+
+<pre><code>#!/usr/bin/env python3
+import asyncio
+import os
+
+class SubprocessProtocol(asyncio.SubprocessProtocol):
+    def pipe_data_received(self, fd, data):
+        if fd == 1: # got stdout data (bytes)
+            print(data)
+
+    def connection_lost(self, exc):
+        loop.stop() # end loop.run_forever()
+
+if os.name == 'nt':
+    loop = asyncio.ProactorEventLoop() # for subprocess' pipes on Windows
+    asyncio.set_event_loop(loop)
+else:
+    loop = asyncio.get_event_loop()
+try:
+    loop.run_until_complete(loop.subprocess_exec(SubprocessProtocol, 
+        "myprogram.exe", "arg1", "arg2"))
+    loop.run_forever()
+finally:
+    loop.close()
+</code></pre>
+
+<p>See <a href="https://docs.python.org/3/library/asyncio-subprocess.html">"Subprocess" in the docs</a>.</p>
+
+<p>There is a high-level interface <code>asyncio.create_subprocess_exec()</code> that returns <a href="https://docs.python.org/3/library/asyncio-subprocess.html#process"><code>Process</code> objects</a> that allows to read a line asynchroniosly using <a href="https://docs.python.org/3/library/asyncio-stream.html#asyncio.StreamReader"><code>StreamReader.readline()</code> coroutine</a> 
+(with <a href="https://www.python.org/dev/peps/pep-0492/"><code>async</code>/<code>await</code> Python 3.5+ syntax</a>):</p>
+
+<pre><code>#!/usr/bin/env python3.5
+import asyncio
+import locale
+import sys
+from asyncio.subprocess import PIPE
+from contextlib import closing
+
+async def readline_and_kill(*args):
+    # start child process
+    process = await asyncio.create_subprocess_exec(*args, stdout=PIPE)
+
+    # read line (sequence of bytes ending with b'\n') asynchronously
+    async for line in process.stdout:
+        print("got line:", line.decode(locale.getpreferredencoding(False)))
+        break
+    process.kill()
+    return await process.wait() # wait for the child process to exit
+
+
+if sys.platform == "win32":
+    loop = asyncio.ProactorEventLoop()
+    asyncio.set_event_loop(loop)
+else:
+    loop = asyncio.get_event_loop()
+
+with closing(loop):
+    sys.exit(loop.run_until_complete(readline_and_kill(
+        "myprogram.exe", "arg1", "arg2")))
+</code></pre>
+
+<p><code>readline_and_kill()</code> performs the following tasks:</p>
+
+<ul>
+<li>start subprocess, redirect its stdout to a pipe</li>
+<li>read a line from subprocess' stdout asynchronously</li>
+<li>kill subprocess</li>
+<li>wait for it to exit</li>
+</ul>
+
+<p>Each step could be limited by timeout seconds if necessary.</p>

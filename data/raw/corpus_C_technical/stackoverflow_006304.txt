@@ -1,0 +1,42 @@
+Question: <p>Simply moving the file to <code>~/.Trash/</code> will not work, as if the file os on an external drive, it will move the file to the main system drive..</p>
+
+<p>Also, there are other conditions, like files on external drives get moved to <code>/Volumes/.Trash/501/</code> (or whatever the current user's ID is)</p>
+
+<p>Given a file or folder path, what is the correct way to determine the trash folder? I imagine the language is pretty irrelevant, but I intend to use Python</p>
+
+Answer: <p>Based upon code from <a href="http://www.cocoadev.com/index.pl?MoveToTrash" rel="nofollow">http://www.cocoadev.com/index.pl?MoveToTrash</a> I have came up with the following:</p>
+
+<pre><code>def get_trash_path(input_file):
+    path, file = os.path.split(input_file)
+    if path.startswith("/Volumes/"):
+        # /Volumes/driveName/.Trashes/&lt;uid&gt;
+        s = path.split(os.path.sep)
+        # s[2] is drive name ([0] is empty, [1] is Volumes)
+        trash_path = os.path.join("/Volumes", s[2], ".Trashes", str(os.getuid()))
+        if not os.path.isdir(trash_path):
+            raise IOError("Volume appears to be a network drive (%s could not be found)" % (trash_path))
+    else:
+        trash_path = os.path.join(os.getenv("HOME"), ".Trash")
+    return trash_path
+</code></pre>
+
+<p>Fairly basic, and there's a few things that have to be done seperatly, particularly checking if the filename already exist in trash (to avoid overwriting) and the actual moving to trash, but it seems to cover most things (internal, external and network drives)</p>
+
+<p><strong>Update:</strong> I wanted to trash a file in a Python script, so I re-implemented Dave Dribin's solution in Python:</p>
+
+<pre><code>from AppKit import NSURL
+from ScriptingBridge import SBApplication
+
+def trashPath(path):
+    """Trashes a path using the Finder, via OS X's Scripting Bridge.
+    """
+    targetfile = NSURL.fileURLWithPath_(path)
+    finder = SBApplication.applicationWithBundleIdentifier_("com.apple.Finder")
+    items = finder.items().objectAtLocation_(targetfile)
+    items.delete()
+</code></pre>
+
+<p>Usage is simple:</p>
+
+<pre><code>trashPath("/tmp/examplefile")
+</code></pre>

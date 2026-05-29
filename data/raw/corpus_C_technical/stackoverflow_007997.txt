@@ -1,0 +1,159 @@
+Question: <p>I'm looking for a production quality bloom filter implementation in Python to handle fairly large numbers of items (say 100M to 1B items with 0.01% false positive rate). </p>
+
+<p><a href="http://www.imperialviolet.org/pybloom.html">Pybloom</a> is one option but it seems to be showing its age as it throws DeprecationWarning errors  on Python 2.5 on a regular basis. Joe Gregorio also has <a href="http://bitworking.org/news/380/bloom-filter-resources">an implementation</a>. </p>
+
+<p>Requirements are fast lookup performance and stability. I'm also open to creating Python interfaces to particularly good c/c++ implementations, or even to Jython if there's a good Java implementation.</p>
+
+<p>Lacking that, any recommendations on a bit array / bit vector representation that can handle ~16E9 bits?</p>
+
+Answer: <p>I recently went down this path as well; though it sounds like my application was slightly different. I was interested in approximating set operations on a large number of strings. </p>
+
+<p>You do make the key observation that a <strong>fast</strong> bit vector is required. Depending on what you want to put in your bloom filter, you may also need to give some thought to the speed of the hashing algorithm(s) used. You might find this <a href="http://www.partow.net/programming/hashfunctions/index.html">library</a> useful. You may also want to tinker with the random number technique used below that only hashes your key a single time.</p>
+
+<p>In terms of non-Java bit array implementations:</p>
+
+<ul>
+<li>Boost has <a href="http://www.boost.org/doc/libs/1_37_0/libs/dynamic_bitset/dynamic_bitset.html">dynamic_bitset</a></li>
+<li>Java has the built in <a href="http://java.sun.com/javase/6/docs/api/java/util/BitSet.html">BitSet</a></li>
+</ul>
+
+<p>I built my bloom filter using <a href="http://cobweb.ecn.purdue.edu/~kak/dist/">BitVector</a>. I spent some time profiling and optimizing the library and contributing back my patches to Avi. Go to that BitVector link and scroll down to acknowledgments in v1.5 to see details. In the end, I realized that performance was not a goal of this project and decided against using it. </p>
+
+<p>Here's some code I had lying around. I may put this up on google code at python-bloom. Suggestions welcome.</p>
+
+<pre><code>from BitVector import BitVector
+from random import Random
+# get hashes from http://www.partow.net/programming/hashfunctions/index.html
+from hashes import RSHash, JSHash, PJWHash, ELFHash, DJBHash
+
+
+#
+# ryan.a.cox@gmail.com / www.asciiarmor.com
+#
+# copyright (c) 2008, ryan cox
+# all rights reserved 
+# BSD license: http://www.opensource.org/licenses/bsd-license.php
+#
+
+class BloomFilter(object):
+    def __init__(self, n=None, m=None, k=None, p=None, bits=None ):
+        self.m = m
+        if k &gt; 4 or k &lt; 1:
+            raise Exception('Must specify value of k between 1 and 4')
+        self.k = k
+        if bits:
+            self.bits = bits
+        else:
+            self.bits = BitVector( size=m )
+        self.rand = Random()
+        self.hashes = []
+        self.hashes.append(RSHash)
+        self.hashes.append(JSHash)
+        self.hashes.append(PJWHash)
+        self.hashes.append(DJBHash)
+
+        # switch between hashing techniques
+        self._indexes = self._rand_indexes
+        #self._indexes = self._hash_indexes
+
+    def __contains__(self, key):
+        for i in self._indexes(key): 
+            if not self.bits[i]:
+                return False    
+        return True 
+
+    def add(self, key):
+        dupe = True 
+        bits = []
+        for i in self._indexes(key): 
+            if dupe and not self.bits[i]:
+                dupe = False
+            self.bits[i] = 1
+            bits.append(i)
+        return dupe
+
+    def __and__(self, filter):
+        if (self.k != filter.k) or (self.m != filter.m): 
+            raise Exception('Must use bloom filters created with equal k / m paramters for bitwise AND')
+        return BloomFilter(m=self.m,k=self.k,bits=(self.bits &amp; filter.bits))
+
+    def __or__(self, filter):
+        if (self.k != filter.k) or (self.m != filter.m): 
+            raise Exception('Must use bloom filters created with equal k / m paramters for bitwise OR')
+        return BloomFilter(m=self.m,k=self.k,bits=(self.bits | filter.bits))
+
+    def _hash_indexes(self,key):
+        ret = []
+        for i in range(self.k):
+            ret.append(self.hashes[i](key) % self.m)
+        return ret
+
+    def _rand_indexes(self,key):
+        self.rand.seed(hash(key))
+        ret = []
+        for i in range(self.k):
+            ret.append(self.rand.randint(0,self.m-1))
+        return ret
+
+if __name__ == '__main__':
+    e = BloomFilter(m=100, k=4)
+    e.add('one')
+    e.add('two')
+    e.add('three')
+    e.add('four')
+    e.add('five')        
+
+    f = BloomFilter(m=100, k=4)
+    f.add('three')
+    f.add('four')
+    f.add('five')
+    f.add('six')
+    f.add('seven')
+    f.add('eight')
+    f.add('nine')
+    f.add("ten")        
+
+    # test check for dupe on add
+    assert not f.add('eleven') 
+    assert f.add('eleven') 
+
+    # test membership operations
+    assert 'ten' in f 
+    assert 'one' in e 
+    assert 'ten' not in e 
+    assert 'one' not in f         
+
+    # test set based operations
+    union = f | e
+    intersection = f &amp; e
+
+    assert 'ten' in union
+    assert 'one' in union 
+    assert 'three' in intersection
+    assert 'ten' not in intersection
+    assert 'one' not in intersection
+</code></pre>
+
+<p>Also, in my case I found it useful to have a faster count_bits function for BitVector. Drop this code into BitVector 1.5 and it should give you a more performant bit counting method:</p>
+
+<pre><code>def fast_count_bits( self, v ):
+    bits = (
+            0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
+            1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+            1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+            2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+            1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+            2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+            2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+            3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+            1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+            2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+            2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+            3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+            2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+            3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+            3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+            4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8 )
+
+    return bits[v &amp; 0xff] + bits[(v &gt;&gt; 8) &amp; 0xff] + bits[(v &gt;&gt; 16) &amp; 0xff] + bits[v &gt;&gt; 24]
+</code></pre>

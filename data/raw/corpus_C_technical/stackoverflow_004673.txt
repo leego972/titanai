@@ -1,0 +1,50 @@
+Question: <p>What is the most elegant way to solve this:</p>
+
+<ul>
+<li>open a file for reading, but only if it is not already opened for writing</li>
+<li>open a file for writing, but only if it is not already opened for reading or writing</li>
+</ul>
+
+<p>The built-in functions work like this</p>
+
+<pre><code>&gt;&gt;&gt; path = r"c:\scr.txt"
+&gt;&gt;&gt; file1 = open(path, "w")
+&gt;&gt;&gt; print file1
+&lt;open file 'c:\scr.txt', mode 'w' at 0x019F88D8&gt;
+&gt;&gt;&gt; file2 = open(path, "w")
+&gt;&gt;&gt; print file2
+&lt;open file 'c:\scr.txt', mode 'w' at 0x02332188&gt;
+&gt;&gt;&gt; file1.write("111")
+&gt;&gt;&gt; file2.write("222")
+&gt;&gt;&gt; file1.close()
+</code></pre>
+
+<p>scr.txt now contains '111'.</p>
+
+<pre><code>&gt;&gt;&gt; file2.close()
+</code></pre>
+
+<p>scr.txt was overwritten and now contains '222' (on Windows, Python 2.4).</p>
+
+<p>The solution should work inside the same process (like in the example above) as well as when another process has opened the file.<br />
+It is preferred, if a crashing program will not keep the lock open.</p>
+
+Answer: <blockquote>
+  <p>The solution should work inside the same process (like in the example above) as well as when another process has opened the file.</p>
+</blockquote>
+
+<p>If by 'another process' you mean 'whatever process' (i.e. not your program), in Linux there's no way to accomplish this relying only on system calls (<em>fcntl</em> &amp; friends). What you want is <a href="http://en.wikipedia.org/wiki/File_locking">mandatory locking</a>, and the Linux way to obtain it is a bit more involved:</p>
+
+<p>Remount the partition that contains your file with the <em>mand</em> option:</p>
+
+<pre><code># mount -o remount,mand /dev/hdXY</code></pre>
+
+<p>Set the <em>sgid</em> flag for your file:</p>
+
+<pre><code># chmod g-x,g+s yourfile</code></pre>
+
+<p>In your Python code, obtain an exclusive lock on that file:</p>
+
+<pre><code>fcntl.flock(fd, fcntl.LOCK_EX)</code></pre>
+
+<p>Now even <em>cat</em> will not be able to read the file until you release the lock. </p>

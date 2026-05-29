@@ -1,0 +1,63 @@
+Question: <p>I have a small utility that I use to download a MP3 from a website on a schedule and then builds/updates a podcast XML file which I've obviously added to iTunes.</p>
+
+<p>The text processing that creates/updates the XML file is written in Python. I use wget inside a Windows <code>.bat</code> file to download the actual MP3 however. I would prefer to have the entire utility written in Python though.</p>
+
+<p>I struggled though to find a way to actually down load the file in Python, thus why I resorted to <code>wget</code>.</p>
+
+<p>So, how do I download the file using Python?</p>
+
+Answer: <p>An improved version of the PabloG code for Python 2/3:</p>
+
+<pre><code>from __future__ import ( division, absolute_import, print_function, unicode_literals )
+
+import sys, os, tempfile, logging
+
+if sys.version_info &gt;= (3,):
+    import urllib.request as urllib2
+    import urllib.parse as urlparse
+else:
+    import urllib2
+    import urlparse
+
+def download_file(url, desc=None):
+    u = urllib2.urlopen(url)
+
+    scheme, netloc, path, query, fragment = urlparse.urlsplit(url)
+    filename = os.path.basename(path)
+    if not filename:
+        filename = 'downloaded.file'
+    if desc:
+        filename = os.path.join(desc, filename)
+
+    with open(filename, 'wb') as f:
+        meta = u.info()
+        meta_func = meta.getheaders if hasattr(meta, 'getheaders') else meta.get_all
+        meta_length = meta_func("Content-Length")
+        file_size = None
+        if meta_length:
+            file_size = int(meta_length[0])
+        print("Downloading: {0} Bytes: {1}".format(url, file_size))
+
+        file_size_dl = 0
+        block_sz = 8192
+        while True:
+            buffer = u.read(block_sz)
+            if not buffer:
+                break
+
+            file_size_dl += len(buffer)
+            f.write(buffer)
+
+            status = "{0:16}".format(file_size_dl)
+            if file_size:
+                status += "   [{0:6.2f}%]".format(file_size_dl * 100 / file_size)
+            status += chr(13)
+            print(status, end="")
+        print()
+
+    return filename
+
+url = "http://download.thinkbroadband.com/10MB.zip"
+filename = download_file(url)
+print(filename)
+</code></pre>

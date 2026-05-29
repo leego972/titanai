@@ -1,0 +1,494 @@
+================================================================================
+TITAN AI — TRAINING PACK 009: MALWARE REVERSE ENGINEERING — DEEP PROFESSIONAL GUIDE
+STATIC ANALYSIS, DYNAMIC ANALYSIS, UNPACKING, OBFUSCATION, FAMILY CLASSIFICATION
+================================================================================
+
+================================================================================
+PART 1: REVERSE ENGINEERING FUNDAMENTALS
+================================================================================
+
+--- THE MINDSET OF A MALWARE ANALYST ---
+
+You are reading the work of an adversary who did not want you to understand it.
+They obfuscated, packed, encrypted, and anti-debugged their code specifically
+to slow you down. Your job is methodical, patient, and systematic.
+
+RULE 1: Never run malware on a non-isolated system. Ever.
+RULE 2: Work from least to most invasive: static first, dynamic only when needed.
+RULE 3: Know what "normal" looks like before you can identify abnormal.
+RULE 4: Document everything as you go. RE sessions are non-reproducible.
+RULE 5: Triage first — is this worth deep analysis or is it known malware?
+
+TRIAGE CHECKLIST (first 5 minutes):
+  1. Hash it: md5sum, sha256sum
+     Check: VirusTotal (hash), MalwareBazaar, Hybrid Analysis
+     If already known: Pull the report. Save hours of analysis.
+  
+  2. File type: file malware.exe (magic bytes, not extension)
+     Extensions lie. Magic bytes don't.
+     PE32 executable? ELF? PDF with embedded JS? ZIP containing dropper?
+  
+  3. Strings extraction:
+     strings -a -n 8 malware.exe | grep -E "(http|cmd|exec|powershell|CreateProcess|VirtualAlloc|LoadLibrary)"
+     Strings tell you intent before you open a disassembler.
+     
+  4. Import table: What APIs does it use?
+     dumpbin /imports malware.exe  (Windows)
+     objdump -d malware.elf        (Linux)
+     
+     High-value imports signal behavior:
+     CreateRemoteThread → Process injection
+     VirtualAllocEx → Writing into other process memory
+     WriteProcessMemory → Process injection continuation
+     CreateService → Persistence as service
+     RegSetValueEx → Registry persistence
+     CryptEncrypt → Encrypting data (ransomware, C2 comms)
+     WSAStartup + connect + send/recv → Network communication
+     IsDebuggerPresent → Anti-debug checks
+     GetTickCount + timing checks → Anti-sandbox (sandboxes run too fast)
+
+--- X86/X64 ASSEMBLY FUNDAMENTALS FOR MALWARE ANALYSIS ---
+
+You don't need to write assembly. You need to READ it well enough to understand
+what the malware is doing without source code.
+
+KEY REGISTERS:
+  EAX/RAX: Accumulator. Return value of function calls always in RAX.
+  EBX/RBX: Base register. Often used for base address calculations.
+  ECX/RCX: Counter. Loop counters, also 1st argument in x64 calling convention.
+  EDX/RDX: Data. Also 2nd argument in x64 calling convention.
+  ESI/RSI: Source index. Source pointer in memory operations.
+  EDI/RDI: Destination index. Destination pointer in memory operations.
+  ESP/RSP: Stack pointer. Points to top of current stack.
+  EBP/RBP: Base pointer. Points to base of current stack frame.
+  EIP/RIP: Instruction pointer. Address of next instruction to execute.
+
+CALLING CONVENTIONS:
+  Windows x64: First 4 args → RCX, RDX, R8, R9. Rest on stack.
+  Linux x64:   First 6 args → RDI, RSI, RDX, RCX, R8, R9. Rest on stack.
+  x86 stdcall: All args on stack (pushed right-to-left). Common in old malware.
+  
+  Knowing calling convention: When you see CALL CreateFile,
+  look at what's in RCX (filename), RDX (access flags) to know
+  what file is being opened with what permissions.
+
+COMMON PATTERNS TO RECOGNIZE:
+
+API resolution (common obfuscation technique):
+  ; Manually walking PEB to find kernel32.dll
+  mov eax, fs:[30h]      ; PEB
+  mov eax, [eax+0Ch]     ; PEB_LDR_DATA
+  mov eax, [eax+14h]     ; InMemoryOrderModuleList
+  ... walking linked list to find module by name hash
+  
+  Why: Malware avoids import table listing by resolving APIs at runtime.
+  Your job: Identify the hash function, implement it, find what APIs are resolved.
+
+String decryption loop:
+  lea esi, [encrypted_string]
+  xor ecx, ecx
+  decrypt_loop:
+    movzx eax, byte ptr [esi+ecx]
+    xor eax, 0x41           ; XOR key
+    mov [decrypted+ecx], al
+    inc ecx
+    cmp ecx, string_length
+    jl decrypt_loop
+  
+  Pattern: Loop over bytes, XOR/add/subtract constant or key-scheduled value.
+  Action in IDA/Ghidra: Find these loops, extract the key, write decryptor script.
+
+Process injection (classic):
+  OpenProcess(PROCESS_ALL_ACCESS, FALSE, target_pid)  ; Get handle to target
+  VirtualAllocEx(proc_handle, NULL, size, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+  WriteProcessMemory(proc_handle, alloc_addr, shellcode, size, NULL)
+  CreateRemoteThread(proc_handle, NULL, 0, alloc_addr, NULL, 0, NULL)
+  
+  This is the canonical process injection signature.
+  Any malware doing these 4 calls in sequence is injecting code.
+
+================================================================================
+PART 2: STATIC ANALYSIS — DEEP DIVE
+================================================================================
+
+--- IDA PRO / GHIDRA WORKFLOW ---
+
+GHIDRA (FREE — USE THIS):
+  Install: Download from ghidra-sre.org
+  Java required: OpenJDK 17
+  
+  Project setup:
+  1. New Project → Non-shared → Import malware.exe
+  2. Auto-analysis: YES (takes 2-10 minutes, worth it)
+  3. Symbol Tree: Shows all functions, labels, data
+  4. Decompiler window: F-key for decompiled C approximation
+  5. Assembly window: Shows actual instructions
+
+FIRST STEPS IN GHIDRA:
+  1. Check entry point: Windows/main function → where execution begins
+  2. Check exports: If it's a DLL, what functions does it export?
+  3. Find interesting functions:
+     - Functions calling VirtualAlloc/VirtualAllocEx → shellcode or injection
+     - Functions with many string references → decryption/C2 config
+     - Functions calling WinInet/WinHTTP/socket APIs → network communication
+     - Functions calling registry APIs → persistence
+     - Functions calling CreateService → service persistence
+
+RECOGNIZING C2 CONFIGURATION:
+  Most malware has a hardcoded C2 config encrypted in the binary.
+  Look for:
+  - Large byte arrays in .data or .rdata sections
+  - Functions that decrypt then immediately use network APIs
+  - Base64 strings (look for A-Za-z0-9+/ pattern)
+  - XOR-encrypted strings (entropy spike in specific data section)
+
+ENTROPY ANALYSIS:
+  Packed/encrypted data has high entropy (near 8.0 = random-looking).
+  Normal code/text has lower entropy (around 4.0-6.0).
+  
+  binwalk -E malware.exe   → entropy graph of each section
+  
+  High entropy in .text section = packed executable (decompress before analysis)
+  High entropy in .data section = encrypted config or second-stage payload
+  
+  Tool: Detect-It-Easy (DIE) → identifies packers, compilers, protections
+  detect-it-easy malware.exe
+  → "Microsoft Visual C++ 14.0, UPX 3.96 packer"
+  → Now you know: Unpack with upx -d malware.exe before static analysis
+
+COMMON PACKER UNPACKING:
+
+UPX (most common, easiest):
+  upx -d malware_packed.exe -o malware_unpacked.exe
+  
+Manual unpacking workflow (when custom packer):
+  1. Load packed exe in debugger (x64dbg)
+  2. Set breakpoint on VirtualAlloc (called to allocate unpacked code)
+  3. After VirtualAlloc returns: Note the allocated address (in RAX)
+  4. Set hardware breakpoint on execute at that address
+  5. Run: Hits the breakpoint when unpacked code starts executing
+  6. At OEP (Original Entry Point): Dump process memory to file
+     Plugin: Scylla (x64dbg plugin) → Dump + Fix IAT (Import Address Table)
+  7. The dumped PE is the unpacked malware
+
+--- YARA RULE WRITING FROM ANALYSIS ---
+
+After reverse engineering, write YARA rules to detect it across your environment:
+
+rule APT29_Cozy_Bear_Loader {
+    meta:
+        description = "Detects APT29 Cozy Bear loader variant observed Q4 2024"
+        author = "TitanAI Security"
+        date = "2025-01-15"
+        hash = "a3f4e8b2c1d5f7a9e3b6c8d2f4a7e9b1"
+        severity = "critical"
+    
+    strings:
+        // Encrypted C2 beacon string (partial, decrypted at runtime)
+        $enc_c2 = { 4D 5A 90 00 03 00 00 00 04 00 00 00 FF FF 00 00 }
+        
+        // Characteristic XOR decryption loop
+        $decrypt_loop = { 
+            8B 04 0E          // mov eax, [esi+ecx]
+            33 C3             // xor eax, ebx
+            89 04 0F          // mov [edi+ecx], eax
+            41                // inc ecx
+            3B CB             // cmp ecx, ebx
+            7C F3             // jl loop
+        }
+        
+        // Anti-debug: IsDebuggerPresent + timing check
+        $anti_debug = { 
+            FF 15 ?? ?? ?? ?? // call IsDebuggerPresent
+            85 C0             // test eax, eax
+            75 ??             // jnz exit
+        }
+        
+        // Unique string from C2 communication protocol
+        $c2_protocol = "X-Request-ID: " wide ascii
+        $c2_header = "Accept-Language: en-US,en;q=0.5" wide ascii
+        
+        // Mutex name used for single-instance check
+        $mutex = "Global\\{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}" wide
+    
+    condition:
+        uint16(0) == 0x5A4D and           // PE file
+        filesize < 2MB and
+        (
+            ($decrypt_loop and $anti_debug) or
+            ($c2_protocol and $c2_header and $mutex)
+        )
+}
+
+================================================================================
+PART 3: DYNAMIC ANALYSIS
+================================================================================
+
+--- SANDBOX SETUP ---
+
+REQUIRED ENVIRONMENT:
+  - VM: VirtualBox or VMware (NEVER physical machine)
+  - OS: Windows 10 (most malware targets this)
+  - Snapshot: Clean state before execution
+  - Network: Isolated or through INetSim (simulates internet without real connection)
+  - Tools installed: Procmon, Procexp, Wireshark, x64dbg, Noriben, regshot
+
+INETSIM SETUP (network simulation):
+  apt install inetsim
+  # inetsim.conf: bind_address = 192.168.1.1 (your host-only adapter IP)
+  service inetsim start
+  # Now all DNS, HTTP, FTP, SMTP resolve to your simulation
+  # Malware will beacon out, INetSim will log the requests
+
+MONITORING TOOLS DURING EXECUTION:
+
+Process Monitor (Procmon):
+  Filter: Process name = malware.exe
+  Watch for:
+  - File writes to %APPDATA%, %TEMP%, %SYSTEM32%
+  - Registry writes to Run keys (persistence)
+  - Network TCP connect events
+  - Spawning of child processes (cmd.exe, powershell.exe)
+
+Noriben (automated Procmon analysis):
+  python noriben.py --filter Noriben/ProcmonConfiguration.pmc -n malware.exe
+  → Generates report of all file, registry, network, process activity
+  → Dramatically speeds up dynamic analysis triage
+
+Wireshark capture:
+  Start before execution, capture all traffic
+  Look for:
+  - DNS queries (C2 domain resolution)
+  - HTTP/HTTPS requests (beacon pattern, user agent, headers)
+  - Non-standard ports (custom C2 protocols on port 443 but not HTTPS)
+  - ICMP data exfiltration (rare but exists)
+  - Large UDP packets (DNS tunneling)
+
+--- ANTI-ANALYSIS TECHNIQUES AND BYPASSES ---
+
+ANTI-DEBUGGING:
+
+1. IsDebuggerPresent:
+   if (IsDebuggerPresent()) { exit(); }
+   
+   Bypass: Patch the PEB!IsBeingDebugged flag to 0
+   In x64dbg: Ctrl+G → fs:[30] → PEB → offset 2 = BeingDebugged → set to 0
+   Or: Use ScyllaHide plugin (patches all common anti-debug checks automatically)
+
+2. CheckRemoteDebuggerPresent:
+   BOOL isDebug; CheckRemoteDebuggerPresent(GetCurrentProcess(), &isDebug);
+   
+   Bypass: Patch the return value / NOP out the conditional jump after check.
+   In x64dbg: Find jnz after the call → change to jmp (always jump)
+
+3. Timing checks:
+   start = GetTickCount();
+   [suspicious_code]
+   end = GetTickCount();
+   if (end - start > threshold) { // Running in debugger (slow) → exit }
+   
+   Bypass: Patch the conditional jump OR hook GetTickCount to return consistent values.
+
+4. Sandbox detection:
+   // Checks if running in a VM/sandbox
+   CPUID EAX=1 → ECX bit 31 = hypervisor present
+   Check: MAC address (VMware: 00:0C:29, VirtualBox: 08:00:27)
+   Check: Registry HKLM\SOFTWARE\VMware, Inc.
+   Check: Process list for vmtoolsd.exe, vboxservice.exe
+   Check: DLL list for sbiedll.dll (Sandboxie), api_log.dll (Cuckoo agent)
+   Check: User name = "sandbox", "malware", "virus"
+   Check: Screen resolution < 800x600 (sandboxes often use small screens)
+   Check: Uptime < 5 minutes (fresh sandbox)
+   Check: Mouse movement (sandboxes don't move mouse)
+   Check: Disk size < 60GB (sandboxes often have small disks)
+   
+   Bypasses:
+   - Change VM MAC to real-world OUI range
+   - Rename analysis processes
+   - Change username to common name
+   - Increase disk size
+   - Set screen resolution to 1920x1080
+   - Run malware after boot delay (uptime > 10 minutes)
+   - Use automated mouse movement script during execution
+   - Use real hardware where possible for advanced samples
+
+OBFUSCATION TECHNIQUES:
+
+1. String obfuscation:
+   // Malware rarely uses plain strings
+   // Instead: XOR, RC4, base64, custom encoding, split strings
+   
+   char key[] = {0x41, 0x42, 0x43};
+   char enc[] = {0x29, 0x2B, 0x2E, 0x25, 0x2C, ...};
+   for(int i=0; i<len; i++) enc[i] ^= key[i%3];
+   // Result: "cmd.exe"
+   
+   Recognize: Short key (1-8 bytes), XOR loop, used before WinAPI call
+
+2. API hashing:
+   // Instead of importing "CreateProcess" by name
+   // Resolve API by CRC/custom hash of function name
+   
+   DWORD hash = compute_hash("CreateProcess");  // 0xAE8A184A
+   FARPROC fn = resolve_by_hash(hash);
+   fn(NULL, "cmd.exe", ...);
+   
+   Recognize: Call to function that searches a table/list and returns address
+   Action: Identify hash algorithm, compute hashes of all WinAPI names,
+           build lookup table, annotate in disassembler
+
+3. Control flow obfuscation:
+   // Legitimate: if (condition) goto function
+   // Obfuscated: Computed goto, indirect jumps, exception-based flow
+   
+   mov eax, [obfuscated_address_table + ecx*4]
+   jmp eax   ; Jump to computed address — hard to follow statically
+   
+   Action: Dynamic analysis shows actual execution path even when static is confused.
+
+================================================================================
+PART 4: MALWARE FAMILY DEEP PROFILES
+================================================================================
+
+--- RANSOMWARE TECHNICAL ANALYSIS ---
+
+HOW RANSOMWARE WORKS (technical detail):
+
+Phase 1: Initial access and persistence
+  - Phishing/exploit → dropper → unpack and execute ransomware payload
+  - Establish persistence: Registry Run key, scheduled task, service
+
+Phase 2: Privilege escalation
+  - Try UAC bypass (token impersonation, fodhelper bypass, etc.)
+  - Target: SYSTEM or domain admin for maximum damage
+  
+  Fodhelper bypass example:
+  reg add HKCU\Software\Classes\ms-settings\shell\open\command /d "C:\malware.exe" /f
+  reg add HKCU\Software\Classes\ms-settings\shell\open\command /v DelegateExecute /f
+  Start fodhelper.exe  ; Elevated process inherits the evil command
+
+Phase 3: Lateral movement (enterprise ransomware)
+  - Credential harvesting: mimikatz, LSASS dump
+  - Pass-the-hash or ticket movement to additional systems
+  - SMB spread to network shares
+
+Phase 4: Data exfiltration (double extortion)
+  - Compress and exfil sensitive data before encryption
+  - Rclone to attacker cloud storage (Mega, S3)
+  - This creates leverage: "Pay or we publish your data"
+
+Phase 5: Encryption
+  Typical hybrid encryption:
+  a) Generate random AES-256 key (per-file or per-machine)
+  b) Encrypt each file with AES-256-CBC (fast, symmetric)
+  c) Encrypt the AES key with attacker's RSA-2048 public key
+  d) Store encrypted AES key with the encrypted file
+  e) Attacker holds RSA private key → decryption only possible if you pay
+  
+  Why hybrid: RSA encrypting gigabytes of data is too slow.
+  AES is fast. RSA protects the AES key. Best of both worlds.
+
+Phase 6: Shadow copy deletion
+  vssadmin.exe delete shadows /all /quiet
+  wmic.exe shadowcopy delete
+  bcdedit /set {default} recoveryenabled no
+  
+  Why: Windows shadow copies (VSS) allow restore without paying.
+  Every ransomware operator knows to delete these first.
+  DETECTION OPPORTUNITY: vssadmin delete shadows = ransomware indicator with very few false positives
+
+RANSOMWARE DETECTION SIGNATURES:
+  - High rate of file rename events (encryption = rename to .locked, .encrypted, etc.)
+  - Shadow copy deletion commands
+  - Rapid file modification events (hundreds per second)
+  - Read-modify-write pattern (read file, write encrypted version, delete original)
+  - Canary files: Place a fake "financial_records_2024.docx" in every user folder.
+    Any process that modifies it triggers immediate alert.
+
+--- ROOTKIT TECHNICAL ANALYSIS ---
+
+TYPES:
+  User-mode rootkit: Hooks API calls to hide processes/files/registry
+  Kernel-mode rootkit: Hooks kernel structures (SSDT, IRP, DKOM)
+  Bootkit: Infects MBR/bootloader, loads before OS
+  Hypervisor rootkit: Runs below OS as hypervisor (extremely advanced)
+
+USER-MODE HOOKING:
+  Inline hooks: Overwrite first 5 bytes of target function with JMP to malicious function
+  
+  Original function prolog:
+  55 8B EC 51 8B  →  push ebp; mov ebp,esp; push ecx; mov ...
+  
+  After inline hook:
+  E9 XX XX XX XX  →  jmp malicious_function
+  
+  Detection: Read function bytes, check if first bytes are JMP to unexpected location.
+  Tool: RkHunter, GMER, or write your own that reads all ntdll.dll exports and checks
+  if first bytes match the disk version (unhook by copying from disk).
+
+KERNEL-MODE: DKOM (Direct Kernel Object Manipulation)
+  Windows maintains doubly-linked list of active processes (EPROCESS structures).
+  Rootkit: Unlink malicious process from list.
+  Result: Process not visible in Task Manager, Process Explorer, tasklist.
+  
+  Why: Task Manager calls NtQuerySystemInformation → if process not in list → not shown.
+  
+  Detection: Compare process list from kernel structure walk vs. API-reported list.
+  Tools: WinObj, Volatility memory forensics
+  
+  Volatility detection:
+  python vol.py -f memory.dmp windows.pstree   # Walk EPROCESS list
+  python vol.py -f memory.dmp windows.psxview  # Cross-reference multiple sources
+  # Discrepancies between views = hidden process
+
+--- MEMORY FORENSICS WITH VOLATILITY ---
+
+COMPLETE INCIDENT WORKFLOW:
+
+1. Memory acquisition:
+   WinPmem: winpmem_3.3.rc3.exe memory.dmp
+   DumpIt: DumpIt.exe /O memory.raw
+   
+   CRITICAL: Acquire before rebooting. Memory is volatile evidence.
+
+2. Profile identification:
+   python vol.py -f memory.dmp windows.info
+   → Returns: OS version, kernel base, build number
+
+3. Process analysis:
+   python vol.py -f memory.dmp windows.pstree
+   → Parent-child relationships. Unusual: svchost spawning cmd.exe
+   
+   python vol.py -f memory.dmp windows.cmdline
+   → Full command line for every process. Malicious commands visible here.
+   
+   python vol.py -f memory.dmp windows.netscan
+   → All network connections including recently closed ones
+   → Shows: PID, protocol, local addr:port, remote addr:port, state
+
+4. Injection detection:
+   python vol.py -f memory.dmp windows.malfind
+   → Finds memory regions: Executable + not backed by a file on disk + RWX permissions
+   → Classic injection indicator
+   → Output includes hex dump and disassembly of suspicious regions
+
+5. Rootkit detection:
+   python vol.py -f memory.dmp windows.ssdt
+   → Shows SSDT entries. Hooked entries point outside kernel modules = rootkit
+   
+   python vol.py -f memory.dmp windows.modules
+   python vol.py -f memory.dmp windows.driverscan
+   → Compare loaded drivers. Unexpected drivers = kernel rootkit
+
+6. Extract artifacts:
+   python vol.py -f memory.dmp windows.dumpfiles --virtaddr 0x7ff6e3400000
+   → Dumps injected code, dropped files, decrypted payloads from memory
+   → Hash and analyze the extracted files
+
+================================================================================
+END OF PACK 009: MALWARE REVERSE ENGINEERING
+Total: Triage workflow, x86/x64 assembly patterns, IDA/Ghidra workflow,
+packer identification and unpacking, YARA rule writing, anti-debug bypasses,
+dynamic analysis setup, sandbox evasion techniques, ransomware technical detail,
+rootkit types and detection, Volatility memory forensics workflow.
+================================================================================

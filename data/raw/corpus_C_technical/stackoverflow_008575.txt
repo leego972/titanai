@@ -1,0 +1,75 @@
+Question: <p>I'd like to extract the text from an HTML file using Python.  I want essentially the same output I would get if I copied the text from a browser and pasted it into notepad.  </p>
+
+<p>I'd like something more robust than using regular expressions that may fail on poorly formed HTML.  I've seen many people recommend Beautiful Soup, but I've had a few problems using it.  For one, it picked up unwanted text, such as JavaScript source.  Also, it did not interpret HTML entities.  For example, I would expect &amp;#39; in HTML source to be converted to an apostrophe in text, just as if I'd pasted the browser content into notepad.</p>
+
+<p><strong>Update</strong> <code>html2text</code> looks promising. It handles HTML entities correctly and ignores JavaScript.  However, it does not exactly produce plain text; it produces markdown that would then have to be turned into plain text. It comes with no examples or documentation, but the code looks clean.</p>
+
+<hr>
+
+<p>Related questions:</p>
+
+<ul>
+<li><a href="http://stackoverflow.com/questions/37486/filter-out-html-tags-and-resolve-entities-in-python">Filter out HTML tags and resolve entities in python</a></li>
+<li><a href="http://stackoverflow.com/questions/57708/convert-xmlhtml-entities-into-unicode-string-in-python">Convert XML/HTML Entities into Unicode String in Python</a></li>
+</ul>
+
+Answer: <p>Found myself facing just the same problem today. I wrote a very simple HTML parser to strip incoming content of all markups, returning the remaining text with only a minimum of formatting.</p>
+
+<pre><code>from HTMLParser import HTMLParser
+from re import sub
+from sys import stderr
+from traceback import print_exc
+
+class _DeHTMLParser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.__text = []
+
+    def handle_data(self, data):
+        text = data.strip()
+        if len(text) &gt; 0:
+            text = sub('[ \t\r\n]+', ' ', text)
+            self.__text.append(text + ' ')
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'p':
+            self.__text.append('\n\n')
+        elif tag == 'br':
+            self.__text.append('\n')
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == 'br':
+            self.__text.append('\n\n')
+
+    def text(self):
+        return ''.join(self.__text).strip()
+
+
+def dehtml(text):
+    try:
+        parser = _DeHTMLParser()
+        parser.feed(text)
+        parser.close()
+        return parser.text()
+    except:
+        print_exc(file=stderr)
+        return text
+
+
+def main():
+    text = r'''
+        &lt;html&gt;
+            &lt;body&gt;
+                &lt;b&gt;Project:&lt;/b&gt; DeHTML&lt;br&gt;
+                &lt;b&gt;Description&lt;/b&gt;:&lt;br&gt;
+                This small script is intended to allow conversion from HTML markup to 
+                plain text.
+            &lt;/body&gt;
+        &lt;/html&gt;
+    '''
+    print(dehtml(text))
+
+
+if __name__ == '__main__':
+    main()
+</code></pre>

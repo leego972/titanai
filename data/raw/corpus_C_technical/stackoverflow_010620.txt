@@ -1,0 +1,75 @@
+Question: <p>I'm mainly a C# developer, but I'm currently working on a project in Python.</p>
+
+<p>How can I represent the equivalent of an Enum in Python?  </p>
+
+Answer: <p>I have had occasion to need of an Enum class, for the purpose of decoding a binary file format. The features I happened to want is concise enum definition, the ability to freely create instances of the enum by either integer value or string, and a useful <code>repr</code>esentation.  Here's what I ended up with:</p>
+
+<pre><code>&gt;&gt;&gt; class Enum(int):
+...     def __new__(cls, value):
+...         if isinstance(value, str):
+...             return getattr(cls, value)
+...         elif isinstance(value, int):
+...             return cls.__index[value]
+...     def __str__(self): return self.__name
+...     def __repr__(self): return "%s.%s" % (type(self).__name__, self.__name)
+...     class __metaclass__(type):
+...         def __new__(mcls, name, bases, attrs):
+...             attrs['__slots__'] = ['_Enum__name']
+...             cls = type.__new__(mcls, name, bases, attrs)
+...             cls._Enum__index = _index = {}
+...             for base in reversed(bases):
+...                 if hasattr(base, '_Enum__index'):
+...                     _index.update(base._Enum__index)
+...             # create all of the instances of the new class
+...             for attr in attrs.keys():
+...                 value = attrs[attr]
+...                 if isinstance(value, int):
+...                     evalue = int.__new__(cls, value)
+...                     evalue._Enum__name = attr
+...                     _index[value] = evalue
+...                     setattr(cls, attr, evalue)
+...             return cls
+... 
+</code></pre>
+
+<p>A whimsical example of using it:</p>
+
+<pre><code>&gt;&gt;&gt; class Citrus(Enum):
+...     Lemon = 1
+...     Lime = 2
+... 
+&gt;&gt;&gt; Citrus.Lemon
+Citrus.Lemon
+&gt;&gt;&gt; 
+&gt;&gt;&gt; Citrus(1)
+Citrus.Lemon
+&gt;&gt;&gt; Citrus(5)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+  File "&lt;stdin&gt;", line 6, in __new__
+KeyError: 5
+&gt;&gt;&gt; class Fruit(Citrus):
+...     Apple = 3
+...     Banana = 4
+... 
+&gt;&gt;&gt; Fruit.Apple
+Fruit.Apple
+&gt;&gt;&gt; Fruit.Lemon
+Citrus.Lemon
+&gt;&gt;&gt; Fruit(1)
+Citrus.Lemon
+&gt;&gt;&gt; Fruit(3)
+Fruit.Apple
+&gt;&gt;&gt; "%d %s %r" % ((Fruit.Apple,)*3)
+'3 Apple Fruit.Apple'
+&gt;&gt;&gt; Fruit(1) is Citrus.Lemon
+True
+</code></pre>
+
+<p>Key features:</p>
+
+<ul>
+<li><code>str()</code>, <code>int()</code> and <code>repr()</code> all produce the most useful output possible, respectively the name of the enumartion, its integer value, and a Python expression that evaluates back to the enumeration.</li>
+<li>Enumerated values returned by the constructor are limited strictly to the predefined values, no accidental enum values.</li>
+<li>Enumerated values are singletons; they can be strictly compared with <code>is</code></li>
+</ul>

@@ -1,0 +1,71 @@
+Question: <p>While I was investigating a problem I had with lexical closures in Javascript code, I came along this problem in Python:</p>
+
+<pre><code>flist = []
+
+for i in xrange(3):
+    def func(x): return x * i
+    flist.append(func)
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>Note that this example mindfully avoids <code>lambda</code>. It prints "4 4 4", which is surprising. I'd expect "0 2 4". </p>
+
+<p>This equivalent Perl code does it right:</p>
+
+<pre><code>my @flist = ();
+
+foreach my $i (0 .. 2)
+{
+    push(@flist, sub {$i * $_[0]});
+}
+
+foreach my $f (@flist)
+{
+    print $f-&gt;(2), "\n";
+}
+</code></pre>
+
+<p>"0 2 4" is printed.</p>
+
+<p>Can you please explain the difference ?</p>
+
+<p><hr /></p>
+
+<p>Update: </p>
+
+<p>The problem <strong>is not</strong> with <code>i</code> being global. This displays the same behavior:</p>
+
+<pre><code>flist = []
+
+def outer():
+    for i in xrange(3):
+        def inner(x): return x * i
+        flist.append(inner)
+
+outer()
+#~ print i   # commented because it causes an error
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>As the commented line shows, <code>i</code> is unknown at that point. Still, it prints "4 4 4".</p>
+
+Answer: <p>The functions defined in the loop keep accessing the same variable <code>i</code> while its value changes. At the end of the loop, all the functions point to the same variable, which is holding the last value in the loop: the effect is what reported in the example.</p>
+
+<p>In order to evaluate <code>i</code> and use its value, a common pattern is to set it as a parameter default: parameter defaults are evaluated when the <code>def</code> statement is executed, and thus the value of the loop variable is frozen.</p>
+
+<p>The following works as expected:</p>
+
+<pre><code>flist = []
+
+for i in xrange(3):
+    def func(x, i=i): # the *value* of i is copied in func() environment
+        return x * i
+    flist.append(func)
+
+for f in flist:
+    print f(2)
+</code></pre>

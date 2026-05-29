@@ -1,0 +1,86 @@
+# How does dinterval() for interval censored data work in JAGS?
+
+I am trying to understand how dinterval() works in JAGS for censored data. I am modeling coarse data where I only have upper and lower bounds for each data point (not the true value). Here is a simple example of how I think it should work:
+
+Some upper and lower bounds for each point:
+
+> head(lim)
+L        U
+[1,] 14.98266 15.68029
+[2,] 21.21827 21.91590
+[3,] 18.34953 19.04716
+[4,] 19.00186 19.69949
+[5,] 15.39891 16.09654
+[6,] 17.81705 18.51468
+
+
+A function to write the model (assuming the data come from a normal with a common mean and variance):
+
+playmodel <- function(){
+for (i in 1:50){
+is.censored[i] ~ dinterval(t[i], lim[i,])
+t[i] ~ dnorm(mu,tau)
+}
+mu ~ dnorm(0,.001)
+tau ~ dgamma(.01,.01)
+}
+filename <- "toymod.bug"
+write.model(toymod,filename)
+
+
+Some functions and assignments for the jags call:
+
+data <- list("lim"=lim)
+inits <- list(mu=rnorm(1),tau=rgamma(1,.01,.01),t=as.vector(apply(lim,1,mean)))
+#last part is to ensure the starting value is between the upper and lower limit
+#each chain will start at the same place for t but this is just for this case
+params <- c("mu","tau")
+
+
+And run the model:
+
+playmodel.jags <- jags(data,inits, params, model.file="toymod.bug", n.chains=3,
+n.iter=50000,n.burnin=30000, n.thin=1, DIC=TRUE,
+working.directory=NULL,refresh = 50000/50, progress.bar = "text")
+
+
+What happens when I run this?
+
+1) my estimate of mu hovers right around 0 when it should be 15
+
+2) it will not run if DIC=TRUE:
+
+error: "Error in jags.samples(model, variable.names, n.iter, thin, type = "trace", : Failed to set trace monitor for node deviance
+
+Note: I can get a similar model running in OpenBUGS by omitting the dinterval() line and appending I(Lower,Upper) to dnorm.
+
+Here is an answer from Martyn Plummer:
+
+As written, your model does not have any observed outcomes. You probably noticed that it runs really really fast. This is because it is forward sampling from the prior. That is why your posterior mean for mu is the same as the prior mean of 0. The variable name "is.censored" is appropriate for left- or right-censored data, as found in survival analysis, but not for your problem. So I'm going to rename it "y". If you have
+
+y[j] ~ dinterval(t[j], lim[j,])
+
+
+and lim[j] has two columns, then y[j] can take three possible values
+
+y[j] = 0 if t[j] <= lim[j,1]
+y[j] = 1 if lim[j,1] < t[j] <= lim[j,2]
+y[j] = 2 if lim[j,2] < t[j]
+
+
+To model interval censored data, you need to supply y[j] as data in your model. In your case, you know that t[j] always falls between lim[j,1] and lim[j,2] so your data should be.
+
+data <- list("lim"=lim, "y"=rep(1,nrow(lim)))
+
+
+The problem with DIC is fairly deep. Because your model does not have any outcome data, the deviance is not defined. However, even if you supply outcome data you will still not get the deviance statistics you want (including pD). The deviance will be zero and the "jags" function will fall back on the Gelman heuristic for pD (I did not write this so don't ask me to explain it), which will also be zero. The likelihood you really want is
+
+ p(lim[j,1] < t[j] <= lim[j,2] | mu, tau)
+
+
+But JAGS is giving you
+
+p(y[j] | t[j])
+
+
+which is always 1. The "focus" of DIC is wrong. I don't know what WinBUGS does under these circumstances. Perhaps it has special rules for censored variables.

@@ -1,0 +1,126 @@
+# Normalisation by evaluation
+
+In programming language semantics, normalisation by evaluation (NBE) is a method of obtaining the normal form of terms in the λ-calculus by appealing to their denotational semantics. A term is first interpreted into a denotational model of the λ-term structure, and then a canonical (β-normal and η-long) representative is extracted by reifying the denotation. Such an essentially semantic, reduction-free, approach differs from the more traditional syntactic, reduction-based, description of normalisation as reductions in a term rewrite system where β-reductions are allowed deep inside λ-terms.
+
+NBE was first described for the simply typed lambda calculus. It has since been extended both to weaker type systems such as the untyped lambda calculus using a domain theoretic approach, and to richer type systems such as several variants of Martin-Löf type theory.
+
+Outline 
+
+Consider the simply typed lambda calculus, where types τ can be basic types (α), function types (→), or products (×), given  by the following Backus–Naur form grammar (→ associating to the right, as usual):
+
+(Types) τ ::= α | τ1 → τ2 | τ1 × τ2
+
+These can be implemented as a datatype in the meta-language; for example, for Standard ML, we might use:
+ datatype ty = Basic of string
+             | Arrow of ty * ty
+             | Prod of ty * ty
+Terms are defined at two levels. The lower syntactic level (sometimes called the dynamic level) is the representation that one intends to normalise.
+
+(Syntax Terms) s,t,… ::= var x | lam (x, t) | app (s, t) | pair (s, t) | fst t | snd t
+
+Here lam/app (resp. pair/fst,snd) are the intro/elim forms for → (resp. ×), and x are variables. These terms are intended to be implemented as a first-order datatype in the meta-language:
+
+ datatype tm = var of string
+             | lam of string * tm | app of tm * tm
+             | pair of tm * tm | fst of tm | snd of tm
+
+The denotational semantics of (closed) terms in the meta-language interprets the constructs of the syntax in terms of features of the meta-language; thus, lam is interpreted as abstraction, app as application, etc. The semantic objects constructed are as follows:
+
+(Semantic Terms) S,T,… ::= LAM (λx. S x) | PAIR (S, T) | SYN t
+
+Note that there are no variables or elimination forms in the semantics; they are represented simply as syntax. These semantic objects are represented by the following datatype:
+
+ datatype sem = LAM of (sem -> sem)
+              | PAIR of sem * sem
+              | SYN of tm
+
+There are a pair of type-indexed functions that move back and forth between the syntactic and semantic layer. The first function, usually written ↑τ, reflects the term syntax into the semantics, while the second reifies the semantics as a syntactic term (written as ↓τ). Their definitions are mutually recursive as follows:
+
+These definitions are easily implemented in the meta-language:
+
+ (* fresh_var : unit -> string *)
+ val variable_ctr = ref ~1
+ fun fresh_var () = 
+      (variable_ctr := 1 + !variable_ctr; 
+       "v" ^ Int.toString (!variable_ctr))
+
+ (* reflect : ty -> tm -> sem *)
+ fun reflect (Arrow (a, b)) t =
+       LAM (fn S => reflect b (app (t, (reify a S))))
+   | reflect (Prod (a, b)) t =
+       PAIR (reflect a (fst t), reflect b (snd t))
+   | reflect (Basic _) t =
+       SYN t
+
+ (* reify   : ty -> sem -> tm *)
+ and reify (Arrow (a, b)) (LAM S) =
+       let val x = fresh_var () in
+         lam (x, reify b (S (reflect a (var x))))
+       end
+   | reify (Prod (a, b)) (PAIR (S, T)) =
+       pair (reify a S, reify b T)
+   | reify (Basic _) (SYN t) = t
+
+By induction on the structure of types, it follows that if the semantic object S denotes a well-typed term s of type τ, then reifying the object (i.e., ↓τ S) produces the β-normal η-long form of s. All that remains is, therefore, to construct the initial semantic interpretation S from a syntactic term s. This operation, written ∥s∥Γ, where Γ is a context of bindings, proceeds by induction solely on the term structure:
+
+In the implementation:
+
+ datatype ctx = empty 
+              | add of ctx * (string * sem)
+
+ (* lookup : ctx -> string -> sem *)
+ fun lookup (add (remdr, (y, value))) x = 
+       if x = y then value else lookup remdr x
+
+ (* meaning : ctx -> tm -> sem *)
+ fun meaning G t =
+       case t of
+         var x => lookup G x
+       | lam (x, s) => LAM (fn S => meaning (add (G, (x, S))) s)
+       | app (s, t) => (case meaning G s of
+                          LAM S => S (meaning G t))
+       | pair (s, t) => PAIR (meaning G s, meaning G t)
+       | fst s => (case meaning G s of
+                     PAIR (S, T) => S)
+       | snd t => (case meaning G t of
+                     PAIR (S, T) => T)
+
+Note that there are many non-exhaustive cases; however, if applied to a closed well-typed term, none of these missing cases are ever encountered. The NBE operation on closed terms is then:
+
+ (* nbe : ty -> tm -> tm *)
+ fun nbe a t = reify a (meaning empty t)
+
+As an example of its use, consider the syntactic term SKK defined below:
+
+ val K = lam ("x", lam ("y", var "x"))
+ val S = lam ("x", lam ("y", lam ("z", app (app (var "x", var "z"), app (var "y", var "z")))))
+ val SKK = app (app (S, K), K)
+
+This is the well-known encoding of the identity function in combinatory logic. Normalising it at an identity type produces:
+
+ - nbe (Arrow (Basic "a", Basic "a")) SKK;
+ val it = lam ("v0",var "v0") : tm
+
+The result is actually in η-long form, as can be easily seen by normalizing it at a different identity type:
+
+ - nbe (Arrow (Arrow (Basic "a", Basic "b"), Arrow (Basic "a", Basic "b"))) SKK;
+ val it = lam ("v1",lam ("v2",app (var "v1",var "v2"))) : tm
+
+Variants 
+
+Using de Bruijn levels instead of names in the residual syntax makes reify a pure function in that there is no need for fresh_var.
+
+The datatype of residual terms can also be the datatype of residual terms in normal form.
+The type of reify (and therefore of nbe) then makes it clear that the result is normalized.
+And if the datatype of normal forms is typed, the type of reify (and therefore of nbe) then makes it clear that normalization is type preserving.
+
+Normalization by evaluation also scales to the simply typed lambda calculus with sums (+), using the delimited control operators shift and reset.
+
+See also 
+
+ MINLOG, a proof assistant that uses NBE as its rewrite engine.
+
+References 
+
+Lambda calculus
+Programming language semantics

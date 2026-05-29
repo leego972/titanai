@@ -1,0 +1,46 @@
+Question: <p>I have several python projects that share common modules. Until now, I've been ... ahem ... keeping multiple copies of the common code and synchronizing by hand. But I'd clearly prefer to do something else.</p>
+
+<p>It looks to me now, as if zc.Buildout maybe what I need. I guess that what I should be doing is putting each reusable component of my system into a separate egg, and then using buildout to assemble them into projects.</p>
+
+<p>I'm also thinking that for any particular module, I should put the unit-tests into a separate package or egg, so that I'm not also installing copies of the component's  unit-tests in every project. I only want to unit-test in a place where my library is developed, not where it's just being used.</p>
+
+<p>So maybe I want something like this</p>
+
+<pre><code>projects
+  lib1
+    tests
+    code
+  lib2
+    tests
+    code
+  app1
+    tests 
+    appcode
+  app2
+    tests
+    appcode
+</code></pre>
+
+<p>etc.</p>
+
+<p>Where both app1 and app2 are independent applications with their own code and tests, but are also including and using both lib1 and lib2. And lib1/test, lib1/code, lib2/test, lib2code, app1, app2 are separate eggs. Does this sound right?</p>
+
+<p>However, I now get confused. I assume that when I develop app1, I want buildout to pull copies of lib1, lib2 and app1 into a separate working directory rather than put copies of these libraries under app1 directly. But how does this work with my SVN source-control? If the working directory is dynamically constructed with buildout, it can't be a live SVN directory from which I can check the changes back into the repository?</p>
+
+<p>Have I misunderstood how buildout is meant to be used? Would I be better going for a completely different approach? How do you mix source-control with module-reuse between projects?</p>
+
+<p>Update : thanks to the two people who've currently answered this question. I'm experimenting more with this.</p>
+
+Answer: <p>Do not separate the tests from your code, you need to keep the two closely together. It's not as if tests take up that much disk space or any memory! And tests can be extremely instructive to your library users.</p>
+
+<p>For library packages, include a <code>buildout.cfg</code> and <code>bootstrap.py</code> file with your package to make running the tests easy. See, for example, the <a href="https://github.com/plone/plone.reload" rel="nofollow">plone.reload package</a>; note how it uses <a href="http://pypi.python.org/pypi/zc.recipe.testrunner" rel="nofollow">zc.recipe.testrunner</a> parts to create a test script that'll autodiscover your tests and run them. This way you can ensure that your library packages are always tested!</p>
+
+<p>Then, your app packages only need to test the integration and application-specific code. Again, include the tests with the package itself, you want to not forget about your tests when working on the code. Use <code>zc.recipe.testrunner</code> parts in your buildout to discover and run these.</p>
+
+<p>Last but not least, use <a href="http://pypi.python.org/pypi/mr.developer" rel="nofollow">mr.developer</a> to manage your packages. With mr.developer, you can check out packages as your work on them, or rely on the released versions if you do not need to work on the code. A larger project will have many dependencies, many of which do not need you tweaking the code. With mr.developer you can pull in source code at will and turn these into development eggs, until such time you release that code and you can dismiss the checkout again.</p>
+
+<p>To see an actual example of such a project buildout, look no further than the <a href="https://github.com/plone/buildout.coredev" rel="nofollow">Plone core development buildout</a>.</p>
+
+<p>The <code>sources.cfg</code> file contains a long list of SCM locations for various packages, but normally released versions of eggs are used, until you explicitly activate the packages you plan to work on. <code>checkouts.cfg</code> lists all the packages checked out by default; these packages have changes that will be part of the next version of Plone and have not yet been released. If you work on Plone, you want these around because you cannot ignore these changes. And <code>testing.cfg</code> lists all the packages you need to test if you want to test Plone, a big list.</p>
+
+<p>Note that Plone's sources come from a wide variety of locations. Once you start using buildout and mr.developer to manage your packages, you are free to pull your source code from anywhere.</p>

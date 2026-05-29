@@ -1,0 +1,35 @@
+Question: <p>A python script need to spawn multiple sub-processes via fork(). All of those child processes  should run simultaneously and the parent process should be waiting for all of them to finish. Having an ability to set some timeout on a "slow" child would be nice.
+The parent process goes on processing the rest of the script after all kids are collected.</p>
+
+<p>What is the best way to work it out? Thanks. </p>
+
+Answer: <p><em>Ephemient</em>: each child in your code will stay in the for loop after his job ends. He will fork again and again. Moreover, the children that start when children[] is not empty will try to wait for some of their brothers at the end of the loop. Eventually someone will crash. This is a workaround:</p>
+
+<pre><code>import os, time
+
+def doTheJob(job):
+    for i in xrange(10):
+    	print job, i
+    	time.sleep(0.01*ord(os.urandom(1)))
+    	# random.random() would be the same for each process
+
+jobs = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+imTheFather = True
+children = []
+
+for job in jobs:
+    child = os.fork()
+    if child:
+    	children.append(child)
+    else:
+    	imTheFather = False
+    	doTheJob(job)
+    	break
+
+# in the meanwhile 
+# ps aux|grep python|grep -v grep|wc -l == 11 == 10 children + the father
+
+if imTheFather:
+    for child in children:
+    	os.waitpid(child, 0)
+</code></pre>

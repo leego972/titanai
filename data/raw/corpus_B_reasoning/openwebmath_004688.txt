@@ -1,0 +1,31 @@
+# Using a UWP API Namespace in PowerShell
+
+I was looking for how to use a namespace for working with the Windows 10 lock screen in PowerShell and came across this answer: https://superuser.com/a/1062551/700258, however it doesn't say anything about how to import or add that namespace to PowerShell for use. I tried looking for the referenced DLL files for the assemblies and they weren't on my computer. When I see they are part of the Windows Desktop Extensions API, I went out and downloaded the Windows 10 SDK, but the DLL files were not within that either. How can I use this LockScreen Class from the Windows.System.UserProfile namespace in a PowerShell script?
+
+## 1 Answer
+
+First you need to tell PowerShell that you want to use a UWP class:
+
+[Windows.System.UserProfile.LockScreen,Windows.System.UserProfile,ContentType=WindowsRuntime] | Out-Null
+
+
+The first part is the class name, the second is the UWP namespace, and the third just says that it's a UWP class. After the type is loaded, you can refer to the type by its name (just the first part: [Windows.System.UserProfile.LockScreen] in this case.)
+
+The next trick is that Windows Runtime methods are asynchronous and use a different async task class than .NET Framework methods. Calling them from PowerShell requires a little extra infrastructure that I originally developed for another answer:
+
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | ? {$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and$_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation1' })[0]
+Function Await($WinRtTask,$ResultType) {
+$asTask =$asTaskGeneric.MakeGenericMethod($ResultType)$netTask = $asTask.Invoke($null, @($WinRtTask))$netTask.Wait(-1) | Out-Null
+$netTask.Result } Function AwaitAction($WinRtAction) {
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | ? {$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and !$_.IsGenericMethod })[0]
+$netTask =$asTask.Invoke($null, @($WinRtAction))
+$netTask.Wait(-1) | Out-Null }  Await can be used to call functions that return an IAsyncOperation, i.e. those that produce a value. It takes the WinRT task object and the type of the output. AwaitAction can be used to call functions that return an IAsyncAction, i.e. those that just do something without returning a result. It takes only the WinRT task object. For this application, we're going to need the StorageFile type accessible too: [Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime] | Out-Null  Now we can start calling some functions. First we use GetFileFromPathAsync to get an IStorageFile instance of the desired lock screen image: $image = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync('C:\path\to\image.ext')) ([Windows.Storage.StorageFile])
+
+
+Finally, we pass that image to SetImageFileAsync to set the lock screen background:
+
+AwaitAction ([Windows.System.UserProfile.LockScreen]::SetImageFileAsync(\$image))
+`
+
+Changes should take effect immediately.

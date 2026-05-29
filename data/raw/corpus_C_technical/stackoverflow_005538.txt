@@ -1,0 +1,54 @@
+Question: <p>I have a <a href="http://en.wikipedia.org/wiki/Bluehost">Bluehost</a> account where I can run Python scripts as CGI. I guess it's the simplest CGI, because to run I have to define the following in <code>.htaccess</code>:</p>
+
+<pre><code>Options +ExecCGI
+AddType text/html py
+AddHandler cgi-script .py
+</code></pre>
+
+<p>Now, whenever I look up web programming with Python, I hear a lot about WSGI and how most frameworks use it. But I just don't understand how it all fits together, especially when my web server is given (Apache running at a host's machine) and not something I can really play with (except defining <code>.htaccess</code> commands).</p>
+
+<p>How are <a href="http://en.wikipedia.org/wiki/Web_Server_Gateway_Interface">WSGI</a>, CGI, and the frameworks all connected? What do I need to know, install, and do if I want to run a web framework (say <a href="http://webpy.org/">web.py</a> or <a href="http://en.wikipedia.org/wiki/CherryPy">CherryPy</a>) on my basic CGI configuration? How to install WSGI support?</p>
+
+Answer: <p><strong>How WSGI, CGI, and the frameworks are all connected ?</strong></p>
+
+<p>Apache listens on port 80.  It gets an HTTP request.  It parses the request to find a way to respond.  Apache has a LOT of choices for responding.   One way to respond is to use CGI to run a script.  Another way to respond is to simply serve a file.  </p>
+
+<p>In the case of CGI, Apache prepares an environment and invokes the script through the CGI protocol.  This is a standard Unix Fork/Exec situation -- the CGI subprocess inherits an OS environment including the socket and stdout.  The CGI subprocess writes a response, which goes back to Apache; Apache sends this response to the browser.</p>
+
+<p>CGI is primitive and annoying.  Mostly because it forks a subprocess for every request, and subprocess must exit or close stdout and stderr to signify end of response.</p>
+
+<p>WSGI is an interface that is based on the CGI design pattern.  It is not necessarily CGI -- it does not have to fork a subprocess for each request.  It can be CGI, but it doesn't have to be.</p>
+
+<p>WSGI adds to the CGI design pattern in several important ways.  It parses the HTTP Request Headers for you and adds these to the environment.  It supplies any POST-oriented input as a file-like object in the environment.  It also provides you a function that will formulate the response, saving you from a lot of formatting details.</p>
+
+<p><strong>What do I need to know / install / do if I want to run a web framework (say web.py or cherrypy) on my basic CGI configuration ?</strong></p>
+
+<p>Recall that forking a subprocess is expensive.  There are two ways to work around this.</p>
+
+<ol>
+<li><p><strong>Embedded</strong> <code>mod_wsgi</code> or <code>mod_python</code> embeds Python inside Apache; no process is forked.  Apache runs the Django application directly.</p></li>
+<li><p><strong>Daemon</strong> <code>mod_wsgi</code> or <code>mod_fastcgi</code> allows Apache to interact with a separate daemon (or "long-running process"), using the WSGI protocol.  You start your long-running Django process, then you configure Apache's mod_fastcgi to communicate with this process.</p></li>
+</ol>
+
+<p>Note that <code>mod_wsgi</code> can work in either mode: embedded or daemon.</p>
+
+<p>When you read up on mod_fastcgi, you'll see that Django uses <a href="http://pypi.python.org/pypi/flup/">flup</a> to create a WSGI-compatible interface from the information provided by mod_fastcgi.  The pipeline works like this.</p>
+
+<pre><code>Apache -&gt; mod_fastcgi -&gt; FLUP (via FastCGI protocol) -&gt; Django (via WSGI protocol)
+</code></pre>
+
+<p>Django has several "django.core.handlers" for the various interfaces.</p>
+
+<p>For mod_fastcgi, Django provides a <code>manage.py runfcgi</code> that integrates FLUP and the handler.</p>
+
+<p>For mod_wsgi, there's a core handler for this.</p>
+
+<p><strong>How to install WSGI support ?</strong></p>
+
+<p>Follow these instructions.</p>
+
+<p><a href="http://code.google.com/p/modwsgi/wiki/IntegrationWithDjango">http://code.google.com/p/modwsgi/wiki/IntegrationWithDjango</a></p>
+
+<p>For background see this</p>
+
+<p><a href="http://docs.djangoproject.com/en/dev/howto/deployment/#howto-deployment-index">http://docs.djangoproject.com/en/dev/howto/deployment/#howto-deployment-index</a></p>

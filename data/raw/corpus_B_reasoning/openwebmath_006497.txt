@@ -1,0 +1,128 @@
+# Merging bed records based on name
+
+I generated a file starting with the following bed lines:
+
+$head -6 /tmp/bed_with_gene_ids.bed I 3746 3909 "WBGene00023193" . - I 3746 3909 "WBGene00023193" . - I 4118 4220 "WBGene00022277" . - I 4118 4358 "WBGene00022277" . - I 4118 10230 "WBGene00022277" . - I 4220 4223 "WBGene00022277" . -  I would like to merge them based on the name field (the 4-th column), taking the min for the start and the max for the end. Other fields are expected to be the same for all records having the same name. Expected result: I 3746 3909 "WBGene00023193" . - I 4118 10230 "WBGene00022277" . -  I found a potential solution based on bedtools groupby here: https://www.biostars.org/p/145751/#145775 Sample data: cat genes.bed chr14 49894259 49895806 ENSMUST00000053290 0.000000 ... chr14 49894873 49894876 ENSMUST00000053290 0.000000 ... chr14 49894876 49895800 ENSMUST00000053291 0.000000 ... chr14 49895797 49895800 ENSMUST00000053291 0.000000 ... chr14 49901908 49901941 ENSMUST00000053291 0.000000 ...  Example output: sort -k4,4 genes.bed \ | groupBy -g 1,4 -c 4,2,3 -o count,min,max \ | awk -v OFS='\t' '{print$1, $4,$5, $2,$3}'
+
+chr14    49894259    49895806    ENSMUST00000053290    2
+chr14    49894876    49901941    ENSMUST00000053291    3
+
+
+However:
+
+1. I don't understand the groupBy behaviour (Why -g 1,4 and not just -g 4?, Why -c 4,2,3 in this order and then rearrange things using awk?)
+
+2. This code doesn't work for me.
+
+Here is what happens when I try the solution given above:
+
+$head -3 /tmp/bed_with_gene_ids.bed | bedtools groupby -g 1,4 -c 4,2,3 -o count,min,max | awk -v OFS='\t' '{print$1, $4,$5, $2,$3}'
+3           3746    4220
+
+
+Here are attempt based on what I thought could work according to the documentation:
+
+$head -6 /tmp/bed_with_gene_ids.bed | bedtools groupby -g 4 -c 1,2,3,4,5,6 -o first,min,max,distinct,first,first I 3746 10230 "WBGene00022277","WBGene00023193" . -$ head -6 /tmp/bed_with_gene_ids.bed | bedtools groupby -g 4 -c 1,2,3,4,5,6 -o first,min,max,last,first,first
+I   3746    10230   "WBGene00022277"    .   -
+
+$head -6 /tmp/bed_with_gene_ids.bed | bedtools groupby -g 4 -c 1,2,3,5,6 -o first,min,max,first,first I 3746 10230 . -  I don't get why when I group based on the 4-th column, for which I have two distinct values, I cannot obtain two lines in the resulting output. I understand based on the comments on the documentation page that the documentation is not up-to-date. In particular, there is a -full option that is needed if one wants all fields to be outputted. Re-reading the solution mentioned above, I think I now understand the reason for the multiple columns for the -g option and for the awk rearrangement. Hence the following attempt. $ head -6 /tmp/bed_with_gene_ids.bed | bedtools groupby -g 1,4,5,6 -c 2,3 -o min,max -full
+I   3746    3909    "WBGene00023193"    .   -   3746    10230
+
+
+But this still doesn't give me two lines.
+
+Are there other tools that could do what I want efficiently?
+
+### Edit: Solution
+
+According to this answer, the problem with bedtools is that there is a bug in the latest release (2.26.0 as of august 2017). In order to have a functional bedtools groupby, one needs to get the development version from github.
+
+With the github version of bedtools, I can now get the expected result as follows:
+
+$head -6 /tmp/bed_with_gene_ids.bed | bedtools groupby -g 1,4,5,6 -c 2,3 -o min,max | awk -v OFS="\t" '{print$1,$5,$6,$2,$3,$4}' I 3746 3909 "WBGene00023193" . - I 4118 10230 "WBGene00022277" . -  I include fields 1, 5 and 6 in -g (besides field 4) in order to have them printed out. In my bed file, they should be the same for a given value of field 4. The awk part is needed because one has apparently not total control on the output order: the -g fields come before the -c fields. • What do you want to do with the score and strand fields if they're different between lines, or does that never happen? – Devon Ryan Aug 10 '17 at 12:55 • Actually, I don't care about the score field, and I would ideally set it to "." if it is not already the case. I cannot guarantee that the strand field will always be the same, but since these bed lines come from transcript annotations whose gene_id I've put in the name field, I suppose it will generally be true that for a same name, the strand will be the same. I should check this, though. – bli Aug 10 '17 at 15:06 ## 5 Answers Although you don't mention it, I'm guessing you're using bedtools v2.26.0. Version 2.26.0 of groupBy has a bug in it, which you've encountered (it was fixed shortly after release, so you'll either have to use a version before the bug was introduced, or compile the current source code yourself from https://github.com/arq5x/bedtools2) v2.26.0: local10:~/Documents/tmp$ cat asdf.bed
+I	3746	3909	WBGene00023193	.	-
+I	3746	3909	WBGene00023193	.	-
+I	4118	4220	WBGene00022277	.	-
+I	4118	4358	WBGene00022277	.	-
+I	4118	10230	WBGene00022277	.	-
+I	4220	4223	WBGene00022277	.	-
+local10:~/Documents/tmp$groupBy -i asdf.bed -g 4 -c 2,3 -o min,max 3746 10230  v2.26.0-125-g52db654 (I.E. compiling the source code from github): local10:~/Documents/tmp$ bedtools2/bin/groupBy -i asdf.bed -g 4 -c 2,3 -o min,max
+WBGene00023193  3746    3909
+WBGene00022277  4118    10230
+
+
+1) You might notice that my output above gives the grouped columns first; you'll have to reorder the output via awk in order to get it back in order. As for why they chose to group on both columns 1 and 4: if you have the same name on multiple chromosomes, you may want to treat them as separate features.
+
+2) Version differences, as stated in the first part of my answer.
+
+To actually merge the file:
+
+Make sure to run this with a version other than v2.26.0 (As Devon Ryan writes in the comments, you may want to add column 6 to -g to make it strand-specific):
+
+./bedtools2/bin/groupBy -i asdf.bed -g 1,4 -c 2,3,5,6 -o min,max,first,first \
+| awk -v OFS='\t' '{print $1,$3, $4,$2, $5,$6}'
+I   3746    3909    WBGene00023193  .   -
+I   4118    10230   WBGene00022277  .   -
+
+• If you include 6 in -g 1,4 then you benefit by not merging genes on different strands. UCSC sometimes has those and they really aren't the same gene and shouldn't be merged together. You don't need 1 in -c, or 6 if you add it to -g. – Devon Ryan Aug 10 '17 at 18:30
+
+You could do this with the CGAT toolkit:
+
+cgat bed2bed --method=merge --merge-by-name -I bed_with_gene_ids.bed
+
+Installing such a massive package might be overkill for this task though.
+
+• It happens that cgat is already installed on my computer (though I forgot for what purpose). I tried the command you suggest, and I end up with a duplicate of I 3746 3909 "WBGene00023193" . - . Granted, there were duplicate lines in the original bed. But is this behaviour expected? – bli Aug 10 '17 at 15:32
+• Also, If I run this on the whole file and not just the first 6 lines, after a while, the program fails on TypeError: '<' not supported between instances of 'Bed' and 'Bed'. I'm upgrading cgat to see if the error persists. – bli Aug 10 '17 at 15:45
+• I reported the issues here: github.com/CGATOxford/cgat/issues/347 – bli Aug 10 '17 at 16:27
+• Your first problem is not as far as I am aware the intended behaviour. And I'm pretty sure the second is not intended. I suggest you file a bug report. – Ian Sudbery Aug 10 '17 at 16:27
+• We crossed posts! – Ian Sudbery Aug 10 '17 at 16:30
+
+You can do this easily with Hail. Hail primarily uses BED files to annotate genetic datasets (see the last annotate_variants_table example), but you can manipulate BED files using Hail's general facilities for manipulating delimited text files. For example:
+
+$cat genes.bed I 3746 3909 "WBGene00023193" . - I 3746 3909 "WBGene00023193" . - I 4118 4220 "WBGene00022277" . - I 4118 4358 "WBGene00022277" . - I 4118 10230 "WBGene00022277" . - I 4220 4223 "WBGene00022277" . -  The Hail script (python code): from hail import * hc = HailContext() (hc .import_table('genes.bed', impute=True, no_header=True) .aggregate_by_key('f0 = f0, f3 = f3', 'f1 = f1.min(), f2 = f2.max(), f4 = ".", f5 = "-"') .select(['f0', 'f1', 'f2', 'f3', 'f4', 'f5']) .export('genes_merged.bed', header=False))  The result: $ cat genes_merged.bed
+I   3746    3909    WBGene00023193  .   -
+I   4118    10230   WBGene00022277  .   -
+
+
+I aggregate over chrom and name so this solution won't merge entries on different chromosomes. The select is necessary to reorder the fields because aggregate_by_key places the keys being aggregated over first.
+
+Disclosure: I work on Hail.
+
+$cut -f4-6 in.bed | sed 's/\t/_/g' | sort | uniq | awk -F'_' '{ system("grep "$1" in.bed | bedops --merge - "); print $0; }' | paste -d "\t" - - | sed 's/_/\t/g' | sort-bed - > answer.bed  Given your sample input: $ more in.bed
+I   3746    3909    "WBGene00023193"    .   -
+I   3746    3909    "WBGene00023193"    .   -
+I   4118    4220    "WBGene00022277"    .   -
+I   4118    4358    "WBGene00022277"    .   -
+I   4118    10230   "WBGene00022277"    .   -
+I   4220    4223    "WBGene00022277"    .   -
+
+
+The answer.bed file:
+
+$more answer.bed I 3746 3909 "WBGene00023193" . - I 4118 10230 "WBGene00022277" . -  Sorting with sort-bed is useful at the end, so that you can pipe it or work with it with other BEDOPS tools, or other tools that now accept sorted BED input. Streaming is a pretty efficient way to do things, generally. How this works Here's the pipeline again: $ cut -f4-6 in.bed | sed 's/\t/_/g' | sort | uniq | awk -F'_' '{ system("grep "$1" in.bed | bedops --merge - "); print$0; }' | paste -d "\t" - - | sed 's/_/\t/g' | sort-bed - > answer.bed
+
+
+We start by cutting columns 4 through 6 (id, score and strand), replacing tabs with underscores, sorting and removing duplicates:
+
+cut -f4-6 in.bed | sed 's/\t/_/g' | sort | uniq
+
+
+What we get out of this is a sorted list of "needles" — one for each ID-score-strand combination: an ID-needle — that we can use to grep or filter the original BED file.
+
+This list is piped to awk which, for each ID-needle, runs grep against the original BED file and pipes the subset to bedops --merge -, which merges overlapping intervals.
+
+Note that merging only works for overlapping intervals. Merging is not necessarily the same as returning a min-max pair, and this pipeline will break if there are intervals that do not overlap. But you could modify the awk statement to process the input intervals and return the minimum and maximum interval coordinates, if that is really what you want, by tracking the min and max values over all intervals that come into awk, and printing a final interval with an END block.
+
+The system command prints the merged interval on one line. The following print $0 statement prints the needle on the next line: awk -F'_' '{ system("grep "$1" in.bed | bedops --merge - "); print $0; }'  We take each pair of alternating lines and re-linearize them with paste. This result now contains four columns: the three columns of each merged interval, and the ID-needle. We then use sed to replace underscores with tabs, so that we turn the ID-needle back into three, tab-separated ID-score-strand columns: paste -d "\t" - - | sed 's/_/\t/g'  The output is now a six-column BED file, but it is ordered by the sort order we applied on ID-needles further up the pipeline, which we don't want. What we really want is BED that is sorted per BEDOPS sort-bed, so that we can do more set operations and get a correct result. So we pipe this to sort-bed - to write a sorted file to answer.bed: sort-bed - > answer.bed  • Thanks for the answer, it works, and I think I understood how. Maybe some explanations about the different steps could be useful. – bli Aug 11 '17 at 10:58 If you're 100% sure that everything but the start and end positions will be the same for all lines sharing a name, you could just do it yourself. For example, in Perl: $ perl -lane '$start{$F[3]}||=$F[1]; if($F[1] < $start{$F[3]} ){
+$start{$F[3]} = $F[1] } if($F[2] > $end{$F[3]} ){
+$end{$F[3]} = $F[2] }$chr{$F[3]} =$F[0];
+$rest{$F[3]} = join "\t", @F[4,$#F]; END{ foreach$n (keys %chr){
+print "$chr{$n}\t$start{$n}\t$end{$n}\t$n\t$rest{\$n}"
+}
+}' file.bed
+I   3746    3909    "WBGene00023193"    .   -
+I   4118    10230   "WBGene00022277"    .   -
+
+• I was hoping that an efficient tool already existed and would avoid me re-inventing the wheel in a slow scripting language. – bli Aug 10 '17 at 15:03
+• @bli absolutely, that makes much more sense. I just figured this is simple enough, so I may as well give a scripting solution. But yes, this will be slow and is also very naive so it will break if your files are slightly different. – terdon Aug 10 '17 at 15:12

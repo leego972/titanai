@@ -1,0 +1,184 @@
+Question: scanBam and countBam end prematurely under Windows 10
+0
+6 days ago by
+Gordon Smyth38k
+Walter and Eliza Hall Institute of Medical Research, Melbourne, Australia
+Gordon Smyth38k wrote:
+
+The problem
+
+I have been using Rsamtools::scanBam() quite a bit recently. When using R for Unix, it has worked perfectly for me, but under Windows 10 it frequently scans only the first couple of hundred reads, even for bam files that contain millions of reads. Using Windows 10, scanBam stops prematurely on about 40% of my BAM files. The problem is new in Bioconductor 3.9.
+
+Unix is fine
+
+Here is one of my sessions scanning some bam files under Unix:
+
+> s <- scanBam("S20_7600_23_CTCs.h.bam",
++              param=ScanBamParam(what="rname"))
+> length(s[[1]]$rname) [1] 52132720 > s <- scanBam("S27_10247_23_Primary.h.bam", + param=ScanBamParam(what="rname")) > length(s[[1]]$rname)
+[1] 48492302
+>
+> sessionInfo()
+R version 3.6.1 (2019-07-05)
+Platform: x86_64-pc-linux-gnu (64-bit)
+Running under: CentOS Linux 7 (Core)
+
+Matrix products: default
+BLAS:   /stornext/System/data/apps/R/R-3.6.1/lib64/R/lib/libRblas.so
+LAPACK: /stornext/System/data/apps/R/R-3.6.1/lib64/R/lib/libRlapack.so
+
+locale:
+[1] LC_CTYPE=en_AU.UTF-8       LC_NUMERIC=C
+[3] LC_TIME=en_AU.UTF-8        LC_COLLATE=en_AU.UTF-8
+[5] LC_MONETARY=en_AU.UTF-8    LC_MESSAGES=en_AU.UTF-8
+[7] LC_PAPER=en_AU.UTF-8       LC_NAME=C
+[9] LC_ADDRESS=C               LC_TELEPHONE=C
+[11] LC_MEASUREMENT=en_AU.UTF-8 LC_IDENTIFICATION=C
+
+attached base packages:
+[1] stats4    parallel  stats     graphics  grDevices utils     datasets
+[8] methods   base
+
+other attached packages:
+[1] Rsamtools_2.0.0      Biostrings_2.52.0    XVector_0.24.0
+[4] GenomicRanges_1.36.0 GenomeInfoDb_1.20.0  IRanges_2.18.1
+[7] S4Vectors_0.22.0     BiocGenerics_0.30.0
+
+loaded via a namespace (and not attached):
+[1] zlibbioc_1.30.0        compiler_3.6.1         GenomeInfoDbData_1.2.1
+[4] RCurl_1.95-4.12        BiocParallel_1.18.0    bitops_1.0-6
+
+
+Windows is not
+
+Now the same thing using Windows:
+
+> s <- scanBam("S20_7600_23_CTCs.h.bam",param=ScanBamParam(what="rname"))
+> length(s[[1]]$rname) [1] 280 > s <- scanBam("S27_10247_23_Primary.h.bam",param=ScanBamParam(what="rname")) > length(s[[1]]$rname)
+[1] 258
+>
+> countBam("S20_7600_23_CTCs.h.bam")
+space start end width                   file records nucleotides
+1    NA    NA  NA    NA S20_7600_23_CTCs.h.bam     280       21152
+> countBam("S27_10247_23_Primary.h.bam")
+space start end width                       file records nucleotides
+1    NA    NA  NA    NA S27_10247_23_Primary.h.bam     258       19445
+>
+> sessionInfo()
+R version 3.6.1 (2019-07-05)
+Platform: x86_64-w64-mingw32/x64 (64-bit)
+Running under: Windows 10 x64 (build 15063)
+
+Matrix products: default
+
+locale:
+[1] LC_COLLATE=English_Australia.1252  LC_CTYPE=English_Australia.1252
+[3] LC_MONETARY=English_Australia.1252 LC_NUMERIC=C
+[5] LC_TIME=English_Australia.1252
+
+attached base packages:
+[1] stats4    parallel  stats     graphics  grDevices utils     datasets  methods   base
+
+other attached packages:
+[1] Rsamtools_2.0.0      Biostrings_2.52.0    XVector_0.24.0       GenomicRanges_1.36.0
+[5] GenomeInfoDb_1.20.0  IRanges_2.18.1       S4Vectors_0.22.0     BiocGenerics_0.30.0
+
+loaded via a namespace (and not attached):
+[1] zlibbioc_1.30.0        compiler_3.6.1         GenomeInfoDbData_1.2.1
+[4] RCurl_1.95-4.12        BiocParallel_1.18.1    bitops_1.0-6
+
+
+As you can see, scanBam and countBam have read only 280 and 258 reads for the two files respectively, even though both files contain millions of reads. There is no error message or warning.
+
+In these two sessions, I am accessing the same bam files on the same disk, using Samba to access the Unix file system from Windows. If I copy the bam files to the PC disk, I get the same result.
+
+I don't see any pattern as to which bam files will exit prematurely and which will not. But the same file always gets the same result. It doesn't make any difference which SAM fields are read -- any settings for param produces the same output number of reads.
+
+The problem is new in Bioconductor 3.9
+
+If I go back to R 3.5.3 and Bioconductor 3.8, then the problem disappears. Using Bioconductor 3.8 for Windows, then scanBam and countBam read all my BAM files correctly.
+
+The problem is still in Bioconductor 3.10
+
+I tried upgrading to Rsamtools 2.1.4, which is the latest on the developmental version of Bioconductor, but the behaviour is the same as for Rsamtools 2.0.0.
+
+Example file
+
+I have put an example of an offending file here. The file is 2Gb in size -- it was the smallest I could find showing the problem.
+
+The correct number of records for this file is:
+
+space start end width                                 file  records nucleotides
+NA    NA  NA    NA    S21_7600_23_Primary.xenosplit.bam 35394670  2678418738
+
+
+but countBam in Bioconductor 3.9 for Windows gives me:
+
+space start end width                                 file  records nucleotides
+NA    NA  NA    NA    S21_7600_23_Primary.xenosplit.bam      300       22680
+
+
+Error message from asSam (added 16 September 2019)
+
+I don't know whether this helps but I find that I do get an error message from asSam on the same bam files, for example:
+
+> asSam("S20_7600_23_CTCs.h.bam",overwrite=TRUE)
+Error in value[[3L]](cond) : 'asSam' truncated input file at record 280
+SAM file: 'S20_7600_23_CTCs.h.bam'
+
+
+I can track the error message to a particular source code file (as_bam.c) like this:
+
+> file <- "S20_7600_23_CTCs.h.bam"
+> d0 <- "S20_7600_23_CTCs.h.sam"
+> .Call(Rsamtools:::.as_bam, file, d0, FALSE)
+Error: truncated input file at record 280
+
+rsamtools • 213 views
+ADD COMMENTlink
+modified 11 hours ago • written 6 days ago by Gordon Smyth38k
+
+I think the change from BioC 3.8 to 3.9 marked the transition to linking against Rhtslib rather than distributing it's own version of samtools, so perhaps it's related to that?
+
+I'm not sure what happened to the other messages, but I can confirm I see this behaviour on Windows 10 with R-3.6.1, Rsamtools 2.0.0
+
+> Rsamtools::countBam("z:/S21_7600_23_Primary.xenosplit.bam")
+[W::bam_hdr_read] bgzf_check_EOF: No error
+space start end width                              file records nucleotides
+1    NA    NA  NA    NA S21_7600_23_Primary.xenosplit.bam     300       22680
+
+
+If it's any help to diagnose the issue, when I ran it on a truncated version of the file that hadn't downloaded properly I got a result which matched the Linux version:
+
+> Rsamtools::countBam("z:/S21_7600_23_Primary.xenosplit.bam")
+space start end width                              file  records nucleotides
+1    NA    NA  NA    NA S21_7600_23_Primary.xenosplit.bam 24130547  1826042711
+
+ADD REPLYlink written 4 days ago by Mike Smith3.9k
+
+Thanks Mike. The previous messages disappeared because they were all hanging off a comment that was subsequently deleted by the poster. I have edited my question and your comment so that all the important stuff from the discussion is preserved. It is cleaner now.
+
+The file truncation problem was my fault -- I posted the link before the file had finished transferring to the web server -- the transfer taking much longer than I expected. It is fortuitous though because your experience with the truncated file is very interesting.
+
+ADD REPLYlink modified 4 days ago • written 4 days ago by Gordon Smyth38k
+
+csaw has had issues with Rhtslib on Windows for some time, e.g.:
+
+https://www.biostars.org/p/323743/
+
+It seems that HTSLib 1.9 has a few fixes for Windows:
+
+https://github.com/samtools/htslib/releases/
+
+So it might be worth upgrading Rhtslib to see if it helps.
+
+ADD REPLYlink written 4 days ago by Aaron Lun24k
+Please log in to add an answer.
+
+Content
+Help
+Access
+
+Use of this site constitutes acceptance of our User Agreement and Privacy Policy.
+Powered by Biostar version 16.09
+Traffic: 273 users visited in the last hour

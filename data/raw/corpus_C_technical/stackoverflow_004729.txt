@@ -1,0 +1,45 @@
+Question: <p>If I'm making a simple grid based game, for example, I might have a few 2d lists. One might be for terrain, another might be for objects, etc. Unfortunately, when I need to iterate over the lists and have the contents of a square in one list affect part of another list, I have to do something like this.</p>
+
+<pre><code>for i in range(len(alist)):
+    for j in range(len(alist[i])):
+        if alist[i][j].isWhatever:
+            blist[i][j].doSomething()
+</code></pre>
+
+<p>Is there a nicer way to do something like this?</p>
+
+Answer: <p>When you are operating with grids of numbers and want really good performance, you should consider using <a href="http://numpy.scipy.org" rel="nofollow">Numpy</a>. It's surprisingly easy to use and lets you think in terms of operations with grids instead of loops over grids. The performance comes from the fact that the operations are then run over whole grids with optimised SSE code.</p>
+
+<p>For example here is some numpy using code that I wrote that does brute force numerical simulation of charged particles connected by springs. This code calculates a timestep for a 3d system with 100 nodes and 99 edges in 31ms. That is over 10x faster than the best pure python code I could come up with.</p>
+
+<pre><code>from numpy import array, sqrt, float32, newaxis
+def evolve(points, velocities, edges, timestep=0.01, charge=0.1, mass=1., edgelen=0.5, dampen=0.95):
+    """Evolve a n body system of electrostatically repulsive nodes connected by
+       springs by one timestep."""
+    velocities *= dampen
+
+    # calculate matrix of distance vectors between all points and their lengths squared
+    dists = array([[p2 - p1 for p2 in points] for p1 in points])
+    l_2 = (dists*dists).sum(axis=2)
+
+    # make the diagonal 1's to avoid division by zero
+    for i in xrange(points.shape[0]):
+        l_2[i,i] = 1
+
+    l_2_inv = 1/l_2
+    l_3_inv = l_2_inv*sqrt(l_2_inv)
+
+    # repulsive force: distance vectors divided by length cubed, summed and multiplied by scale
+    scale = timestep*charge*charge/mass
+    velocities -= scale*(l_3_inv[:,:,newaxis].repeat(points.shape[1], axis=2)*dists).sum(axis=1)
+
+    # calculate spring contributions for each point
+    for idx, (point, outedges) in enumerate(izip(points, edges)):
+        edgevecs = point - points.take(outedges, axis=0)
+        edgevec_lens = sqrt((edgevecs*edgevecs).sum(axis=1))
+        scale = timestep/mass
+        velocities[idx] += (edgevecs*((((edgelen*scale)/edgevec_lens - scale))[:,newaxis].repeat(points.shape[1],axis=1))).sum(axis=0)
+
+    # move points to new positions
+    points += velocities*timestep
+</code></pre>

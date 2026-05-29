@@ -1,0 +1,52 @@
+Question: <p>In a comment on the <a href="http://stackoverflow.com/questions/306130/python-decorator-makes-function-forget-that-it-belongs-to-a-class#306277">answer to another question</a>, someone said they weren't sure what functools.wraps was doing.  So I'm asking this question so that there will be a record of it on StackOverflow for future reference: what does functools.wraps do, exactly?</p>
+
+Answer: <p>When you use a decorator, you're replacing one function with another.  In other words, if you have a decorator</p>
+
+<pre><code>def logged(func):
+    def with_logging(*args, **kwargs):
+        print func.__name__ + " was called"
+        return func(*args, **kwargs)
+    return with_logging
+</code></pre>
+
+<p>then when you say</p>
+
+<pre><code>@logged
+def f(x):
+   """does some math"""
+   return x + x * x
+</code></pre>
+
+<p>it's exactly the same as saying</p>
+
+<pre><code>def f(x):
+    """does some math"""
+    return x + x * x
+f = logged(f)
+</code></pre>
+
+<p>and your function f is replaced with the function with_logging.  Unfortunately, this means that if you then say</p>
+
+<pre><code>print f.__name__
+</code></pre>
+
+<p>it will print <code>with_logging</code> because that's the name of your new function.  In fact, if you look at the docstring for f, it will be blank because with_logging has no docstring, and so the docstring you wrote won't be there anymore.  Also, if you look at the pydoc result for that function, it won't be listed as taking one argument <code>x</code>; instead it'll be listed as taking <code>*args</code> and <code>**kwargs</code> because that's what with_logging takes.</p>
+
+<p>If using a decorator always meant losing this information about a function, it would be a serious problem.  That's why we have <code>functools.wraps</code>.  This takes a function used in a decorator and adds the functionality of copying over the function name, docstring, arguments list, etc.  And since <code>wraps</code> is itself a decorator, the following code does the correct thing:</p>
+
+<pre><code>from functools import wraps
+def logged(func):
+    @wraps(func)
+    def with_logging(*args, **kwargs):
+        print func.__name__ + " was called"
+        return func(*args, **kwargs)
+    return with_logging
+
+@logged
+def f(x):
+   """does some math"""
+   return x + x * x
+
+print f.__name__  # prints 'f'
+print f.__doc__   # prints 'does some math'
+</code></pre>

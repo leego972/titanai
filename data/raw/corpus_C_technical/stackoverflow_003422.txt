@@ -1,0 +1,11 @@
+Question: <p>Right now I have a log parser reading through 515mb of plain-text files (a file for each day over the past 4 years). My code currently stands as this: <a href="http://gist.github.com/12978" rel="nofollow">http://gist.github.com/12978</a>. I've used psyco (as seen in the code) and I'm also compiling it and using the compiled version. It's doing about 100 lines every 0.3 seconds. The machine is a standard 15" MacBook Pro (2.4ghz C2D, 2GB RAM)</p>
+
+<p>Is it possible for this to go faster or is that a limitation on the language/database?</p>
+
+Answer: <p>As Mark suggested, use binding variables. The database only has to prepare each statement once, then "fill in the blanks" for each execution. As a nice side effect, it will automatically take care of string-quoting issues (which your program isn't handling).</p>
+
+<p>Turn transactions on (if they aren't already) and do a single commit at the end of the program. The database won't have to write anything to disk until all the data needs to be committed. And if your program encounters an error, none of the rows will be committed, allowing you to simply re-run the program once the problem has been corrected.</p>
+
+<p>Your log_hostname, log_person, and log_date functions are doing needless SELECTs on the tables. Make the appropriate table attributes PRIMARY KEY or UNIQUE. Then, instead of checking for the presence of the key before you INSERT, just do the INSERT. If the person/date/hostname already exists, the INSERT will fail from the constraint violation. (This won't work if you use a transaction with a single commit, as suggested above.)</p>
+
+<p>Alternatively, if you know you're the only one INSERTing into the tables while your program is running, then create parallel data structures in memory and maintain them in memory while you do your INSERTs. For example, read in all the hostnames from the table into an associative array at the start of the program. When want to know whether to do an INSERT, just do an array lookup. If no entry found, do the INSERT and update the array appropriately. (This suggestion is compatible with transactions and a single commit, but requires more programming. It'll be wickedly faster, though.)</p>

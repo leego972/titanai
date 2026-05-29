@@ -1,0 +1,895 @@
+================================================================================
+TITAN AI — TRAINING PACK 012: ENTERPRISE INTEGRATION PATTERNS AND ARCHITECTURE
+MESSAGING, EVENT-DRIVEN SYSTEMS, API INTEGRATION, SERVICE MESH, DATA PIPELINES
+================================================================================
+
+================================================================================
+PART 1: ENTERPRISE INTEGRATION PATTERNS — THE CANONICAL CATALOG
+================================================================================
+
+--- WHY SYSTEMS NEED TO INTEGRATE ---
+
+No system operates in isolation. Every real enterprise has:
+  - Legacy systems built 20 years ago that cannot be replaced
+  - Third-party SaaS tools (Salesforce, Workday, ServiceNow)
+  - Modern microservices built by different teams with different tech stacks
+  - Data pipelines feeding analytics and ML models
+  - Partner APIs for B2B integration
+  - Mobile apps needing backend coordination
+
+The integration layer is where most system failures, data inconsistencies,
+and security vulnerabilities live. It is also where most senior engineering
+effort is spent. Getting it right separates functional systems from brittle ones.
+
+--- THE GREGOR HOHPE PATTERNS (Enterprise Integration Patterns, 2003, still definitive) ---
+
+MESSAGING CHANNELS:
+  Point-to-Point: One message → one consumer
+    Use case: Work queue, task distribution
+    Pattern: Each message processed exactly once by one worker
+    Example: Order processing — each order picked up by one worker
+  
+  Publish-Subscribe: One message → many consumers
+    Use case: Event notification, fan-out
+    Pattern: All subscribers receive every message
+    Example: User signup event → email service, analytics, CRM all notified
+  
+  Dead Letter Channel: Messages that fail processing N times go here
+    Critical: Without dead letter handling, failed messages are silently dropped
+    or cause endless retry loops
+    Rule: Every consumer must define what happens to messages it can't process
+
+MESSAGE CONSTRUCTION PATTERNS:
+
+  Command Message: "Do this specific thing"
+    Contains: Verb + target + parameters
+    Example: {"command": "SendEmail", "to": "user@example.com", "subject": "Welcome"}
+    Characteristic: Directed at specific service, expects it to act
+  
+  Event Message: "This thing happened"
+    Contains: Fact about the past + context
+    Example: {"event": "UserRegistered", "userId": "123", "timestamp": "2025-01-15T10:00:00Z"}
+    Characteristic: Publisher doesn't know or care who consumes it
+    Critical difference from Command: Events are facts, not instructions
+  
+  Document Message: "Here is data for you to process"
+    Contains: Structured data payload, no implicit action
+    Example: Full order document with all line items, customer info, shipping address
+    Use case: Asynchronous document transfer between systems
+
+  Message Sequence: Large data split across multiple messages
+    Problem: Messages may arrive out of order
+    Solution: Sequence number + correlation ID + resequencer pattern
+    
+    RESEQUENCER IMPLEMENTATION:
+    class Resequencer:
+        def __init__(self):
+            self.buffer = {}
+            self.expected_seq = 0
+        
+        def receive(self, message):
+            self.buffer[message.sequence] = message
+            results = []
+            while self.expected_seq in self.buffer:
+                results.append(self.buffer.pop(self.expected_seq))
+                self.expected_seq += 1
+            return results  # In-order messages ready to process
+
+MESSAGE ROUTING PATTERNS:
+
+  CONTENT-BASED ROUTER:
+  Route message to different channels based on its content.
+  
+  class OrderRouter:
+      def route(self, order):
+          if order.value > 10000:
+              return 'high-value-orders'     # Special processing, fraud check
+          elif order.is_international:
+              return 'international-orders'  # Customs, currency conversion
+          elif order.items_count > 100:
+              return 'bulk-orders'           # Warehouse team
+          else:
+              return 'standard-orders'       # Normal fulfillment
+  
+  SPLITTER:
+  One message contains multiple items → split into individual messages.
+  
+  def split_order(order_message):
+      """Split multi-item order into per-item fulfillment messages"""
+      for item in order_message['items']:
+          yield {
+              'order_id': order_message['order_id'],
+              'item_id': item['id'],
+              'quantity': item['quantity'],
+              'warehouse': item['warehouse_id']
+          }
+  
+  AGGREGATOR:
+  Multiple messages → one combined message (opposite of splitter).
+  
+  class OrderAggregator:
+      def __init__(self, expected_count):
+          self.parts = {}
+          self.expected = expected_count
+      
+      def receive(self, msg):
+          order_id = msg['correlation_id']
+          if order_id not in self.parts:
+              self.parts[order_id] = []
+          self.parts[order_id].append(msg)
+          
+          if len(self.parts[order_id]) == self.expected:
+              complete = self.assemble(self.parts.pop(order_id))
+              return complete  # All parts arrived, process complete order
+          return None  # Still waiting
+  
+  SCATTER-GATHER:
+  Send to multiple services simultaneously, aggregate responses.
+  Use case: Price comparison (ask 10 suppliers simultaneously, take cheapest)
+  
+  async def scatter_gather_pricing(product_id, suppliers):
+      # Scatter: Ask all suppliers simultaneously
+      tasks = [supplier.get_price(product_id) for supplier in suppliers]
+      responses = await asyncio.gather(*tasks, return_exceptions=True)
+      
+      # Filter errors, gather valid prices
+      valid_prices = [
+          (supplier, price) for supplier, price 
+          in zip(suppliers, responses)
+          if not isinstance(price, Exception)
+      ]
+      
+      # Gather: Return cheapest
+      return min(valid_prices, key=lambda x: x[1])
+
+================================================================================
+PART 2: EVENT-DRIVEN ARCHITECTURE — DEEP PROFESSIONAL GUIDE
+================================================================================
+
+--- EVENT SOURCING ---
+
+TRADITIONAL: Store current state only
+  Table: users(id, name, email, balance)
+  UPDATE users SET balance = 750 WHERE id = 1
+  → You know balance is $750. You don't know how it got there.
+
+EVENT SOURCING: Store the full history of events
+  events table: id, aggregate_id, event_type, event_data, timestamp
+  
+  Events for account 1:
+  1. AccountOpened   {initial_balance: 1000, currency: USD}
+  2. MoneyDeposited  {amount: 500}
+  3. MoneyWithdrawn  {amount: 250}
+  4. MoneyWithdrawn  {amount: 500}
+  
+  Current balance = 1000 + 500 - 250 - 500 = 750 ✓
+  
+  ADVANTAGES:
+  - Complete audit trail (banking, healthcare, compliance)
+  - Time travel: Replay events to any point in history
+  - Debugging: "What happened on Tuesday?" → replay to Tuesday
+  - New features: Add new projections from historical events
+  - Event-driven integration: Publish events to other systems naturally
+
+IMPLEMENTATION:
+
+class BankAccount:
+    def __init__(self, account_id):
+        self.account_id = account_id
+        self.balance = 0
+        self._events = []
+    
+    # Commands (produce events)
+    def deposit(self, amount: float):
+        if amount <= 0:
+            raise ValueError("Deposit must be positive")
+        event = {
+            "type": "MoneyDeposited",
+            "aggregate_id": self.account_id,
+            "data": {"amount": amount},
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        self._apply(event)
+        self._events.append(event)
+    
+    def withdraw(self, amount: float):
+        if amount > self.balance:
+            raise InsufficientFundsError(f"Balance {self.balance} < {amount}")
+        event = {
+            "type": "MoneyWithdrawn",
+            "aggregate_id": self.account_id,
+            "data": {"amount": amount},
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        self._apply(event)
+        self._events.append(event)
+    
+    # Event handler — mutates state
+    def _apply(self, event):
+        if event["type"] == "MoneyDeposited":
+            self.balance += event["data"]["amount"]
+        elif event["type"] == "MoneyWithdrawn":
+            self.balance -= event["data"]["amount"]
+        elif event["type"] == "AccountOpened":
+            self.balance = event["data"]["initial_balance"]
+    
+    # Reconstitute from event history
+    @classmethod
+    def from_events(cls, account_id, events):
+        account = cls(account_id)
+        for event in events:
+            account._apply(event)
+        return account
+    
+    def get_uncommitted_events(self):
+        events = self._events.copy()
+        self._events.clear()
+        return events
+
+EVENT STORE IMPLEMENTATION:
+class EventStore:
+    def __init__(self, db):
+        self.db = db
+    
+    def save(self, aggregate_id, events, expected_version):
+        # Optimistic concurrency control
+        current_version = self.get_version(aggregate_id)
+        if current_version != expected_version:
+            raise ConcurrencyConflict(
+                f"Expected version {expected_version}, got {current_version}"
+            )
+        
+        for i, event in enumerate(events):
+            self.db.execute(
+                """INSERT INTO events (aggregate_id, version, event_type, event_data, created_at)
+                   VALUES (%s, %s, %s, %s, NOW())""",
+                (aggregate_id, expected_version + i + 1,
+                 event['type'], json.dumps(event['data']))
+            )
+    
+    def load(self, aggregate_id, from_version=0):
+        rows = self.db.execute(
+            "SELECT event_type, event_data FROM events WHERE aggregate_id=%s AND version > %s ORDER BY version",
+            (aggregate_id, from_version)
+        )
+        return [{"type": r['event_type'], "data": json.loads(r['event_data'])} for r in rows]
+
+--- CQRS (COMMAND QUERY RESPONSIBILITY SEGREGATION) ---
+
+PRINCIPLE: Separate the model for writing (commands) from the model for reading (queries).
+
+WHY: Write model needs transactions, consistency, business rules.
+     Read model needs speed, denormalized data, custom projections.
+     These requirements pull in opposite directions. Separate them.
+
+ARCHITECTURE:
+
+Write side:
+  Command → Command Handler → Aggregate (business logic) → Events → Event Store
+  
+  Command: {"type": "PlaceOrder", "user_id": "123", "items": [...]}
+  Handler validates, applies to aggregate, aggregate produces events
+  Events persisted to event store
+  Events published to event bus
+
+Read side (projections):
+  Event Bus → Projection Handler → Read Model (optimized for queries)
+  
+  OrderSummaryProjection:
+    On OrderPlaced: INSERT into order_summary (order_id, user_id, total, status, created_at)
+    On OrderShipped: UPDATE order_summary SET status='shipped', shipped_at=... WHERE order_id=...
+    On OrderDelivered: UPDATE order_summary SET status='delivered' WHERE order_id=...
+  
+  Query: SELECT * FROM order_summary WHERE user_id='123' ORDER BY created_at DESC
+  → Instantly returns denormalized, pre-computed view. No joins. Fast.
+
+IMPLEMENTATION EXAMPLE:
+class PlaceOrderCommandHandler:
+    def __init__(self, event_store, event_bus):
+        self.event_store = event_store
+        self.event_bus = event_bus
+    
+    def handle(self, command: PlaceOrderCommand):
+        # Load aggregate
+        events = self.event_store.load(command.order_id)
+        order = Order.from_events(command.order_id, events)
+        
+        # Apply command (business rules validated inside aggregate)
+        order.place(command.user_id, command.items, command.total)
+        
+        # Save new events
+        new_events = order.get_uncommitted_events()
+        self.event_store.save(command.order_id, new_events, order.version - len(new_events))
+        
+        # Publish for projections and other services
+        for event in new_events:
+            self.event_bus.publish(event)
+
+class OrderProjectionHandler:
+    def __init__(self, read_db):
+        self.db = read_db
+    
+    def on_order_placed(self, event):
+        self.db.execute(
+            "INSERT INTO order_summary VALUES (%s, %s, %s, 'pending', %s)",
+            (event['data']['order_id'], event['data']['user_id'],
+             event['data']['total'], event['timestamp'])
+        )
+
+================================================================================
+PART 3: MESSAGE BROKER DEEP DIVE
+================================================================================
+
+--- APACHE KAFKA — PRODUCTION ARCHITECTURE ---
+
+KAFKA FUNDAMENTALS:
+  Topic: Named stream of records
+  Partition: Ordered, immutable log. A topic has 1-N partitions.
+  Offset: Position of a record within a partition
+  Consumer Group: Multiple consumers share partition consumption
+  Broker: Kafka server node. Cluster = multiple brokers.
+  Replication: Each partition has 1 leader + N followers
+
+PARTITION KEY DESIGN — CRITICAL:
+  Partition key determines which partition a message goes to.
+  Messages with same key always go to same partition.
+  Same partition = strict ordering guaranteed.
+  Different partitions = parallel processing, no ordering guarantee.
+  
+  CHOOSING A KEY:
+  Use case: Order events for same order must be in order
+  Key: order_id → All events for order 123 on same partition → in order ✓
+  
+  Use case: Payment processing, maximize parallelism
+  Key: None (round-robin) or user_id → Distributes load across partitions
+  
+  BAD KEY: High-cardinality but skewed. If 10% of users do 90% of activity:
+  Key=user_id → Hot partition with 90% of load. Other 9 partitions idle.
+  Better: Combine user_id + hour → Spreads across time as well as users
+
+CONSUMER GROUP DESIGN:
+  # 1 topic, 6 partitions, 3 consumers in group
+  # Kafka assigns: Consumer1 → P0,P1 | Consumer2 → P2,P3 | Consumer3 → P4,P5
+  
+  # Scaling: Add consumer 4 → Rebalance: Each consumer gets 1-2 partitions
+  # More consumers than partitions: Extra consumers idle (max parallelism = partition count)
+  
+  # Rule: Set partition count at topic creation to max expected consumers
+  # Partitions can only be increased, never decreased. Plan ahead.
+  
+  # Rule of thumb: Partitions = max_consumers_per_group × replication_factor
+
+KAFKA PRODUCER CONFIGURATION (production-grade):
+  from confluent_kafka import Producer
+  
+  producer = Producer({
+      'bootstrap.servers': 'kafka1:9092,kafka2:9092,kafka3:9092',
+      'acks': 'all',               # Wait for all replicas to acknowledge
+      'retries': 5,                # Retry on transient failures
+      'retry.backoff.ms': 300,     # Wait between retries
+      'enable.idempotence': True,  # Exactly-once delivery (no duplicates on retry)
+      'compression.type': 'snappy',# Compress messages (reduces bandwidth 40-60%)
+      'batch.size': 65536,         # Batch messages for throughput (64KB)
+      'linger.ms': 5,              # Wait 5ms to fill batch before sending
+      'max.in.flight.requests.per.connection': 5,
+  })
+  
+  def delivery_callback(err, msg):
+      if err:
+          logger.error(f"Message delivery failed: {err}")
+          # Handle: retry, dead letter, alert
+      else:
+          logger.debug(f"Delivered to {msg.topic()} partition {msg.partition()} offset {msg.offset()}")
+  
+  producer.produce('orders', key=order_id, value=json.dumps(order_data), callback=delivery_callback)
+  producer.poll(0)  # Trigger callbacks
+
+KAFKA CONSUMER CONFIGURATION (production-grade):
+  from confluent_kafka import Consumer, KafkaException
+  
+  consumer = Consumer({
+      'bootstrap.servers': 'kafka1:9092,kafka2:9092,kafka3:9092',
+      'group.id': 'order-processor-v2',
+      'auto.offset.reset': 'earliest',    # Start from beginning if no committed offset
+      'enable.auto.commit': False,         # Manual commit — commit only after processing
+      'max.poll.interval.ms': 300000,      # 5 min max between polls before kicked from group
+      'session.timeout.ms': 30000,         # 30s heartbeat timeout
+  })
+  
+  consumer.subscribe(['orders'])
+  
+  try:
+      while True:
+          msg = consumer.poll(timeout=1.0)
+          if msg is None:
+              continue
+          if msg.error():
+              raise KafkaException(msg.error())
+          
+          try:
+              order = json.loads(msg.value())
+              process_order(order)  # Your business logic
+              consumer.commit(msg)  # Commit AFTER successful processing
+          except ProcessingError as e:
+              logger.error(f"Failed to process message: {e}")
+              # Route to dead letter topic
+              dead_letter_producer.produce('orders-dlq', value=msg.value(), 
+                                          headers={'error': str(e), 'original_topic': 'orders'})
+              consumer.commit(msg)  # Commit to move past the bad message
+  finally:
+      consumer.close()
+
+KAFKA FOR SECURITY DATA (SIEM use case):
+  Topics:
+    raw.sysmon       → Raw Sysmon events from all endpoints
+    raw.firewall     → Firewall logs from all firewalls
+    raw.proxy        → Web proxy logs
+    enriched.alerts  → Normalized, enriched alerts
+    alerts.high      → High severity alerts only
+    alerts.dlq       → Alerts that failed enrichment
+  
+  Pipeline:
+    Agent → raw.sysmon → Normalization Consumer → enriched.events
+    enriched.events → Correlation Engine → alerts.high → Notification Service
+    enriched.events → Elasticsearch Indexer → SIEM Storage
+    enriched.events → ML Anomaly Detector → alerts.behavioral
+
+--- RABBITMQ VS KAFKA DECISION MATRIX ---
+
+RabbitMQ (AMQP):
+  Best for: Task queues, RPC patterns, complex routing, message TTL
+  Strength: Rich routing (exchanges, bindings), message priority, per-message TTL
+  Message lifecycle: Deleted after acknowledgment (not a log)
+  Throughput: ~20K-50K msg/sec per broker
+  Retention: Until consumed and acknowledged (or TTL expires)
+  Use when: Each message should be processed once and discarded
+            You need complex routing logic (topic exchange, headers exchange)
+            Request-reply patterns
+            Message priority (some messages jump queue)
+
+Kafka:
+  Best for: Event streaming, log aggregation, audit trail, replay
+  Strength: Persistent log, replay, high throughput, multiple consumers per event
+  Message lifecycle: Retained for configurable period (days, weeks, or forever)
+  Throughput: ~1M+ msg/sec per broker
+  Retention: Time-based or size-based (7 days common, or unlimited for event sourcing)
+  Use when: Multiple consumers need same events
+            Replay historical data (new service catching up)
+            Audit trail / compliance
+            Stream processing (Kafka Streams, Flink)
+            High throughput data pipeline
+
+================================================================================
+PART 4: API INTEGRATION PATTERNS
+================================================================================
+
+--- API GATEWAY PATTERNS ---
+
+PURPOSE: Single entry point for all client-service communication.
+Functions: Authentication, rate limiting, routing, SSL termination, logging,
+           request transformation, caching, circuit breaking.
+
+COMPLETE API GATEWAY DESIGN:
+
+                    Client
+                      │
+              ┌───────▼────────┐
+              │   API Gateway   │
+              │                 │
+              │ 1. Rate Limit   │
+              │ 2. Authenticate │
+              │ 3. Authorize    │
+              │ 4. Route        │
+              │ 5. Transform    │
+              │ 6. Log          │
+              └────────┬────────┘
+         ┌─────────────┼─────────────┐
+         ▼             ▼             ▼
+    User Service  Order Service  Payment Service
+
+NGINX API GATEWAY CONFIGURATION:
+upstream user_service {
+    server user-service:8001;
+    server user-service-2:8001;
+    keepalive 32;
+}
+
+upstream order_service {
+    server order-service:8002;
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl;
+    
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=100r/m;
+    limit_req zone=api burst=20 nodelay;
+    
+    # JWT validation (using nginx-jwt module or lua)
+    location /api/orders/ {
+        # Auth check first
+        auth_request /auth/validate;
+        auth_request_set $user_id $upstream_http_x_user_id;
+        
+        # Route to service
+        proxy_pass http://order_service;
+        proxy_set_header X-User-ID $user_id;
+        proxy_set_header X-Request-ID $request_id;
+        
+        # Timeouts
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+    
+    location /auth/validate {
+        internal;
+        proxy_pass http://auth_service/validate;
+        proxy_pass_request_body off;
+        proxy_set_header Authorization $http_authorization;
+    }
+}
+
+--- WEBHOOK INTEGRATION PATTERNS ---
+
+RECEIVING WEBHOOKS RELIABLY:
+
+Problem: Webhook delivered once. If your server is down: payload lost.
+Solution: Receive, acknowledge, queue, process asynchronously.
+
+WRONG pattern:
+  @app.post("/webhook/stripe")
+  def stripe_webhook(request):
+      process_payment_update(request.json)  # If this fails: webhook lost
+      return {"status": "ok"}, 200
+
+CORRECT pattern:
+  @app.post("/webhook/stripe")
+  def stripe_webhook(request):
+      # Step 1: Verify signature FIRST (prevents spoofed webhooks)
+      sig = request.headers.get('Stripe-Signature')
+      try:
+          event = stripe.Webhook.construct_event(
+              request.data, sig, STRIPE_WEBHOOK_SECRET
+          )
+      except stripe.error.SignatureVerificationError:
+          return "Invalid signature", 400
+      
+      # Step 2: Persist to queue IMMEDIATELY
+      queue.enqueue('process_stripe_event', event.id, event.type, event.data)
+      
+      # Step 3: Return 200 fast (before processing)
+      return {"received": True}, 200  # Stripe retries if this doesn't return in 30s
+
+  # Step 4: Process asynchronously in worker
+  def process_stripe_event(event_id, event_type, data):
+      # Check idempotency (Stripe may retry)
+      if ProcessedEvent.exists(event_id):
+          return  # Already processed, skip
+      
+      if event_type == 'payment_intent.succeeded':
+          fulfill_order(data['metadata']['order_id'])
+      elif event_type == 'payment_intent.payment_failed':
+          notify_customer_of_failure(data['metadata']['user_id'])
+      
+      # Mark as processed
+      ProcessedEvent.create(event_id=event_id)
+
+WEBHOOK DELIVERY WITH RETRY (sending webhooks to customers):
+class WebhookDelivery:
+    MAX_ATTEMPTS = 5
+    BACKOFF_SCHEDULE = [0, 60, 300, 1800, 7200]  # 0, 1m, 5m, 30m, 2h
+    
+    def deliver(self, webhook_config, event):
+        for attempt, delay in enumerate(self.BACKOFF_SCHEDULE):
+            if delay > 0:
+                time.sleep(delay)
+            
+            try:
+                # Sign the payload
+                payload = json.dumps(event)
+                signature = hmac.new(
+                    webhook_config.secret.encode(),
+                    payload.encode(),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                response = requests.post(
+                    webhook_config.url,
+                    data=payload,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'X-Signature': f'sha256={signature}',
+                        'X-Attempt': str(attempt + 1)
+                    },
+                    timeout=30
+                )
+                
+                if 200 <= response.status_code < 300:
+                    self.log_success(webhook_config.id, event['id'], attempt)
+                    return
+                    
+            except requests.RequestException as e:
+                self.log_failure(webhook_config.id, event['id'], attempt, str(e))
+        
+        # All attempts exhausted
+        self.notify_webhook_failure(webhook_config)
+
+================================================================================
+PART 5: SERVICE MESH AND MICROSERVICE COMMUNICATION
+================================================================================
+
+--- SERVICE MESH (ISTIO/LINKERD) ---
+
+WHAT IT SOLVES:
+  Without service mesh: Every service implements:
+    - Retries, timeouts, circuit breaking
+    - mTLS between services
+    - Distributed tracing (inject headers)
+    - Load balancing
+    - Health checks
+  
+  This is duplicated across every service, every language, every team.
+  
+  With service mesh: All of this moves to a sidecar proxy (Envoy).
+  Your service code: Just business logic.
+  Sidecar handles: All the above, transparently.
+
+ISTIO CONFIGURATION PATTERNS:
+
+Traffic management — Canary deployment:
+  # Route 5% of traffic to new version, 95% to stable
+  apiVersion: networking.istio.io/v1alpha3
+  kind: VirtualService
+  metadata:
+    name: orders-service
+  spec:
+    hosts: [orders-service]
+    http:
+    - route:
+      - destination:
+          host: orders-service
+          subset: stable
+        weight: 95
+      - destination:
+          host: orders-service
+          subset: canary
+        weight: 5
+
+Circuit breaking:
+  apiVersion: networking.istio.io/v1alpha3
+  kind: DestinationRule
+  metadata:
+    name: payment-service
+  spec:
+    host: payment-service
+    trafficPolicy:
+      outlierDetection:
+        consecutive5xxErrors: 5
+        interval: 10s
+        baseEjectionTime: 30s
+        maxEjectionPercent: 50
+      connectionPool:
+        tcp:
+          maxConnections: 100
+        http:
+          http1MaxPendingRequests: 50
+          maxRequestsPerConnection: 10
+
+Retry policy:
+  retries:
+    attempts: 3
+    perTryTimeout: 5s
+    retryOn: 5xx,reset,connect-failure,retriable-4xx
+
+mTLS (mutual TLS between all services):
+  apiVersion: security.istio.io/v1beta1
+  kind: PeerAuthentication
+  metadata:
+    name: default
+    namespace: production
+  spec:
+    mtls:
+      mode: STRICT   # All traffic must be mTLS. No plain HTTP between services.
+
+--- SAGA PATTERN FOR DISTRIBUTED TRANSACTIONS ---
+
+PROBLEM: Traditional ACID transactions don't span multiple services.
+  Order → Payment → Inventory → Shipping: What if Inventory fails after Payment?
+  You've charged the customer but can't fulfill the order. Data inconsistent.
+
+SAGA PATTERN: Break transaction into a sequence of local transactions.
+  Each step publishes an event/message. If a step fails → compensating transactions roll back.
+
+CHOREOGRAPHY-BASED SAGA:
+  Each service listens for events and publishes its own.
+  No central orchestrator.
+  
+  OrderService: Publishes "OrderCreated"
+  PaymentService: Listens "OrderCreated" → charges card → Publishes "PaymentProcessed"
+  InventoryService: Listens "PaymentProcessed" → reserves items → Publishes "InventoryReserved"
+  ShippingService: Listens "InventoryReserved" → creates shipment → Publishes "ShipmentCreated"
+  
+  FAILURE — Inventory fails:
+  InventoryService: Publishes "InventoryReservationFailed"
+  PaymentService: Listens "InventoryReservationFailed" → refunds card → Publishes "PaymentRefunded"
+  OrderService: Listens "PaymentRefunded" → marks order cancelled → Publishes "OrderCancelled"
+  
+  Advantage: Loose coupling. No single point of failure.
+  Disadvantage: Hard to understand full flow. Cascading event chains are complex to debug.
+
+ORCHESTRATION-BASED SAGA:
+  Central orchestrator (saga state machine) coordinates steps.
+  
+  class OrderFulfillmentSaga:
+      steps = [
+          {'action': 'payment.charge', 'compensate': 'payment.refund'},
+          {'action': 'inventory.reserve', 'compensate': 'inventory.release'},
+          {'action': 'shipping.create', 'compensate': 'shipping.cancel'},
+      ]
+      
+      def execute(self, order):
+          completed_steps = []
+          for step in self.steps:
+              result = self.execute_step(step['action'], order)
+              if result.success:
+                  completed_steps.append(step)
+              else:
+                  # Rollback all completed steps in reverse order
+                  for completed in reversed(completed_steps):
+                      self.execute_step(completed['compensate'], order)
+                  raise SagaFailedError(f"Failed at {step['action']}: {result.error}")
+  
+  Advantage: Centralized visibility. Easier to understand full flow.
+  Disadvantage: Orchestrator is a coordinating service that must also be reliable.
+
+================================================================================
+PART 6: DATA INTEGRATION AND ETL PIPELINES
+================================================================================
+
+--- CHANGE DATA CAPTURE (CDC) ---
+
+WHAT IT IS:
+  Track every change in a database and stream those changes to downstream systems.
+  Instead of batch ETL (run every hour, move bulk data):
+  CDC = Real-time streaming of every INSERT, UPDATE, DELETE.
+
+DEBEZIUM + KAFKA (standard production approach):
+  Database → Debezium Connector → Kafka Topic → Consumer
+  
+  Debezium reads: PostgreSQL WAL (Write-Ahead Log), MySQL binlog, MongoDB oplog
+  Outputs: Every row change as a structured event in Kafka
+  
+  Example change event (PostgreSQL INSERT):
+  {
+    "before": null,
+    "after": {
+      "id": 1001,
+      "user_id": "user-123",
+      "amount": 150.00,
+      "status": "pending",
+      "created_at": 1705329600000
+    },
+    "source": {
+      "db": "ecommerce",
+      "table": "orders",
+      "ts_ms": 1705329600100
+    },
+    "op": "c"  // c=create, u=update, d=delete, r=read(snapshot)
+  }
+
+CDC USE CASES:
+  1. Real-time search index: Orders table changes → Elasticsearch update → search always current
+  2. Cache invalidation: User profile changes → Redis cache invalidated immediately
+  3. Microservice data sync: Legacy monolith DB → Events → New microservices
+  4. Audit log: Every DB change captured immutably → Compliance trail
+  5. Analytics: OLTP changes → OLAP data warehouse in near-real-time
+
+DEBEZIUM SETUP (Docker, for learning):
+  version: '3'
+  services:
+    zookeeper:
+      image: confluentinc/cp-zookeeper:7.0.0
+      environment:
+        ZOOKEEPER_CLIENT_PORT: 2181
+    
+    kafka:
+      image: confluentinc/cp-kafka:7.0.0
+      depends_on: [zookeeper]
+      environment:
+        KAFKA_BROKER_ID: 1
+        KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+        KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
+    
+    postgres:
+      image: postgres:15
+      command: postgres -c wal_level=logical  # Required for CDC
+      environment:
+        POSTGRES_PASSWORD: password
+    
+    debezium:
+      image: debezium/connect:2.4
+      depends_on: [kafka, postgres]
+      environment:
+        BOOTSTRAP_SERVERS: kafka:29092
+        GROUP_ID: debezium-group
+        CONFIG_STORAGE_TOPIC: debezium-configs
+        OFFSET_STORAGE_TOPIC: debezium-offsets
+      ports:
+        - "8083:8083"
+
+  # Register connector (after services start):
+  # curl -X POST http://localhost:8083/connectors -H 'Content-Type: application/json' -d '{
+  #   "name": "orders-connector",
+  #   "config": {
+  #     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  #     "database.hostname": "postgres",
+  #     "database.port": "5432",
+  #     "database.user": "postgres",
+  #     "database.password": "password",
+  #     "database.dbname": "ecommerce",
+  #     "table.include.list": "public.orders,public.users",
+  #     "topic.prefix": "ecommerce"
+  #   }
+  # }'
+
+--- OUTBOX PATTERN (reliable event publishing) ---
+
+PROBLEM: You need to save to DB and publish an event atomically.
+  Save order to DB ✓
+  Publish OrderCreated event ✗  (network failure)
+  → Order exists in DB but downstream services never hear about it.
+  → System is now inconsistent.
+
+OUTBOX PATTERN:
+  Part 1 (in same DB transaction as business logic):
+    INSERT INTO orders VALUES (...);
+    INSERT INTO outbox (event_type, aggregate_id, payload) 
+      VALUES ('OrderCreated', order_id, '{"id": ...}');
+    COMMIT;   -- Either both are saved or neither are
+  
+  Part 2 (separate process/thread — the outbox poller):
+    Periodically scan outbox table for unprocessed events
+    Publish each event to message broker
+    Mark event as published
+    
+  Or better: Use Debezium to watch the outbox table (Debezium Outbox Pattern)
+    → Changes to outbox table stream to Kafka automatically
+    → No polling needed
+
+IMPLEMENTATION:
+  class OutboxRepository:
+      def save_with_events(self, order, events):
+          with self.db.transaction():
+              self.db.execute(
+                  "INSERT INTO orders VALUES (%s, %s, %s)",
+                  (order.id, order.user_id, order.total)
+              )
+              for event in events:
+                  self.db.execute(
+                      """INSERT INTO outbox 
+                         (id, event_type, aggregate_id, payload, created_at, published)
+                         VALUES (%s, %s, %s, %s, NOW(), FALSE)""",
+                      (str(uuid4()), event['type'], order.id, json.dumps(event))
+                  )
+  
+  # Outbox poller (runs every second)
+  class OutboxPoller:
+      def poll(self):
+          rows = self.db.execute(
+              "SELECT id, payload FROM outbox WHERE published=FALSE LIMIT 100"
+          )
+          for row in rows:
+              self.publisher.publish(json.loads(row['payload']))
+              self.db.execute(
+                  "UPDATE outbox SET published=TRUE WHERE id=%s", (row['id'],)
+              )
+
+================================================================================
+END OF PACK 012: ENTERPRISE INTEGRATION PATTERNS
+Total: Full EIP catalog (channels, routing, transformation), event sourcing implementation,
+CQRS with command/query separation, Kafka producer/consumer production config,
+RabbitMQ vs Kafka decision matrix, API gateway patterns, webhook delivery with
+retry and signature verification, service mesh (Istio), saga pattern
+(choreography vs orchestration), CDC with Debezium, outbox pattern.
+================================================================================

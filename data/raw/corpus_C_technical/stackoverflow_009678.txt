@@ -1,0 +1,62 @@
+Question: <p>I've been programming for many years, and recently started learning Python. The following code works as expected in both python 2.5 and 3.0 (on OS X if that matters):</p>
+
+<pre><code>a, b, c = (1, 2, 3)
+
+print(a, b, c)
+
+def test():
+    print(a)
+    print(b)
+    print(c)    # (A)
+    #c+=1       # (B)
+test()
+</code></pre>
+
+<p>However, when I uncomment line <strong>(B)</strong>, I get an <em>UnboundLocalError: 'c' not assigned</em> at line <strong>(A)</strong>. The values of <em>a</em> and <em>b</em> are printed correctly. This has me completely baffled for two reasons:</p>
+
+<ol>
+<li><p>Why is there a runtime error thrown at line <strong>(A)</strong> because of a later statement on line <strong>(B)</strong>?</p></li>
+<li><p>Why are variables <em>a</em> and <em>b</em> printed as expected, while <em>c</em> raises an error?</p></li>
+</ol>
+
+<p>The only explanation I can come up with is that a <strong>local</strong> variable <em>c</em> is created by the assignment <code>c+=1</code>, which takes precedent over the "global" variable <em>c</em> even before the local variable is created. Of course, it doesn't make sense for a variable to "steal" scope before it exists.</p>
+
+<p>Could someone please explain this behavior?</p>
+
+Answer: <p>This is not a direct answer to your question, but it is closely related, as it's another gotcha caused by the relationship between augmented assignment and function scopes.</p>
+
+<p>In most cases, you tend to think of augmented assignment (a += b) as exactly equivalent to simple assignment (a = a + b). It is possible to get into some trouble with this though, in one corner case. Let me explain:</p>
+
+<p>The way python's simple assignment works means that if a is passed into a function (like func(a); note that python is always pass-by-reference), then a = a + b will not modify the a that is passed in. Instead, it will just modify the local pointer to a. </p>
+
+<p>But if you use a += b, then it is sometimes implemented as:</p>
+
+<pre><code>a = a + b
+</code></pre>
+
+<p>or sometimes (if the method exists) as:</p>
+
+<pre><code>a.__iadd__(b)
+</code></pre>
+
+<p>In the first case (as long as a is not declared global), there are no side-effects outside local scope, as the assignment to "a" is just a pointer update.</p>
+
+<p>In the second case, a will actually modify itself, so all references to a will point to the modified version. This is demonstrated by the following code:</p>
+
+<pre><code>def copy_on_write(a):
+      a = a + a
+def inplace_add(a):
+      a += a
+a = [1]
+copy_on_write(a)
+print a # [1]
+inplace_add(a)
+print a # [1, 1]
+b = 1
+copy_on_write(b)
+print b # [1]
+inplace_add(b)
+print b # 1
+</code></pre>
+
+<p>So the trick is to avoid augmented assignment on function arguments (I try to only use it for local/loop variables). Use simple assignment, and you will be safe from ambiguous behaviour. </p>

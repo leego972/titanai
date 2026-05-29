@@ -1,0 +1,45 @@
+Question: <p>What is the most elegant way to check if the directory a file is going to be written to exists, and if not, create the directory using Python? Here is what I tried:</p>
+
+<pre><code>filename = "/my/directory/filename.txt"
+dir = os.path.dirname(filename)
+
+try:
+    os.stat(dir)
+except:
+    os.mkdir(dir)       
+
+f = file(filename)
+</code></pre>
+
+<p>Somehow, I missed <code>os.path.exists</code> (thanks kanja, Blair, and Douglas). This is what I have now:</p>
+
+<pre><code>def ensure_dir(f):
+    d = os.path.dirname(f)
+    if not os.path.exists(d):
+        os.makedirs(d)
+</code></pre>
+
+<p>Is there a flag for "open", that makes this happen automatically?</p>
+
+Answer: <p>The <a href="https://docs.python.org/2/library/os.html#files-and-directories">relevant python documentation</a> suggests the use of the <a href="https://docs.python.org/2/library/os.html#files-and-directories">EAFP coding style (Easier to Ask for Forgiveness than Permission)</a>. This means that the code</p>
+
+<pre><code>try:
+    os.makedirs(path)
+except OSError as exception:
+    if exception.errno != errno.EEXIST:
+        raise
+    else:
+        print "\nBE CAREFUL! Directory %s already exists." % path
+</code></pre>
+
+<p>is better than the alternative</p>
+
+<pre><code>if not os.path.exists(path):
+    os.makedirs(path)
+else:
+    print "\nBE CAREFUL! Directory %s already exists." % path
+</code></pre>
+
+<p>The documentation suggests this exactly because of the race condition discussed in this thread. In addition, as others mention here, there is a performance advantage in querying once instead of twice the OS. Finally, the argument placed forward, potentially, in favour of the second code in some cases --when the developer knows the environment the application is running-- can only be advocated in the special case that the program has set up a private environment for itself (and other instances of the same program).</p>
+
+<p>Even in that case, this is a bad practice and can lead to long useless debugging. For example, the fact we set the permissions for a directory should not leave us with the impression permissions are set appropriately for our purposes. A parent directory could be mounted with other permissions. In general, a program should always work correctly and the programmer should not expect one specific environment.</p>

@@ -1,0 +1,109 @@
+Question: <p>How can I create a regex for a string such as this:</p>
+
+<pre><code>&lt;SERVER&gt; &lt;SERVERKEY&gt; &lt;COMMAND&gt; &lt;FOLDERPATH&gt; &lt;RETENTION&gt; &lt;TRANSFERMODE&gt; &lt;OUTPUTPATH&gt; &lt;LOGTO&gt; &lt;OPTIONAL-MAXSIZE&gt; &lt;OPTIONAL-OFFSET&gt;
+</code></pre>
+
+<p>Most of these fields are just simple words, but some of them can be paths, such as FOLDERPATH, OUTPUTPATH, these paths can also be paths with a filename and wildcard appended.</p>
+
+<p>Retention is a number, and transfer mode can be bin or ascii. The issue is, LOGTO which can be a path with the logfile name appended to it or can be NO, which means no log file.</p>
+
+<p>The main issue, is the optional arguments, they are both numbers, and OFFSET can't exist without MAXSIZE, but MAXSIZE can exist without offset.</p>
+
+<p>Heres some examples:</p>
+
+<pre><code>loveserver love copy /muffin* 20 bin C:\Puppies\ NO 256 300
+loveserver love copy /muffin* 20 bin C:\Puppies\ NO 256
+loveserver love copy /hats* 300 ascii C:\Puppies\no\ C:\log\love.log 256
+</code></pre>
+
+<p>Now the main issue, is that paths can have spaces in them, so if I use . to match everything, the regex ends up breaking, when parsing the optional arguments where the LOG destination ends up getting attached to the outputpath.</p>
+
+<p>Also if I end up using . and start removing parts of it, the regex will start putting things where it shouldn't.</p>
+
+<p>Heres my regex:</p>
+
+<pre><code>^(\s+)?(?P&lt;SRCHOST&gt;.+)(\s+)(?P&lt;SRCKEY&gt;.+)(\s+)(?P&lt;COMMAND&gt;COPY)(\s+)(?P&lt;SRCDIR&gt;.+)(\s+)(?P&lt;RETENTION&gt;\d+)(\s+)(?P&lt;TRANSFER_MODE&gt;BIN|ASC|BINARY|ASCII)(\s+)(?P&lt;DSTDIR&gt;.+)(\s+)(?P&lt;LOGFILE&gt;.+)(\s+)?(?P&lt;SIZE&gt;\d+)?(\s+)?(?P&lt;OFFSET&gt;\d+)?$
+</code></pre>
+
+Answer: <p>Just splitting on whitespace is never going to work. But if you can make some assumptions on the data it could be made to work.</p>
+
+<p>Some assumptions I had in mind:</p>
+
+<ul>
+<li><code>SERVER</code>, <code>SERVERKEY</code> and <code>COMMAND</code> not containing any spaces: <code>\S+</code></li>
+<li><code>FOLDERPATH</code> beginning with a slash: <code>/.*?</code></li>
+<li><code>RETENTION</code> being a number: <code>\d+</code></li>
+<li><code>TRANSFERMODE</code> not containing any spaces: <code>\S+</code></li>
+<li><code>OUTPUTPATH</code> beginning with a drive and ending with a slash: <code>[A-Z]:\\.*?\\</code></li>
+<li><code>LOGTO</code> either being the word "<code>NO</code>", or a path beginning with a drive: <code>[A-Z]:\\.*?</code></li>
+<li><code>MAXSIZE</code> and <code>OFFSET</code> being a number: <code>\d+</code></li>
+</ul>
+
+<p>Putting it all together:</p>
+
+<pre><code>^\s*
+(?P&lt;SERVER&gt;\S+)\s+
+(?P&lt;SERVERKEY&gt;\S+)\s+
+(?P&lt;COMMAND&gt;\S+)\s+
+(?P&lt;FOLDERPATH&gt;/.*?)\s+   # Slash not that important, but should start with non-whitespace
+(?P&lt;RETENTION&gt;\d+)\s+
+(?P&lt;TRANSFERMODE&gt;\S+)\s+
+(?P&lt;OUTPUTPATH&gt;[A-Z]:\\.*?\\)\s+   # Could also support network paths
+(?P&lt;LOGTO&gt;NO|[A-Z]:\\.*?)
+(?:
+  \s+(?P&lt;MAXSIZE&gt;\d+)
+  (?:
+    \s+(?P&lt;OFFSET&gt;\d+)
+  )?
+)?
+\s*$
+</code></pre>
+
+<p>In one line:</p>
+
+<pre><code>^\s*(?P&lt;SERVER&gt;\S+)\s+(?P&lt;SERVERKEY&gt;\S+)\s+(?P&lt;COMMAND&gt;\S+)\s+(?P&lt;FOLDERPATH&gt;/.*?)\s+(?P&lt;RETENTION&gt;\d+)\s+(?P&lt;TRANSFERMODE&gt;\S+)\s+(?P&lt;OUTPUTPATH&gt;[A-Z]:\\.*?\\)\s+(?P&lt;LOGTO&gt;NO|[A-Z]:\\.*?)(?:\s+(?P&lt;MAXSIZE&gt;\d+)(?:\s+(?P&lt;OFFSET&gt;\d+))?)?\s*$
+</code></pre>
+
+<p>Testing:</p>
+
+<pre><code>&gt;&gt;&gt; import re
+&gt;&gt;&gt; p = re.compile(r'^(?P&lt;SERVER&gt;\S+)\s+(?P&lt;SERVERKEY&gt;\S+)\s+(?P&lt;COMMAND&gt;\S+)\s+(?P&lt;FOLDERPATH&gt;/.*?)\s+(?P&lt;RETENTION&gt;\d+)\s+(?P&lt;TRANSFERMODE&gt;\S+)\s+(?P&lt;OUTPUTPATH&gt;[A-Z]:\\.*?\\)\s+(?P&lt;LOGTO&gt;NO|[A-Z]:\\.*?)(?:\s+(?P&lt;MAXSIZE&gt;\d+)(?:\s+(?P&lt;OFFSET&gt;\d+))?)?\s*$',re.M)
+&gt;&gt;&gt; data = r"""loveserver love copy /muffin* 20 bin C:\Puppies\ NO 256 300
+... loveserver love copy /muffin* 20 bin C:\Puppies\ NO 256
+... loveserver love copy /hats* 300 ascii C:\Puppies\no\ C:\log\love.log 256"""
+&gt;&gt;&gt; import pprint
+&gt;&gt;&gt; for match in p.finditer(data):
+...   print pprint.pprint(match.groupdict())
+...
+{'COMMAND': 'copy',
+ 'FOLDERPATH': '/muffin*',
+ 'LOGTO': 'NO',
+ 'MAXSIZE': '256',
+ 'OFFSET': '300',
+ 'OUTPUTPATH': 'C:\\Puppies\\',
+ 'RETENTION': '20',
+ 'SERVER': 'loveserver',
+ 'SERVERKEY': 'love',
+ 'TRANSFERMODE': 'bin'}
+{'COMMAND': 'copy',
+ 'FOLDERPATH': '/muffin*',
+ 'LOGTO': 'NO',
+ 'MAXSIZE': '256',
+ 'OFFSET': None,
+ 'OUTPUTPATH': 'C:\\Puppies\\',
+ 'RETENTION': '20',
+ 'SERVER': 'loveserver',
+ 'SERVERKEY': 'love',
+ 'TRANSFERMODE': 'bin'}
+{'COMMAND': 'copy',
+ 'FOLDERPATH': '/hats*',
+ 'LOGTO': 'C:\\log\\love.log',
+ 'MAXSIZE': '256',
+ 'OFFSET': None,
+ 'OUTPUTPATH': 'C:\\Puppies\\no\\',
+ 'RETENTION': '300',
+ 'SERVER': 'loveserver',
+ 'SERVERKEY': 'love',
+ 'TRANSFERMODE': 'ascii'}
+&gt;&gt;&gt;
+</code></pre>

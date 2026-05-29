@@ -1,0 +1,113 @@
+Question: <p>I have been playing with the Ruby library "shoes". Basically you can write a GUI application in the following way:</p>
+
+<pre><code>Shoes.app do
+  t = para "Not clicked!"
+  button "The Label" do
+    alert "You clicked the button!" # when clicked, make an alert
+    t.replace "Clicked!" # ..and replace the label's text
+  end
+end
+</code></pre>
+
+<p>This made me think - how would I design a similarly nice-to-use GUI framework in Python? One that doesn't have the usual tyings of basically being wrappers to a C* library (In the case of GTK, Tk, wx, QT etc etc)</p>
+
+<p>Shoes takes things from web devlopment (like <code>#f0c2f0</code> style colour notation, CSS layout techniques, like <code>:margin =&gt; 10</code>), and from ruby (extensively using blocks in sensible ways)</p>
+
+<p>Python's lack of "rubyish blocks" makes a (metaphorically)-direct port impossible:</p>
+
+<pre><code>def Shoeless(Shoes.app):
+    self.t = para("Not clicked!")
+
+    def on_click_func(self):
+        alert("You clicked the button!")
+        self.t.replace("clicked!")
+
+    b = button("The label", click=self.on_click_func)
+</code></pre>
+
+<p>No where near as clean, and wouldn't be <em>nearly</em> as flexible, and I'm not even sure if it would be implementable.</p>
+
+<p>Using decorators seems like an interesting way to map blocks of code to a specific action:</p>
+
+<pre><code>class BaseControl:
+    def __init__(self):
+        self.func = None
+
+    def clicked(self, func):
+        self.func = func
+
+    def __call__(self):
+        if self.func is not None:
+            self.func()
+
+class Button(BaseControl):
+    pass
+
+class Label(BaseControl):
+    pass
+
+# The actual applications code (that the end-user would write)
+class MyApp:
+    ok = Button()
+    la = Label()
+
+    @ok.clicked
+    def clickeryHappened():
+        print "OK Clicked!"
+
+if __name__ == '__main__':
+    a = MyApp()
+    a.ok() # trigger the clicked action
+</code></pre>
+
+<p>Basically the decorator function stores the function, then when the action occurred (say, a click) the appropriate function would be executed.</p>
+
+<p>The scope of various stuff (say, the <code>la</code> label in the above example) could be rather complicated, but it seems doable in a fairly neat manner..</p>
+
+Answer: <p>Here's an approach that goes about GUI definitions a bit differently using class-based meta-programming rather than inheritance.</p>
+
+<p>This is largley Django/SQLAlchemy inspired in that it is heavily based on meta-programming and separates your GUI code from your "code code".  I also think it should make heavy use of layout managers like Java does because when you're dropping code, no one wants to constantly tweak pixel alignment.  I also think it would be cool if we could have CSS-like properties.</p>
+
+<p>Here is a rough brainstormed example that will show a column with a label on top, then a text box, then a button to click on the bottom which shows a message.</p>
+
+<pre>
+from happygui.controls import *
+
+MAIN_WINDOW = Window(width="500px", height="350px",
+    my_layout=ColumnLayout(padding="10px",
+        my_label=Label(text="What's your name kiddo?", bold=True, align="center"),
+        my_edit=EditBox(placeholder=""),
+        my_btn=Button(text="CLICK ME!", on_click=Handler('module.file.btn_clicked')),
+    ),
+)
+MAIN_WINDOW.show()
+
+def btn_clicked(sender): # could easily be in a handlers.py file
+    name = MAIN_WINDOW.my_layout.my_edit.text
+    # same thing: name = sender.parent.my_edit.text
+    # best practice, immune to structure change: MAIN_WINDOW.find('my_edit').text
+    MessageBox("Your name is '%s'" % ()).show(modal=True)
+</pre>
+
+<p>One cool thing to notice is the way you can reference the input of my_edit by saying <code>MAIN_WINDOW.my_layout.my_edit.text</code>.  In the declaration for the window, I think it's important to be able to arbitrarily name controls in the function kwargs.</p>
+
+<p>Here is the same app only using absolute positioning (the controls will appear in different places because we're not using a fancy layout manager):</p>
+
+<pre>
+from happygui.controls import *
+
+MAIN_WINDOW = Window(width="500px", height="350px",
+    my_label=Label(text="What's your name kiddo?", bold=True, align="center", x="10px", y="10px", width="300px", height="100px"),
+    my_edit=EditBox(placeholder="", x="10px", y="110px", width="300px", height="100px"),
+    my_btn=Button(text="CLICK ME!", on_click=Handler('module.file.btn_clicked'), x="10px", y="210px", width="300px", height="100px"),
+)
+MAIN_WINDOW.show()
+
+def btn_clicked(sender): # could easily be in a handlers.py file
+    name = MAIN_WINDOW.my_edit.text
+    # same thing: name = sender.parent.my_edit.text
+    # best practice, immune to structure change: MAIN_WINDOW.find('my_edit').text
+    MessageBox("Your name is '%s'" % ()).show(modal=True)
+</pre>
+
+<p>I'm not entirely sure yet if this is a super great approach, but I definitely think it's on the right path.  I don't have time to explore this idea more, but if someone took this up as a project, I would love them.</p>

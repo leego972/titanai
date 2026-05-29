@@ -1,0 +1,30 @@
+Question: <p>If I call <code>os.stat()</code> on a broken <code>symlink</code>, python throws an <code>OSError</code> exception. This makes it useful for finding them. However, there are a few other reasons that <code>os.stat()</code> might throw a similar exception. Is there a more precise way of detecting broken <code>symlinks</code> with Python under Linux?</p>
+
+Answer: <p>A common Python saying is that it's easier to ask forgiveness than permission.  While I'm not a fan of this statement in real life, it does apply in a lot of cases.  Usually you want to avoid code that chains two system calls on the same file, because you never know what will happen to the file in between your two calls in your code.</p>
+
+<p><strong>A typical mistake is to write something like</strong>:</p>
+
+<pre><code>if os.path.exists(path):
+    os.unlink(path)
+</code></pre>
+
+<p>The second call (os.unlink) may fail if something else deleted it after your if test, raise an Exception, and stop the rest of your function from executing.  (You might think this doesn't happen in real life, but we just fished another bug like that out of our codebase last week - and it was the kind of bug that left a few programmers scratching their head and claiming 'Heisenbug' for the last few months)</p>
+
+<p>So, in your particular case, I would probably do:</p>
+
+<pre><code>try:
+    os.stat(path)
+except OSError, e:
+    if e.errno == errno.ENOENT:
+        print 'path %s does not exist or is a broken symlink' % path
+    else:
+        raise e
+</code></pre>
+
+<p>The annoyance here is that stat returns the same error code for a symlink that just isn't there and a broken symlink.</p>
+
+<p>So, I guess you have no choice than to break the atomicity, and do something like</p>
+
+<pre><code>if not os.path.exists(os.readlink(path)):
+    print 'path %s is a broken symlink' % path
+</code></pre>

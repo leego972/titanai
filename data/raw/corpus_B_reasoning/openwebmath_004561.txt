@@ -1,0 +1,424 @@
+# Compilation¶
+
+ trueq.compilation.base.Pattern Substitution pattern used by the Compiler. trueq.compilation.Compiler Substitutes cycles in a Circuit using known substitution Patterns. trueq.compilation.CycleSandwich Pattern that searches Circuits for a specific Cycle and when found, sandwiches it between two other (optional) cycles. trueq.compilation.DecomposeRRZ Decomposes single qubit gates into 3 gates $R(\theta) R(\phi) Z(\gamma)$, where the R gates are defined by $Z(\theta) X(90) Z(-\theta)$. trueq.compilation.DEFAULT_PATTERNS This is the default set of compiler patterns. trueq.compilation.InvolvingRestrictions A pattern which ensures that any NativeGate that is defined from a Config obeys the involving restrictions of its GateFactorys. trueq.compilation.Justify Pattern that takes two Cycles, and moves gates preferentially to one side. trueq.compilation.Merge Pattern that takes two cycles, finds compatabile labels and gates, then merges them to a single gate as much as is possible. trueq.compilation.Native1Q Pattern which expands arbitrary single qubit gates into the decomposition mode provided in a given Config object. trueq.compilation.Native2Q Series of numerical SU(4) decomposition methods. trueq.compilation.PhaseTrack This pattern tracks phase accumulation on each qubit throughout a circuit, and compiles this phase information into parametric gates. trueq.compilation.Relabel Pattern which relabels all the labels and keys in a Circuit. trueq.compilation.RemoveId Pattern that removes identity gates from 1 Cycle. trueq.compile Compiles an arbitrary True-Q™ Circuit into a representation which is compatible with a given Config.
+
+## Pattern¶
+
+class trueq.compilation.base.Pattern(config=None)
+
+Substitution pattern used by the Compiler.
+
+A pattern will be passed a list of cycles in order to it’s apply_cycles() function. It will then perform it’s substitution and return a list of Cycles. The number of cycles passed to the pattern is decided by the n_input_cycles property.
+
+There is no restriction on the number of returned cycles.
+
+Patterns should be subclassed off of this class, and implement at a minimum:
+
+See those functions for descriptions of expected inputs and outputs.
+
+abstract property n_input_cycles
+
+Returns the number of cycles this pattern expects.
+
+This must be over-written in the subclass, but doesn’t neccessarily need to be a function.
+
+# an example where this is not defined as a function
+class Example(Pattern):
+n_input_cycles = 1
+
+Return type
+
+int
+
+abstract apply_cycles(cycles)
+
+This must accept n_input_cycles number of Cycles and return a list of cycles.
+
+This function must be over-written in the subclass, and should be where the substitutions are applied.
+
+Return type
+
+list
+
+abstract property direction
+
+The direction in which the pattern will be applied.
+
+The Compiler iterates through a Circuit and passes a subcircuit to a Pattern.
+
+This direction must be specified by one of the two enums of Direction, namely, FORWARD or BACK.
+
+apply(circuit)
+
+Applies the pattern to a circuit.
+
+Parameters
+
+circuit (Circuit | list | dict) – The circuit to which the pattern will be applied.
+
+Returns
+
+A new circuit that has been altered by the pattern.
+
+Return type
+
+Circuit
+
+## Compiler¶
+
+class trueq.compilation.Compiler(patterns, repeat=1)
+
+Substitutes cycles in a Circuit using known substitution Patterns.
+
+In classical computing this would formally be called a Peephole Optimizer.
+
+This stores a list of Pattern objects which are rules for how to replace Gates in collections of Cycles.
+
+These pattern objects take a set of cycles at a time, and return an altered set of cycles. A trivial example is the RemoveId pattern, which accepts 1 cycle at a time, and removes any identity gates from the cycle, before returning it.
+
+To build a Compiler which knows all possible simplification rules would result in an overly complex and rigid tool, which would would be difficult to generalize for all hardware implementations. By making the compiler itself very small, and allowing custom rules (Patterns in this case), very complex compilation instructions can be expressed in simple and readable fashion.
+
+Each Pattern object requires a certain number of cycles at a time; in the example above, only 1 cycle is passed. In general many patterns accept more than 1, for example merging multiple single qubit gates into a single operation requires that multiple cycles be passed into the Merge pattern. In this case the minimum number of cycles needed is 2. The pattern looks for single qubit gates in both of the cycles, and computes the single equivalent Gate, which is put back instead of the two original gates.
+
+In traversing a circuit, the compiler can either iterate forward, or backward. This traversal direction is specified by the patterns themselves, as it may be useful to have certain patterns apply themselves backwards while others are strictly forward.
+
+An example of a set of patterns which converts a circuit of Gates into a circuit of NativeGates as defined in a Config.
+
+from trueq.compilation import *
+import trueq as tq
+
+config = tq.Config.basic("example")
+
+Compiler([Justify(),
+Native2Q(config=config),
+Merge(),
+RemoveId(),
+Native1Q(config=config),
+Justify()
+])
+
+Compiler([Justify(n_cycles=2), Native2Q(n_cycles=1), Merge(n_cycles=2), RemoveId(n_cycles=1), Native1Q(n_cycles=1), Justify(n_cycles=2)])
+
+
+This set of patterns performs these operations:
+
+Justify
+
+Move gates preferentially to one side of the circuit. For example, if a circuit contains an X90 gate at the beginning and 10 empty cycles, Justify would move the X90 gate to the end of the circuit.
+
+Native2Q
+
+Convert all 2 qubit operations found in the circuit into NativeGates which can be run on a hardware as specified by the config object. This pattern does NOT decompose the single qubit gates, so in the process it adds single qubit gate objects to some cycles.
+
+Merge
+
+This simplifies any neighboring single qubit operations and reduces them to a single gate. Changing the default settings can enable it to merge multi-qubit gates together as well.
+
+RemoveId
+
+Since the simplify step may have introduced single qubit gate which are the identity gate, this pattern removes all Id Gates.
+
+Native1Q
+
+This converts all 1 qubit operations into NativeGates which can be run on hardware as specified by the config object.
+
+Justify
+
+Just for good measure, make sure everything is moved as far forward in the circuit as possible.
+
+Parameters
+• patterns (list) – A list of Pattern, see above.
+
+• repeat (int) – The number of times to repeat the pattern list, may be helpful in certain instances.
+
+compile(circ)
+
+Apply all of the patterns in the compiler in order to a given Circuit or CircuitCollection
+
+Parameters
+
+circ (Circuit | CircuitCollection) – A circuit that the pattern list should be applied to.
+
+property patterns
+
+A list of all Patterns applied by this compiler.
+
+Return type
+
+list
+
+## CycleSandwich¶
+
+class trueq.compilation.CycleSandwich(target, before=None, after=None, ignore_imm=True, ignore_id=True)
+
+Pattern that searches Circuits for a specific Cycle and when found, sandwiches it between two other (optional) cycles.
+
+import trueq as tq
+
+old_circuit = tq.Circuit({(0, 1): tq.Gate.cx})
+
+# every time a the target cycle is found, add the before and after cycles as
+# appropriate
+target = tq.Cycle({(0, 1): tq.Gate.cx})
+before = tq.Cycle({0: tq.Gate.from_generators("Z", 4)})
+after = tq.Cycle({1: tq.Gate.from_generators("X", -8.2)})
+
+pattern = tq.compilation.CycleSandwich(target, before=before, after=after)
+pattern.apply(old_circuit)
+
+ Circuit Key: No key present in circuit. (0): Gate(Z) Name: Gate(Z) Generators: 'Z': 4.0 Matrix: 1.00 -0.03j 1.00 0.03j imm (0, 1): Gate.cx Name: Gate.cx Aliases: Gate.cx Gate.cnot Likeness: CNOT Generators: 'IX': 90.0 'ZI': 90.0 'ZX': -90.0 Matrix: 1.00 1.00 1.00 1.00 (1): Gate(X) Name: Gate(X) Generators: 'X': -8.2 Matrix: 1.00 0.07j 0.07j 1.00
+
+Note
+
+This pattern makes deep copies of before and after.
+
+Parameters
+• target (Cycle) – Which cycle to match on.
+
+• before (Cycle) – A cycle to place immediately before every occurrence of the provided target.
+
+• after (Cycle) – A cycle to place immediately after every occurrence of the provided target.
+
+• ignore_imm (bool) – Whether to apply this pattern when the target and a cycle have differing values of trueq.Cycle.immutable. Default is True.
+
+• ignore_id (bool) – Whether to treat all identity gates as though they are not present when comparing cycles. Default is True.
+
+## DecomposeRRZ¶
+
+class trueq.compilation.DecomposeRRZ(config=None)
+
+Decomposes single qubit gates into 3 gates $R(\theta) R(\phi) Z(\gamma)$, where the R gates are defined by $Z(\theta) X(90) Z(-\theta)$.
+
+This does not build into trueq.NativeGates, it is a direct decomposition from trueq.Gates into trueq.Gates. All other operations are left unchanged in the final cycle which is returned.
+
+This class does not skip immutable cycles.
+
+It accepts 1 cycle and will return either 1 or 3 cycles.
+
+## DEFAULT_PATTERNS¶
+
+compilation.DEFAULT_PATTERNS = (<class 'trueq.compilation.transpile.Native2Q'>, <class 'trueq.compilation.common.Justify'>, <class 'trueq.compilation.common.Merge'>, <class 'trueq.compilation.common.RemoveId'>, <class 'trueq.compilation.transpile.Native1Q'>, functools.partial(<class 'trueq.compilation.common.RemoveId'>, skip_immutable=False), <class 'trueq.compilation.common.InvolvingRestrictions'>)
+
+## InvolvingRestrictions¶
+
+class trueq.compilation.InvolvingRestrictions(config=None)
+
+A pattern which ensures that any NativeGate that is defined from a Config obeys the involving restrictions of its GateFactorys.
+
+Returns a list of Cycles, whose length will not exceed the number of operations inside the original cycle.
+
+Satisfying the involving restrictions is done through a greedy algorithm, and there is no guarantee that the final number of cycles will be optimal.
+
+Cycles retain their immutable flag, and immutable cycles will be broken into pieces as neccessary.
+
+import trueq as tq
+
+# an example config with no initial restrictions
+config = tq.Config.basic("example", entangler=tq.Gate.cx)
+
+# adding a restriction on cx on (0, 1) so that it can not be at the
+# same time as gates on qubit (2, )
+config.cx.involving[(0, 1)] = (2, )
+
+circuit = tq.Circuit([{(0, 1): tq.Gate.cx, (2, 3): tq.Gate.cx, 7: tq.Gate.x}])
+patterns = (tq.compilation.Native2Q, tq.compilation.InvolvingRestrictions)
+tq.compile(config, circuit, patterns)
+
+ Circuit Key: No key present in circuit. imm (0, 1): example.cx() Name: example.cx Aliases: Gate.cx Gate.cnot Likeness: CNOT Generators: 'IX': 90.0 'ZI': 90.0 'ZX': -90.0 Matrix: 0.71 -0.71j 0.71 -0.71j 0.71 -0.71j 0.71 -0.71j (7): Gate.x Name: Gate.x Aliases: Gate.x Gate.cliff1 Generators: 'X': 180.0 Matrix: 1.00 1.00 imm (2, 3): example.cx() Name: example.cx Aliases: Gate.cx Gate.cnot Likeness: CNOT Generators: 'IX': 90.0 'ZI': 90.0 'ZX': -90.0 Matrix: 0.71 -0.71j 0.71 -0.71j 0.71 -0.71j 0.71 -0.71j
+
+## Justify¶
+
+class trueq.compilation.Justify(direction=<Direction.FORWARD: 1>, **_)
+
+Pattern that takes two Cycles, and moves gates preferentially to one side.
+
+This method is inherently limited, because it only deals with 2 Cycles at a time, it can encounter “traffic jams”, IE: If you have two Cycles on qubit 0, followed by a series of empty cycles, the first Cycles Gate cannot move because of the second Cycle, but then the second cycle’s Gate will iteratively progress forward through the empty Cycles. This can be combated by repeating the Justify several times.
+
+This class skips immutable cycles.
+
+Returns 2 Cycles.
+
+import trueq as tq
+
+circuit = tq.Circuit()
+circuit.append({0: tq.Gate.id, 1: tq.Gate.x})
+circuit.append({0: tq.Gate.id})
+circuit.append({0: tq.Gate.id})
+circuit.draw()
+
+pat = tq.compilation.Justify()
+pat.apply(circuit).draw()
+
+Parameters
+
+direction (trueq.compilation.Direction) – Specifies the direction to preferentially move gates, either FORWARD or BACK.
+
+## Merge¶
+
+class trueq.compilation.Merge(n_labels=1, merge_immutable=False, **_)
+
+Pattern that takes two cycles, finds compatabile labels and gates, then merges them to a single gate as much as is possible.
+
+Gates are automatically split into the smallest number of individual gates possible. For example, if the merging results in a two qubit gate that turns out to be the kronecker product of two single qubit gates, then it will automatically be broken apart into the two single qubit gates.
+
+This class skips immutable cycles unless specified.
+
+Returns 2 Cycles.
+
+import trueq as tq
+
+# Make a circuit containing 4 x gates in a row, and merge them together
+circuit = tq.Circuit()
+for _ in range(4):
+circuit.append({0: tq.Gate.x})
+
+pat = tq.compilation.Merge()
+pat.apply(circuit)
+
+ Circuit Key: No key present in circuit. (0): Gate.id Name: Gate.id Aliases: Gate.id Gate.i Gate.cliff0 Likeness: Identity Generators: 'I': 0 Matrix: 1.00 1.00
+Parameters
+• n_labels (int) – How many labels to merge at any given time, if only single qubit merging is desired, then n_labels=1, merging two qubit operations would be n_labels=2 etc. This defaults to single qubit reductions.
+
+• merge_immutable (bool) – If set to True, immutable cycles will be merged, if set to False, then immutable cycles are skipped.
+
+## Native1Q¶
+
+class trueq.compilation.Native1Q(config)
+
+Pattern which expands arbitrary single qubit gates into the decomposition mode provided in a given Config object.
+
+Basics of operation:
+
+1. When asked to decompose a qubit gate on a given label, looks through the config object to find GateFactory objects that apply to that qubit. Checks if these factories are sufficient to build arbitrary single qubit gates according to the mode of the config. This list of factories is stashed against the label.
+
+2. Next, these factories are combined with QubitMode to decompose into 3 or 5 cycles of NativeGates.
+
+This class does NOT skip immutable cycles.
+
+Returns 3 or 5 cycles.
+
+Parameters
+
+config (trueq.Config) – Config object which defines available gates on the system
+
+## Native2Q¶
+
+class trueq.compilation.Native2Q(config, max_depth=3, rounding=5, tol=1e-06)
+
+Series of numerical SU(4) decomposition methods.
+
+Decomposes a target gate into a series of SU(2) gates between non-parameterized SU(4) gates found in the config. This uses the trueq.math.decomposition.decompose_su4() method found below.
+
+This class does NOT skip immutable cycles.
+
+Returns 1 to 2 * max_depth + 1 Cycles.
+
+Parameters
+• config (trueq.Config) – Config object which defines available gates on the system
+
+• max_depth (int) – The maximum number of SU(4) gates to use.
+
+• rounding (int) – How much rounding should be performed on the KAK fitting, this is how many decimal places to round to in terms of degrees, IE: 0 means nearest whole degree, 1 means nearest 0.1 degree etc.
+
+## PhaseTrack¶
+
+class trueq.compilation.PhaseTrack(config, virtual=None)
+
+This pattern tracks phase accumulation on each qubit throughout a circuit, and compiles this phase information into parametric gates.
+
+For example, if a device tunes up two gate pulses, $X90$ and $XX90$ (the maximally entangling Molmer-Sorensen gate), and implements single-qubit Z-rotations virtually, then this pattern will accumulate phases on each qubit based on $Z(\theta)$ gates it finds, and respectively replace $X90$ and $XX90$ gates with parameterized $X90(\phi)$ gates (i.e. 90 degree nutations about a vector in the X-Y plane) and parameterized $XX90(\phi_1, \phi_2)$ gates (i.e. the $XX90$ gate which has been individually phase updated on each qubit). Therefore, pulse sequences can be programmed directly by looping through cycles in a circuit, choosing the pulse shape based on the gate names, and choosing pulse phases based on the parameters of the gates.
+
+See Phase Tracking with the Compiler for detailed usage examples.
+
+Note
+
+This pattern may not output a circuit that implements the same unitary as the input because it may be off by z-rotations (as in the example above) prior to measurement. It will, however, produce the same bitstring statistics because a z-rotation prior to a measurement along the z-axis will not affect bitstring populations.
+
+Parameters
+• config (Config) – The config object that contains all the gate factories of interest.
+
+• virtual (None | GateFactory) – The factory of the virtual gate. By default, the config will be searched for a single-qubit Z-rotation, which will be defined as the virtual gate.
+
+## RemoveId¶
+
+class trueq.compilation.RemoveId(skip_immutable=True, **_)
+
+Pattern that removes identity gates from 1 Cycle.
+
+This is a good class to use as an example for more complex Patterns.
+
+Returns a list containing 1 Cycle.
+
+import trueq as tq
+
+# Make a circuit containing 4 id gates in a row
+circuit = tq.Circuit()
+for _ in range(4):
+circuit.append({0: tq.Gate.id})
+
+# remove all identity gates
+pat = tq.compilation.RemoveId()
+pat.apply(circuit)
+
+This circuit is empty.
+Parameters
+
+skip_immutable (bool) – Determines if identity gates should be removed from immutable cycles. If True, immutable cycles are not altered.
+
+## Relabel¶
+
+class trueq.compilation.Relabel(permutation, **_)
+
+Pattern which relabels all the labels and keys in a Circuit.
+
+This searches through and relabels/reorders entries in the following key entries:
+
+• analyze_decays
+
+• compiled_pauli
+
+• cycle
+
+• measurement_basis
+
+• targeted_errors
+
+• twirl
+
+Note that this does not function when the circuit has results present.
+
+import trueq as tq
+
+old_circ = tq.Circuit([{0: tq.Gate.x, 1: tq.Gate.y, 2: tq.Gate.z}])
+
+# Swapping the labels on qubit 0 and 1, 2 stays
+permutation = {0: 1, 1: 0, 2: 2}
+
+pat = tq.compilation.Relabel(permutation)
+pat.apply(old_circ)
+
+ Circuit Key: No key present in circuit. (0): Gate.y Name: Gate.y Aliases: Gate.y Gate.cliff2 Generators: 'Y': 180.0 Matrix: -1.00j 1.00j (1): Gate.x Name: Gate.x Aliases: Gate.x Gate.cliff1 Generators: 'X': 180.0 Matrix: 1.00 1.00 (2): Gate.z Name: Gate.z Aliases: Gate.z Gate.cliff3 Generators: 'Z': 180.0 Matrix: 1.00 -1.00
+Parameters
+
+permutation (dict) – A dictionary where the keys are the current label and the values are the new labels.
+
+## Direction¶
+
+class trueq.compilation.Direction(value)
+
+Defines the two directions in which Patterns may be applied to a Circuit.
+
+See the description of Pattern for more details.
+
+FORWARD = 1
+BACK = 2
+
+## compile¶
+
+trueq.compile(config, circuit, patterns=None)
+
+Compiles an arbitrary True-Q™ Circuit into a representation which is compatible with a given Config.
+
+By default, this performs a standard set of patterns, and can be used as a template for more advanced compiler definitions. See DEFAULT_PATTERNS for a list of the default patterns which are applied.
+
+Parameters

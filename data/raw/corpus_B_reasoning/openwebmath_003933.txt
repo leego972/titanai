@@ -1,0 +1,258 @@
+## Load packages
+library(kairos)
+library(folio) # Datasets
+
+## Not All Dates Are Created Equal
+
+This vignette presents different methods for dating archaeological assemblages using artifact count data. Here, dating refers to “the placement in time of events relative to one another or to any established scale of temporal measurement” (Dean 1978). This involves distinguishing between relative (that provide only a chronological sequence of events) and absolute dating methods (that yield a calendric indication and may provide the duration of an event) (O’Brien and Lyman 2002). Strictly speaking, there is no absolute dating given how dates are produced and given that any date refers to a scale. The distinction between absolute and relative time can be rephrased more clearly as quantifiable vs non-quantifiable (O’Brien and Lyman 2002): absolute dates “are expressed as points on standard scales of time measurement” (Dean 1978).
+
+We will keep here the distinction between a date an age as formulated by Colman, Pierce, and Birkeland (1987): “a date is a specific point in time, whereas an age is an interval of time measured back from the present.” Dealing with dates in archaeology can be tricky if one does not take into account the sources of the chronological information. In most cases, a date represents a terminus for a given archaeological assemblage. That is, a date before (terminus ante-quem) or after (terminus post-quem) which the formation process of the assemblage took place. This in mind, one obvious question that should underlie any investigation is what does the date represent?
+
+First, let’s be more formal:
+
+• An archaeological event is determined by its unknown calendar date $$t$$ with associated error $$\delta t$$.
+• $$t \pm \delta t$$ can be provided by different means and is assumed to be related to the event.
+
+This implies that:
+
+• There are no error-free dates in archaeology (although uncertainties cannot always be quantified).
+• Errors are assumed here to be symmetrical. This is true for most physical dating methods, but may be false after some data processing (e.g. 14C calibration).
+
+For a set of $$m$$ assemblages in which $$p$$ different types of artifact were recorded, let $$X = \left[ x_{ij} \right] ~\forall i \in \left[ 1,m \right], j \in \left[ 1,p \right]$$ be the $$m \times p$$ count matrix with row and column sums:
+
+\begin{align} x_{i \cdot} = \sum_{j = 1}^{p} x_{ij} && x_{\cdot j} = \sum_{i = 1}^{m} x_{ij} && x_{\cdot \cdot} = \sum_{i = 1}^{m} x_{i \cdot} = \sum_{j = 1}^{p} x_{\cdot j} && \forall x_{ij} \in \mathbb{N} \end{align}
+
+Note that all $$x_{ij}$$ are assumed to be error-free.
+
+## Mean Ceramic Date
+
+### Definition
+
+The Mean Ceramic Date (MCD) is a point estimate of the occupation of an archaeological site (South 1977). The MCD is estimated as the weighted mean of the date midpoints of the ceramic types $$t_j$$ (based on absolute dates or the known production interval) found in a given assemblage. The weights are the conditional frequencies of the respective types in the assemblage.
+
+The MCD is defined as: $t^{MCD}_i = \sum_{j = 1}^{p} t_j \times \frac{x_{ij}}{x_{i \cdot}}$
+
+### Limitation
+
+The MCD is a point estimate: knowing the mid-date of an assemblage and not knowing the time span of accumulation might be short sighted. MCD offers a rough indication of the chronological position of an assemblage, but does not tell if an assemblage represents ten or 100 years.
+
+### Usage
+
+## Coerce the zuni dataset to an abundance (count) matrix
+data("zuni", package = "folio")
+zuni_counts <- as_count(zuni)
+
+## Set the start and end dates for each ceramic type
+zuni_dates <- list(
+LINO = c(600, 875), KIAT = c(850, 950), RED = c(900, 1050),
+GALL = c(1025, 1125), ESC = c(1050, 1150), PUBW = c(1050, 1150),
+RES = c(1000, 1200), TULA = c(1175, 1300), PINE = c(1275, 1350),
+PUBR = c(1000, 1200), WING = c(1100, 1200), WIPO = c(1125, 1225),
+SJ = c(1200, 1300), LSJ = c(1250, 1300), SPR = c(1250, 1300),
+PINER = c(1275, 1325), HESH = c(1275, 1450), KWAK = c(1275, 1450)
+)
+
+## Calculate date midpoint
+zuni_mid <- vapply(X = zuni_dates, FUN = mean, FUN.VALUE = numeric(1))
+
+## Calculate MCD
+zuni_mcd <- mcd(zuni_counts, dates = zuni_mid)
+#> LZ1105 LZ1103 LZ1100 LZ1099 LZ1097 LZ1096
+#>   1162   1138   1154   1091   1092    841
+
+## Event & Accumulation Date
+
+### Definition
+
+Event and accumulation dates are density estimates of the occupation and duration of an archaeological site (Bellanger, Husi, and Tomassone 2006; Bellanger, Tomassone, and Husi 2008; Bellanger and Husi 2012).
+
+The event date is an estimation of the terminus post-quem of an archaeological assemblage. The accumulation date represents the “chronological profile” of the assemblage. According to Bellanger and Husi (2012), accumulation date can be interpreted “at best […] as a formation process reflecting the duration or succession of events on the scale of archaeological time, and at worst, as imprecise dating due to contamination of the context by residual or intrusive material.” In other words, accumulation dates estimate occurrence of archaeological events and rhythms of the long term.
+
+#### Event Date
+
+Event dates are estimated by fitting a Gaussian multiple linear regression model on the factors resulting from a correspondence analysis - somewhat similar to the idea introduced by Poblome and Groenen (2003). This model results from the known dates of a selection of reliable contexts and allows to predict the event dates of the remaining assemblages.
+
+First, a correspondence analysis (CA) is carried out to summarize the information in the count matrix $$X$$. The correspondence analysis of $$X$$ provides the coordinates of the $$m$$ rows along the $$q$$ factorial components, denoted $$f_{ik} ~\forall i \in \left[ 1,m \right], k \in \left[ 1,q \right]$$.
+
+Then, assuming that $$n$$ assemblages are reliably dated by another source, a Gaussian multiple linear regression model is fitted on the factorial components for the $$n$$ dated assemblages:
+
+$t^E_i = \beta_{0} + \sum_{k = 1}^{q} \beta_{k} f_{ik} + \epsilon_i ~\forall i \in [1,n]$ where $$t^E_i$$ is the known date point estimate of the $$i$$th assemblage, $$\beta_k$$ are the regression coefficients and $$\epsilon_i$$ are normally, identically and independently distributed random variables, $$\epsilon_i \sim \mathcal{N}(0,\sigma^2)$$.
+
+These $$n$$ equations are stacked together and written in matrix notation as
+
+$t^E = F \beta + \epsilon$
+
+where $$\epsilon \sim \mathcal{N}_{n}(0,\sigma^2 I_{n})$$, $$\beta = \left[ \beta_0 \cdots \beta_q \right]' \in \mathbb{R}^{q+1}$$ and
+
+$F = \begin{bmatrix} 1 & f_{11} & \cdots & f_{1q} \\ 1 & f_{21} & \cdots & f_{2q} \\ \vdots & \vdots & \ddots & \vdots \\ 1 & f_{n1} & \cdots & f_{nq} \end{bmatrix}$
+
+Assuming that $$F'F$$ is nonsingular, the ordinary least squares estimator of the unknown parameter vector $$\beta$$ is:
+
+$\widehat{\beta} = \left( F'F \right)^{-1} F' t^E$
+
+Finally, for a given vector of CA coordinates $$f_i$$, the predicted event date of an assemblage $$t^E_i$$ is:
+
+$\widehat{t^E_i} = f_i \hat{\beta}$
+
+The endpoints of the $$100(1 − \alpha)$$% associated prediction confidence interval are given as:
+
+$\widehat{t^E_i} \pm t_{\alpha/2,n-q-1} \sqrt{\widehat{V}}$
+
+where $$\widehat{V_i}$$ is an estimator of the variance of the prediction error: $\widehat{V_i} = \widehat{\sigma}^2 \left( f_i^T \left( F'F \right)^{-1} f_i + 1 \right)$
+
+were $$\widehat{\sigma} = \frac{\sum_{i=1}^{n} \left( t_i - \widehat{t^E_i} \right)^2}{n - q - 1}$$.
+
+The probability density of an event date $$t^E_i$$ can be described as a normal distribution:
+
+$t^E_i \sim \mathcal{N}(\widehat{t^E_i},\widehat{V_i})$
+
+#### Accumulation Date
+
+As row (assemblages) and columns (types) CA coordinates are linked together through the so-called transition formulae, event dates for each type $$t^E_j$$ can be predicted following the same procedure as above.
+
+Then, the accumulation date $$t^A_i$$ is defined as the weighted mean of the event date of the ceramic types found in a given assemblage. The weights are the conditional frequencies of the respective types in the assemblage (akin to the MCD).
+
+The accumulation date is estimated as: $\widehat{t^A_i} = \sum_{j = 1}^{p} \widehat{t^E_j} \times \frac{x_{ij}}{x_{i \cdot}}$
+
+The probability density of an accumulation date $$t^A_i$$ can be described as a Gaussian mixture:
+
+$t^A_i \sim \frac{x_{ij}}{x_{i \cdot}} \mathcal{N}(\widehat{t^E_j},\widehat{V_j}^2)$
+
+Interestingly, the integral of the accumulation date offers an estimates of the cumulative occurrence of archaeological events, which is close enough to the definition of the tempo plot introduced by Dye (2016).
+
+### Limitation
+
+Event and accumulation dates estimation relies on the same conditions and assumptions as the matrix seriation problem. Dunnell (1970) summarizes these conditions and assumptions as follows.
+
+The homogeneity conditions state that all the groups included in a seriation must:
+
+• Be of comparable duration.
+• Belong to the same cultural tradition.
+• Come from the same local area.
+
+The mathematical assumptions state that the distribution of any historical or temporal class:
+
+• Is continuous through time.
+• Exhibits the form of a unimodal curve.
+
+Theses assumptions create a distributional model and ordering is accomplished by arranging the matrix so that the class distributions approximate the required pattern. The resulting order is inferred to be chronological.
+
+Predicted dates have to be interpreted with care: these dates are highly dependent on the range of the known dates and the fit of the regression.
+
+### Usage
+
+This package provides an implementation of the chronological modeling method developed by Bellanger and Husi (2012). This method is slightly modified here and allows the construction of different probability density curves of archaeological assemblage dates (event, activity and tempo).
+
+## Bellanger et al. did not publish the data supporting their demonstration:
+## no replication of their results is possible.
+## Here is a pseudo-reproduction using the zuni dataset
+
+## Assume that some assemblages are reliably dated (this is NOT a real example)
+## The names of the vector entries must match the names of the assemblages
+zuni_dates <- c(
+LZ0569 = 1097, LZ0279 = 1119, CS16 = 1328, LZ0066 = 1111,
+LZ0852 = 1216, LZ1209 = 1251, CS144 = 1262, LZ0563 = 1206,
+LZ0329 = 1076, LZ0005Q = 859, LZ0322 = 1109, LZ0067 = 863,
+LZ0578 = 1180, LZ0227 = 1104, LZ0610 = 1074
+)
+
+## Model the event and accumulation date for each assemblage
+model <- event(zuni_counts, dates = zuni_dates, cutoff = 90)
+summary(get_model(model))
+#>
+#> Call:
+#> stats::lm(formula = date ~ ., data = contexts, na.action = stats::na.omit)
+#>
+#> Residuals:
+#>         1         2         3         4         5         6         7         8
+#>  0.517235 -4.017534 -0.279200  0.662137 -1.246499  0.576044  2.634482 -4.383683
+#>         9        10        11        12        13        14        15
+#> -1.093837 -0.005002  2.543773 -0.032706  3.480918 -0.759429  1.403301
+#>
+#> Coefficients:
+#>             Estimate Std. Error  t value Pr(>|t|)
+#> (Intercept) 1164.350      1.892  615.459 2.15e-13 ***
+#> F1          -158.314      1.472 -107.582 1.32e-09 ***
+#> F2            25.629      1.444   17.753 1.04e-05 ***
+#> F3            -5.546      1.905   -2.912   0.0333 *
+#> F4            11.416      3.407    3.351   0.0203 *
+#> F5            -2.713      2.448   -1.108   0.3183
+#> F6             2.697      1.181    2.285   0.0711 .
+#> F7             3.966      3.001    1.322   0.2435
+#> F8            11.132      2.941    3.785   0.0128 *
+#> F9            -4.886      2.020   -2.418   0.0602 .
+#> ---
+#> Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+#>
+#> Residual standard error: 3.669 on 5 degrees of freedom
+#>   (405 observations deleted due to missingness)
+#> Multiple R-squared:  0.9997, Adjusted R-squared:  0.9992
+#> F-statistic:  1979 on 9 and 5 DF,  p-value: 2.456e-08
+
+## Estimate event dates
+event <- predict_event(model, margin = 1, level = 0.95)
+#>        date lower upper error
+#> LZ1105 1168  1158  1178     4
+#> LZ1103 1143  1139  1147     1
+#> LZ1100 1156  1148  1164     3
+#> LZ1099 1099  1092  1106     3
+#> LZ1097 1088  1080  1097     3
+#> LZ1096  839   829   849     4
+
+## Estimate accumulation dates
+acc <- predict_accumulation(model)
+#> LZ1105 LZ1103 LZ1100 LZ1099 LZ1097 LZ1096
+#>   1170   1140   1158   1087   1092    875
+## Activity plot
+plot(model, type = "activity", event = TRUE, select = "LZ1105")
+
+
+## Tempo plot
+plot(model, type = "tempo", select = "LZ1105")
+
+Resampling methods can be used to check the stability of the resulting model. If jackknife() is used, one type/fabric is removed at a time and all statistics are recalculated. In this way, one can assess whether certain type/fabric has a substantial influence on the date estimate. If bootstrap() is used, a large number of new bootstrap assemblages is created, with the same sample size, by resampling the original assemblage with replacement. Then, examination of the bootstrap statistics makes it possible to pinpoint assemblages that require further investigation.
+
+## Check model variability
+## Warning: this may take a few seconds
+
+## Jackknife fabrics
+jack <- jackknife(model)
+#>        date lower upper error  bias
+#> LZ1105 1457  1447  1466     4  4913
+#> LZ1103  948   945   952     1 -3315
+#> LZ1100 1094  1086  1102     3 -1054
+#> LZ1099 1253  1246  1260     3  2618
+#> LZ1097  917   908   925     3 -2907
+#> LZ1096 1060  1050  1070     4  3757
+
+## Bootstrap of assemblages
+boot <- bootstrap(model, n = 30)
+#>         min     mean  max      Q5     Q95
+#> LZ1105 1122 1165.500 1206 1134.70 1190.65
+#> LZ1103 1070 1146.433 1202 1091.35 1184.95
+#> LZ1100 1021 1148.133 1221 1095.15 1193.80
+#> LZ1099 1089 1099.767 1115 1089.00 1108.20
+#> LZ1097  992 1085.833 1162 1006.05 1155.60
+#> LZ1096  726  842.000  991  726.00  943.30
+
+## References
+
+Bellanger, L., Ph. Husi, and R. Tomassone. 2006. “Une approche statistique pour la datation de contextes archéologiques.” Revue de statistique appliquée 54 (2): 65–81. https://doi.org/10.1111/j.1475-4754.2006.00249.x.
+
+Bellanger, Lise, and Philippe Husi. 2012. “Statistical Tool for Dating and Interpreting Archaeological Contexts Using Pottery.” Journal of Archaeological Science 39 (4): 777–90. https://doi.org/10.1016/j.jas.2011.06.031.
+
+Bellanger, L., R. Tomassone, and P. Husi. 2008. “A Statistical Approach for Dating Archaeological Contexts.” Journal of Data Science 6: 135–54.
+
+Colman, Steven M., Kenneth L. Pierce, and Peter W. Birkeland. 1987. “Suggested Terminology for Quaternary Dating Methods.” Quaternary Research 28 (2): 314–19. https://doi.org/10.1016/0033-5894(87)90070-6.
+
+Dean, Jeffrey S. 1978. “Independent Dating in Archaeological Analysis.” In Advances in Archaeological Method and Theory, 223–55. Elsevier. https://doi.org/10.1016/B978-0-12-003101-6.50013-5.
+
+Dunnell, Robert C. 1970. “Seriation Method and Its Evaluation.” American Antiquity 35 (03): 305–19. https://doi.org/10.2307/278341.
+
+Dye, Thomas S. 2016. “Long-Term Rhythms in the Development of Hawaiian Social Stratification.” Journal of Archaeological Science 71 (July): 1–9. https://doi.org/10.1016/j.jas.2016.05.006.
+
+O’Brien, Michael J, and R. Lee Lyman. 2002. Seriation, Stratigraphy, and Index Fossils: The Backbone of Archaeological Dating. Dordrecht: Springer.
+
+Poblome, J., and P. J. F. Groenen. 2003. “Constrained Correspondence Analysis for Seriation of Sagalassos Tablewares.” In The Digital Heritage of Archaeology, edited by M. Doerr and A. Sarris. Hellenic Ministry of Culture.
+
+South, S. A. 1977. Method and Theory in Historical Archaeology. Studies in Archeology. New York: Academic Press.

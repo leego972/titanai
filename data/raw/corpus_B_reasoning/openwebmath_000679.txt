@@ -1,0 +1,80 @@
+# K-Fold Crossvalidation in Tensorflow when using flow_from_directory for image recognition
+
+Disclaimer: I have very little experience with Tensorflow.
+
+I have a custom dataset with 20 categories with 100+ images in each. I am doing 5-fold cross validation using InceptionV3 for transfer learning. The easiest way to load this dataset into Tensorflow that I was able to find was flow_from_directory. The method works for one fold, but not for 5 folds since you can't set the folds. How would I go about dividing up the generators into 5 folds? Should I use an alternative method of importing data instead of flow_from_directory? There was a similar question where the answer was seemingly just importing it in a different way.
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+datagen=ImageDataGenerator(preprocessing_function=preprocess_input,
+validation_split=0.2)
+train_generator=datagen.flow_from_directory('/content/dataset',
+target_size=(299,299),
+color_mode='rgb',
+batch_size=32,
+class_mode='categorical',
+shuffle=True,
+subset='training')
+val_generator = datagen.flow_from_directory('/content/dataset',
+target_size=(299,299),
+color_mode='rgb',
+batch_size=32,
+class_mode='categorical',
+shuffle=True,
+subset='validation')
+
+
+The easiest way I found was replacing flow_from_directory command to flow_from_dataframe (for more information on this command see).
+
+That way you can split the dataframe. You just have to make a dataframe with images paths and labels.
+
+ i = 1
+df_metrics = pd.DataFrame()
+kf = KFold(n_splits = 10, shuffle = True, random_state = None)
+for train_index, test_index in kf.split(dataframe):
+trainData = dataframe.iloc[train_index]
+testData = dataframe.iloc[test_index]
+print('Initializing Kfold %s'%str(i))
+print('Train shape:',trainData.shape)
+print('Test shape:',testData.shape)
+epochs = 30
+
+train_datagen = ImageDataGenerator(rescale=1./255,validation_split=0.2)
+test_datagen = ImageDataGenerator(rescale=1. / 255)
+
+train_generator=train_datagen.flow_from_dataframe(
+dataframe=trainData,
+directory="./train/",
+x_col="id",
+y_col="label",
+subset="training",
+batch_size=batch_size,
+shuffle=True,
+class_mode="categorical",
+target_size=(img_width, img_height))
+
+validation_generator=train_datagen.flow_from_dataframe(
+dataframe=trainData,
+directory="./train/",
+x_col="id",
+y_col="label",
+subset="validation",
+batch_size=batch_size,
+shuffle=True,
+class_mode="categorical",
+target_size=(img_width, img_height))
+
+test_generator=test_datagen.flow_from_dataframe(
+dataframe=testData,
+directory="./test/",
+x_col="id",
+y_col="label",
+batch_size=1,
+shuffle=False,
+class_mode="categorical",
+target_size=(img_width, img_height)
+
+.
+.
+.
+
+i +=1

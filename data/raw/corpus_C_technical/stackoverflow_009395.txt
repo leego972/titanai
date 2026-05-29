@@ -1,0 +1,95 @@
+Question: <p>Is there any way to split a long string of HTML after N words? Obviously I could use:</p>
+
+<pre><code>' '.join(foo.split(' ')[:n])
+</code></pre>
+
+<p>to get the first n words of a plain text string, but that might split in the middle of an html tag, and won't produce valid html because it won't close the tags that have been opened.</p>
+
+<p>I need to do this in a zope / plone site - if there is something as standard in those products that can do it, that would be ideal.</p>
+
+<p>For example, say I have the text:</p>
+
+<pre><code>&lt;p&gt;This is some text with a 
+  &lt;a href="http://www.example.com/" title="Example link"&gt;
+     bit of linked text in it
+  &lt;/a&gt;.
+&lt;/p&gt;
+</code></pre>
+
+<p>And I ask it to split after 5 words, it should return:</p>
+
+<pre><code>&lt;p&gt;This is some text with&lt;/p&gt;
+</code></pre>
+
+<p>7 words:</p>
+
+<pre><code>&lt;p&gt;This is some text with a 
+  &lt;a href="http://www.example.com/" title="Example link"&gt;
+     bit
+  &lt;/a&gt;
+&lt;/p&gt;
+</code></pre>
+
+Answer: <p>You can use a mix of regex, BeautifulSoup or Tidy (I prefer BeautifulSoup).
+The idea is simple - strip all the HTML tags first. Find the nth word (n=7 here), find the number of times the nth word appears in the string till n words - coz u are looking only for the last occurrence to be used for truncation.</p>
+
+<p>Here is a piece of code, though a bit messy but works</p>
+
+<pre><code>import re
+from BeautifulSoup import BeautifulSoup
+import tidy
+
+def remove_html_tags(data):
+    p = re.compile(r'&lt;.*?&gt;')
+    return p.sub('', data)
+
+input_string='&lt;p&gt;This is some text with a &lt;a href="http://www.example.com/" '\
+    'title="Example link"&gt;bit of linked text in it&lt;/a&gt;&lt;/p&gt;'
+
+s=remove_html_tags(input_string).split(' ')[:7]
+
+###required to ensure that only the last occurrence of the nth word is                                                                                      
+#  taken into account for truncating.                                                                                                                       
+#  coz if the nth word could be 'a'/'and'/'is'....etc                                                                                                       
+#  which may occur multiple times within n words                                                                                                            
+temp=input_string
+k=s.count(s[-1])
+i=1
+j=0
+while i&lt;=k:
+    j+=temp.find(s[-1])
+    temp=temp[j+len(s[-1]):]
+    i+=1
+####                                                                                                                                                        
+output_string=input_string[:j+len(s[-1])]
+
+print "\nBeautifulSoup\n", BeautifulSoup(output_string)
+print "\nTidy\n", tidy.parseString(output_string)
+</code></pre>
+
+<p>The output is what u want</p>
+
+<pre><code>BeautifulSoup
+&lt;p&gt;This is some text with a &lt;a href="http://www.example.com/" title="Example link"&gt;bit&lt;/a&gt;&lt;/p&gt;
+
+Tidy
+&lt;!DOCTYPE html PUBLIC "-//W3C//DTD HTML 3.2//EN"&gt;
+&lt;html&gt;
+&lt;head&gt;
+&lt;meta name="generator" content=
+"HTML Tidy for Linux/x86 (vers 6 November 2007), see www.w3.org"&gt;
+&lt;title&gt;&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;p&gt;This is some text with a &lt;a href="http://www.example.com/"
+title="Example link"&gt;bit&lt;/a&gt;&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+
+<p>Hope this helps</p>
+
+<p><strong>Edit:</strong> A better regex </p>
+
+<pre><code>`p = re.compile(r'&lt;[^&lt;]*?&gt;')`
+</code></pre>

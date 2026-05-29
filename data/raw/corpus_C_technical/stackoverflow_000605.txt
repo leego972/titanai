@@ -1,0 +1,48 @@
+Question: <p>Is there a way to conveniently define a C-like structure in Python? I'm tired of writing stuff like:</p>
+
+<pre><code>class MyStruct():
+    def __init__(self, field1, field2, field3):
+        self.field1 = field1
+        self.field2 = field2
+        self.field3 = field3
+</code></pre>
+
+Answer: <p>I wrote a decorator which you can use on any method to make it so that all of the arguments passed in, or any defaults, are assigned to the instance.</p>
+
+<pre><code>def argumentsToAttributes(method):
+    argumentNames = method.func_code.co_varnames[1:]
+
+    # Generate a dictionary of default values:
+    defaultsDict = {}
+    defaults = method.func_defaults if method.func_defaults else ()
+    for i, default in enumerate(defaults, start = len(argumentNames) - len(defaults)):
+        defaultsDict[argumentNames[i]] = default
+
+    def newMethod(self, *args, **kwargs):
+        # Use the positional arguments.
+        for name, value in zip(argumentNames, args):
+            setattr(self, name, value)
+
+        # Add the key word arguments. If anything is missing, use the default.
+        for name in argumentNames[len(args):]:
+            setattr(self, name, kwargs.get(name, defaultsDict[name]))
+
+        # Run whatever else the method needs to do.
+        method(self, *args, **kwargs)
+
+    return newMethod
+</code></pre>
+
+<p>A quick demonstration. Note that I use a positional argument <code>a</code>, use the default value for <code>b</code>, and a named argument <code>c</code>. I then print all 3 referencing <code>self</code>, to show that they've been properly assigned before the method is entered.</p>
+
+<pre><code>class A(object):
+    @argumentsToAttributes
+    def __init__(self, a, b = 'Invisible', c = 'Hello'):
+        print(self.a)
+        print(self.b)
+        print(self.c)
+
+A('Why', c = 'Nothing')
+</code></pre>
+
+<p>Note that my decorator should work with any method, not just <code>__init__</code>.</p>

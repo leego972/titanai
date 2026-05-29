@@ -1,0 +1,27 @@
+Question: <p>The docs say that calling sys.exit() raises a SystemExit exception which can be caught in outer levels.  I have a situation in which I want to definitively and unquestionably exit from inside a test case, however the unittest module catches SystemExit and prevents the exit.  This is normally great, but the specific situation I am trying to handle is one where our test framework has detected that it is configured to point to a non-test database.  In this case I want to exit and prevent any further tests from being run.  Of course since unittest traps the SystemExit and continues happily on it's way, it is thwarting me.</p>
+
+<p>The only option I have thought of so far is using ctypes or something similar to call   exit(3) directly but this seems like a pretty fugly hack for something that should be really simple.</p>
+
+Answer: <p>As Jerub said, <code>os._exit(1)</code> is your answer. But, considering it bypasses <em>all</em> cleanup procedures, including <code>finally:</code> blocks, closing files, etc, and should really be avoided at all costs, may I present a "safer-ish" way of using it?</p>
+
+<p>If you problem is <code>SystemExit</code> being caught at outer levels (ie, unittest), then <strong><em>be the outer level yourself!</em></strong> Wrap your main code in a try/except block, catch SystemExit, and call os._exit there, <em>and <strong>only</strong> there!</em> This way you may call <code>sys.exit</code> normally anywhere in the code, let it bubble out to the top level, gracefully closing all files and running all cleanups, and <em>then</em> calling os._exit.</p>
+
+<p>You can even choose which exits are the "emergency" ones. The code below is an example of such approach:</p>
+
+<pre><code>import sys, os
+
+EMERGENCY = 255  # can be any number actually
+
+try:
+    # wrap your whole code here ...
+    # ... some code
+    if x: sys.exit()
+    # ... some more code
+    if y: sys.exit(EMERGENCY)  # use only for emergency exits
+    # ...
+except SystemExit as e:
+    if e.code != EMERGENCY:
+        raise  # normal exit, let unittest catch it
+    else:
+        os._exit(EMERGENCY)  # try to stop *that*, sucker!
+</code></pre>

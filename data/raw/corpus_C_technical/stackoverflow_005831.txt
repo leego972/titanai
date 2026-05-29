@@ -1,0 +1,166 @@
+Question: <p>What is the use of the <code>yield</code> keyword in Python? What does it do?</p>
+
+<p>For example, I'm trying to understand this code<sup><strong>1</strong></sup>:</p>
+
+<pre><code>def _get_child_candidates(self, distance, min_dist, max_dist):
+    if self._leftchild and distance - max_dist &lt; self._median:
+        yield self._leftchild
+    if self._rightchild and distance + max_dist &gt;= self._median:
+        yield self._rightchild  
+</code></pre>
+
+<p>And this is the caller:</p>
+
+<pre><code>result, candidates = list(), [self]
+while candidates:
+    node = candidates.pop()
+    distance = node._get_dist(obj)
+    if distance &lt;= max_dist and distance &gt;= min_dist:
+        result.extend(node._values)
+    candidates.extend(node._get_child_candidates(distance, min_dist, max_dist))
+return result
+</code></pre>
+
+<p>What happens when the method <code>_get_child_candidates</code> is called?
+A list is returned? A single element is returned? Is it called again? When will subsequent calls stop?</p>
+
+<hr>
+
+<p><sub>
+1. The code comes from Jochen Schulz (jrschulz), who made a great Python library for metric spaces. This is the link to the complete source: <a href="http://well-adjusted.de/~jrschulz/mspace/">Module mspace</a>.</sub></p>
+
+Answer: <p>The <code>yield</code> keyword is reduced to two simple facts:</p>
+
+<ol>
+<li>If the compiler detects the <code>yield</code> keyword <em>anywhere</em> inside a function, that function no longer returns via the <code>return</code> statement. <strong><em>Instead</em></strong>, it <strong>immediately</strong> returns a <strong>lazy "pending list" object</strong> called a generator</li>
+<li>A generator is iterable. What is an <em>iterable</em>? It's anything like a <code>list</code> or <code>set</code> or <code>range</code> or dict-view, with a <em>built-in protocol for visiting each element in a certain order</em>.</li>
+</ol>
+
+<p>In a nutshell: <strong>a generator is a lazy, incrementally-pending list</strong>, and <strong><code>yield</code> statements allow you to use function notation to program the list values</strong> the generator should incrementally spit out.</p>
+
+<pre><code>generator = myYieldingFunction(...)
+x = list(generator)
+
+   generator
+       v
+[x[0], ..., ???]
+
+         generator
+             v
+[x[0], x[1], ..., ???]
+
+               generator
+                   v
+[x[0], x[1], x[2], ..., ???]
+
+                       StopIteration exception
+[x[0], x[1], x[2]]     done
+
+list==[x[0], x[1], x[2]]
+</code></pre>
+
+<hr>
+
+<h2>Example</h2>
+
+<p>Let's define a function <code>makeRange</code> that's just like Python's <code>range</code>. Calling <code>makeRange(n)</code> RETURNS A GENERATOR:</p>
+
+<pre><code>def makeRange(n):
+    # return 0,1,2,...,n-1
+    i = 0
+    while i &lt; n:
+        yield i
+        i += 1
+
+&gt;&gt;&gt; makeRange(5)
+&lt;generator object makeRange at 0x19e4aa0&gt;
+</code></pre>
+
+<p>To force the generator to immediately return its pending values, you can pass it into <code>list()</code> (just like you could any iterable):</p>
+
+<pre><code>&gt;&gt;&gt; list(makeRange(5))
+[0, 1, 2, 3, 4]
+</code></pre>
+
+<hr>
+
+<h2>Comparing example to "just returning a list"</h2>
+
+<p>The above example can be thought of as merely creating a list which you append to and return:</p>
+
+<pre><code># list-version                   #  # generator-version
+def makeRange(n):                #  def makeRange(n):
+    """return [0,1,2,...,n-1]""" #~     """return 0,1,2,...,n-1"""
+    TO_RETURN = []               #&gt;
+    i = 0                        #      i = 0
+    while i &lt; n:                 #      while i &lt; n:
+        TO_RETURN += [i]         #~         yield i
+        i += 1                   #      i += 1
+    return TO_RETURN             #&gt;
+
+&gt;&gt;&gt; makeRange(5)
+[0, 1, 2, 3, 4]
+</code></pre>
+
+<p>There is one major difference though; see the last section.</p>
+
+<hr>
+
+<h2>How you might use generators</h2>
+
+<p>An iterable is the last part of a list comprehension, and all generators are iterable, so they're often used like so:</p>
+
+<pre><code>#                   _ITERABLE_
+&gt;&gt;&gt; [x+10 for x in makeRange(5)]
+[10, 11, 12, 13, 14]
+</code></pre>
+
+<p>To get a better feel for generators, you can play around with the <code>itertools</code> module (be sure to use <code>chain.from_iterable</code> rather than <code>chain</code> when warranted). For example, you might even use generators to implement infinitely-long lazy lists like <code>itertools.count()</code>. You could implement your own <code>def enumerate(iterable): zip(count(), iterable)</code>, or alternatively do so with the <code>yield</code> keyword in a while-loop.</p>
+
+<p>Please note: generators can actually be used for many more things, such as <a href="http://www.dabeaz.com/coroutines/index.html">implementing coroutines</a> or non-deterministic programming or other elegant things. However, the "lazy lists" viewpoint I present here is the most common use you will find.</p>
+
+<hr>
+
+<h2>Behind the scenes</h2>
+
+<p>This is how the "Python iteration protocol" works. That is, what is going on when you do <code>list(makeRange(5))</code>. This is what I describe earlier as a "lazy, incremental list".</p>
+
+<pre><code>&gt;&gt;&gt; x=iter(range(5))
+&gt;&gt;&gt; next(x)
+0
+&gt;&gt;&gt; next(x)
+1
+&gt;&gt;&gt; next(x)
+2
+&gt;&gt;&gt; next(x)
+3
+&gt;&gt;&gt; next(x)
+4
+&gt;&gt;&gt; next(x)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+StopIteration
+</code></pre>
+
+<p>The built-in function <code>next()</code> just calls the objects <code>.next()</code> function, which is a part of the "iteration protocol" and is found on all iterators. You can manually use the <code>next()</code> function (and other parts of the iteration protocol) to implement fancy things, usually at the expense of readability, so try to avoid doing that...</p>
+
+<hr>
+
+<h2>Minutiae</h2>
+
+<p>Normally, most people would not care about the following distinctions and probably want to stop reading here.</p>
+
+<p>In Python-speak, an <em>iterable</em> is any object which "understands the concept of a for-loop" like a list <code>[1,2,3]</code>, and an <em>iterator</em> is a specific instance of the requested for-loop like <code>[1,2,3].__iter__()</code>. A <em>generator</em> is exactly the same as any iterator, except for the way it was written (with function syntax).</p>
+
+<p>When you request an iterator from a list, it creates a new iterator. However, when you request an iterator from an iterator (which you would rarely do), it just gives you a copy of itself.</p>
+
+<p>Thus, in the unlikely event that you are failing to do something like this...</p>
+
+<pre><code>&gt; x = myRange(5)
+&gt; list(x)
+[0, 1, 2, 3, 4]
+&gt; list(x)
+[]
+</code></pre>
+
+<p>... then remember that a generator is an <em>iterator</em>; that is, it is one-time-use. If you want to reuse it, you should call <code>myRange(...)</code> again. If you need to use the result twice, convert the result to a list and store it in a variable <code>x = list(myRange(5))</code>. Those who absolutely need to clone a generator (for example, who are doing terrifyingly hackish metaprogramming) can use <a href="https://docs.python.org/2/library/itertools.html#itertools.tee"><code>itertools.tee</code></a> if absolutely necessary, since the copyable iterator Python <a href="http://en.wikipedia.org/wiki/Python_Enhancement_Proposal#Development">PEP</a> standards proposal has been deferred.</p>

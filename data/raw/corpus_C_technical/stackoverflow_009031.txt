@@ -1,0 +1,51 @@
+Question: <p>I currently am trying to write a Python program using scheme semantics so I can later translate it into Scheme without relying on a lot of Pythonic stuff.</p>
+
+<p>I'm trying solve the sliding puzzle problem (where you have 9 slots and 8 tiles arranged in a square) using a*, depth first, and breadth first search algorithm.  I did this ~11 years ago in some AI class in Lisp, but basically at the time I had no idea about lisp, I hated it with all my heart, and only in retrospect do I realize I was programming "C" in Lisp.  The prof didn't help in this matter.</p>
+
+<p>I have a python function which can swap two tiles easily:  </p>
+
+<pre><code>def swap(p, (r1, c1), (r2, c2)):  
+    # Swaps *any* two locations and returns new configuration  
+    # Does not concern itself with zero location, etc  
+    # Not sure how to do this functionally  
+    p_p = p[:]  
+    temp = p_p[r1][c1]  
+    p_p[r1][c1] = p_p[r2][c2]  
+    p_p[r2][c2] = temp  
+    return p_p  
+</code></pre>
+
+<p>I'd like to turn this into something you might find in SICP, avoiding side effects, etc.  </p>
+
+<p>But this brings up a question.  Everything I read in SICP is loops via recursion.  I didn't see anything in accessing arrays/vectors/lists in constant time.  I can imagine a loopish/recursive way to read an element, but I find it harder to imagine a way to create a new list with a certain element changed, without invoking side-effect producing things like set!, and without resorting to crazy if/then/else clauses concerning which element should be changed.  This of course gets more confusing when considering a 2d array.  In this case the solution with python is obvious because of its native support for multidimensional arrays.</p>
+
+<p>In C/C++/Python/Matlab/Lua/anything else, accessing lists/arrays via the [i] syntax is easy, and directly translates to a hardware-oriented pointer lookup somewhere underneath.  I don't understand how scheme does this, given the atomic operations defined in the SICP version of scheme, which all seem very loop-and-search oriented.  How do the vector and list array access functions work to get constant time access?  (I'm a total newbie here, so I'm not ever sure what functions I'd be talking about).  Is there a C or Assembly library someplace which is secretly being accessed?  Are there any inherent constant-time semantics in scheme which could be used for list/array/vector access, and which would allow me a guilt-free way of using that idiom in Python for the moment?  </p>
+
+<p>How would can I rewrite the above function in python using Schemish semantics?  How would I rewrite the above function in Scheme?</p>
+
+Answer: <p>Here's one way to achieve it.  Recreate the list using a function which will apply the appropriate mapping.</p>
+
+<pre><code>def swap(p, (r1,c1), (r2,c2)):
+    def getitem(r,c):
+        if (r,c) == (r1,c1): return p[r2][c2]
+        elif (r,c) == (r2,c2): return p[r1][c1]
+        return p[r][c]
+    return [ [getitem(r,c) for c in range(len(p[0]))] for r in range(len(p)) ]
+</code></pre>
+
+<p>You could even take this a step further and make the function be the actual interface, where each swap merely returns a function that does the appropriate conversions before passing through to the function below.  Not particularly performant, but a fairly simple functional approach that dispenses with nasty mutable datastructures:</p>
+
+<pre><code>def swap(f, (r1,c1), (r2,c2)):
+    def getitem(r,c):
+        if (r,c) == (r1,c1): return f(r2,c2)
+        elif (r,c) == (r2,c2): return f(r1,c1)
+        return f(r,c)
+   return getitem
+
+l=[ [1,2,3], [4,5,6], [7,8,0]]
+f=lambda r,c: l[r][c]    # Initial accessor function
+f=swap(f, (2,1), (2,2))  # 8 right
+f=swap(f, (1,1), (2,1))  # 5 down
+print [[f(x,y) for y in range(3)] for x in range(3)]
+# Gives: [[1, 2, 3], [4, 0, 6], [7, 5, 8]]
+</code></pre>

@@ -1,0 +1,600 @@
+# Finite State Machines, Automata, Transducers¶
+
+This module adds support for finite state machines, automata and transducers. See class FiniteStateMachine and the examples below for details creating one.
+
+## Examples¶
+
+### A simple finite state machine¶
+
+We can easily create a finite state machine by
+
+sage: fsm = FiniteStateMachine()
+sage: fsm
+Finite state machine with 0 states
+
+
+By default this is the empty finite state machine, so not very interesting. Let’s create some states and transitions:
+
+sage: from sage.combinat.finite_state_machine import FSMState, FSMTransition
+sage: day = FSMState('day')
+sage: night = FSMState('night')
+sage: sunrise = FSMTransition(night, day)
+sage: sunset = FSMTransition(day, night)
+
+
+And now let’s add those states and transitions to our finite state machine:
+
+sage: fsm.add_transition(sunrise)
+Transition from 'night' to 'day': -|-
+Transition from 'day' to 'night': -|-
+
+
+Note that the states are added automatically, since they are present in the transitions. We could add the states manually by
+
+sage: fsm.add_state(day)
+'day'
+'night'
+
+
+Anyhow, we got the following finite state machine:
+
+sage: fsm
+Finite state machine with 2 states
+
+
+We can also visualize it as a graph by
+
+sage: fsm.graph()
+Digraph on 2 vertices
+
+
+Alternatively, we could have created the finite state machine above simply by
+
+sage: FiniteStateMachine([('night', 'day'), ('day', 'night')])
+Finite state machine with 2 states
+
+
+or by
+
+sage: fsm = FiniteStateMachine()
+sage: fsm
+Finite state machine with 2 states
+
+
+### A simple Automaton (recognizing NAFs)¶
+
+We want to build an automaton which recognizes non-adjacent forms (NAFs), i.e., sequences which have no adjacent non-zeros. We use $$0$$, $$1$$, and $$-1$$ as digits:
+
+sage: NAF = Automaton(
+....:     {'A': [('A', 0), ('B', 1), ('B', -1)], 'B': [('A', 0)]})
+sage: NAF.state('A').is_initial = True
+sage: NAF.state('A').is_final = True
+sage: NAF.state('B').is_final = True
+sage: NAF
+Automaton with 2 states
+
+
+Of course, we could have specified the initial and final states directly in the definition of NAF by initial_states=['A'] and final_states=['A', 'B'].
+
+So let’s test the automaton with some input:
+
+sage: sage.combinat.finite_state_machine.FSMOldProcessOutput = False  # activate new output behavior
+sage: NAF([0])
+True
+sage: NAF([0, 1])
+True
+sage: NAF([1, -1])
+False
+sage: NAF([0, -1, 0, 1])
+True
+sage: NAF([0, -1, -1, -1, 0])
+False
+sage: NAF([-1, 0, 0, 1, 1])
+False
+
+
+Alternatively, we could call that by
+
+sage: NAF.process([0, -1, 0, 1])
+(True, 'B')
+
+
+which gives additionally the state in which we arrived.
+
+### A simple transducer (binary inverter)¶
+
+Let’s build a simple transducer, which rewrites a binary word by iverting each bit:
+
+sage: inverter = Transducer({'A': [('A', 0, 1), ('A', 1, 0)]},
+....:     initial_states=['A'], final_states=['A'])
+
+
+We can look at the states and transitions:
+
+sage: inverter.states()
+['A']
+sage: for t in inverter.transitions():
+....:     print t
+Transition from 'A' to 'A': 0|1
+Transition from 'A' to 'A': 1|0
+
+
+Now we apply a word to it and see what the transducer does:
+
+sage: inverter([0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1])
+[1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0]
+
+
+True means, that we landed in a final state, that state is labeled 'A', and we also got an output.
+
+### A transducer which performs division by $$3$$ in binary¶
+
+Now we build a transducer, which divides a binary number by $$3$$. The labels of the states are the remainder of the division. The transition function is
+
+sage: def f(state_from, read):
+....:     if state_from + read <= 1:
+....:         state_to = 2*state_from + read
+....:         write = 0
+....:     else:
+....:         state_to = 2*state_from + read - 3
+....:         write = 1
+....:     return (state_to, write)
+
+
+which assumes reading a binary number from left to right. We get the transducer with
+
+sage: D = Transducer(f, initial_states=[0], final_states=[0],
+....:                input_alphabet=[0, 1])
+
+
+Let us try to divide $$12$$ by $$3$$:
+
+sage: D([1, 1, 0, 0])
+[0, 1, 0, 0]
+
+
+Now we want to divide $$13$$ by $$3$$:
+
+sage: D([1, 1, 0, 1])
+Traceback (most recent call last):
+...
+ValueError: Invalid input sequence.
+
+
+The raised ValueError means $$13$$ is not divisible by $$3$$.
+
+### Using the hook-functions¶
+
+Let’s use the previous example “divison by $$3$$” to demonstrate the optional state and transition parameters hook.
+
+First, we define, what those functions should do. In our case, this is just saying in which state we are and which transition we take
+
+sage: def state_hook(state, process):
+....:     print "We are now in State %s." % (state.label(),)
+sage: from sage.combinat.finite_state_machine import FSMWordSymbol
+sage: def transition_hook(transition, process):
+....:     print ("Currently we go from %s to %s, "
+....:            "reading %s and writing %s." % (
+....:                transition.from_state, transition.to_state,
+....:                FSMWordSymbol(transition.word_in),
+....:                FSMWordSymbol(transition.word_out)))
+
+
+Now, let’s add these hook-functions to the existing transducer:
+
+sage: for s in D.iter_states():
+....:     s.hook = state_hook
+sage: for t in D.iter_transitions():
+....:     t.hook = transition_hook
+
+
+Rerunning the process again now gives the following output:
+
+sage: D.process([1, 1, 0, 1])
+We are now in State 0.
+Currently we go from 0 to 1, reading 1 and writing 0.
+We are now in State 1.
+Currently we go from 1 to 0, reading 1 and writing 1.
+We are now in State 0.
+Currently we go from 0 to 0, reading 0 and writing 0.
+We are now in State 0.
+Currently we go from 0 to 1, reading 1 and writing 0.
+We are now in State 1.
+(False, 1, [0, 1, 0, 0])
+
+
+The example above just explains the basic idea of using hook-functions. In the following, we will use those hooks more seriously.
+
+### Detecting sequences with same number of $$0$$ and $$1$$¶
+
+Suppose we have a binary input and want to accept all sequences with the same number of $$0$$ and $$1$$. This cannot be done with a finite automaton. Anyhow, we can make usage of the hook functions to extend our finite automaton by a counter:
+
+sage: from sage.combinat.finite_state_machine import FSMState, FSMTransition
+sage: C = FiniteStateMachine()
+sage: def update_counter(state, process):
+....:     process.fsm.counter += 1 if l == 1 else -1
+....:     if process.fsm.counter > 0:
+....:         next_state = 'positive'
+....:     elif process.fsm.counter < 0:
+....:         next_state = 'negative'
+....:     else:
+....:         next_state = 'zero'
+....:     return FSMTransition(state, process.fsm.state(next_state),
+....:                          l, process.fsm.counter)
+....:             is_initial=True, is_final=True))
+'zero'
+'positive'
+'negative'
+
+
+Now, let’s input some sequence:
+
+sage: C.counter = 0; C([1, 1, 1, 1, 0, 0])
+(False, 'positive', [1, 2, 3, 4, 3, 2])
+
+
+The result is False, since there are four $$1$$ but only two $$0$$. We land in the state positive and we can also see the values of the counter in each step.
+
+Let’s try some other examples:
+
+sage: C.counter = 0; C([1, 1, 0, 0])
+(True, 'zero', [1, 2, 1, 0])
+sage: C.counter = 0; C([0, 1, 0, 0])
+(False, 'negative', [-1, 0, -1, -2])
+
+
+AUTHORS:
+
+• Daniel Krenn (2012-03-27): initial version
+
+• Clemens Heuberger (2012-04-05): initial version
+
+• Sara Kropf (2012-04-17): initial version
+
+• Clemens Heuberger (2013-08-21): release candidate for Sage patch
+
+• Daniel Krenn (2013-08-21): release candidate for Sage patch
+
+• Sara Kropf (2013-08-21): release candidate for Sage patch
+
+• Clemens Heuberger (2013-09-02): documentation improved
+
+• Daniel Krenn (2013-09-13): comments from trac worked in
+
+• Clemens Heuberger (2013-11-03): output (labels) of determinisation,
+
+product, composition, etc. changed (for consistency), representation of state changed, documentation improved
+
+• Daniel Krenn (2013-11-04): whitespaces in documentation corrected
+
+• Clemens Heuberger (2013-11-04): full_group_by added
+
+• Daniel Krenn (2013-11-04): next release candidate for Sage patch
+
+• Sara Kropf (2013-11-08): fix for adjacency matrix
+
+• Clemens Heuberger (2013-11-11): fix for prepone_output
+
+• Daniel Krenn (2013-11-11): comments from trac 15078 included:
+
+docstring of FiniteStateMachine rewritten, Automaton and Transducer inherited from FiniteStateMachine
+
+• Daniel Krenn (2013-11-25): documentation improved according to
+
+ACKNOWLEDGEMENT:
+
+• Daniel Krenn, Clemens Heuberger and Sara Kropf are supported by the Austrian Science Fund (FWF): P 24644-N26.
+class sage.combinat.finite_state_machine.Automaton(data=None, initial_states=None, final_states=None, input_alphabet=None, output_alphabet=None, determine_alphabets=None, store_states_dict=True, on_duplicate_transition=None)
+
+This creates an automaton, which is a finite state machine, whose transitions have input labels.
+
+An automaton has additional features like creating a deterministic and a minimized automaton.
+
+EXAMPLES:
+
+We can create an automaton recognizing even numbers (given in binary and read from left to right) in the following way:
+
+sage: A = Automaton([('P', 'Q', 0), ('P', 'P', 1),
+....:                ('Q', 'P', 1), ('Q', 'Q', 0)],
+....:               initial_states=['P'], final_states=['Q'])
+sage: A
+Automaton with 2 states
+sage: A([0])
+True
+sage: A([1, 1, 0])
+True
+sage: A([1, 0, 1])
+False
+
+
+Note that the full output of the commands can be obtained by calling process() and looks like this:
+
+sage: A.process([1, 0, 1])
+(False, 'P')
+
+
+TESTS:
+
+sage: Automaton()
+Automaton with 0 states
+
+cartesian_product(other, only_accessible_components=True)
+
+Returns a new automaton which accepts an input if it is accepted by both given automata.
+
+INPUT:
+
+• other – an automaton
+• only_accessible_components – If True (default), then the result is piped through accessible_components. If no new_input_alphabet is given, it is determined by determine_alphabets().
+
+OUTPUT:
+
+A new automaton which computes the intersection (see below) of the languages of self and other.
+
+The set of states of the new automaton is the cartesian product of the set of states of both given automata. There is a transition $$((A, B), (C, D), a)$$ in the new automaton if there are transitions $$(A, C, a)$$ and $$(B, D, a)$$ in the old automata.
+
+The methods intersection() and cartesian_product() are the same (for automata).
+
+EXAMPLES:
+
+sage: aut1 = Automaton([('1', '2', 1),
+....:                   ('2', '2', 1),
+....:                   ('2', '2', 0)],
+....:                  initial_states=['1'],
+....:                  final_states=['2'],
+....:                  determine_alphabets=True)
+sage: aut2 = Automaton([('A', 'A', 1),
+....:                   ('A', 'B', 0),
+....:                   ('B', 'B', 0),
+....:                   ('B', 'A', 1)],
+....:                  initial_states=['A'],
+....:                  final_states=['B'],
+....:                  determine_alphabets=True)
+sage: res = aut1.intersection(aut2)
+sage: (aut1([1, 1]), aut2([1, 1]), res([1, 1]))
+(True, False, False)
+sage: (aut1([1, 0]), aut2([1, 0]), res([1, 0]))
+(True, True, True)
+sage: res.transitions()
+[Transition from ('1', 'A') to ('2', 'A'): 1|-,
+Transition from ('2', 'A') to ('2', 'B'): 0|-,
+Transition from ('2', 'A') to ('2', 'A'): 1|-,
+Transition from ('2', 'B') to ('2', 'B'): 0|-,
+Transition from ('2', 'B') to ('2', 'A'): 1|-]
+
+
+For automata with epsilon-transitions, intersection is not well defined. But for any finite state machine, epsilon-transitions can be removed by remove_epsilon_transitions().
+
+sage: a1 = Automaton([(0, 0, 0),
+....:                 (0, 1, None),
+....:                 (1, 1, 1),
+....:                 (1, 2, 1)],
+....:                 initial_states=[0],
+....:                 final_states=[1],
+....:                 determine_alphabets=True)
+sage: a2 = Automaton([(0, 0, 0), (0, 1, 1), (1, 1, 1)],
+....:                 initial_states=[0],
+....:                 final_states=[1],
+....:                 determine_alphabets=True)
+sage: a1.intersection(a2)
+Traceback (most recent call last):
+...
+ValueError: An epsilon-transition (with empty input)
+was found.
+sage: a1.remove_epsilon_transitions()  # not tested (since not implemented yet)
+sage: a1.intersection(a2)  # not tested
+
+determinisation()
+
+Returns a deterministic automaton which accepts the same input words as the original one.
+
+INPUT:
+
+Nothing.
+
+OUTPUT:
+
+A new automaton, which is deterministic.
+
+The labels of the states of the new automaton are frozensets of states of self. The color of a new state is the frozenset of colors of the constituent states of self. Therefore, the colors of the constituent states have to be hashable.
+
+The input alphabet must be specified. It is restricted to nice cases: input words have to have length at most $$1$$.
+
+EXAMPLES:
+
+sage: aut = Automaton([('A', 'A', 0), ('A', 'B', 1), ('B', 'B', 1)],
+....:                 initial_states=['A'], final_states=['B'])
+sage: aut.determinisation().transitions()
+[Transition from frozenset(['A'])
+to frozenset(['A']): 0|-,
+Transition from frozenset(['A'])
+to frozenset(['B']): 1|-,
+Transition from frozenset(['B'])
+to frozenset([]): 0|-,
+Transition from frozenset(['B'])
+to frozenset(['B']): 1|-,
+Transition from frozenset([])
+to frozenset([]): 0|-,
+Transition from frozenset([])
+to frozenset([]): 1|-]
+
+sage: A = Automaton([('A', 'A', 1), ('A', 'A', 0), ('A', 'B', 1),
+....:                ('B', 'C', 0), ('C', 'C', 1), ('C', 'C', 0)],
+....:               initial_states=['A'], final_states=['C'])
+sage: A.determinisation().states()
+[frozenset(['A']), frozenset(['A', 'B']),
+frozenset(['A', 'C']), frozenset(['A', 'C', 'B'])]
+
+
+Note that colors of states have to be hashable:
+
+sage: A = Automaton([[0, 0, 0]], initial_states=[0])
+sage: A.state(0).color = []
+sage: A.determinisation()
+Traceback (most recent call last):
+...
+TypeError: unhashable type: 'list'
+sage: A.state(0).color = ()
+sage: A.determinisation()
+Automaton with 1 states
+
+
+TESTS:
+
+This is from #15078, comment 13.
+
+sage: D = {'A': [('A', 'a'), ('B', 'a'), ('A', 'b')],
+....:      'C': [], 'B': [('C', 'b')]}
+sage: auto = Automaton(D, initial_states=['A'], final_states=['C'])
+sage: auto.is_deterministic()
+False
+sage: auto.process(list('aaab'))
+(False, 'A')
+sage: auto.states()
+['A', 'C', 'B']
+sage: auto.determinisation()
+Automaton with 3 states
+
+intersection(other, only_accessible_components=True)
+
+Returns a new automaton which accepts an input if it is accepted by both given automata.
+
+INPUT:
+
+• other – an automaton
+• only_accessible_components – If True (default), then the result is piped through accessible_components. If no new_input_alphabet is given, it is determined by determine_alphabets().
+
+OUTPUT:
+
+A new automaton which computes the intersection (see below) of the languages of self and other.
+
+The set of states of the new automaton is the cartesian product of the set of states of both given automata. There is a transition $$((A, B), (C, D), a)$$ in the new automaton if there are transitions $$(A, C, a)$$ and $$(B, D, a)$$ in the old automata.
+
+The methods intersection() and cartesian_product() are the same (for automata).
+
+EXAMPLES:
+
+sage: aut1 = Automaton([('1', '2', 1),
+....:                   ('2', '2', 1),
+....:                   ('2', '2', 0)],
+....:                  initial_states=['1'],
+....:                  final_states=['2'],
+....:                  determine_alphabets=True)
+sage: aut2 = Automaton([('A', 'A', 1),
+....:                   ('A', 'B', 0),
+....:                   ('B', 'B', 0),
+....:                   ('B', 'A', 1)],
+....:                  initial_states=['A'],
+....:                  final_states=['B'],
+....:                  determine_alphabets=True)
+sage: res = aut1.intersection(aut2)
+sage: (aut1([1, 1]), aut2([1, 1]), res([1, 1]))
+(True, False, False)
+sage: (aut1([1, 0]), aut2([1, 0]), res([1, 0]))
+(True, True, True)
+sage: res.transitions()
+[Transition from ('1', 'A') to ('2', 'A'): 1|-,
+Transition from ('2', 'A') to ('2', 'B'): 0|-,
+Transition from ('2', 'A') to ('2', 'A'): 1|-,
+Transition from ('2', 'B') to ('2', 'B'): 0|-,
+Transition from ('2', 'B') to ('2', 'A'): 1|-]
+
+
+For automata with epsilon-transitions, intersection is not well defined. But for any finite state machine, epsilon-transitions can be removed by remove_epsilon_transitions().
+
+sage: a1 = Automaton([(0, 0, 0),
+....:                 (0, 1, None),
+....:                 (1, 1, 1),
+....:                 (1, 2, 1)],
+....:                 initial_states=[0],
+....:                 final_states=[1],
+....:                 determine_alphabets=True)
+sage: a2 = Automaton([(0, 0, 0), (0, 1, 1), (1, 1, 1)],
+....:                 initial_states=[0],
+....:                 final_states=[1],
+....:                 determine_alphabets=True)
+sage: a1.intersection(a2)
+Traceback (most recent call last):
+...
+ValueError: An epsilon-transition (with empty input)
+was found.
+sage: a1.remove_epsilon_transitions()  # not tested (since not implemented yet)
+sage: a1.intersection(a2)  # not tested
+
+minimization(algorithm=None)
+
+Returns the minimization of the input automaton as a new automaton.
+
+INPUT:
+
+• algorithm – Either Moore’s algorithm (by algorithm='Moore' or as default for deterministic automata) or Brzozowski’s algorithm (when algorithm='Brzozowski' or when the automaton is not deterministic) is used.
+
+OUTPUT:
+
+A new automaton.
+
+The resulting automaton is deterministic and has a minimal number of states.
+
+EXAMPLES:
+
+sage: A = Automaton([('A', 'A', 1), ('A', 'A', 0), ('A', 'B', 1),
+....:                ('B', 'C', 0), ('C', 'C', 1), ('C', 'C', 0)],
+....:               initial_states=['A'], final_states=['C'])
+sage: B = A.minimization(algorithm='Brzozowski')
+sage: B.transitions(B.states()[1])
+[Transition from frozenset([frozenset(['A', 'C', 'B']),
+frozenset(['C', 'B']), frozenset(['A', 'C'])]) to
+frozenset([frozenset(['A', 'C', 'B']), frozenset(['C', 'B']),
+frozenset(['A', 'C']), frozenset(['C'])]): 0|-,
+Transition from frozenset([frozenset(['A', 'C', 'B']),
+frozenset(['C', 'B']), frozenset(['A', 'C'])]) to
+frozenset([frozenset(['A', 'C', 'B']), frozenset(['C', 'B']),
+frozenset(['A', 'C'])]): 1|-]
+sage: len(B.states())
+3
+sage: C = A.minimization(algorithm='Brzozowski')
+sage: C.transitions(C.states()[1])
+[Transition from frozenset([frozenset(['A', 'C', 'B']),
+frozenset(['C', 'B']), frozenset(['A', 'C'])]) to
+frozenset([frozenset(['A', 'C', 'B']), frozenset(['C', 'B']),
+frozenset(['A', 'C']), frozenset(['C'])]): 0|-,
+Transition from frozenset([frozenset(['A', 'C', 'B']),
+frozenset(['C', 'B']), frozenset(['A', 'C'])]) to
+frozenset([frozenset(['A', 'C', 'B']), frozenset(['C', 'B']),
+frozenset(['A', 'C'])]): 1|-]
+sage: len(C.states())
+3
+
+sage: aut = Automaton([('1', '2', 'a'), ('2', '3', 'b'),
+....:                  ('3', '2', 'a'), ('2', '1', 'b'),
+....:                  ('3', '4', 'a'), ('4', '3', 'b')],
+....:                  initial_states=['1'], final_states=['1'])
+sage: min = aut.minimization(algorithm='Brzozowski')
+sage: [len(min.states()), len(aut.states())]
+[3, 4]
+sage: min = aut.minimization(algorithm='Moore')
+Traceback (most recent call last):
+...
+NotImplementedError: Minimization via Moore's Algorithm is only
+implemented for deterministic finite state machines
+
+process(*args, **kwargs)
+
+Warning
+
+The default output of this method is scheduled to change. This docstring describes the new default behaviour, which can already be achieved by setting FSMOldProcessOutput to False.
+
+Returns whether the automaton accepts the input and the state where the computation stops.
+
+INPUT:
+
+• input_tape – The input tape can be a list with entries from the input alphabet.
+• initial_state – (default: None) The state in which to start. If this parameter is None and there is only one initial state in the machine, then this state is taken.
+• full_output – (default: True) If set, then the full output is given, otherwise only whether the sequence is accepted or not (the first entry below only).
+
+OUTPUT:
+
+The full output is a pair, where
+
+• the first entry is True if the input string is accepted and
+• the second gives the state reached afte

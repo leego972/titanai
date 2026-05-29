@@ -1,0 +1,91 @@
+# How to make functions recall previously calculated results? [duplicate]
+
+I need to calculate a complicated set of functions dpdv[j_], which depend on a set of variables m[n_]. They are time-consuming to calculate, and I don't know in advance which values I'll need. So right now, I just pre-calculate more m's than I think I will need...
+
+m[0] = 1;
+Do[
+If[OddQ[n],
+m[n] = 0,
+m[n] = (B^(n/2))*Sum[n!*(i - 1)!!/(i!*(n - i)!), {i, 0, n, 2}]],{n, 0, 100}];
+
+
+And I do the same with the dpdv's...
+
+gau[x_, v_] = (1/Sqrt[2*Pi*v])*E^-((x^2)/(2*v));
+Do[
+coef = CoefficientList[
+Expand[D[gau[x - z, v], {v, j}]/gau[x - z, v]], z];
+t = Table[m[k - 1]*gau[x - m[k], m[k + 1] + v], {k, 1, Length[coef]}];
+dpdv[j] = Total[coef*t];, {j, 1, 12}];
+
+
+The values get used later on:
+
+ord = 7;
+h = Table[0, {j, 1, ord}];
+h[[1]] = Log[y[v]];
+Do[h[[j]] = D[h[[j - 1]], v], {j, 2, ord}];
+h = h /. Derivative[n_][y][v] -> dpdv[n] /. y[v] -> gau[x - m[1], m[2] + v];
+
+
+Because the dpdv[j]'s are complicated for large j, I want to calculated each value just once and not calculate extra values that I won't need.
+
+Is there a way to create functions for dpdv[] and m[] that will calculate and return the value on the fly the first time it's called, but remember that value to return it on the next call without recalculating it?
+
+Bonus question: Could my code be better? I'm still getting the hang of MMa coding practices.
+
+• f[x_]:=f[x]=... Don't forget to clear when done with them... – ciao Mar 7 '15 at 0:55
+• @rasher I don't understand this. If I call f[100] for a second time, won't this redo the entire calculation of that value? Am I not understanding the function syntax? – Jerry Guern Mar 7 '15 at 1:10
+• See answer below. Do note, this will probably be closed as a duplicate, this is an oft-asked question... – ciao Mar 7 '15 at 1:18
+
+Common Mathematica idiom. Say, e.g., Fib numbers:
+
+ClearAll[f]
+?f
+
+(* Globalf *)
+
+f[1] = 1;
+f[0] = 0;
+f[x_] := f[x] = f[x - 1] + f[x - 2]
+?f
+
+(*
+Globalf
+
+f[0]=0
+
+f[1]=1
+
+f[x_]:=f[x]=f[x-1]+f[x-2]
+
+*)
+
+f[4]
+
+(* 3 *)
+
+?f
+
+(*
+
+Globalf
+f[0]=0
+
+f[1]=1
+
+f[2]=1
+
+f[3]=2
+
+f[4]=3
+
+f[x_]:=f[x]=f[x-1]+f[x-2]
+
+*)
+`
+
+Notice how intermediate results have a pattern assigned, so next call(s) for same pattern immediately resolve to the result w/o calculation...
+
+• Well, that was simpler than I expected. Thank you! – Jerry Guern Mar 7 '15 at 1:20
+• @JerryGuern: Glad to help. Yes, this is an elegant side-effect of term-rewriting languages like Mathematica - "memoization" and "memoization-like" things are trivial. – ciao Mar 7 '15 at 1:59

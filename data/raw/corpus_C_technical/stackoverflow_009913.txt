@@ -1,0 +1,97 @@
+Question: <p>In Python, is there a portable and simple way to test if an executable program exists?</p>
+
+<p>By simple I mean something like the <code>which</code> command which would be just perfect. I don't want to search PATH manually or something involving trying to execute it with <code>Popen</code> &amp; al and see if it fails (that's what I'm doing now, but imagine it's <code>launchmissiles</code>)</p>
+
+Answer: <p>I know that I'm being a bit of a necromancer here, but I stumbled across this question and the accepted solution didn't work for me for all cases Thought it might be useful to submit anyway. In particular, the "executable" mode detection, and the requirement of supplying the file extension. Furthermore, both python3.3's <code>shutil.which</code> (uses <code>PATHEXT</code>) and python2.4+'s <code>distutils.spawn.find_executable</code> (just tries adding <code>'.exe'</code>) only work in a subset of cases.</p>
+
+<p>So I wrote a "super" version (based on the accepted answer, and the <code>PATHEXT</code> suggestion from Suraj). This version of <code>which</code> does the task a bit more thoroughly, and tries a series of "broadphase" breadth-first techniques first, and eventually tries more fine-grained searches over the <code>PATH</code> space:</p>
+
+<pre><code>import os
+import sys
+import stat
+import tempfile
+
+
+def is_case_sensitive_filesystem():
+    tmphandle, tmppath = tempfile.mkstemp()
+    is_insensitive = os.path.exists(tmppath.upper())
+    os.close(tmphandle)
+    os.remove(tmppath)
+    return not is_insensitive
+
+_IS_CASE_SENSITIVE_FILESYSTEM = is_case_sensitive_filesystem()
+
+
+def which(program, case_sensitive=_IS_CASE_SENSITIVE_FILESYSTEM):
+    """ Simulates unix `which` command. Returns absolute path if program found """
+    def is_exe(fpath):
+        """ Return true if fpath is a file we have access to that is executable """
+        accessmode = os.F_OK | os.X_OK
+        if os.path.exists(fpath) and os.access(fpath, accessmode) and not os.path.isdir(fpath):
+            filemode = os.stat(fpath).st_mode
+            ret = bool(filemode &amp; stat.S_IXUSR or filemode &amp; stat.S_IXGRP or filemode &amp; stat.S_IXOTH)
+            return ret
+
+    def list_file_exts(directory, search_filename=None, ignore_case=True):
+        """ Return list of (filename, extension) tuples which match the search_filename"""
+        if ignore_case:
+            search_filename = search_filename.lower()
+        for root, dirs, files in os.walk(path):
+            for f in files:
+                filename, extension = os.path.splitext(f)
+                if ignore_case:
+                    filename = filename.lower()
+                if not search_filename or filename == search_filename:
+                    yield (filename, extension)
+            break
+
+    fpath, fname = os.path.split(program)
+
+    # is a path: try direct program path
+    if fpath:
+        if is_exe(program):
+            return program
+    elif "win" in sys.platform:
+        # isnt a path: try fname in current directory on windows
+        if is_exe(fname):
+            return program
+
+    paths = [path.strip('"') for path in os.environ.get("PATH", "").split(os.pathsep)]
+    exe_exts = [ext for ext in os.environ.get("PATHEXT", "").split(os.pathsep)]
+    if not case_sensitive:
+        exe_exts = map(str.lower, exe_exts)
+
+    # try append program path per directory
+    for path in paths:
+        exe_file = os.path.join(path, program)
+        if is_exe(exe_file):
+            return exe_file
+
+    # try with known executable extensions per program path per directory
+    for path in paths:
+        filepath = os.path.join(path, program)
+        for extension in exe_exts:
+            exe_file = filepath+extension
+            if is_exe(exe_file):
+                return exe_file
+
+    # try search program name with "soft" extension search
+    if len(os.path.splitext(fname)[1]) == 0:
+        for path in paths:
+            file_exts = list_file_exts(path, fname, not case_sensitive)
+            for file_ext in file_exts:
+                filename = "".join(file_ext)
+                exe_file = os.path.join(path, filename)
+                if is_exe(exe_file):
+                    return exe_file
+
+    return None
+</code></pre>
+
+<p>Usage looks like this:</p>
+
+<pre><code>&gt;&gt;&gt; which.which("meld")
+'C:\\Program Files (x86)\\Meld\\meld\\meld.exe'
+</code></pre>
+
+<p>The accepted solution did not work for me in this case, since there were files like <code>meld.1</code>, <code>meld.ico</code>, <code>meld.doap</code>, etc also in the directory, one of which were returned instead (presumably since lexicographically first) because the executable test in the accepted answer was incomplete and giving false positives.</p>

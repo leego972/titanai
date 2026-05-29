@@ -1,0 +1,120 @@
+# Map (higher-order function)
+
+In many programming languages, map is the name of a higher-order function that applies a given function to each element of a collection, e.g. a list or set, returning the results in a collection of the same type.  It is often called apply-to-all when considered in functional form.
+
+The concept of a map is not limited to lists: it works for sequential containers, tree-like containers, or even abstract containers such as futures and promises.
+
+Examples: mapping a list 
+
+Suppose we have a list of integers [1, 2, 3, 4, 5] and would like to calculate the square of each integer.  To do this, we first define a function to square a single number (shown here in Haskell):
+
+square x = x * x
+
+Afterwards we may call
+
+>>> map square [1, 2, 3, 4, 5]
+
+which yields [1, 4, 9, 16, 25], demonstrating that map has gone through the entire list and applied the function square to each element.
+
+Visual example 
+Below, you can see a view of each step of the mapping process for a list of integers X = [0, 5, 8, 3, 2, 1] that we want to map into a new list X' according to the function  :
+
+The map is provided as part of the Haskell's base prelude (i.e. "standard library") and is implemented as:
+
+map :: (a -> b) -> [a] -> [b]
+map _ []       = []
+map f (x : xs) = f x : map f xs
+
+Generalization
+
+In Haskell, the polymorphic function map :: (a -> b) -> [a] -> [b] is generalized to a polytypic function fmap :: Functor f => (a -> b) -> f a -> f b, which applies to any type belonging the Functor type class.
+
+The type constructor of lists [] can be defined as an instance of the Functor type class using the map function from the previous example:
+
+instance Functor [] where
+  fmap = map
+
+Other examples of Functor instances include trees:
+
+-- a simple binary tree
+data Tree a = Leaf a | Fork (Tree a) (Tree a)
+
+instance Functor Tree where  
+  fmap f (Leaf x) = Leaf (f x)
+  fmap f (Fork l r) = Fork (fmap f l) (fmap f r)
+
+Mapping over a tree yields:
+
+>>> fmap square (Fork (Fork (Leaf 1) (Leaf 2)) (Fork (Leaf 3) (Leaf 4)))
+Fork (Fork (Leaf 1) (Leaf 4)) (Fork (Leaf 9) (Leaf 16))
+
+For every instance of the Functor type class, fmap is contractually obliged to obey the functor laws:
+fmap id      ≡ id              -- identity law
+fmap (f . g) ≡ fmap f . fmap g -- composition law
+where . denotes function composition in Haskell.
+
+Among other uses, this allows defining element-wise operations for various kinds of collections.
+
+Category-theoretic background 
+
+In category theory, a functor  consists of two maps: one that sends each object  of the category to another object , and one that sends each morphism  to another morphism , which acts as a homomorphism on categories (i.e. it respects the category axioms). Interpreting the universe of data types as a category , with morphisms being functions, then a type constructor F that is a member of the Functor type class is the object part of such a functor, and fmap :: (a -> b) -> F a -> F b is the morphism part. The functor laws described above are precisely the category-theoretic functor axioms for this functor.
+
+Functors can also be objects in categories, with "morphisms" called natural transformations. Given two functors , a natural transformation  consists of a collection of morphisms , one for each object  of the category , which are 'natural' in the sense that they act as a 'conversion' between the two functors, taking no account of the objects that the functors are applied to. Natural transformations correspond to functions of the form eta :: F a -> G a, where a is a universally quantified type variable – eta knows nothing about the type which inhabits a. The naturality axiom of such functions is automatically satisfied because it is a so-called free theorem, depending on the fact that it is parametrically polymorphic. For example, reverse :: List a -> List a, which reverses a list, is a natural transformation, as is flattenInorder :: Tree a -> List a, which flattens a tree from left to right, and even sortBy :: (a -> a -> Bool) -> List a -> List a, which sorts a list based on a provided comparison function.
+
+Optimizations
+
+The mathematical basis of maps allow for a number of optimizations. The composition law ensures that both
+ (map f . map g) list and
+ map (f . g) list
+lead to the same result; that is, . However, the second form is more efficient to compute than the first form, because each map requires rebuilding an entire list from scratch. Therefore, compilers will attempt to transform the first form into the second; this type of optimization is known as map fusion and is the functional analog of loop fusion.
+
+Map functions can be and often are defined in terms of a fold such as foldr, which means one can do a map-fold fusion: foldr f z . map g is equivalent to foldr (f . g) z.
+
+The implementation of map above on singly linked lists is not tail-recursive, so it may build up a lot of frames on the stack when called with a large list. Many languages alternately provide a "reverse map" function, which is equivalent to reversing a mapped list, but is tail-recursive. Here is an implementation which utilizes the fold-left function.
+
+reverseMap f = foldl (\ys x -> f x : ys) []
+
+Since reversing a singly linked list is also tail-recursive, reverse and reverse-map can be composed to perform normal map in a tail-recursive way, though it requires performing two passes over the list.
+
+Language comparison
+
+The map function originated in functional programming languages.
+
+The language Lisp introduced a map function called maplist in 1959, with slightly different versions already appearing in 1958. This is the original definition for maplist, mapping a function over successive rest lists:
+
+maplist[x;f] = [null[x] -> NIL;T -> cons[f[x];maplist[cdr[x];f]]]
+
+The function maplist is still available in newer Lisps like Common Lisp, though functions like mapcar or the more generic map would be preferred.
+
+Squaring the elements of a list using maplist would be written in S-expression notation like this:
+
+(maplist (lambda (l) (sqr (car l))) '(1 2 3 4 5))
+
+Using the function mapcar, above example would be written like this:
+
+(mapcar (function sqr) '(1 2 3 4 5))
+
+Today mapping functions are supported (or may be defined) in many procedural, object-oriented, and multi-paradigm languages as well: In C++'s Standard Library, it is called std::transform, in C# (3.0)'s LINQ library, it is provided as an extension method called Select. Map is also a frequently used operation in high level languages such as ColdFusion Markup Language (CFML), Perl, Python, and Ruby; the operation is called map in all four of these languages. A collect alias for map is also provided in Ruby (from Smalltalk). Common Lisp provides a family of map-like functions; the one corresponding to the behavior described here is called mapcar (-car indicating access using the CAR operation). There are also languages with syntactic constructs providing the same functionality as the map function.
+
+Map is sometimes generalized to accept dyadic (2-argument) functions that can apply a user-supplied function to corresponding elements from two lists. Some languages use special names for this, such as map2 or zipWith. Languages using explicit variadic functions may have versions of map with variable arity to support variable-arity functions. Map with 2 or more lists encounters the issue of handling when the lists are of different lengths. Various languages differ on this. Some raise an exception. Some stop after the length of the shortest list and ignore extra items on the other lists. Some continue on to the length of the longest list, and for the lists that have already ended, pass some placeholder value to the function indicating no value.
+
+In languages which support first-class functions and currying, map may be partially applied to lift a function that works on only one value to an element-wise equivalent that works on an entire container; for example, map square is a Haskell function which squares each element of a list.
+
+See also
+ Functor (functional programming)
+ Zipping (computer science) or zip, mapping 'list' over multiple lists
+ Filter (higher-order function)
+ Fold (higher-order function)
+ foreach
+ Free monoid
+ Functional programming
+ Higher-order function
+ List comprehension
+ Map (parallel pattern)
+
+References
+
+Higher-order functions
+Programming language comparisons
+Articles with example Haskell code
+Iteration in programming

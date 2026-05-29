@@ -1,0 +1,120 @@
+Question: <p>What is the use of the <code>yield</code> keyword in Python? What does it do?</p>
+
+<p>For example, I'm trying to understand this code<sup><strong>1</strong></sup>:</p>
+
+<pre><code>def _get_child_candidates(self, distance, min_dist, max_dist):
+    if self._leftchild and distance - max_dist &lt; self._median:
+        yield self._leftchild
+    if self._rightchild and distance + max_dist &gt;= self._median:
+        yield self._rightchild  
+</code></pre>
+
+<p>And this is the caller:</p>
+
+<pre><code>result, candidates = list(), [self]
+while candidates:
+    node = candidates.pop()
+    distance = node._get_dist(obj)
+    if distance &lt;= max_dist and distance &gt;= min_dist:
+        result.extend(node._values)
+    candidates.extend(node._get_child_candidates(distance, min_dist, max_dist))
+return result
+</code></pre>
+
+<p>What happens when the method <code>_get_child_candidates</code> is called?
+A list is returned? A single element is returned? Is it called again? When will subsequent calls stop?</p>
+
+<hr>
+
+<p><sub>
+1. The code comes from Jochen Schulz (jrschulz), who made a great Python library for metric spaces. This is the link to the complete source: <a href="http://well-adjusted.de/~jrschulz/mspace/">Module mspace</a>.</sub></p>
+
+Answer: <p><strong>TL;DR</strong></p>
+
+<h1>When you find yourself building a list from scratch...</h1>
+
+<pre><code>def squares_list(n):
+    the_list = []
+    for x in range(n):
+        y = x * x
+        the_list.append(y)
+    return the_list
+</code></pre>
+
+<h1>...you may want to yield the pieces instead.</h1>
+
+<pre><code>def squares_the_yield_way(n):
+    for x in range(n):
+        y = x * x
+        yield y
+</code></pre>
+
+<p>This was my first aha-moment with yield.</p>
+
+<hr>
+
+<p><code>yield</code> is a sugary way to say </p>
+
+<blockquote>
+  <p>build a series of stuff</p>
+</blockquote>
+
+<p>Same behavior:</p>
+
+<pre><code>&gt;&gt;&gt; for square in squares_list(4):
+...     print(square)
+...
+0
+1
+4
+9
+&gt;&gt;&gt; for square in squares_the_yield_way(4):
+...     print(square)
+...
+0
+1
+4
+9
+</code></pre>
+
+<p>Different behavior:</p>
+
+<p>Yield is <strong>single-use</strong>: you can only iterate through once. Conceptually the yield-function returns an ordered container of things. But it's revealing that we call any function with a yield in it a <a href="http://stackoverflow.com/a/1756342/673991">generator function</a>. And the term for what it returns is an <a href="http://stackoverflow.com/a/9884501/673991">iterator</a>.</p>
+
+<p>Yield is <strong>lazy</strong>, it puts off computation until you need it. A function with a yield in it <em>doesn't actually execute at all</em> when you call it. The iterator object it returns uses <a href="https://docs.python.org/reference/simple_stmts.html#yield" rel="nofollow">magic</a> to maintain the function's internal context. Each time you call <code>next()</code> on the iterator (as happens in a for-loop), execution inches forward to the next yield. (Or <code>return</code>, which raises <code>StopIteration</code> and ends the series.)</p>
+
+<p>Yield is <strong>versatile</strong>. It can do infinite loops:</p>
+
+<pre><code>&gt;&gt;&gt; def squares_all_of_them():
+...     x = 0
+...     while True:
+...         yield x * x
+...         x += 1
+...
+&gt;&gt;&gt; squares = squares_all_of_them()
+&gt;&gt;&gt; for i in range(6):
+...     print(squares.next())
+...
+0
+1
+4
+9
+16
+25
+</code></pre>
+
+<hr>
+
+<p>Brilliant choice of the word <code>yield</code> because <a href="https://www.google.com/search?q=yield+meaning" rel="nofollow">both meanings of the verb</a> apply:</p>
+
+<blockquote>
+  <p><strong>yield</strong> &mdash; produce or provide (as in agriculture)</p>
+</blockquote>
+
+<p>...provide the next data in the series.</p>
+
+<blockquote>
+  <p><strong>yield</strong> &mdash; give way or relinquish (as in political power)</p>
+</blockquote>
+
+<p>...relinquish CPU execution until the iterator advances.</p>

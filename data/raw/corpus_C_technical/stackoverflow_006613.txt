@@ -1,0 +1,55 @@
+Question: <p>Most of the documentation available for building Python extension modules
+uses distutils, but I would like to achieve this by using the appropriate
+python autoconf &amp; automake macros instead.</p>
+
+<p>I'd like to know if there is an open source project out there that does
+exactly this. Most of the ones I've found end up relying on a setup.py file.
+Using that approach works, but unfortunately ends up rebuilding the entire
+source tree any time I make a modification to the module source files.</p>
+
+Answer: <p>Supposing that you have a project with a directory called <code>src</code>, so let's follow the follow steps to get a python extension built and packaged using autotools:</p>
+
+<h2>Create the Makefile.am files</h2>
+
+<p>First, you need to create one Makefile.am in the root of your project, basically (but not exclusively) listing the subdirectories that should also be processed. You will end up with something like this:</p>
+
+<pre><code>SUBDIRS = src
+</code></pre>
+
+<p>The second one, inside the <code>src</code> directory will hold the instructions to actually compile your python extension. It will look like this:</p>
+
+<pre><code>myextdir = $(pkgpythondir)
+myext_PYTHON = file1.py file2.py
+
+pyexec_LTLIBRARIES = _myext.la
+
+_myext_la_SOURCES = myext.cpp
+_myext_la_CPPFLAGS = $(PYTHON_CFLAGS)
+_myext_la_LDFLAGS = -module -avoid-version -export-symbols-regex initmyext
+_myext_la_LIBADD = $(top_builddir)/lib/libhollow.la
+
+EXTRA_DIST = myext.h
+</code></pre>
+
+<h2>Write the configure.ac</h2>
+
+<p>This file must be created in the root directory of the project and must list all libraries, programs or any kind of tool that your project needs to be built, such as a compiler, linker, libraries, etc.</p>
+
+<p>Lazy people, like me, usually don't create it from scratch, I prefer to use the <code>autoscan</code> tool, that looks for things that you are using and generate a <code>configure.scan</code> file that can be used as the basis for your real <code>configure.ac</code>.</p>
+
+<p>To inform <code>automake</code> that you will need python stuff, you can add this to your <code>configure.ac</code>:</p>
+
+<pre><code>dnl python checks (you can change the required python version bellow)
+AM_PATH_PYTHON(2.7.0)
+PY_PREFIX=`$PYTHON -c 'import sys ; print sys.prefix'`
+PYTHON_LIBS="-lpython$PYTHON_VERSION"
+PYTHON_CFLAGS="-I$PY_PREFIX/include/python$PYTHON_VERSION"
+AC_SUBST([PYTHON_LIBS])
+AC_SUBST([PYTHON_CFLAGS])
+</code></pre>
+
+<h2>Wrap up</h2>
+
+<p>Basically, <code>automake</code> has a built-in extension that knows how to deal with python stuff, you just need to add it to your <code>configure.ac</code> file and then take the advantage of this feature in your <code>Makefile.am</code>.</p>
+
+<p>PyGtk is definitely an awesome example, but it's pretty big, so maybe you will want to check another project, like <a href="http://github.com/Guake/Guake">Guake</a></p>

@@ -1,0 +1,50 @@
+Question: <p>With a class in Python, how do I define a function to print every single instance of the class in a format defined in the function?</p>
+
+Answer: <p>I see two options in this case:</p>
+
+<h2>Garbage collector</h2>
+
+<pre><code>import gc
+for obj in gc.get_objects():
+    if isinstance(obj, some_class):
+        dome_something(obj)
+</code></pre>
+
+<p>This has the disadvantage of being very slow when you have a lot of objects, but works with types over which you have no control.</p>
+
+<h2>Use a mixin and weakrefs</h2>
+
+<pre><code>from collections import defaultdict
+import weakref
+
+class KeepRefs(object):
+    __refs__ = defaultdict(list)
+    def __init__(self):
+        self.__refs__[self.__class__].append(weakref.ref(self))
+
+    @classmethod
+    def get_instances(cls):
+        for inst_ref in cls.__refs__[cls]:
+            inst = inst_ref()
+            if inst is not None:
+                yield inst
+
+class X(KeepRefs):
+    def __init__(self, name):
+        super(X, self).__init__()
+        self.name = name
+
+x = X("x")
+y = X("y")
+for r in X.get_instances():
+    print r.name
+del y
+for r in X.get_instances():
+    print r.name
+</code></pre>
+
+<p>In this case, all the references get stored as a weak reference in a list. If you create and delete a lot of instances frequently, you should clean up the list of weakrefs after iteration, otherwise there's going to be a lot of cruft. </p>
+
+<p>Another problem in this case is that you have to make sure to call the base class constructor. You could also override <code>__new__</code>, but only the <code>__new__</code> method of the first base class is used on instantiation. This also works only on types that are under your control.</p>
+
+<p><strong>Edit</strong>: The method for printing all instances according to a specific format is left as an exercise, but it's basically just a variation on the <code>for</code>-loops.</p>

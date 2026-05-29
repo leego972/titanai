@@ -1,0 +1,431 @@
+================================================================================
+TITAN AI — TRAINING PACK 016: DATABASE ARCHITECTURE AND INTEGRATION PATTERNS
+POLYGLOT PERSISTENCE, SHARDING, REPLICATION, QUERY OPTIMIZATION, DATA MODELING
+================================================================================
+
+================================================================================
+PART 1: CHOOSING THE RIGHT DATABASE — THE DECISION FRAMEWORK
+================================================================================
+
+--- THE POLYGLOT PERSISTENCE MODEL ---
+
+Modern systems do not use ONE database for everything.
+Different data types have fundamentally different access patterns.
+Forcing all data into one DB type: Mismatches between access pattern and data model → performance, complexity, cost.
+
+DATA CLASSIFICATION:
+
+RELATIONAL (PostgreSQL, MySQL):
+  Characteristics: Structured, relationships between entities, ACID transactions
+  Access pattern: Complex queries, joins, aggregations
+  When to use: User accounts, orders, financial transactions, anything needing ACID
+  When NOT: Massive scale unstructured data, time-series, graph relationships
+
+DOCUMENT (MongoDB, Firestore, DynamoDB):
+  Characteristics: Schema-flexible, nested structures, horizontal scale
+  Access pattern: Get document by ID, query by specific fields
+  When to use: Content, product catalogs, user profiles with variable fields
+  When NOT: Complex multi-collection joins, strict ACID requirements
+
+KEY-VALUE (Redis, DynamoDB):
+  Characteristics: Fastest possible reads/writes, simple data model
+  Access pattern: Get value by exact key. No complex queries.
+  When to use: Session storage, caching, distributed locks, leaderboards
+  When NOT: Need to query by multiple fields, complex data relationships
+
+TIME-SERIES (InfluxDB, TimescaleDB, Prometheus):
+  Characteristics: Optimized for timestamp-ordered data, automated downsampling
+  Access pattern: "Give me all metrics for last 1 hour, aggregated by minute"
+  When to use: Metrics, monitoring, IoT sensor data, financial tick data
+  Why special DB: Regular DBs can query this data but at terrible performance.
+    TimescaleDB stores chunks by time window → queries only relevant chunks.
+    InfluxDB: Columnar storage, native downsampling (1-second → 1-minute → 1-hour auto-aggregation)
+  When NOT: Long-lived entities with complex relationships
+
+GRAPH (Neo4j, Amazon Neptune):
+  Characteristics: Nodes and edges, traverse relationships
+  Access pattern: "Who are friends-of-friends of user X?" "What's the shortest path?"
+  When to use: Social networks, fraud detection (connected accounts), recommendation engines
+  Why special DB: Relationship traversal in RDBMS = N self-joins. Performance degrades exponentially.
+    Neo4j: Traversal is O(depth), not O(n²). 1M-hop traversal takes milliseconds.
+  When NOT: Not relationship-focused data
+
+WIDE-COLUMN (Cassandra, HBase):
+  Characteristics: Optimized for writes, partitioned by primary key, no ACID
+  Access pattern: Write everything, read by exact partition key
+  When to use: IoT data ingestion, time-series at massive scale, log storage
+  When NOT: Need complex queries or transactions
+
+SEARCH (Elasticsearch, OpenSearch, Meilisearch):
+  Characteristics: Inverted index, full-text search, faceted search
+  Access pattern: Text search, multi-field queries with relevance ranking
+  When to use: Product search, log search, any "find me documents about X"
+  When NOT: Primary data store (it's an index, not a database)
+  Critical: Elasticsearch is eventually consistent — always maintain a primary DB
+  and index into ES. Never treat ES as source of truth.
+
+REAL-WORLD POLYGLOT EXAMPLE — E-commerce platform:
+  PostgreSQL: Users, orders, payments (ACID critical)
+  MongoDB: Product catalog (flexible attributes per category)
+  Redis: Sessions, cart, rate limiting, featured products cache
+  Elasticsearch: Product search, order search
+  TimescaleDB: Sales analytics, inventory levels over time
+  Cassandra: Click stream, user behavior events (high write volume)
+  Neo4j: Product recommendations ("users who bought this also bought...")
+
+================================================================================
+PART 2: POSTGRESQL — PRODUCTION MASTERY
+================================================================================
+
+--- QUERY OPTIMIZATION DEEP DIVE ---
+
+EXPLAIN ANALYZE — READ THIS BEFORE OPTIMIZING ANYTHING:
+  EXPLAIN ANALYZE SELECT * FROM orders WHERE user_id = 12345 AND status = 'shipped';
+  
+  Read the output:
+  Seq Scan on orders (cost=0.00..45231.00 rows=3 width=127) (actual time=0.050..891.234 rows=3 loops=1)
+    Filter: ((user_id = 12345) AND (status = 'shipped'))
+    Rows Removed by Filter: 2000000
+  
+  KEY SIGNALS:
+  "Seq Scan": Full table scan — bad for large tables.
+  "cost=": Planner's estimate. First number=startup, second=total.
+  "rows=3": Planner estimated 3 rows (check actual rows match).
+  "actual time=891ms": THIS IS SLOW. 2 million rows scanned for 3 results.
+  "Rows Removed by Filter: 2000000": Scanned 2M rows to find 3. Need index.
+  
+  FIX: CREATE INDEX idx_orders_user_status ON orders(user_id, status);
+  
+  After index:
+  Index Scan using idx_orders_user_status on orders (cost=0.43..12.76 rows=3 width=127) 
+    (actual time=0.043..0.055 rows=3 loops=1)
+  
+  891ms → 0.055ms. 16,000x faster. One index.
+
+INDEX TYPES AND WHEN TO USE EACH:
+
+B-Tree (default): Equality and range queries on most types.
+  CREATE INDEX idx_orders_created ON orders(created_at);  -- Range queries
+  Use for: WHERE x = ?, WHERE x > ?, WHERE x BETWEEN ? AND ?, ORDER BY x
+
+Hash: Equality only, slightly faster than B-tree for exact match.
+  CREATE INDEX idx_user_email_hash ON users USING HASH (email);
+  Use for: WHERE email = ? (no ranges, no LIKE, no ORDER BY)
+  Rarely needed: B-tree is nearly as fast and more versatile.
+
+GIN (Generalized Inverted Index): For contains/overlap queries.
+  CREATE INDEX idx_article_tags ON articles USING GIN (tags);  -- tags is array
+  CREATE INDEX idx_product_attrs ON products USING GIN (attributes);  -- JSONB
+  Use for: WHERE tags @> ARRAY['python'], WHERE attrs ? 'color'
+
+GiST: For geometric/range/full-text search.
+  CREATE INDEX idx_event_range ON events USING GIST (tsrange(start_at, end_at));
+  Use for: Overlapping date ranges, PostGIS geographic queries
+
+BRIN (Block Range Index): For large, naturally ordered tables.
+  CREATE INDEX idx_logs_created_brin ON logs USING BRIN (created_at);
+  Tiny index (1000x smaller than B-tree). Works when data is physically ordered.
+  Use for: Append-only logs with timestamp (physically sorted) — massive storage savings
+
+Partial Index: Index only subset of rows.
+  CREATE INDEX idx_orders_pending ON orders(created_at) WHERE status = 'pending';
+  Only indexes pending orders. Much smaller than indexing all orders.
+  Use for: Queries that always include a common filter condition.
+
+Covering Index: Include all columns a query needs.
+  CREATE INDEX idx_orders_covering ON orders(user_id) INCLUDE (status, total, created_at);
+  Query: SELECT status, total, created_at FROM orders WHERE user_id = ?
+  Result: Index-only scan — never touches main table. Maximum speed.
+
+--- PARTITIONING FOR LARGE TABLES ---
+
+WHEN TO PARTITION: Table > 100 million rows, most queries filter by partition key.
+
+RANGE PARTITIONING (time-based, most common):
+  CREATE TABLE orders (
+    id BIGSERIAL,
+    user_id BIGINT,
+    total DECIMAL(10,2),
+    created_at TIMESTAMP WITH TIME ZONE
+  ) PARTITION BY RANGE (created_at);
+  
+  CREATE TABLE orders_2024_q1 PARTITION OF orders
+    FOR VALUES FROM ('2024-01-01') TO ('2024-04-01');
+  CREATE TABLE orders_2024_q2 PARTITION OF orders
+    FOR VALUES FROM ('2024-04-01') TO ('2024-07-01');
+  -- etc.
+  
+  Benefits:
+  - Partition pruning: "WHERE created_at BETWEEN 2024-01-01 AND 2024-03-31"
+    Only scans orders_2024_q1. Other partitions ignored.
+  - Archiving: Drop partition instead of DELETE (instant, no bloat)
+    DROP TABLE orders_2022_q1;  -- Instant. DELETE FROM orders WHERE created_at < '2023' → days.
+
+AUTOMATIC PARTITION CREATION (pg_partman extension):
+  -- Instead of manually creating partitions:
+  SELECT partman.create_parent(
+    p_parent_table := 'public.orders',
+    p_control := 'created_at',
+    p_interval := 'monthly',
+    p_premake := 3  -- Pre-create next 3 months
+  );
+  -- pg_partman creates partitions automatically, runs in cron-like background process.
+
+--- REPLICATION AND HIGH AVAILABILITY ---
+
+STREAMING REPLICATION SETUP:
+  Primary: Streams WAL (Write-Ahead Log) to standby.
+  Standby: Applies WAL changes in near-real-time.
+  
+  primary postgresql.conf:
+  wal_level = replica
+  max_wal_senders = 10
+  wal_keep_size = 1GB
+  
+  Create replication user:
+  CREATE USER replicator REPLICATION LOGIN PASSWORD 'replpass';
+  
+  Standby: Run pg_basebackup to get initial copy, then stream.
+  pg_basebackup -h primary-host -U replicator -P -R -D /var/lib/postgresql/data
+  # -R creates recovery.conf / standby.signal automatically
+  
+  Standby postgresql.conf:
+  primary_conninfo = 'host=primary-host user=replicator password=replpass'
+  hot_standby = on  # Allow read queries on standby
+
+READ SCALING WITH PGBOUNCER + STANDBY:
+  All writes → Primary
+  All reads → Load balanced across standbys (or primary if needed)
+  
+  PgBouncer (connection pooler — critical for PostgreSQL at scale):
+  PostgreSQL: Each connection = OS process = ~5-10MB RAM.
+  100 connections = 500MB-1GB just for connection overhead.
+  PgBouncer: Multiplexes many app connections to few DB connections.
+  
+  pgbouncer.ini:
+  [databases]
+  mydb_read = host=standby1 port=5432 dbname=mydb
+  mydb_read = host=standby2 port=5432 dbname=mydb   # Rotates between standbys
+  mydb_write = host=primary port=5432 dbname=mydb
+  
+  [pgbouncer]
+  pool_mode = transaction  # Connection returned to pool after each transaction
+  max_client_conn = 10000  # Up to 10K application connections
+  default_pool_size = 20   # Only 20 actual DB connections per pool
+
+================================================================================
+PART 3: DATABASE MIGRATION PATTERNS
+================================================================================
+
+--- ZERO-DOWNTIME MIGRATIONS ---
+
+RULE: Database migrations must be backward compatible until old code is gone.
+REASON: During rolling deploy, old code and new code run simultaneously.
+         If migration breaks old code: Outage during deploy.
+
+EXPAND-CONTRACT PATTERN:
+
+Phase 1 — EXPAND (backward compatible change):
+  Add new column with default value. Both old and new code work.
+  ALTER TABLE users ADD COLUMN full_name VARCHAR(255);
+  
+  Or: Add new table. Old code doesn't use it. New code starts writing to it.
+
+Phase 2 — MIGRATE (backfill data):
+  UPDATE users SET full_name = first_name || ' ' || last_name;
+  Do this in batches to avoid locking:
+  
+  DO $$
+  DECLARE
+    batch_size INT := 10000;
+    processed INT := 0;
+    total INT;
+  BEGIN
+    SELECT COUNT(*) INTO total FROM users WHERE full_name IS NULL;
+    WHILE processed < total LOOP
+      UPDATE users SET full_name = first_name || ' ' || last_name
+      WHERE id IN (
+        SELECT id FROM users WHERE full_name IS NULL LIMIT batch_size
+      );
+      processed := processed + batch_size;
+      PERFORM pg_sleep(0.1);  -- Brief pause to reduce lock pressure
+      COMMIT;
+    END LOOP;
+  END $$;
+
+Phase 3 — TRANSITION (deploy new code that uses new column):
+  New code reads full_name. Also writes to full_name on updates.
+  Old code still reads first_name/last_name. Both work. No outage.
+
+Phase 4 — CONTRACT (remove old columns after all old code is deployed):
+  ALTER TABLE users DROP COLUMN first_name;
+  ALTER TABLE users DROP COLUMN last_name;
+  Only after 100% of traffic is on new code.
+  Never in the same deployment as the column add.
+
+MIGRATION THAT SHOULD NEVER BE DONE DIRECTLY IN PRODUCTION:
+  ALTER TABLE orders ADD COLUMN notes VARCHAR(255) NOT NULL;
+  
+  Why: NOT NULL with no default requires scanning and locking the entire table.
+  On a 10M row table: Hours of table lock. Complete outage.
+  
+  CORRECT:
+  Step 1: ALTER TABLE orders ADD COLUMN notes VARCHAR(255);  -- Nullable, instant
+  Step 2: Backfill with default: UPDATE orders SET notes = '' WHERE notes IS NULL;
+  Step 3: ALTER TABLE orders ALTER COLUMN notes SET NOT NULL;  -- After backfill, fast
+  Step 4: ALTER TABLE orders ALTER COLUMN notes SET DEFAULT '';  -- For future inserts
+
+================================================================================
+PART 4: CACHING STRATEGIES
+================================================================================
+
+--- CACHE INVALIDATION PATTERNS ---
+
+"There are only two hard things in Computer Science: cache invalidation and naming things."
+— Phil Karlton
+
+CACHE-ASIDE (Lazy Loading — most common):
+  Application manages cache explicitly.
+  
+  def get_user(user_id):
+      # Try cache first
+      user = redis.get(f"user:{user_id}")
+      if user:
+          return json.loads(user)
+      
+      # Cache miss: Query DB
+      user = db.query("SELECT * FROM users WHERE id=%s", user_id)
+      
+      # Populate cache
+      redis.setex(f"user:{user_id}", 3600, json.dumps(user))  # 1-hour TTL
+      return user
+  
+  Write: Update DB. Invalidate cache (delete key).
+  def update_user(user_id, data):
+      db.execute("UPDATE users SET ... WHERE id=%s", ...)
+      redis.delete(f"user:{user_id}")  # Invalidate, don't update
+  
+  Pro: Cache only populated for what's actually requested.
+  Con: Cold start — first request always slow. Brief inconsistency possible.
+
+WRITE-THROUGH (Cache stays in sync):
+  Every write goes to cache AND database simultaneously.
+  Cache is always current.
+  
+  def update_user(user_id, data):
+      db.execute("UPDATE users SET ... WHERE id=%s", ...)
+      redis.setex(f"user:{user_id}", 3600, json.dumps(updated_user))
+  
+  Pro: No cold-start problem. No inconsistency window.
+  Con: Every write hits cache too. Cache may hold data never read again.
+
+WRITE-BEHIND (Write to cache first, async to DB):
+  Writes go to cache immediately. Async worker flushes to DB.
+  
+  Pro: Extremely low write latency.
+  Con: Data loss risk if cache fails before flush.
+  Use when: Acceptable to lose recent writes (game scores, view counts).
+
+CACHE STAMPEDE PREVENTION:
+  Problem: Cache expires. 10,000 requests arrive simultaneously.
+  All miss cache. All query database simultaneously. DB dies.
+  
+  Solution 1: Probabilistic early expiration
+  Cache TTL = 1 hour. When TTL < 5 minutes: Randomly refresh early.
+  Spreads recomputation, avoids synchronized expiry.
+  
+  Solution 2: Locking (mutex on cache miss)
+  First request: Acquires distributed lock, populates cache.
+  Other requests: Wait briefly, retry cache (now populated).
+  
+  Solution 3: Background refresh
+  Cache hit: Return cached value.
+  If TTL < threshold: Also trigger async refresh in background.
+  Old value served while refresh happens. Never expired, never stampede.
+
+MULTI-LEVEL CACHING:
+  L1: In-process memory (fastest, smallest, no network)
+  L2: Redis (fast, larger, network hop, shared across instances)
+  L3: CDN (for static assets, geographically distributed)
+  L4: Database query cache (within DB engine)
+  
+  L1 implementation:
+  from cachetools import TTLCache
+  
+  _local_cache = TTLCache(maxsize=1000, ttl=60)  # 1000 items, 60-second TTL
+  
+  def get_product(product_id):
+      # L1 check (in-process)
+      if product_id in _local_cache:
+          return _local_cache[product_id]
+      
+      # L2 check (Redis)
+      cached = redis.get(f"product:{product_id}")
+      if cached:
+          product = json.loads(cached)
+          _local_cache[product_id] = product  # Populate L1
+          return product
+      
+      # L3 (Database)
+      product = db.query(...)
+      redis.setex(f"product:{product_id}", 3600, json.dumps(product))
+      _local_cache[product_id] = product
+      return product
+
+================================================================================
+PART 5: DATA MODELING ANTI-PATTERNS
+================================================================================
+
+--- COMMON MISTAKES AND HOW TO FIX THEM ---
+
+ANTI-PATTERN 1: Storing arrays as comma-separated strings
+  BAD: tags VARCHAR(255) = "python,security,backend"
+  Query: WHERE tags LIKE '%python%' → Full table scan, wrong partial matches
+  
+  GOOD: Separate table
+  CREATE TABLE article_tags (article_id INT, tag VARCHAR(100));
+  CREATE INDEX idx_tags ON article_tags(tag);
+  Query: JOIN article_tags WHERE tag = 'python' → Index scan
+
+ANTI-PATTERN 2: EAV (Entity-Attribute-Value) for everything
+  BAD: attributes table with (entity_id, attribute_name, attribute_value)
+  Enables "flexible" schema but: Joins become impossible, no type safety, terrible performance
+  
+  GOOD for truly flexible attributes: JSONB column
+  products.attributes JSONB
+  CREATE INDEX idx_product_attrs ON products USING GIN (attributes);
+  Query: WHERE attributes->>'color' = 'red'  → GIN index used
+
+ANTI-PATTERN 3: God table with 200+ columns
+  Symptoms: Most queries use 5-10 columns. 190+ always NULL for any given row.
+  Fix: Vertical partitioning. Split into core table + extension tables.
+  Core: The 10 columns used in 90% of queries.
+  Extension: Rarely-used columns in separate table, joined when needed.
+
+ANTI-PATTERN 4: Missing foreign keys
+  Symptom: "We removed FK constraints because they slowed down inserts."
+  Reality: You now have orphan records everywhere. Data integrity impossible.
+  Fix: Keep foreign keys. Use deferred constraint checking for bulk loads:
+  SET CONSTRAINTS ALL DEFERRED;
+  -- Bulk insert
+  COMMIT;  -- Constraints checked here, not per-row
+
+ANTI-PATTERN 5: Over-indexing
+  Every index adds write overhead (update on every INSERT/UPDATE/DELETE).
+  Table with 15 indexes: Inserts are 10x slower than table with 3 indexes.
+  Audit unused indexes:
+  SELECT schemaname, tablename, indexname, idx_scan
+  FROM pg_stat_user_indexes
+  WHERE idx_scan = 0  -- Never used
+  ORDER BY pg_relation_size(indexrelid) DESC;
+  
+  DROP these. Especially large, never-scanned indexes.
+
+================================================================================
+END OF PACK 016: DATABASE ARCHITECTURE
+Total: Polyglot persistence decision framework, PostgreSQL query optimization
+(EXPLAIN ANALYZE, all index types, when to use each), partitioning (range,
+pg_partman), replication with PgBouncer, zero-downtime migrations
+(expand-contract pattern, NOT NULL migration), cache-aside/write-through/write-behind,
+cache stampede prevention, multi-level caching, data modeling anti-patterns.
+================================================================================

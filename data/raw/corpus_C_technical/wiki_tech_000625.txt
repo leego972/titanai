@@ -1,0 +1,66 @@
+Title: HTTP persistent connection
+
+HTTP persistent connection, also called HTTP keep-alive, or HTTP connection reuse, is the idea of using a single TCP connection to send and receive multiple HTTP requests/responses, as opposed to opening a new connection for every single request/response pair. The newer HTTP/2 protocol uses the same idea and takes it further to allow multiple concurrent requests/responses to be multiplexed over a single connection.
+
+Operation
+
+HTTP 1.0 
+Under HTTP 1.0, connections should always be closed by the server after sending the response.
+
+Since late 1996, developers of popular products (browsers, web servers, etc.) using HTTP/1.0, started to add an unofficial extension (to the protocol) named "keep-alive" in order to allow the reuse of a connection for multiple requests/responses.
+
+If the client supports keep-alive, it adds an additional header to the request:
+Connection: keep-alive
+When the server receives this request and generates a response, if it supports keep-alive then it also adds the same above header to the response.  Following this, the connection is not dropped, but is instead kept open. When the client sends another request, it uses the same connection.
+
+This will continue until either the client or the server decides that the conversation is over and in this case they omit the "Connection:" header from the last message sent or, better, they add the keyword "close" to it:
+Connection: close
+After that the connection is closed following specified rules.
+
+Since 1997, the various versions of HTTP/1.1 specifications acknowledged the usage of this unofficial extension and included a few caveats regarding the interoperability between HTTP/1.0 (keep-alive) and HTTP/1.1 clients / servers.
+
+HTTP 1.1 
+In HTTP 1.1, all connections are considered persistent unless declared otherwise. The HTTP persistent connections do not use separate keepalive messages, they just allow multiple requests to use a single connection. However, the default connection timeout of Apache httpd 1.3 and 2.0 is as little as 15 seconds and just 5 seconds for Apache httpd 2.2 and above.  The advantage of a short timeout is the ability to deliver multiple components of a web page quickly while not consuming resources to run multiple server processes or threads for too long.
+
+Keepalive with chunked transfer encoding 
+Keepalive makes it difficult for the client to determine where one response ends and the next response begins, particularly during pipelined HTTP operation. This is a serious problem when Content-Length cannot be used due to streaming. To solve this problem, HTTP 1.1 introduced a chunked transfer coding that defines a last-chunk bit. The last-chunk bit is set at the end of each response so that the client knows where the next response begins.
+
+Advantages 
+ Reduced latency in subsequent requests (no handshaking and no slow start).
+ Reduced CPU usage and round-trips because of fewer new connections and  TLS handshakes.
+ Enables HTTP pipelining of requests and responses.
+ Reduced network congestion (fewer TCP connections).
+ Errors can be reported without the penalty of closing the TCP connection.
+
+According to RFC 7230, section 6.4, "a client ought to limit the number of simultaneous open connections that it maintains to a given server". The previous version of the HTTP/1.1 specification stated specific maximum values but in the words of RFC 7230 "this was found to be impractical for many applications... instead... be conservative when opening multiple connections". These guidelines are intended to improve HTTP response times and avoid congestion. If HTTP pipelining is correctly implemented, there is no performance benefit to be gained from additional connections, while additional connections may cause issues with congestion.
+
+Disadvantages 
+If the client does not close the connection when all of the data it needs has been received, the resources needed to keep the connection open on the server will be unavailable for other clients. How much this affects the server's availability and how long the resources are unavailable depend on the server's architecture and configuration.
+
+Also a race condition can occur where the client sends a request to the server at the same time that the server closes the TCP connection. A server should send a 408 Request Timeout status code to the client immediately before closing the connection. When a client receives the 408 status code, after having sent the request, it may open a new connection to the server and re-send the request. Not all clients will re-send the request, and many that do will only do so if the request has an idempotent HTTP method.
+
+Use in web browsers 
+
+All modern web browsers including Google Chrome, Firefox, Internet Explorer (since 4.01), Opera (since 4.0) and Safari use persistent connections.
+
+By default, Internet Explorer versions 6 and 7 use two persistent connections while version 8 uses six. Persistent connections time out after 60 seconds of inactivity which is changeable via the Windows Registry.
+
+In Firefox, the number of simultaneous connections can be customized (per-server, per-proxy, total). Persistent connections time out after 115 seconds (1.92 minutes) of inactivity which is changeable via the configuration.
+
+Implementation 
+Python's requests library contains requests.Session(), which establishes a persistent HTTP connection, thereby allowing the underlying TCP connection to be reused, which can result in a significant performance increase.
+
+See also 
+
+ HTTP pipelining, whereby multiple requests can be sent without waiting for a response
+ HTTP/2, which allows out-of-order pipelining of requests and responses, and also predictive pushing of content before it has been requested
+
+References
+
+External links 
+ Hypertext Transfer Protocol (HTTP/1.1): Message Syntax and Routing, Connection Management, Persistence
+ Persistent Connection Behavior of Popular Browsers (dated)
+ Apache HTTPD Keep-Alive Support
+ Network Performance Effects of HTTP/1.1, CSS1, and PNG
+
+Hypertext Transfer Protocol

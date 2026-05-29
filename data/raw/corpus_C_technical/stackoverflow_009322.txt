@@ -1,0 +1,89 @@
+Question: <p>I'm doing a Python script where I need to spawn several ssh-copy-id processes, and they need for me to type in a password, so i'm using PExpect.</p>
+
+<p>I have basically this:</p>
+
+<pre><code>child = pexpect.spawn('command')
+child.expect('password:')
+child.sendline('the password')
+</code></pre>
+
+<p>and then I want to spawn another process, I don't care about this one anymore, whether it ended or not.</p>
+
+<pre><code>child = pexpect.spawn('command2')
+child.expect('password:')
+child.sendline('the password')
+</code></pre>
+
+<p>And the code is hanging at the second "spawn"</p>
+
+<p>However, if I comment out the first call, the second one works, so i'm guessing that the fact that the first one is still running or something is keeping it from working.</p>
+
+<p>Now, the other thing I haven't been able to do is wait until the first one stops.
+I've tried:<br />
+child.close() - it hangs (both with True and False as parameters)
+child.read(-1) - it hangs<br />
+child.expect(pexpect.EOF) - it hangs.<br />
+child.terminate() - it hangs  (both with True and False as parameters)</p>
+
+<p>Any ideas on what could be happening?<br />
+NOTE: I'm not a Python expert, and i have never used pexpect before, so ANY idea is more than welcome.</p>
+
+<p>Thanks!</p>
+
+<p><hr /></p>
+
+<p>UPDATE: This is definitely related to ssh-copy-id, because with other processes, spawn works well even if they don't return.
+Also, apparently ssh-copy-id never returns an EOF.</p>
+
+Answer: <p>I think the problem is, that SSH tries to open PTY and it does not work
+on anything else than PTY for security reasons. This won't work well
+with pexpect.</p>
+
+<p>I have another ssh client:</p>
+
+<p><a href="http://www.digmia.com/index.php?option=com_content&amp;view=article&amp;id=54:Digmia%20Enterprise%20SSH&amp;Itemid=56" rel="nofollow">http://www.digmia.com/index.php?option=com_content&amp;view=article&amp;id=54:Digmia%20Enterprise%20SSH&amp;Itemid=56</a></p>
+
+<p>It's open-source, you can use it. What you are trying to do would
+be more commands, but you don't need expect at all.</p>
+
+<ol>
+<li><p>First install it accordingly to manual, then do something like this:</p></li>
+<li><p>Run dssh-agent, add the password you need like this:</p>
+
+<pre><code>dssh-add -l &lt; passwordfile
+</code></pre>
+
+<ul>
+<li><p>or if it is a secure machine, i.e. no one else can log in there,
+this is <em>very</em> important, otherwise this would be a huge security hole:</p>
+
+<pre><code>echo "name-of-server;22;root;password;" | dssh-add -l
+</code></pre></li>
+<li><p><code>password</code> file would be something like:</p>
+
+<pre><code>name-of-server;22;root;password;
+</code></pre></li>
+</ul></li>
+<li><p>And the do something like (replace <code>CONTENTS OF ...</code> with actual content of that file):</p>
+
+<pre><code>dssh root@name-of-server -- echo "CONTENTS OF ~/.ssh/identity.pub" &gt; .ssh/authorized_keys \; chmod og-w .ssh .ssh/authorized_keys
+</code></pre>
+
+<ul>
+<li><p>You can (optionally) do</p>
+
+<pre><code>dssh-add -f passwords
+</code></pre></li>
+</ul>
+
+<p>(make sure no one else is doing all this stuff, otherwise you would
+have a race condition).</p></li>
+</ol>
+
+<p>Also, pexpect should probably work with dssh itself (so you don't need
+to use dssh-agent). But using dssh-agent is simpler and safer.</p>
+
+<p>Installation manual for DSSH is contained in the tarball.</p>
+
+<p>I don't know any simpler way of doing this, OpenSSH ssh-copy-id is
+very picky about where the password comes from...</p>

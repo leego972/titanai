@@ -1,0 +1,62 @@
+Question: <p>Python's access to environment variables does not accurately reflect the operating system's view of the processes environment.</p>
+
+<p>os.getenv and os.environ do not function as expected in particular cases.</p>
+
+<p>Is there a way to properly get the running process' environment?</p>
+
+<p><hr /></p>
+
+<p>To demonstrate what I mean, take the two roughly equivalent programs (the first in C, the other in python):</p>
+
+<pre><code>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;unistd.h&gt;
+int main(int argc, char *argv[]){
+    char *env;
+    for(;;){
+        env = getenv("SOME_VARIABLE");
+        if(env)
+            puts(env);
+        sleep(5);
+    }
+}
+</code></pre>
+
+<p><hr /></p>
+
+<pre><code>import os
+import time
+while True:
+    env = os.getenv("SOME_VARIABLE")
+    if env is not None:
+        print env
+    time.sleep(5)
+</code></pre>
+
+<p><hr /></p>
+
+<p>Now, if we run the C program and attach to the running process with gdb and forcibly change the environment under the hood by doing something like this:</p>
+
+<pre><code>(gdb) print setenv("SOME_VARIABLE", "my value", 1)
+[Switching to Thread -1208600896 (LWP 16163)]
+$1 = 0
+(gdb) print (char *)getenv("SOME_VARIABLE")
+$2 = 0x8293126 "my value"
+</code></pre>
+
+<p>then the aforementioned C program will start spewing out "my value" once every 5 seconds. The aforementioned python program, however, will not.</p>
+
+<p>Is there a way to get the python program to function like the C program in this case?</p>
+
+<p>(Yes, I realize this is a very obscure and potentially damaging action to perform on a running process)</p>
+
+<p>Also, I'm currently using python 2.4, this may have been fixed in a later version of python.</p>
+
+Answer: <p>You can use <code>ctypes</code> to do this pretty simply:</p>
+
+<pre><code>&gt;&gt;&gt; from ctypes import CDLL, c_char_p
+&gt;&gt;&gt; getenv = CDLL("libc.so.6").getenv
+&gt;&gt;&gt; getenv.restype = c_char_p
+&gt;&gt;&gt; getenv("HOME")
+'/home/glyph'
+</code></pre>

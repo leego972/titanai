@@ -1,0 +1,55 @@
+### begriffs
+
+During tonight’s Madrailers meetup everyone worked on a kata to play the “word morph” game. You pick two arbitrary words and see if one can be converted to the other by changing only one letter at a time where the resulting intermediate words are valid.
+
+It’s an interesting puzzle, and rather than solve it directly I wanted to discover some general statistics about how connected English words are generally. Rather than choosing two words and seeing if they are connected, I wanted to survey the equivalence classes of this connectedness.
+
+I needed to write a program, but I realized that the program can operate on more general structures than simply words and letter manipulations. It turns out that the relation of “differing by one letter” is symmetric, and our program can extend it to a full equivalence relation and then calculate its equivalence classes on a finite set.
+
+To get an idea how this works, let’s consider the symmetric relation on integers of “differing by three.” The transitive closure of this relation is “differing by any nonzero multiple of three” and the reflexive closure of that is “differing by any multiple of three.” The equivalence classes of this last relation on [0,1,2,3,4,5,6,7,8] are [[0,3,6], [1,4,7], [2,5,8]]. Let’s look at the general JavaScript code which acts on symmetric relations and see how it behaves on the number example.
+
+function eq_classes(set, rel) {
+var classes = {}, connected_stack, root,
+stack_top, elt, pushed_more;
+
+while(set.length > 0) {
+root = set.shift();
+classes[root] = [root];
+connected_stack = [root];
+
+while(connected_stack.length > 0) {
+stack_top = connected_stack[connected_stack.length - 1];
+pushed_more = false;
+for(elt in set) {
+if(rel(stack_top, set[elt])) {
+pushed_more = true;
+connected_stack.push(set[elt]);
+classes[root].push(set[elt]);
+set.splice(elt, 1);
+}
+}
+if(!pushed_more) {
+connected_stack.pop();
+}
+}
+}
+return classes;
+}
+
+If we run it, we see that it returns an object with each representative mapping to its class:
+
+eq_classes(
+[0,1,2,3,4,5,6,7,8],
+function(a,b) { return Math.abs(a-b) === 3; }
+);
+// returns {0: [0,3,6], 1: [1,4,7], 2: [2,5,8]}
+
+Returning to the word morph game, I ran eq_classes() on /usr/share/dict/words with the word relation of “differing by one letter.” The results are interesting. Obviously all one-letter words are equivalent to one another. But so are all two-letter words, and almost all three-letter words. The exceptions are “Eli”, “Emm”, “Osc”, “edh”, “its”, and “nth” which are not equivalent to any word except themselves.
+
+The vast majority of four letter words are all equivalent. There are 158 equivalence classes, most of which have only one word ([“ruby”] is one such). After the class containing 5073 words, the next largest classes have four words (such as [“idic”, “odic”, “Udic”, “otic”]).
+
+The longer the words become, the more disconnected their classes become. By the time you get to fourteen-letter words, there are 9233 classes among 9765 words. The largest class has seven items: [“invendibleness”, “inventibleness”, “unvendibleness”, “unvendableness”, “unbendableness”, “unmendableness”, “unbondableness”], but there are 8759 single-word classes.
+
+What does this tell us? The only reason that every word is not equivalent to every other of the same length is that we tend to avoid certain combinations of letters. Small words are convenient to write, so we have exhausted a greater ratio of valid short words to total short letter combinations. However we are wasteful and choose longer sequences of letters haphazardly, leaving big holes in the larger state space. If our symbols were all phonetic (such as in a language like Telugu which spells by the syllable) I think we would have greater connectedness.
+
+I like this challenge not just for what it tells us about English, but as an opportunity to think of algorithms more abstractly. That said, somebody in the 1970s has doubtless written a similar function that runs an order of magnitude faster than mine. Let me know if you see a way to improve it.

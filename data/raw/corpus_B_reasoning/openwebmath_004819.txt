@@ -1,0 +1,199 @@
+# Multiplication of 3×3 and N×N square matrices
+
+I recently wrote a matrix module in C++.
+
+During the development process I quoted some source code and found a problem.
+
+For example, matrix multiplication:
+
+This way is suitable for all N×N matrices：
+
+void multiplyMatrix(const float32* a, const float32* b, float32* dst,
+int32 aColumns, int32 bColumns, int32 dstColumns, int32 dstRows) {
+
+for (int32 i = 0; i < dstRows; i++) {
+
+for (int32 j = 0; j < dstColumns; j++)
+dst[i * dstColumns + j] = dotMatrix(a, b, aColumns, bColumns, j, i);
+
+}
+}
+
+float32 dotMatrix(const float32* a, const float32* b,
+int32 aColumns, int32 bColumns,
+int32 column, int32 row) {
+
+float32 result = 0.0f;
+
+int32 index = aColumns * row;
+for (int32 i = 0; i < aColumns; i++) {
+result += a[index++] * b[column];
+column += bColumns;
+}
+
+return result;
+}
+
+
+Next, I wrote a 3x3 matrix class.
+
+class Matrix3x3
+{
+public:
+float32 m11, m12, m13,
+m21, m22, m23,
+m31, m32, m33;
+
+float32 element[9];
+
+void multiply(float32 ma11, float32 ma12, float32 ma13,
+float32 ma21, float32 ma22, float32 ma23,
+float32 ma31, float32 ma32, float32 ma33) {
+
+float32 temp1 = m11 * ma11 + m21 * ma12 + m31 * ma13;
+float32 temp2 = m12 * ma11 + m22 * ma12 + m32 * ma13;
+
+m13 = m13 * ma11 + m23 * ma12 + m33 * ma13;
+m11 = temp1;
+m12 = temp2;
+
+temp1 = m11 * ma21 + m21 * ma22 + m31 * ma23;
+temp2 = m12 * ma21 + m22 * ma22 + m32 * ma23;
+m23   = m13 * ma21 + m23 * ma22 + m33 * ma23;
+m21   = temp1;
+m22   = temp2;
+
+temp1 = m11 * ma31 + m21 * ma32 + m31 * ma33;
+temp2 = m12 * ma31 + m22 * ma32 + m32 * ma33;
+m31   = m13 * ma31 + m23 * ma32 + m33 * ma33;
+m32   = temp1;
+m33   = temp2;
+}
+}
+
+
+Obviously the first one is very convenient.
+
+Next, I tested the time it took to calculate：
+
+        float32 e1[9];
+e1[0] = 2.1018f;   e1[1] = -1.81754f; e1[2] = 1.2541f;
+e1[3] = 0.54194f;  e1[4] = 2.75391f;  e1[5] = -0.1167f;
+e1[6] = -5.81652f; e1[7] = -7.9381f;  e1[8] = 4.2816f;
+
+float32 e2[9];
+e2[0] = 2.1018f;   e2[1] = -1.81754f; e2[2] = 1.2541f;
+e2[3] = 0.54194f;  e2[4] = 2.75391f;  e2[5] = -0.1167f;
+e2[6] = -5.81652f; e2[7] = -7.9381f;  e2[8] = 4.2816f;
+
+Matrix3x3 a;
+a.m11 = 2.1018f;   a.m12 = -1.81754f; a.m13 = 1.2541f;
+a.m21 = 0.54194f;  a.m22 = 2.75391f;  a.m23 = -0.1167f;
+a.m31 = -5.81652f; a.m32 = -7.9381f;  a.m33 = 4.2816f;
+
+Matrix3x3 b = a;
+
+float64 timeSpent = 0;
+LARGE_INTEGER nFreq;
+LARGE_INTEGER nBeginTime;
+LARGE_INTEGER nEndTime;
+
+QueryPerformanceFrequency(&nFreq); // statistical frequency
+QueryPerformanceCounter(&nBeginTime);// start timer
+
+for (int32 i = 0; i < 100000; i++) {
+multiplyMatrix(e1, e2, dst, 3, 3, 3, 3);
+}
+
+QueryPerformanceCounter(&nEndTime); //end timer
+
+printf("timeSpent1:%f\n", timeSpent);
+
+QueryPerformanceCounter(&nBeginTime);
+for (int32 i = 0; i < 100000; i++) {
+b.multiply(a.m11, a.m12, a.m13,
+a.m21, a.m22, a.m23,
+a.m31, a.m32, a.m33);
+}
+QueryPerformanceCounter(&nEndTime);
+
+printf("timeSpent2:%f\n", timeSpent);
+
+
+Output：
+
+timeSpent1:0.014277
+timeSpent2:0.004649
+timeSpent1:0.012684
+timeSpent2:0.004522
+.......
+.......
+timeSpent1:0.003414
+timeSpent2:0.001166
+timeSpent1:0.003407
+timeSpent2:0.001242
+
+
+Is this difference in efficiency significant or negligible?
+
+• I changed the title so that it describes what the code does per site goals: "State what your code does in your title, not your main concerns about it.". Please check that I haven't misrepresented your code, and correct it if I have. – Toby Speight Jan 17 at 10:49
+• Which C++ version is this targeting? C++11 or newer? C++98? This might be important context for reviewers since a lot changed since C++98. – hoffmale Jan 17 at 11:13
+
+A factor of 3 is large, but in my opinion not unexpected or abnormal. The functions that can handle a variable size matrix in their natural form (ie as they would be compiled without knowledge of the size, for example if the functions are defined in a different compilation unit than they are used in and LTO is not applied) have a lot of overhead: non-linear control flow (3 nested loops), more complicated address computation (involving multiplication by a variable).
+
+Basically, that is the cost of generality .. but there is more to it.
+
+From your use of QueryPerformanceCounter I assume you use MSVC (other compilers aren't much different for the following considerations). MSVC likes to unroll loops such as the one in dotMatrix by 4. It does not like to unroll such loops by 3, though it can be persuaded to do so anyway, for example by giving it a loop that makes exactly 3 iterations. So the cost of generality would work out much differently if the relevant matrix was of size 4x4 or 8x8, as in those cases only the faster unrolled codepath would be used (this still comes with overhead, but less). 3 is a bad case, only ever using the fallback codepath.
+
+Additionally, the general matrix multiply implemented by multiplyMatrix is not scalable: it does not implement cache blocking, so for any matrix that does not fit in L1 cache it will perform badly (and even more badly when going beyond the L2 and L3 sizes). That is normal for code in general, but matrix multiplication is special in that it does not have to suffer significantly from that common effect thanks to its "O(n2) data in O(n3) time" property.
+
+Both the general matrix multiply and the special 3x3 one could use SIMD intrinsics for extra efficiency. 3x3 is an awkward size that would cause some "wasted lanes", but it would still help. For example, it could be done like this (not tested):
+
+#include <xmmintrin.h>
+
+class Matrix3x3
+{
+public:
+float32 m11, m21, m31,
+m12, m22, m32,
+
+void multiply(float32 ma11, float32 ma12, float32 ma13,
+float32 ma21, float32 ma22, float32 ma23,
+float32 ma31, float32 ma32, float32 ma33) {
+
+_mm_mul_ps(col1, _mm_set1_ps(ma11)),
+_mm_mul_ps(col2, _mm_set1_ps(ma21))),
+_mm_mul_ps(col3, _mm_set1_ps(ma31)));
+_mm_mul_ps(col1, _mm_set1_ps(ma12)),
+_mm_mul_ps(col2, _mm_set1_ps(ma22))),
+_mm_mul_ps(col3, _mm_set1_ps(ma32)));
+_mm_mul_ps(col1, _mm_set1_ps(ma13)),
+_mm_mul_ps(col2, _mm_set1_ps(ma23))),
+_mm_mul_ps(col3, _mm_set1_ps(ma33)));
+
+_mm_storeu_ps(&m11, t1);
+_mm_storeu_ps(&m12, t2);
+_mm_storeu_ps(&m13, t3);
+}
+};
+
+
+The padding is a bit unfortunate (and shouldn't be private, because that makes its positioning relative to the actual matrix elements undefined), but simplifies the SIMD logic, chunks of 16 bytes are easier to deal with. It is possible to avoid the padding if required. Anyway, this results in a significant reduction in code and should be more efficient (without AVX the set1s cost more, that shouldn't be enough to undo the improvement but I didn't try it). The dllexport in the code on godbolt is not really part of the code, I just put that there to force code to be generated for an otherwise unused method.
+
+Column-major order is used here because the columns of the result are a linear combination of the columns of the left hand matrix, which we have access to in packed memory. Similarly, the rows of the output are a linear combination of the rows of the right hand side, but we have no packed access to the rows of the right hand side, so they would be inefficient to gather. A row-oriented version of the above could be arranged for example if the right hand side was passed in as a reference to a Matrix3x3.
+
+Passing the right hand side as matrix is probably a nicer interface anyway, with 9 separate arguments there is no choice but to write them all out separately even if the RHS is available as a matrix object, as you already experienced in your benchmark code.
+
+• Thank you,I don't know assembly language. I read some open source code such as btMatrix3x3.h for bullet3, b2Math.h for Box2D, and some examples of openGL such as matrixModelView. It has been found that in most cases the corresponding matrix is treated separately, such as writing a separate class or method for matrix 3x3 or matrix 4x4 instead of processing all NXN matrices in general, for efficiency? What's your opinion? Thank you. – Shuang2019 Jan 19 at 3:38
+• @Shuang2019 yes, specialized classes for specific matrix sizes are more efficient – harold Jan 19 at 7:44
+
+A factor 4 for 3x3 is in the same order, and okay.
+
+One could write could to generate a Matrix99x99 C++ file, and test that. My guess it would be factor 4 too. If it could be 2 then, and as such it would be totally fine.
+
+A remark Normal matrix multiplication A.B with A having dimensions LxM and B dimensions MxN, requiring a s´hared M, resulting in a dimension LxN. So a small C++ class as such would be nice._
+
+• Sorry, my English is very poor, so using a translator, your suggestion is to write a class or method that handles all NXN matrices? Thank you. – Shuang2019 Jan 19 at 3:42
+• Yes, storing the dimensions too would be something for a class. – Joop Eggen Jan 21 at 7:35
+• But there are some gaps in efficiency, especially for the Minors, cofactors and adjugate inverse matrices, which are 30-40 times slower. – Shuang2019 Jan 24 at 10:00
+• One can always add heuristics: if (dimension == 3) { do something special }. The only overhead then are the indirections, loops not being rolled out and the if-s. I would expect a factor 3 at most. BTW I like harolds answer. – Joop Eggen Jan 24 at 11:17

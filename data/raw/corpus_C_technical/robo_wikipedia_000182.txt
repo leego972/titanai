@@ -1,0 +1,41 @@
+# Microcom Networking Protocol
+
+The Microcom Networking Protocols, almost always shortened to MNP, is a family of error-correcting protocols commonly used on early high-speed (2400 bit/s and higher) modems. Originally developed for use on Microcom's own family of modems, the protocol was later openly licensed and used by most of the modem industry, notably the "big three", Telebit, USRobotics and Hayes. MNP was later supplanted by V.42bis, which was used almost universally starting with the first V.32bis modems in the early 1990s.
+
+Overview
+Although Xmodem was introduced 1977, as late as 1985 The New York Times described XMODEM first, then discussed MNP as a leading contender, and that 9600 baud modems "are beginning to make their appearance."
+By 1988, the Times was talking about 9600 and 19.2K, and that "At least 100 other brands of modems follow" MNP (compared to Hayes' use of LAP-B).
+
+Error correction basics
+
+Modems are, by their nature, error-prone devices. Noise on the telephone line, a common occurrence, can easily mimic the sounds used by the modems to transmit data, thereby introducing errors that are difficult to notice. For some tasks, like reading or writing simple text, a small number of errors can be accepted without causing too many problems. For other tasks, like transferring computer programs in machine format, even one error can render the received data useless. As modems increase in speed by using up more of the available bandwidth, the chance that random noise would introduce errors also increases; above 2400 bit/s these errors are quite common.
+
+To deal with this problem, a number of file transfer protocols were introduced and implemented in various programs. In general, these protocols break down a file into a series of frames or packets containing a number of bytes from the original file. Some sort of additional data, normally a checksum or CRC, is added to each packet to indicate whether the packet encountered an error while being received . The packet is then sent to the remote system, which recomputes the checksum or CRC of the data and compares it to the received checksum or CRC to determine if it was received properly. If it was, the receiver sends back an ACK (acknowledgement) message, prompting the sender to send the next packet. If there was any problem, it instead sends a NAK (not-acknowledged) message, and the sender resends the damaged packet.
+
+This process introduces "overhead" into the transfer. For one, the additional checksum or CRC uses up time in the channel that could otherwise be used to send additional data. This is a minor concern, however, unless the packets are very small (which they are in UUCP for instance). A more serious concern is the time needed for the receiver to examine the packet, compare it to the CRC, and then send the  ACK back to the sender. This delay grows in relative terms as the speed of the modem increases; the latency of the phone line is a constant, but the amount of data that could be sent in that fixed amount of time grows as the speed increases. To address this problem, newer protocols use a system known as "sliding windows", allowing the sender to begin transmitting the next packet without receiving an ACK message; only if the ACK does not arrive for some time will it resend the packet.
+
+MNP handshaking
+MNP connections were set up after the modems had successfully connected. The originating system (the modem that placed the call, or sometimes the computer it was connected to) would send a short series of 8-bit characters known as the "Originator Detection Pattern" (ODP). The string consisted of DC1 with even parity (10001000) at the start, one or two $FF (11111111), DC1 with odd parity (10001001) and the same number of $FF again.
+
+Once the ODP had been sent, the sender begins the "Detection Phase Timer", or T400. The answering system had to properly respond to the ODP within this time, or the originating system would assume that MNP was not supported.
+
+If the answering modem did support MNP, or the later V.42 standards that superseded it, it responded with one of the "Answerer Detection Patterns" (ADP). If the modem supported compression, it responded with the 8-bit version of the string E$FF[$FF]C$FF[$FF], indicating "EC", or "Error correction and Compression". If error correction was supported, but compression was not, the ADP was E$FF[$FF]NUL$FF[$FF], indicating "E", or "Error correction". The standard allowed any value of the last four bits in the second character to indicate difference standards, but this was never implemented. The ADP had to be sent at least ten times.
+
+If the ADP is successfully received within the T400 time, the system has successfully determined that the two systems support some sort of error correction and/or compression. At that point, the systems enter the "Protocol Establishment Phase" where the details of these standards are determined and selected. This starts with the originating system sending the L-ESTABLISH string, indicating the mode is switching to the error correcting mode, and the answering system responds with the same L-ESTABLISH. The answering system can reject the attempt by sending L- RELEASE. This phase is timed by T401.
+
+The final step in the handshaking process is to send an MNP packet containing the "SABME" command, short for "set asynchronous balanced mode extended". This is sent by the originator, containing a number of data fields indicating the exact protocols it can support. The answering system responds with a modified version of the same packet, switching bits in the data to indicate it is successful. From that point on, the two systems exchange data using the error correcting packet protocol. If this last step does not complete during timer T401, the originator sends L-RELEASE and returns to a non-MNP link.
+
+MNP "classes"
+Microcom's idea was to move the file-transfer protocol out of the host computer and place it in the modem instead. In doing so, all data being transferred would be error corrected, not just file transfers. This also meant that devices with no processor, like dumb terminals, could enjoy an error-free link.
+
+The original protocol was extremely simple and rather inefficient, leading to a variety of improved protocols referred to as "classes". Each class generally improved performance over earlier versions, which were retained only for backward-compatibility reasons.
+
+MNP 1 and 2
+The first MNP standard, retroactively known as MNP Class 1, or simply MNP 1, was a simple half-duplex protocol similar to XModem in nature. Lacking sliding window support, throughput efficiency was fairly low, at about 70%. That meant that on a 2400 bit/s modem, like the ones Microcom sold, throughput would be limited to about 1690 bit/s when MNP 1 was in use. This system was created primarily to be as easy as possible to implement in limited hardware, which explains its simplicity.
+
+With low-cost processing power improving, Microcom introduced MNP 2, a full-duplex version of MNP 1 that allowed the ACK messages to be returned while the next outbound packet was already starting. This eliminated the pause while the modem waited for the ACK to be returned, adding the requirement that the system needed some memory to track whether or not an ACK was received within a given amount of time. Since the inter-packet delay was reduced, only the overhead of the CRC remained, improving throughput to about 84%.
+
+MNP 3
+In normal use, a modem can send or receive data at any point in time, a mode of operation known as "asynchronous". The modem can determine the speed of the sender's data by listening to the bits being sent to it, and "locking" its clock to the speed of bits being received. Since the data can arrive at any time, there is no precise timing; the clock may have to be re-adjusted for pauses as the user stops typing (for instance).
+
+Unfortunately, this sort of clock decoding does not work unless there are at least some transitions between 1 and 0 in the data; a long strea

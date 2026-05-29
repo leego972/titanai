@@ -1,0 +1,22 @@
+Question: <p>I have multiple Network Interface Cards on my computer, each with its own IP address.</p>
+
+<p>When I use <code>gethostbyname(gethostname())</code> from Python's (built-in) <code>socket</code> module, it will only return one of them.  How do I get the others?</p>
+
+Answer: <p>Here is a routine for finding all IPv4 and IPv6 interfaces. As a previous poster pointed out, socket.gethostbyname_ex() does not work for IPv6, and the Python documentation recommends one use <a href="http://docs.python.org/library/socket.html#socket.getaddrinfo" rel="nofollow">socket.getaddressinfo()</a> instead.</p>
+
+<p>This routine adds the callback IPv4 interface (127.0.0.1), and if there are any IPv6 interfaces then it also adds the callback IPv6 interface (::1). On my machine, socket.getaddrinfo() will give me one or both of these but only if I have no other interfaces available.</p>
+
+<p>For my needs, I wanted to try to open a UDP socket on a specified port on each of my available interfaces, which is why the code has "port" and socket.SOCK_DGRAM in it. It is safe to change those, e.g. if you don't have a port in mind.</p>
+
+<pre><code>addrinfo_ipv4 = socket.getaddrinfo(hostname,port,socket.AF_INET,socket.SOCK_DGRAM)
+addrinfo_ipv6 = []
+try:
+    addrinfo_ipv6 = socket.getaddrinfo(hostname,port,socket.AF_INET6,socket.SOCK_DGRAM)
+except socket.gaierror:
+    pass
+addrinfo = [(f,t,a) for f,t,p,cn,a in addrinfo_ipv4+addrinfo_ipv6]
+addrinfo_local = [(socket.AF_INET,socket.SOCK_DGRAM,('127.0.0.1',port))]
+if addrinfo_ipv6: 
+    addrinfo_local.append( (socket.AF_INET6,socket.SOCK_DGRAM,('::1',port)) )
+[addrinfo.append(ai) for ai in addrinfo_local if ai not in addrinfo]
+</code></pre>

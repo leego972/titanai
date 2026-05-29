@@ -1,0 +1,76 @@
+Question: <p>The function below takes a python file handle, reads in packed binary data from the file, creates a Python dictionary and returns it.  If I loop it endlessly, it'll continually consume RAM.  What's wrong with my RefCounting?</p>
+
+<pre><code>static PyObject* __binParse_getDBHeader(PyObject *self, PyObject *args){
+
+PyObject *o; //generic object
+PyObject* pyDB = NULL; //this has to be a py file object
+
+if (!PyArg_ParseTuple(args, "O", &amp;pyDB)){
+	return NULL;
+} else {
+	Py_INCREF(pyDB);
+	if (!PyFile_Check(pyDB)){
+        Py_DECREF(pyDB);
+		PyErr_SetString(PyExc_IOError, "argument 1 must be open file handle");
+		return NULL;
+	}
+}
+
+FILE *fhDB = PyFile_AsFile(pyDB);
+
+long offset = 0;
+DB_HEADER *pdbHeader = malloc(sizeof(DB_HEADER));
+fseek(fhDB,offset,SEEK_SET); //at the beginning
+fread(pdbHeader, 1, sizeof(DB_HEADER), fhDB );
+if (ferror(fhDB)){
+	fclose(fhDB);
+	Py_DECREF(pyDB);
+	PyErr_SetString(PyExc_IOError, "failed reading database header");
+	return NULL;
+}
+Py_DECREF(pyDB);
+
+PyObject *pyDBHeader = PyDict_New();
+Py_INCREF(pyDBHeader);
+
+o=PyInt_FromLong(pdbHeader-&gt;version_number);
+PyDict_SetItemString(pyDBHeader, "version", o);
+Py_DECREF(o);
+
+PyObject *pyTimeList = PyList_New(0);
+Py_INCREF(pyTimeList);
+
+int i;
+for (i=0; i&lt;NUM_DRAWERS; i++){
+	//epochs
+	o=PyInt_FromLong(pdbHeader-&gt;last_good_test[i]);
+	PyList_Append(pyTimeList, o);
+	Py_DECREF(o);
+}
+PyDict_SetItemString(pyDBHeader, "lastTest", pyTimeList);
+Py_DECREF(pyTimeList);
+
+o=PyInt_FromLong(pdbHeader-&gt;temp);
+PyDict_SetItemString(pyDBHeader, "temp", o);
+Py_DECREF(o);
+
+free(pdbHeader);
+return (pyDBHeader);
+}
+</code></pre>
+
+<p>Thanks for taking a look,</p>
+
+<p>LarsenMTL</p>
+
+Answer: <p>OT: Using successive calls to <code>PyList_Append</code> is a performance issue. Since you know how many results you'll get in advance, you can use:</p>
+
+<pre><code>PyObject *pyTimeList = PyList_New(NUM_DRAWERS);
+int i;
+for (i=0; i&lt;NUM_DRAWERS; i++){
+    o = PyInt_FromLong(pdbHeader-&gt;last_good_test[i]);
+    PyList_SET_ITEM(pyTimeList, i, o);
+}
+</code></pre>
+
+<p>Observe that you may not decrease the refcount of <code>o</code> after calling <code>PyList_SET_ITEM</code>, because it "steals" a reference. Check the <a href="http://docs.python.org/c-api/list.html">docs</a>.</p>

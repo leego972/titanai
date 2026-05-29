@@ -1,0 +1,51 @@
+Question: <p>I need to test a function that needs to query a page on an external server using urllib.urlopen (it also uses urllib.urlencode). The server could be down, the page could change; I can't rely on it for a test.</p>
+
+<p>What is the best way to control what urllib.urlopen returns?</p>
+
+Answer: <p>In case you don't want to even load the module:</p>
+
+<pre><code>import sys,types
+class MockCallable():
+  """ Mocks a function, can be enquired on how many calls it received """
+  def __init__(self, result):
+    self.result  = result
+    self._calls  = []
+
+  def __call__(self, *arguments):
+    """Mock callable"""
+    self._calls.append(arguments)
+    return self.result
+
+  def called(self):
+    """docstring for called"""
+    return self._calls
+
+class StubModule(types.ModuleType, object):
+  """ Uses a stub instead of loading libraries """
+
+  def __init__(self, moduleName):
+    self.__name__ = moduleName
+    sys.modules[moduleName] = self
+
+  def __repr__(self):
+    name  = self.__name__
+    mocks = ', '.join(set(dir(self)) - set(['__name__']))
+    return "&lt;StubModule: %(name)s; mocks: %(mocks)s&gt;" % locals()
+
+class StubObject(object):
+  pass
+</code></pre>
+
+<p>And then:</p>
+
+<pre><code>&gt;&gt;&gt; urllib = StubModule("urllib")
+&gt;&gt;&gt; import urllib # won't actually load urllib
+
+&gt;&gt;&gt; urls.urlopen = MockCallable(StubObject())
+
+&gt;&gt;&gt; example = urllib.urlopen('http://example.com')
+&gt;&gt;&gt; example.read = MockCallable('foo')
+
+&gt;&gt;&gt; print(example.read())
+'foo'
+</code></pre>

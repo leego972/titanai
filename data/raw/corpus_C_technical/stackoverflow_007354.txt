@@ -1,0 +1,82 @@
+Question: <p>I'm developing an application with a team in .Net (C++) and provide a COM interface to interact with python and other languages.</p>
+
+<p>What we've found is that pushing data through COM turns out to be pretty slow.</p>
+
+<p>I've considered several alternatives:</p>
+
+<ul>
+<li>dumping data to a file and sending the file path through com</li>
+<li>Shared Memory via <a href="http://docs.python.org/library/mmap.html?highlight=shared%20memory#module-mmap">mmap</a>?</li>
+<li>Stream data through a socket directly?</li>
+</ul>
+
+<p>From your experience what's the best way to pass around data?</p>
+
+Answer: <p>Staying within the Windows interprocess communication mechanisms, we had positive experience using <em>windows named pipes</em>. 
+Using Windows overlapped IO and the <code>win32pipe</code> module from <a href="http://pywin32.sourceforge.net/">pywin32</a>.</p>
+
+<p>You can learn much about win32 and python in the <a href="http://oreilly.com/catalog/9781565926219/index.html">Python Programming On Win32 </a> book.</p>
+
+<p>The sending part simply writes to <code>r'\\.\pipe\mypipe'</code>.</p>
+
+<p>A listener (<code>ovpipe</code>) object holds an event handle, and waiting for a message with possible other events involves calling <code>win32event.WaitForMultipleObjects</code>.</p>
+
+<pre><code>rc = win32event.WaitForMultipleObjects(
+    eventlist,    # Objects to wait for.
+    0,            # Wait for one object
+    timeout)      # timeout in milli-seconds.
+</code></pre>
+
+<p>Here is part of the python overlapped listener class:</p>
+
+<pre><code>import win32event
+import pywintypes
+import win32file
+import win32pipe
+
+class ovpipe:
+"Overlapped I/O named pipe class"
+def __init__(self):
+    self.over=pywintypes.OVERLAPPED()
+    evt=win32event.CreateEvent(None,1,0,None)
+    self.over.hEvent=evt
+    self.pname='mypipe'
+    self.hpipe = win32pipe.CreateNamedPipe(
+        r'\\.\pipe\mypipe',             # pipe name 
+        win32pipe.PIPE_ACCESS_DUPLEX|   # read/write access
+        win32file.FILE_FLAG_OVERLAPPED,
+        win32pipe.PIPE_TYPE_MESSAGE|    # message-type pipe 
+        win32pipe.PIPE_WAIT,            # blocking mode 
+        1,                              # number of instances 
+        512,                            # output buffer size 
+        512,                            # input buffer size 
+        2000,                           # client time-out
+        None)                           # no security attributes
+    self.buffer = win32file.AllocateReadBuffer(512)
+    self.state='noconnected'
+    self.chstate()
+
+def execmsg(self):
+    "Translate the received message"
+    pass
+
+def chstate(self):
+    "Change the state of the pipe depending on current state"
+    if self.state=='noconnected':
+        win32pipe.ConnectNamedPipe(self.hpipe,self.over)
+        self.state='connectwait'
+        return -6
+
+    elif self.state=='connectwait':
+        j,self.strbuf=win32file.ReadFile(self.hpipe,self.buffer,self.over)
+        self.state='readwait'
+        return -6
+
+    elif self.state=='readwait':
+        size=win32file.GetOverlappedResult(self.hpipe,self.over,1)
+        self.msg=self.strbuf[:size]
+        ret=self.execmsg()
+        self.state = 'noconnected'
+        win32pipe.DisconnectNamedPipe(self.hpipe)
+        return ret
+</code></pre>

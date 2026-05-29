@@ -1,0 +1,99 @@
+Question: <p>I'm making a program that fits the wizard concept ideally; the user is walked through the steps to create a character for a game.</p>
+
+<p>However, I'm realizing that the limitations of the wizard are making it difficult to design "elegant" logic flow. For example, because all pages of the wizard are initalized at the same time, I can't have the values entered in one page available to the next one. I have to put a button on each page to get the values from a previous page rather than simply having fields auto-populated.</p>
+
+<p>I've thought about alternatives to using the wizard. I think the best idea is to have some buttons on one panel that change the information on another panel, e.g. a splitter window.</p>
+
+<p>However, I can't find any documentation in wxPython on how to dynamically change the panel. Everything I've found so far is really pretty static, hence the use of the wizard. Even the "wxPython in Action" book doesn't mention it.</p>
+
+<p>Are there any tutorials for making "dynamic panels" or better management of a wizard?</p>
+
+Answer: <p>Here is a simple example. This way you can make your "wizard" work like a finite state machine where states are different pages that are initialized on demand. Also, the data is shared between pages.</p>
+
+<pre><code>import wx
+import wx.lib.newevent
+
+
+(PageChangeEvent, EVT_PAGE_CHANGE) = wx.lib.newevent.NewEvent()
+
+
+class Data:
+    foo = None
+    bar = None
+
+
+class Page1(wx.Panel):
+    def __init__(self, parent, data):
+        wx.Panel.__init__(self, parent)
+        self.parent = parent
+        self.data = data
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(sizer)
+        label = wx.StaticText(self, label="Page 1 - foo")
+        self.foo = wx.TextCtrl(self)
+        goto_page2 = wx.Button(self, label="Go to page 2")
+
+        for c in (label, self.foo, goto_page2):
+            sizer.Add(c, 0, wx.TOP, 5)
+
+        goto_page2.Bind(wx.EVT_BUTTON, self.OnPage2)
+
+    def OnPage2(self, event):
+        self.data.foo = self.foo.Value
+        wx.PostEvent(self.parent, PageChangeEvent(page=Page2))
+
+
+class Page2(wx.Panel):
+    def __init__(self, parent, data):
+        wx.Panel.__init__(self, parent)
+        self.parent = parent
+        self.data = data
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(sizer)
+        label = wx.StaticText(self, label="Page 2 - bar")
+        self.bar = wx.TextCtrl(self)
+        goto_finish = wx.Button(self, label="Finish")
+
+        for c in (label, self.bar, goto_finish):
+            sizer.Add(c, 0, wx.TOP, 5)
+
+        goto_finish.Bind(wx.EVT_BUTTON, self.OnFinish)
+
+    def OnFinish(self, event):
+        self.data.bar = self.bar.Value
+        wx.PostEvent(self.parent, PageChangeEvent(page=finish))
+
+
+def finish(parent, data):
+    wx.MessageBox("foo = %s\nbar = %s" % (data.foo, data.bar))
+    wx.GetApp().ExitMainLoop()
+
+
+class Test(wx.Frame):
+    def __init__(self):
+        wx.Frame.__init__(self, None)
+        self.data = Data()
+        self.current_page = None
+
+        self.Bind(EVT_PAGE_CHANGE, self.OnPageChange)
+        wx.PostEvent(self, PageChangeEvent(page=Page1))
+
+    def OnPageChange(self, event):
+        page = event.page(self, self.data)
+        if page == None:
+            return
+        if self.current_page:
+            self.current_page.Destroy()
+        self.current_page = page
+        page.Layout()
+        page.Fit()
+        page.Refresh()
+
+
+app = wx.PySimpleApp()
+app.TopWindow = Test()
+app.TopWindow.Show()
+app.MainLoop()
+</code></pre>

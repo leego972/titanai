@@ -1,0 +1,107 @@
+# How to pull scalars out of a function that should act on lists?
+
+Suppose I have
+
+A = a vecA
+B = b vecB
+
+
+where a and b are supposed to be arbitrary scalars and vecA={vA1,vA2} and vecB={vB1,vB2} are vectors, i.e. lists (I guess from a mathematica point of view the difference is that a and b have Head Symbol, whereas vec1 and vec2 have head List?).
+
+Now imagine an arbitrary function of two arguments f[A,B]. What I would like to do is to pull out the scalars and multiply them:
+
+f[A,B] -> a * b * g[vecA,vecB]
+
+
+where g[vecA,vecB] is again an arbitrary function that only works on vectors (lists). How can I achieve that?
+
+The background is that I would like to process (simplify, rearrange, expand in series, etc.) expressions that mix scalars and vectors and contain inner products of such mixtures without explicitly expanding the inner products into the components of the vectors. Such that I can later on easily replace occurrences of some inner products. See also my (not yet really solved) question: Symbolically associate vectors and their norms My current take on this is to use
+
+Inner[f,A,B]
+
+
+instead of Dot[A,B] such that the inner product is not explicitly expanded into components. However I do need to pull out the scalars somehow..
+
+-
+
+The following seems to do what you want:
+
+f[x: {(0|a_|a_*__) ..}, y: {(0|b_|b_*__) ..}]:=a b g[x/a,y/b]
+
+
+With this, you get
+
+f[a {1, 2, 3}, b {4, 5, 6}]
+(*
+==> a b g[{1, 2, 3}, {4, 5, 6}]
+*)
+
+
+However I didn't do much testing.
+
+-
+As far as I can tell right now, your solution relies on explicitly dividing out the prefactors a and b. However these are just examples of generic scalar prefactors that are complicated and that I do not know a priori. See also my comment to Mr.Wizards answer for more details.. –  janitor048 Oct 19 '12 at 19:37
+@janitor048: No, the aand b in the definition of f are patterns. For example, f[Sin[x^2+y^2] {a, 2, l}, Exp[I k x]/y {x+1, x-1, 0}] gives (E^(I*k*x)*g[{a, 2, l}, {1 + x, -1 + x, 0}]*Sin[x^2 + y^2])/y. I probably would have avoided confusion if I had used different names in the definition of f. –  celtschk Oct 19 '12 at 19:49
+Yes, I realized this after writing my comment. I'm sorry. I will test your approach more carefully later. Does it work when a and b are themselves composed of multiple factors? –  janitor048 Oct 19 '12 at 20:04
+f[a b {1,2,3}, c d {4,5,6}] gives a b c d g[{1, 2, 3}, {4, 5, 6}], so obviously the answer is yes. –  celtschk Oct 19 '12 at 20:06
+Ok, this is pretty cool! I've done some basic testing (not applied it to my real problem though) and it does the job. The way you've build up your pattern appears a bit like black voodoo though :-) Would you maybe like to elaborate a bit on how this works? –  janitor048 Oct 22 '12 at 12:54
+
+I believe that what you're looking for is some data structure Vector which has some list defining direction and some scalar which in part defines magnitude.
+
+Here you go:
+
+Vector[a_List] := Vector[1, a]
+Vector[b_, _]["scalar"] := b
+Vector[_, a_List]["vector"] := a
+Vector /: (b_ Vector[c_, a_List]) := Vector[c b, a]
+a = 3 Vector[{1, 1, 0}];
+b = 2 Vector[.3, {3, 2, 0}];
+
+
+If you want to "extract" the scalars, then use magicfunction:
+
+magicfunction[a__Vector, z_] :=
+Times @@ (#["scalar"] &) /@ List[a] z @@ (#["vector"] &) /@ List[a]
+
+
+For instance:
+
+magicfunction[a, b, Cross]
+(* {0., 0., -1.8} *)
+magicfunction[a, b, Hold]
+(* 1.8 Hold[{1, 1, 0}, {3, 2, 0}] *)
+
+
+In order to get the regular vector back, just use Normal. Make sure you have a copy of your Vector, however, as this transformation will lose the information about the scalar.
+
+Vector /: Normal[Vector[b_, a_List]] := b a
+Normal[a]
+(* {3, 3, 0} *)
+
+-
+This is indeed some magic function :-) Thanks a lot! I think to the question as asked here, the answer by celtschk is probably the best suited answer. But I am really considering whether using a data structure Vector as you propose it, would actually be beneficial for the real problem I am after. I'll do some testing.. –  janitor048 Oct 22 '12 at 14:26
+
+I'm sure this is far too straightforward to be what you're asking, but since I'm apparently not understanding the question maybe your telling me why this is wrong will help:
+
+vecA = Range[7]
+vecB = Range[5, 15]
+
+{1, 2, 3, 4, 5, 6, 7}
+
+{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+
+A = a vecA;
+B = b vecB;
+
+f[x_, y_] := a * b * g[A/a, B/b]
+
+f[A, B]
+
+a b g[{1, 2, 3, 4, 5, 6, 7}, {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}]
+
+-
+My understanding of the question (I ve had that pb myself many times) is to do this when its too late... ie when mathematica has already distributed a and b (?) –  chris Oct 19 '12 at 17:13
+@chris What do you mean by distributed? This still works if a and b have numeric values, if that is your concern. Otherwise I guess I don't understand. –  Mr.Wizard Oct 19 '12 at 17:51
+The problem is that a, b, etc. are just examples. The real expressions are a lot more complicated and I don't know a priori how they look like, i.e. I can't just divide out the prefactors. In more detail, I have two terms and all I know is their general structure: a lot of scalar prefactors times a vector. I then need to dot these terms into each other and simplify the result. The thing is that the prefactors can be related to the inner products of the vectors (e.g. they are the norms) - so there is a lot of possible simplification that only works if I do NOT explicitly expand the dot –  janitor048 Oct 19 '12 at 19:34
+[continued] product into its components but rather keep it intact as long as possible and then use replacement rules on the appropriate terms. –  janitor048 Oct 19 '12 at 19:35
+BTW: In case you are curious, I am trying to compute squared amplitudes of Feynman diagrams that eventually involves computing inner products of a lot of terms of the generic structure I discussed above.. –  janitor048 Oct 19 '12 at 19:39

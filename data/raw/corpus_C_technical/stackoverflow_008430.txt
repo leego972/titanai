@@ -1,0 +1,86 @@
+Question: <p>I am currently the following code based on Chapter 12.5 of the Python Cookbook:</p>
+
+<pre><code>from xml.parsers import expat
+
+class Element(object):
+    def __init__(self, name, attributes):
+        self.name = name
+        self.attributes = attributes
+        self.cdata = ''
+        self.children = []
+    def addChild(self, element):
+        self.children.append(element)
+    def getAttribute(self,key):
+        return self.attributes.get(key)
+    def getData(self):
+        return self.cdata
+    def getElements(self, name=''):
+        if name:
+            return [c for c in self.children if c.name == name]
+        else:
+            return list(self.children)
+
+class Xml2Obj(object):
+    def __init__(self):
+        self.root = None
+        self.nodeStack = []
+    def StartElement(self, name, attributes):
+        element = Element(name.encode(), attributes)
+        if self.nodeStack:
+            parent = self.nodeStack[-1]
+            parent.addChild(element)
+        else:
+            self.root = element
+        self.nodeStack.append(element)
+    def EndElement(self, name):
+        self.nodeStack.pop()
+    def CharacterData(self,data):
+        if data.strip():
+            data = data.encode()
+            element = self.nodeStack[-1]
+            element.cdata += data
+    def Parse(self, filename):
+        Parser = expat.ParserCreate()
+        Parser.StartElementHandler = self.StartElement
+        Parser.EndElementHandler = self.EndElement
+        Parser.CharacterDataHandler = self.CharacterData
+        ParserStatus = Parser.Parse(open(filename).read(),1)
+        return self.root
+</code></pre>
+
+<p>I am working with XML docs about 1 GB in size. Does anyone know a faster way to parse these?</p>
+
+Answer: <p>I looks to me as if you do not need any DOM capabilities from your program. I would second the use of the (c)ElementTree library. If you use the iterparse function of the cElementTree module, you can work your way through the xml and deal with the events as they occur. </p>
+
+<p>Note however, Fredriks advice on using cElementTree <a href="http://effbot.org/zone/element-iterparse.htm" rel="nofollow">iterparse function</a>:</p>
+
+<blockquote>
+  <p>to parse large files, you can get rid of elements as soon as youâve processed them:</p>
+</blockquote>
+
+<pre><code>for event, elem in iterparse(source):
+    if elem.tag == "record":
+        ... process record elements ...
+        elem.clear()
+</code></pre>
+
+<blockquote>
+  <p>The above pattern has one drawback; it does not clear the root element, so you will end up with a single element with lots of empty child elements. If your files are huge, rather than just large, this might be a problem. To work around this, you need to get your hands on the root element. The easiest way to do this is to enable start events, and save a reference to the first element in a variable:</p>
+</blockquote>
+
+<pre><code># get an iterable
+context = iterparse(source, events=("start", "end"))
+
+# turn it into an iterator
+context = iter(context)
+
+# get the root element
+event, root = context.next()
+
+for event, elem in context:
+    if event == "end" and elem.tag == "record":
+        ... process record elements ...
+        root.clear()
+</code></pre>
+
+<p>The <a href="http://codespeak.net/lxml/FAQ.html#why-can-t-i-just-delete-parents-or-clear-the-root-node-in-iterparse" rel="nofollow">lxml.iterparse()</a> does not allow this.</p>

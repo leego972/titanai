@@ -1,0 +1,68 @@
+Question: <p>Here is the problem: </p>
+
+<p>for your reference:</p>
+
+<p><img src="http://i.stack.imgur.com/mmrNH.jpg" alt="http://i.stack.imgur.com/mmrNH.jpg"></p>
+
+<p>database entries 1,2 and 3 are made using jython 2.2.1 using jdbc1.2.
+database entry 4 is made using vb the old to be replace program using odbc.</p>
+
+<p>We have found that if I copy and paste both jython and vb MailBody entries to wordpad directly from that SQL Server Enterprise Manager software it outputs the format perfectly with correct line returns. if I compare the bytes of each file with a hex editor or KDiff3 they are binary identically the same.</p>
+
+<p>There is a 3rd party program which consumes this data. Sadly that 3rd party program reads the data and for entries 1 to 3 it displays the data without line returns. though for entry 4 it correctly formats the text. As futher proof we can see in the picture, the data in the database is displayed differently.
+Somehow the line returns are preserved in the database for the vb entries but the jython entries they are overlooked. if I click on the 'MailBody' field of entry 4 i can press down i can see the rest of the email. Whereas the data for jython is displayed in one row.</p>
+
+<p>What gives, what am i missing, and how do I handle this?
+Here is a snippet of the code where I actually send it to the database.</p>
+
+<p>EDIT: FYI: please disregard the discrepancies in the 'Processed' column, it is irrelevant.
+EDIT: what i want to do is make the jython program input the data in the same way as the vb program. So that the 3rd party program will come along and correctly display the data.
+so what it will look like is every entry in 'MailBody' will display "This is a testing only!" then next line "etc etc" so if I was to do a screendump all entries would resemble database entry 4.</p>
+
+<p><em>SOLVED</em> </p>
+
+<p>add _force_CRLF to the mix:</p>
+
+<pre><code>def _force_CRLF(self, data):
+    '''Make sure data uses CRLF for line termination.
+    Nicked the regex from smtplib.quotedata. '''
+    print data
+    newdata = re.sub(r'(?:\r\n|\n|\r(?!\n))', "\r\n", data)
+    print newdata
+    return newdata
+
+def _execute_insert(self):
+    try:
+        self._stmt=self._con.prepareStatement(\
+            "INSERT INTO EmailHdr (EntryID, MailSubject, MailFrom, MailTo, MailReceive, MailSent, AttachNo, MailBody)\
+             VALUES (?, ?, ?, ?, ?, ?, ?, cast(? as varchar (" + str(BODY_FIELD_DATABASE) + ")))")
+        self._stmt.setString(1,self._emailEntryId)
+        self._stmt.setString(2,self._subject)
+        self._stmt.setString(3,self._fromWho)
+        self._stmt.setString(4,self._toWho)
+        self._stmt.setString(5,self._format_date(self._emailRecv))
+        self._stmt.setString(6,self._format_date(self._emailSent))
+        self._stmt.setString(7,str(self._attachmentCount))
+        self._stmt.setString(8,self._force_CRLF(self._format_email_body()))
+        self._stmt.execute()
+        self._prepare_inserting_attachment_data()
+        self._insert_attachment_data()
+    except:
+        raise
+
+def _format_email_body(self):
+    if not self._emailBody:
+        return "could not extract email body"
+    if len(self._emailBody) &gt; BODY_TRUNCATE_LENGTH:
+        return self._clean_body(self._emailBody[:BODY_TRUNCATE_LENGTH])
+    else:
+        return self._clean_body(self._emailBody)
+
+def _clean_body(self,dirty):
+    '''this method simply deletes any occurrence of an '=20' that plagues my output after much testing this is not related to the line return issue, even if i comment it out I still have the problem.''' 
+    dirty=str(dirty)
+    dirty=dirty.replace(r"=20","")
+    return r"%s"%dirty
+</code></pre>
+
+Answer: <p>You should look at the quopri module (and others regarding email) so you don't have to use dirty tricks as <code>_clean_body</code></p>

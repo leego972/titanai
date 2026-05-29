@@ -1,0 +1,39 @@
+Question: <p>How to wait for multiple child processes in Python on Windows, without active wait (polling)? Something like this <em>almost</em> works for me:</p>
+
+<pre><code>proc1 = subprocess.Popen(['python','mytest.py'])
+proc2 = subprocess.Popen(['python','mytest.py'])    
+proc1.wait()
+print "1 finished"
+proc2.wait()
+print "2 finished"
+</code></pre>
+
+<p>The problem is that when <code>proc2</code> finishes before <code>proc1</code>, the parent process will still wait for <code>proc1</code>. On Unix one would use <code>waitpid(0)</code> in a loop to get the child processes' return codes as they finish - how to achieve something like this in Python on Windows?</p>
+
+Answer: <p>Building on zseil's answer, you can do this with a mix of subprocess and win32 API calls. I used straight ctypes, because my Python doesn't happen to have win32api installed. I'm just spawning sleep.exe from MSYS here as an example, but clearly you could spawn any process you like. I use OpenProcess() to get a HANDLE from the process' PID, and then WaitForMultipleObjects to wait for any process to finish.</p>
+
+<pre><code>import ctypes, subprocess
+from random import randint
+SYNCHRONIZE=0x00100000
+INFINITE = -1
+numprocs = 5
+handles = {}
+
+for i in xrange(numprocs):
+    sleeptime = randint(5,10)
+    p = subprocess.Popen([r"c:\msys\1.0\bin\sleep.exe", str(sleeptime)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+    h = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, p.pid)
+    handles[h] = p.pid
+    print "Spawned Process %d" % p.pid
+
+while len(handles) &gt; 0:
+    print "Waiting for %d children..." % len(handles)
+    arrtype = ctypes.c_long * len(handles)
+    handle_array = arrtype(*handles.keys())
+    ret = ctypes.windll.kernel32.WaitForMultipleObjects(len(handle_array), handle_array, False, INFINITE)
+    h = handle_array[ret]
+    ctypes.windll.kernel32.CloseHandle(h)
+    print "Process %d done" % handles[h]
+    del handles[h]
+print "All done!"
+</code></pre>

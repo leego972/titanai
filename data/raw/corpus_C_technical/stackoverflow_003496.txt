@@ -1,0 +1,66 @@
+Question: <p>The following test fails:</p>
+
+<pre><code>#!/usr/bin/env python
+def f(*args):
+    """
+    &gt;&gt;&gt; t = 1, -1
+    &gt;&gt;&gt; f(*map(lambda i: lambda: i, t))
+    [1, -1]
+    &gt;&gt;&gt; f(*(lambda: i for i in t)) # -&gt; [-1, -1]
+    [1, -1]
+    &gt;&gt;&gt; f(*[lambda: i for i in t]) # -&gt; [-1, -1]
+    [1, -1]
+    """
+    alist = [a() for a in args]
+    print(alist)
+
+if __name__ == '__main__':
+    import doctest; doctest.testmod()
+</code></pre>
+
+<p>In other words:</p>
+
+<pre><code>&gt;&gt;&gt; t = 1, -1
+&gt;&gt;&gt; args = []
+&gt;&gt;&gt; for i in t:
+...   args.append(lambda: i)
+...
+&gt;&gt;&gt; map(lambda a: a(), args)
+[-1, -1]
+&gt;&gt;&gt; args = []
+&gt;&gt;&gt; for i in t:
+...   args.append((lambda i: lambda: i)(i))
+...
+&gt;&gt;&gt; map(lambda a: a(), args)
+[1, -1]
+&gt;&gt;&gt; args = []
+&gt;&gt;&gt; for i in t:
+...   args.append(lambda i=i: i)
+...
+&gt;&gt;&gt; map(lambda a: a(), args)
+[1, -1]
+</code></pre>
+
+Answer: <p>Expression <code>f = lambda: i</code> is equivalent to:</p>
+
+<pre><code>def f():
+    return i
+</code></pre>
+
+<p>Expression <code>g = lambda i=i: i</code> is equivalent to:</p>
+
+<pre><code>def g(i=i):
+    return i
+</code></pre>
+
+<p><code>i</code> is a <a href="http://docs.python.org/ref/naming.html" rel="nofollow">free variable</a> in the first case and it is bound to the function parameter in the second case i.e., it is a local variable in that case. Values for default parameters are evaluated at the time of function definition. </p>
+
+<p>Generator expression is the nearest enclosing scope (where <code>i</code> is defined) for <code>i</code> name in the <code>lambda</code> expression, therefore <code>i</code> is resolved in that block:</p>
+
+<pre><code>f(*(lambda: i for i in (1, -1)) # -&gt; [-1, -1]
+</code></pre>
+
+<p><code>i</code> is a local variable of the <code>lambda i: ...</code> block, therefore the object it refers to is defined in that block:</p>
+
+<pre><code>f(*map(lambda i: lambda: i, (1,-1))) # -&gt; [1, -1]
+</code></pre>

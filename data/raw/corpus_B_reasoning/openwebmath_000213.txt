@@ -1,0 +1,95 @@
+Enables easy loading of sparse data matrices provided by alevin-fry USA mode.
+
+loadFry(fryDir, outputFormat = "scRNA", nonzero = FALSE, quiet = FALSE)
+
+## Arguments
+
+fryDir
+
+path to the output directory returned by alevin-fry quant command. This directory should contain a metainfo.json, and an alevin folder which contains quants_mat.mtx, quants_mat_cols.txt and quants_mat_rows.txt
+
+outputFormat
+
+can be either be a list that defines the desired format of the output SingleCellExperiment object or a string that represents one of the pre-defined output formats, which are "scRNA", "snRNA", "all", "scVelo", "velocity", "U+S+A" and "S+A". See details for the explanations of the pre-defined formats and how to define custom format.
+
+nonzero
+
+whether to filter cells with non-zero expression value across all genes (default FALSE). If TRUE, this will filter based on all assays. If a string vector of assay names, it will filter based on the matching assays in the vector. If not in USA mode, it must be TRUE/FALSE/counts.
+
+quiet
+
+logical whether to display no messages
+
+## Value
+
+A SingleCellExperiment object that contains one or more assays. Each assay consists of a gene by cell count matrix. The row names are feature names, and the column names are cell barcodes
+
+## Details about loadFry
+
+This function consumes the result folder returned by running alevin-fry quant in unspliced, spliced, ambiguous (USA) quantification mode, and returns a SingleCellExperiment object that contains a final count for each gene within each cell. In USA mode, alevin-fry quant returns a count matrix contains three types of count for each feature (gene) within each sample (cell or nucleus), which represent the spliced mRNA count of the gene (S), the unspliced mRNA count of the gene (U), and the count of UMIs whose splicing status is ambiguous for the gene (A). For each assay defined by outputFormat, these three counts of a gene within a cell will be summed to get the final count of the gene according to the rule defined in the outputFormat. The returned object will contains the desired assays defined by outputFormat, with rownames as the barcode of samples and colnames as the feature names.
+
+## Details about the output format
+
+The outputFormat argument takes either be a list that defines the desired format of the output SingleCellExperiment object or a string that represents one of the pre-defined output format.
+
+Currently the pre-defined formats of the output SingleCellExperiment object are:
+
+"scRNA":
+
+This format is recommended for single cell experiments. It returns a counts assay that contains the S+A count of each gene in each cell, and a unspliced assay that contains the U count of each gene in each cell.
+
+"snRNA", "all" and "U+S+A":
+
+These three formats are the same. They return a counts assay that contains the U+S+A count of each gene in each cell without any extra layers. "snRNA" is recommended for single-nucleus RNA-sequencing experiments. "raw" is recommended for mimicing CellRanger 7's behavior, which returns this format for both single-cell and single-nucleus experiments.
+
+"S+A":
+
+This format returns a counts assay that contains the S+A count of each gene in each cell.
+
+"raw":
+
+This format puts the three kinds of counts into three separate assays, which are unspliced, spliced and ambiguous.
+
+"velocity":
+
+This format contains two assays. The spliced assay contains the S+A count of each gene in each cell. The unspliced assay contains the U counts of each gene in each cell.
+
+"scVelo":
+
+This format is for direct entry into velociraptor R package or other scVelo downstream analysis pipeline for velocity analysis in R with Bioconductor. It adds the expected "S"-pliced assay and removes errors for size factors being non-positive.
+
+A custom output format can be defined using a list. Each element in the list defines an assay in the output SingleCellExperiment object. The name of an element in the list will be the name of the corresponding assay in the output object. Each element in the list should be defined as a vector that takes at least one of the three kinds of count, which are U, S and A. See the provided toy example for defining a custom output format.
+
+## References
+
+alevin-fry publication:
+
+He, D., Zakeri, M., Sarkar, H. et al. "Alevin-fry unlocks rapid, accurate and memory-frugal quantification of single-cell RNA-seq data." Nature Methods 19, 316–322 (2022). https://doi.org/10.1038/s41592-022-01408-3
+
+## Author
+
+Dongze He, with contributions from Steve Lianoglou, Wes Wilson
+
+## Examples
+
+
+# Get path for minimal example avelin-fry output dir
+testdat <- fishpond:::readExampleFryData("fry-usa-basic")
+
+# This is exactly how the velocity format defined internally.
+custom_velocity_format <- list("spliced"=c("S","A"), "unspliced"=c("U"))
+
+# Load alevin-fry gene quantification in velocity format
+sce <- loadFry(fryDir=testdat$parent_dir, outputFormat=custom_velocity_format) #> locating quant file #> Reading meta data #> USA mode: TRUE #> Processing 4 genes and 4 barcodes #> Using user-defined output assays #> Building the 'spliced' assay, which contains S A #> Building the 'unspliced' assay, which contains U #> Constructing output SingleCellExperiment object #> Done SummarizedExperiment::assayNames(sce) #> [1] "spliced" "unspliced" # Load the same data but use pre-defined, velociraptor R pckage desired format scvelo_format <- "scVelo" scev <- loadFry(fryDir=testdat$parent_dir, outputFormat=scvelo_format, nonzero=TRUE)
+#> locating quant file
+#> Reading meta data
+#> USA mode: TRUE
+#> Processing 4 genes and 4 barcodes
+#> Using pre-defined output format: scvelo
+#> Building the 'counts' assay, which contains S A
+#> Building the 'spliced' assay, which contains S A
+#> Building the 'unspliced' assay, which contains U
+#> Constructing output SingleCellExperiment object
+#> Done
+SummarizedExperiment::assayNames(scev)
+#> [1] "counts"    "spliced"   "unspliced"

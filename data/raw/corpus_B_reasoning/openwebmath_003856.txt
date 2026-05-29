@@ -1,0 +1,37 @@
+# Need 32-bit mixing function that has perfect avalanche between octets
+
+for my hobby tinkering project, I need a mixing function that takes 32-bit input and has 32-bit output (and will, most likely, run in a 32-bit C environment) and the following property (independent of endianness, i.e. it’s enough to only look at either big endian or little endian (or pdp endian) systems):
+
+union u {
+uint32_t u32;
+uint8_t u8[4];
+} ival, oval, ival2, oval2;
+int x;
+
+ival.u32 = /* some unsigned 32-bit value */;
+oval.u32 = ƒ(ival.u32);
+
+x = /* some value ∈ { 0, 1, 2, 3 } */;
+ival2.u32 = ival.u32;
+ival2.u8[x] ^= /* some nonzero octet */;
+/* ival2 = ival where exactly one input octet differs */
+oval2.u32 = ƒ(ival2.u32);
+assert(oval2.u8[0] ≠ oval.u8[0]); /* first output octet differs */
+assert(oval2.u8[1] ≠ oval.u8[1]); /* second output octet differs */
+assert(oval2.u8[2] ≠ oval.u8[2]); /* third output octet differs */
+assert(oval2.u8[3] ≠ oval.u8[3]); /* fourth output octet differs */
+
+
+That is, I need a function where, when you change one of the octets in the input, all four octets of the output differ.
+
+Since this is a 32-bit to 32-bit mapping, it can be a perfect mixing function (bijective, not one-way); this would be extremely beneficial because I could then replace the Final function of a 32-bit (nōn-cryptographic) hash (based on Jenkins’ one-at-a-time but tweaked) I’m using in the same context with it, too, and it would not lose any fractional bits of entropy from the input.
+
+Of course I could do this “the simple way” with lookup tables, but the idea is to have this in only a few lines of code (that is, few machine instructions), either completely algorithmic, or with only, say, up to 256 bytes of read-only data. I bet there’s something like this already around. (My target CPUs are, for now, i486, sparc v8, 32-bit MIPS, but I’d want it in portable code, not assembly; C is just fine as long as it uses only unsigned integers, since I’ll most likely need to implement it in C.)
+
+Please only include code snippets if they are true Public Domain (e.g. government work) or I can reuse them under the MIT Licence, the MirOS Licence, or the BSD Licence, or in a language not C with a permission for me to “rewrite the same algorithm” in C (while not copying a line of code); otherwise, please only include algorithmic descriptions that are enough for me to write C code from it. And nothing that’s legally dangerous or questionable of course ☺
+
+My strength is coding, not mathematics (I already had to prove the bijectivity of the Finish function of my modified Jenkins-OAAT empirically, i.e. by trying all possible 2³² combinations), that’s why I thought to ask here. (No homework or commercial stuff, just trying to improve the world, in the context of the BSD Unix operating systems, and Open Source.)
+
+-
+The avalanche property does not have to hold if more than one octet gets modified, right? –  nightcracker Dec 5 '13 at 23:31
+Oh, sorry, that is underspecified then. If two get modified, the other two should both change; similar for three, but this is harder to express. I think that, since we get a 2³²→2³² mapping, this should be doable. –  mirabilos Dec 5 '13 at 23:42

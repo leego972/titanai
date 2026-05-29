@@ -1,0 +1,165 @@
+Integer type:  int32  int64  nag_int  show int32  show int32  show int64  show int64  show nag_int  show nag_int
+
+Chapter Contents
+Chapter Introduction
+NAG Toolbox
+
+# NAG Toolbox Chapter IntroductionF07 — linear equations (lapack)
+
+## Scope of the Chapter
+
+This chapter provides functions for the solution of systems of simultaneous linear equations, and associated computations. It provides functions for
+• matrix factorizations;
+• solution of linear equations;
+• estimating matrix condition numbers;
+• computing error bounds for the solution of linear equations;
+• matrix inversion;
+• computing scaling factors to equilibrate a matrix.
+Functions are provided for both real and complex data.
+For a general introduction to the solution of systems of linear equations, you should turn first to the F04 Chapter Introduction. The decision trees, in Decision Trees in the F04 Chapter Introduction, direct you to the most appropriate functions in Chapters F04 or F07 for solving your particular problem. In particular, Chapters F04 and F07 contain Black Box (or driver) functions which enable some standard types of problem to be solved by a call to a single function. Where possible, functions in Chapter F04 call Chapter F07 functions to perform the necessary computational tasks.
+There are two types of driver functions in this chapter: simple drivers which just return the solution to the linear equations; and expert drivers which also return condition and error estimates and, in many cases, also allow equilibration. The simple drivers for real matrices have names of the form f07_a and for complex matrices have names of the form f07_n. The expert drivers for real matrices have names of the form f07_b and for complex matrices have names of the form f07_p.
+The functions in this chapter (Chapter F07) handle only dense and band matrices (not matrices with more specialised structures, or general sparse matrices).
+The functions in this chapter have all been derived from the LAPACK project (see Anderson et al. (1999)). They have been designed to be efficient on a wide range of high-performance computers, without compromising efficiency on conventional serial machines.
+
+## Background to the Problems
+
+This section is only a brief introduction to the numerical solution of systems of linear equations. Consult a standard textbook, for example Golub and Van Loan (1996) for a more thorough discussion.
+
+### Notation
+
+We use the standard notation for a system of simultaneous linear equations:
+ $Ax=b$ (1)
+where $A$ is the coefficient matrix, $b$ is the right-hand side, and $x$ is the solution. $A$ is assumed to be a square matrix of order $n$.
+If there are several right-hand sides, we write
+ $AX=B$ (2)
+where the columns of $B$ are the individual right-hand sides, and the columns of $X$ are the corresponding solutions.
+We also use the following notation, both here and in the function documents:
+ $\stackrel{^}{x}$ a computed solution to $Ax=b$, (which usually differs from the exact solution $x$ because of round-off error) $r=b-A\stackrel{^}{x}$ the residual corresponding to the computed solution $\stackrel{^}{x}$ ${‖x‖}_{\infty }=\underset{i}{\mathrm{max}}\phantom{\rule{0.25em}{0ex}}\left|{x}_{i}\right|$ the $\infty$-norm of the vector $x$ ${‖x‖}_{1}=\sum _{j=1}^{n}\left|{x}_{j}\right|$ the $1$-norm of the vector $x$ ${‖A‖}_{\infty }=\underset{i}{\mathrm{max}}\phantom{\rule{0.25em}{0ex}}\sum _{j}\phantom{\rule{0.25em}{0ex}}\left|{a}_{ij}\right|$ the $\infty$-norm of the matrix $A$ ${‖A‖}_{1}=\underset{j}{\mathrm{max}}\phantom{\rule{0.25em}{0ex}}\sum _{i=1}^{n}\left|{a}_{ij}\right|$ the $1$-norm of the matrix $A$ $\left|x\right|$ the vector with elements $\left|{x}_{i}\right|$ $\left|A\right|$ the matrix with elements $\left|{a}_{ij}\right|$
+Inequalities of the form $\left|A\right|\le \left|B\right|$ are interpreted component-wise, that is $\left|{a}_{ij}\right|\le \left|{b}_{ij}\right|$ for all $i,j$.
+
+### Matrix Factorizations
+
+If $A$ is upper or lower triangular, $Ax=b$ can be solved by a straightforward process of backward or forward substitution.
+Otherwise, the solution is obtained after first factorizing $A$, as follows.
+General matrices (LU factorization with partial pivoting)
+ $A=PLU$
+where $P$ is a permutation matrix, $L$ is lower-triangular with diagonal elements equal to $1$, and $U$ is upper-triangular; the permutation matrix $P$ (which represents row interchanges) is needed to ensure numerical stability.
+Symmetric positive definite matrices (Cholesky factorization)
+ $A=UTU or A=LLT$
+where $U$ is upper triangular and $L$ is lower triangular.
+Symmetric positive semidefinite matrices (pivoted Cholesky factorization)
+ $A=PUTUPT or A=PLLTPT$
+where $P$ is a permutation matrix, $U$ is upper triangular and $L$ is lower triangular. The permutation matrix $P$ (which represents row-and-column interchanges) is needed to ensure numerical stability and to reveal the numerical rank of $A$.
+Symmetric indefinite matrices (Bunch–Kaufman factorization)
+ $A = PUD UT PT or A = PLD LT PT$
+where $P$ is a permutation matrix, $U$ is upper triangular, $L$ is lower triangular, and $D$ is a block diagonal matrix with diagonal blocks of order $1$ or $2$; $U$ and $L$ have diagonal elements equal to $1$, and have $2$ by $2$ unit matrices on the diagonal corresponding to the $2$ by $2$ blocks of $D$. The permutation matrix $P$ (which represents symmetric row-and-column interchanges) and the $2$ by $2$ blocks in $D$ are needed to ensure numerical stability. If $A$ is in fact positive definite, no interchanges are needed and the factorization reduces to $A=UD{U}^{\mathrm{T}}$ or $A=LD{L}^{\mathrm{T}}$ with diagonal $D$, which is simply a variant form of the Cholesky factorization.
+
+### Solution of Systems of Equations
+
+Given one of the above matrix factorizations, it is straightforward to compute a solution to $Ax=b$ by solving two subproblems, as shown below, first for $y$ and then for $x$. Each subproblem consists essentially of solving a triangular system of equations by forward or backward substitution; the permutation matrix $P$ and the block diagonal matrix $D$ introduce only a little extra complication:
+General matrices ( LU factorization)
+ $Ly=PTb Ux=y$
+Symmetric positive definite matrices (Cholesky factorization)
+ $UTy=b Ux=y or Ly=b LTx=y$
+Symmetric indefinite matrices (Bunch–Kaufman factorization)
+ $PUDy=b UTPTx=y or PLDy=b LTPTx=y$
+
+### Sensitivity and Error Analysis
+
+#### Normwise error bounds
+
+Frequently, in practical problems the data $A$ and $b$ are not known exactly, and it is then important to understand how uncertainties or perturbations in the data can affect the solution.
+If $x$ is the exact solution to $Ax=b$, and $x+\delta x$ is the exact solution to a perturbed problem $\left(A+\delta A\right)\left(x+\delta x\right)=\left(b+\delta b\right)$, then
+ $δx x ≤κA δA A +δb b +⋯second-order terms$
+where $\kappa \left(A\right)$ is the condition number of $A$ defined by
+ $κA = A.A-1 .$ (3)
+In other words, relative errors in $A$ or $b$ may be amplified in $x$ by a factor $\kappa \left(A\right)$. Estimating condition numbers discusses how to compute or estimate $\kappa \left(A\right)$.
+Similar considerations apply when we study the effects of rounding errors introduced by computation in finite precision. The effects of rounding errors can be shown to be equivalent to perturbations in the original data, such that $\frac{‖\delta A‖}{‖A‖}$ and $\frac{‖\delta b‖}{‖b‖}$ are usually at most $p\left(n\right)\epsilon$, where $\epsilon$ is the machine precision and $p\left(n\right)$ is an increasing function of $n$ which is seldom larger than $10n$ (although in theory it can be as large as ${2}^{n-1}$).
+In other words, the computed solution $\stackrel{^}{x}$ is the exact solution of a linear system $\left(A+\delta A\right)\stackrel{^}{x}=b+\delta b$ which is close to the original system in a normwise sense.
+
+#### Estimating condition numbers
+
+The previous section has emphasized the usefulness of the quantity $\kappa \left(A\right)$ in understanding the sensitivity of the solution of $Ax=b$. To compute the value of $\kappa \left(A\right)$ from equation (3) is more expensive than solving $Ax=b$ in the first place. Hence it is standard practice to estimate $\kappa \left(A\right)$, in either the $1$-norm or the $\infty$-norm, by a method which only requires $\mathit{O}\left({n}^{2}\right)$ additional operations, assuming that a suitable factorization of $A$ is available.
+The method used in this chapter is Higham's modification of Hager's method (see Higham (1988)). It yields an estimate which is never larger than the true value, but which seldom falls short by more than a factor of $3$ (although artificial examples can be constructed where it is much smaller). This is acceptable since it is the order of magnitude of $\kappa \left(A\right)$ which is important rather than its precise value.
+Because $\kappa \left(A\right)$ is infinite if $A$ is singular, the functions in this chapter actually return the reciprocal of $\kappa \left(A\right)$.
+
+#### Scaling and Equilibration
+
+The condition of a matrix and hence the accuracy of the computed solution, may be improved by scaling; thus if ${D}_{1}$ and ${D}_{2}$ are diagonal matrices with positive diagonal elements, then
+ $B = D1 A D2$
+is the scaled matrix. A general matrix is said to be equilibrated if it is scaled so that the lengths of its rows and columns have approximately equal magnitude. Similarly a general matrix is said to be row-equilibrated (column-equilibrated) if it is scaled so that the lengths of its rows (columns) have approximately equal magnitude. Note that row scaling can affect the choice of pivot when partial pivoting is used in the factorization of $A$.
+A symmetric or Hermitian positive definite matrix is said to be equilibrated if the diagonal elements are all approximately equal to unity.
+For further information on scaling and equilibration see Section 3.5.2 of Golub and Van Loan (1996), Section 7.2, 7.3 and 9.8 of Higham (1988) and Section 5 of Chapter 4 of Wilkinson (1965).
+Functions are provided to return the scaling factors that equilibrate a matrix for general, general band, symmetric and Hermitian positive definite and symmetric and Hermitian positive definite band matrices.
+
+#### Componentwise error bounds
+
+A disadvantage of normwise error bounds is that they do not reflect any special structure in the data $A$ and $b$ – that is, a pattern of elements which are known to be zero – and the bounds are dominated by the largest elements in the data.
+Componentwise error bounds overcome these limitations. Instead of the normwise relative error, we can bound the relative error in each component of $A$ and $b$:
+ $maxijk δaij aij , δbk bk ≤ω$
+where the component-wise backward error bound $\omega$ is given by
+ $ω= maxi ri A. x^+bi .$
+Functions are provided in this chapter which compute $\omega$, and also compute a forward error bound which is sometimes much sharper than the normwise bound given earlier:
+ $x- x^ ∞ x∞ ≤ A-1 . r ∞ x∞ .$
+Care is taken when computing this bound to allow for rounding errors in computing $r$. The norm ${‖\left|{A}^{-1}\right|.\left|r\right|‖}_{\infty }$ is estimated cheaply (without computing ${A}^{-1}$) by a modification of the method used to estimate $\kappa \left(A\right)$.
+
+#### Iterative refinement of the solution
+
+If $\stackrel{^}{x}$ is an approximate computed solution to $Ax=b$, and $r$ is the corresponding residual, then a procedure for iterative refinement of $\stackrel{^}{x}$ can be defined as follows, starting with ${x}_{0}=\stackrel{^}{x}$:
+• for $i=0,1,\dots \text{}$, until convergence
+ compute ${r}_{i}=b-A{x}_{i}$ solve $A{d}_{i}={r}_{i}$ compute ${x}_{i+1}={x}_{i}+{d}_{i}$
+In Chapter F04, functions are provided which perform this procedure using additional precision to compute $r$, and are thus able to reduce the forward error to the level of machine precision.
+The functions in this chapter do not use additional precision to compute $r$, and cannot guarantee a small forward error, but can guarantee a small backward error (except in rare cases when $A$ is very ill-conditioned, or when $A$ and $x$ are sparse in such a way that $\left|A\right|.\left|x\right|$ has a zero or very small component). The iterations continue until the backward error has been reduced as much as possible; usually only one iteration is needed.
+
+### Matrix Inversion
+
+It is seldom necessary to compute an explicit inverse of a matrix. In particular, do not attempt to solve $Ax=b$ by first computing ${A}^{-1}$ and then forming the matrix-vector product $x={A}^{-1}b$; the procedure described in Solution of Systems of Equations is more efficient and more accurate.
+However, functions are provided for the rare occasions when an inverse is needed, using one of the factorizations described in Matrix Factorizations.
+
+### Packed Storage Formats
+
+Functions which handle symmetric matrices are usually designed so that they use either the upper or lower triangle of the matrix; it is not necessary to store the whole matrix. If the upper or lower triangle is stored conventionally in the upper or lower triangle of a two-dimensional array, the remaining elements of the array can be used to store other useful data.
+However, that is not always convenient, and if it is important to economize on storage, the upper or lower triangle can be stored in a one-dimensional array of length $n\left(n+1\right)/2$ or a two-dimensional array with $n\left(n+1\right)/2$ elements; in other words, the storage is almost halved.
+The one-dimensional array storage format is referred to as packed storage; it is described in Packed storage. The two-dimensional array storage format is referred to as Rectangular Full Packed (RFP) format; it is described in Rectangular Full Packed (RFP) Storage. They may also be used for triangular matrices.
+Functions designed for these packed storage formats perform the same number of arithmetic operations as functions which use conventional storage. Those using a packed one-dimensional array are usually less efficient, especially on high-performance computers, so there is then a trade-off between storage and efficiency. The RFP functions are as efficient as for conventional storage, although only a small subset of functions use this format.
+
+### Band and Tridiagonal Matrices
+
+A band matrix is one whose nonzero elements are confined to a relatively small number of subdiagonals or superdiagonals on either side of the main diagonal. A tridiagonal matrix is a special case of a band matrix with just one subdiagonal and one superdiagonal. Algorithms can take advantage of bandedness to reduce the amount of work and storage required. The storage scheme used for band matrices is described in Band storage.
+The $LU$ factorization for general matrices, and the Cholesky factorization for symmetric and Hermitian positive definite matrices both preserve bandedness. Hence functions are provided which take advantage of the band structure when solving systems of linear equations.
+The Cholesky factorization preserves bandedness in a very precise sense: the factor $U$ or $L$ has the same number of superdiagonals or subdiagonals as the original matrix. In the $LU$ factorization, the row-interchanges modify the band structure: if $A$ has ${k}_{l}$ subdiagonals and ${k}_{u}$ superdiagonals, then $L$ is not a band matrix but still has at most ${k}_{l}$ nonzero elements below the diagonal in each column; and $U$ has at most ${k}_{l}+{k}_{u}$ superdiagonals.
+The Bunch–Kaufman factorization does not preserve bandedness, because of the need for symmetric row-and-column permutations; hence no functions are provided for symmetric indefinite band matrices.
+The inverse of a band matrix does not in general have a band structure, so no functions are provided for computing inverses of band matrices.
+
+### Block Partitioned Algorithms
+
+Many of the functions in this chapter use what is termed a block partitioned algorithm. This means that at each major step of the algorithm a block of rows or columns is updated, and most of the computation is performed by matrix-matrix operations on these blocks. The matrix-matrix operations are performed by calls to the Level 3 BLAS which are the key to achieving high performance on many modern computers. See Golub and Van Loan (1996) or Anderson et al. (1999) for more about block partitioned algorithms.
+The performance of a block partitioned algorithm varies to some extent with the block size – that is, the number of rows or columns per block. This is a machine-dependent argument, which is set to a suitable value when the library is implemented on each range of machines. You do not normally need to be aware of what value is being used. Different block sizes may be used for different functions. Values in the range $16$ to $64$ are typical.
+On some machines there may be no advantage from using a block partitioned algorithm, and then the functions use an unblocked algorithm (effectively a block size of $1$), relying solely on calls to the Level 2 BLAS again).
+
+### Mixed Precision LAPACK Routines
+
+Some LAPACK routines use mixed precision arithmetic in an effort to solve problems more efficiently on modern hardware. They work by converting a double precision problem into an equivalent single precision problem, solving it and then using iterative refinement in double precision to find a full precision solution to the original problem. The method may fail if the problem is too ill-conditioned to allow the initial single precision solution, in which case the functions fall back to solve the original problem entirely in double precision. The vast majority of problems are not so ill-conditioned, and in those cases the technique can lead to significant gains in speed without loss of accuracy. This is particularly true on machines where double precision arithmetic is significantly slower than single precision.
+
+## Recommendations on Choice and Use of Available Functions
+
+### Available Functions
+
+Tables 1 to 8 in Tables of Driver and Computational Routines show the functions which are provided for performing different computations on different types of matrices. Tables 1 to 4 show functions for real matrices; Tables 5 to 8 show functions for complex matrices. Each entry in the table gives the NAG function name and the LAPACK double precision name.
+Functions are provided for the following types of matrix:
+• general
+• general band
+• general tridiagonal
+• symmetric or Hermitian positive definite
+• symmetric or Hermitian positive definite (packed storage)
+• symmetric or Hermitian positive definite (RFP storage)
+• symmetric or Hermitian positive definite band
+• symmetric or Hermitian positive definite tridiagonal
+• symmetric or Hermitian indefinite
+• symmetric or Hermitian indefinite (packed storage)
+• triangular
+• triangular (packed storage)
+• triangular (RFP storage)
+• triangular band
+For each of the above types of matrix (except where indicated), functions are provided to perform the following computations:
+ (a) (except for RFP matrices) solve a system of linear equations (driver functions); (b) (except for RFP matrices) solve a system of linear equations with condition and error estimation (expert drivers); (c) (except for triangular matrices) factorize the matrix (see Matrix Factorizations); (d) solve a system of linear equations, using the factorization (see Solution of Systems of Equations); (e) (except for RFP matrices) estimate the condition number of the matrix, using the factorization (see Estimating condition numbers); these functions also require the norm of the original matrix (except when the matrix is triangular) which may be computed by a function in (f) (except for RFP matrices) refine the solution and compute forward and backward error bounds (see Componentwise error bounds and Iterative refinement of the solution); these functions require the original matrix and right-hand side, as well as the factorization returned

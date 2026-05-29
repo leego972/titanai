@@ -1,0 +1,478 @@
+## Numerical solution of PDE:s, Part 6: Adiabatic approximation for quantum dynamics
+
+Having solved the time-dependent Schrödinger equation both in real and imaginary time, we can move forward to investigate systems where the potential energy function $V$ has an explicit time dependence in it:
+
+In this kind of systems, the expectation value of the Hamiltonian operator doesn’t have to stay constant.
+
+Time-dependent perturbation theory is one method for finding approximate solutions for this kind of problems, but here I will handle a simpler example, which is called adiabatic approximation.
+
+Suppose that the potential energy function $V(x,t)$ is known. Now, let’s say that we also know the solutions of the time-independent Schrödinger equation
+
+for any value of $t$. I denote the solutions as $\psi_n (x;t)$, where it is understood that $x$ is a variable and $t$ is a parameter. Now, if the function $V(x,t)$ changes very slowly as a function of time, i.e. its partial derivative with respect to $t$ is small at all points of the domain, we can use the adiabatic approximation, which says that if the initial state $\Psi (x,0)$ is the ground state for the potential $V(x,0)$, then the state at time $t$ is the ground state for the potential $V(x,t)$.
+
+So, we can change a ground state of one potential $V_1 (x)$ into the ground state of another potential $V_2 (x)&bg=ffffff&fg=000000$ by making a continuous change from $V_1 (x)$ to $V_2 (x)$ slowly enough.
+
+Let’s test this by chooosing a function $V$ as
+
+i.e. a Hookean potential that moves to the positive x-direction with constant speed. If we set the wavefunction at $t=0$ to
+
+which is the ground state corresponding to $V(x,0)$, the time depelopment of the wavepacket should be like
+
+which means that is moves with the same constant speed as the bottom of the potential $V$. This can be calculated with the R-Code below:
+
+library(graphics) #load the graphics library needed for plotting
+
+lx <- 6.0 #length of the computational domain
+lt <- 15.0 #length of the simulation time interval
+nx <- 100 #number of discrete lattice points
+nt <- 300 #number of timesteps
+dx <- lx/nx #length of one discrete lattice cell
+dt <- lt/nt #length of timestep
+
+V = c(1:nx) #potential energies at discrete points
+
+for(j in c(1:nx)) {
+V[j] = as.complex(2*(j*dx-3)*(j*dx-3)) #harmonic potential
+}
+
+kappa1 = (1i)*dt/(2*dx*dx) #an element needed for the matrices
+kappa2 <- c(1:nx) #another element
+
+for(j in c(1:nx)) {
+kappa2[j] <- as.complex(kappa1*2*dx*dx*V[j])
+}
+
+psi = as.complex(c(1:nx)) #array for the wave function values
+
+for(j in c(1:nx)) {
+psi[j] = as.complex(exp(-(j*dx-3)*(j*dx-3))) #Gaussian initial wavefunction
+}
+
+xaxis <- c(1:nx)*dx #the x values corresponding to the discrete lattice points
+
+A = matrix(nrow=nx,ncol=nx) #matrix for forward time evolution
+B = matrix(nrow=nx,ncol=nx) #matrix for backward time evolution
+
+for(j in c(1:nx)) {
+for(k in c(1:nx)) {
+A[j,k]=0
+B[j,k]=0
+if(j==k) {
+A[j,k] = 1 + 2*kappa1 + kappa2[j]
+B[j,k] = 1 - 2*kappa1 - kappa2[j]
+}
+if((j==k+1) || (j==k-1)) {
+A[j,k] = -kappa1 #off-diagonal elements
+B[j,k] = kappa1
+}
+}
+}
+
+for (k in c(1:nt)) { #main time stepping loop
+
+for(j in c(1:nx)) {
+V[j] = as.complex(2*(j*dx-3-k*dt*0.05)*(j*dx-3-k*dt*0.05)) #time dependent potential
+}
+
+for(j in c(1:nx)) {
+kappa2[j] <- as.complex(kappa1*2*dx*dx*V[j])
+}
+
+for(l in c(1:nx)) {
+for(m in c(1:nx)) {
+A[l,m]=0
+B[l,m]=0
+if(l==m) {
+A[l,m] = 1 + 2*kappa1 + kappa2[m]
+B[l,m] = 1 - 2*kappa1 - kappa2[m]
+}
+if((l==m+1) || (l==m-1)) {
+A[l,m] = -kappa1
+B[l,m] = kappa1
+}
+}
+}
+sol <- solve(A,B%*%psi) #solve the system of equations
+
+for (l in c(1:nx)) {
+psi[l] <- sol[l]
+}
+
+if(k %% 3 == 1) { #make plots of psi(x) on every third timestep
+jpeg(file = paste("plot_",k,".jpg",sep=""))
+plot(xaxis,abs(psi)^2,xlab="position (x)", ylab="Abs(Psi)^2",ylim=c(0,2))
+title(paste("|psi(x,t)|^2 at t =",k*dt))
+lines(xaxis, abs(psi)^2)
+lines(xaxis, V)
+dev.off()
+}
+}
+
+and in the following sequences of images you see that the approximation is quite good for $v = 0.05$
+
+As an animation, this process looks like shown below:
+
+By doing the same calculation again, but this time with $v = 3$, the image sequence looks like this:
+
+where it is obvious that the approximation doesn’t work anymore.
+
+## Numerical solution of PDE:s, Part 5: Schrödinger equation in imaginary time
+
+In the last post, I mentioned that the solution of the time dependent 1D Schrödinger equation
+
+can be written by expanding the initial state $\Psi (x,0)$ in the basis of the solutions of time-independent Schrödinger equation
+
+and multiplying each term in the expansion by a complex-valued time dependent phase factor:
+
+Now, assuming that the energies $E_n$ are all positive and are ordered so that $E_0$ is the smallest of them, we get an interesting result by replacing the time variable $t$ with an imaginary time variable $s = it$. The function $\Psi (x,s)$ is then
+
+which is a sum of exponentially decaying terms, of which the first one, $c_0 \exp(-E_0 s)\psi_0 (x)$ decays slowest. So, in the limit of large $s$, the wave function is
+
+i.e. after normalizing it, it’s approximately the same as the ground state $\psi_0$. Also, if $s$ is a large number, we have
+
+or
+
+So, here we have a way to use the TDSE to numerically calculate the ground state wavefunction and corresponding energy eigenvalue for any potential energy function $V(x)$. This is very useful, as the ground state can’t usually be solved analytically, except for some very simple potential energy functions such as the harmonic oscillator potential.
+
+To test this imaginary time method, I will approximately calculate the ground state of an anharmonic oscillator, described by a Schrödinger equation
+
+as an initial state, I will choose a Gaussian function
+
+and the computational domain is defined by 0 < x < 6, 0 < t < 3, $\Delta x = 0.05$, $\Delta t = 0.01$.
+
+An R-Code that performs this calculation is shown below:
+
+library(graphics) #load the graphics library needed for plotting
+
+lx <- 6.0 #length of the computational domain
+lt <- 3.0 #length of the simulation time interval
+nx <- 120 #number of discrete lattice points
+nt <- 300 #number of timesteps
+dx <- lx/nx #length of one discrete lattice cell
+dt <- (-1i)*lt/nt #length of imaginary timestep
+
+V = c(1:nx) #potential energies at discrete points
+
+for(j in c(1:nx)) {
+V[j] = as.complex(0.25*(j*dx-3)*(j*dx-3)+0.15*(j*dx-3)*(j*dx-3)*(j*dx-3)*(j*dx-3)) #anharmonic potential
+}
+
+kappa1 = (1i)*dt/(2*dx*dx) #an element needed for the matrices
+kappa2 <- c(1:nx) #another element
+
+for(j in c(1:nx)) {
+kappa2[j] <- as.complex(kappa1*2*dx*dx*V[j])
+}
+
+psi = as.complex(c(1:nx)) #array for the wave function values
+
+for(j in c(1:nx)) {
+psi[j] = as.complex(exp(-2*(j*dx-3)*(j*dx-3))) #Gasussian initial wavefunction
+}
+
+xaxis <- c(1:nx)*dx #the x values corresponding to the discrete lattice points
+
+A = matrix(nrow=nx,ncol=nx) #matrix for forward time evolution
+B = matrix(nrow=nx,ncol=nx) #matrix for backward time evolution
+
+for(j in c(1:nx)) {
+for(k in c(1:nx)) {
+A[j,k]=0
+B[j,k]=0
+if(j==k) {
+A[j,k] = 1 + 2*kappa1 + kappa2[j]
+B[j,k] = 1 - 2*kappa1 - kappa2[j]
+}
+if((j==k+1) || (j==k-1)) {
+A[j,k] = -kappa1
+B[j,k] = kappa1
+}
+}
+}
+
+for (k in c(1:nt)) { #main time stepping loop
+
+sol <- solve(A,B%*%psi) #solve the system of equations
+
+for (l in c(1:nx)) {
+psi[l] <- sol[l]
+}
+
+nrm = 0
+for (l in c(1:nx)) nrm <- nrm + dx*abs(psi[l])*abs(psi[l])
+
+if(k %% 3 == 1) { #make plots of psi(x) on every third timestep
+jpeg(file = paste("plot_",k,".jpg",sep=""))
+plot(xaxis, abs(psi)^2,xlab="position (x)", ylab="Abs(Psi)^2")
+title(paste("|psi(x,t)|^2 at t =",k*dt))
+lines(xaxis, abs(psi)^2)
+lines(xaxis, V*max(abs(psi)^2))
+dev.off()
+}
+}
+
+And a set of plots of $|\Psi (x,t)|^2$ for several values of $t$ look like this:
+
+Here the shape of the anharmonic potential has been plotted to the same images.
+
+The problem with this method for finding a ground state is that if the system has more degrees of freedom than a single coordinate x, the matrices in the linear systems needed in the time stepping quickly become very large and the calculation becomes prohibitively slow. To make this worse, the Crank-Nicolson method of time stepping can’t be parallelized for multiple processors. However, there is another way to compute the evolution of a wave function in imaginary time, which is called Diffusion Monte Carlo, and that is easily parallelizable. DMC is one practical way for calculating ground state wave functions for multi-particle systems such as a helium or a lithium atom.
+
+## Numerical solution of PDE:s, Part 4: Schrödinger equation
+
+In the earlier posts, I showed how to numerically solve a 1D or 2D diffusion or heat conduction problem using either explicit or implicit finite differencing. In the 1D example, the relevant equation for diffusion was
+
+and an important property of the solution was the conservation of mass,
+
+i.e. the integral of the concentration field over whole domain stays constant.
+
+Next, I will show how to integrate the 1D time-dependent Schrödinger equation, which in a nondimensional form where we set $\hbar = 1$ and $m = 1$ reads:
+
+Here $i$ is the imaginary unit and $V(x)$ is the potential energy as a function of $x$. The solutions of this equation must obey a conservation law similar to the mass conservation in the diffusion equation, the conservation of norm:
+
+where the quantity $|\Psi (x,t)|$ is the modulus of the complex-valued function $\Psi (x,t)$ . This property of the solution is also called unitarity of the time evolution.
+
+Apart from the TDSE, another way to represent the time development of this system is to find the normalized solutions $\psi_0 (x)$, $\psi_1 (x)$, $\psi_2 (x) \dots$ of the time-independent Schrödinger equation
+
+and write the initial state $\Psi (x,0)$ as a linear combination of those basis functions:
+
+This is possible because the solutions of the time-independent equation form a basis for the set of acceptable wave functions $\psi (x)$. Then, every term in that eigenfunction expansion is multiplied by a time dependent phase factor $\exp(-iE_n t)$:
+
+The numbers $E_n$ are the eigenvalues corresponding to the solutions $\psi_n (x)$ and the function $\psi_0 (x)$ is called the ground state corresponding to potential $V(x)$, while the functions $\psi_1 (x)$ is the first excited state and so on.
+
+The Schrödinger equation can’t be discretized by using either the explicit or implicit method that we used when solving the diffusion equation. The method is either numerically unstable or doesn’t conserve the normalization of the wave function (or both) if you try to do that. The correct way to discretize the Schrödinger equation is to replace the wave function with a discrete equivalent
+
+and the potential energy function $V(x)$ with $V_{i;j}$ (or $V_i$ in the case of time-independent potential), and write an equation that basically tells that propagating the state $\Psi_{i;j}$ forward by half a time step gives the same result as propagating the state $\Psi_{i;j+1}$ backwards by half a time step:
+
+Here we have
+
+and
+
+This kind of discretization is called the Crank-Nicolson method. As boundary conditions, we usually set that at the boundaries of the computational domain the wavefunction stays at value zero: $\Psi (0,t) = \Psi (L,t) = 0$ for any value of $t$. In the diffusion problem, this kind of a BC corresponded to infinite sinks at the boundaries, that annihilated anything that diffused through them. In the Schrödinger equation problem, which is a complex diffusion equation, the equivalent condition makes the boundaries impenetrable walls that deflect elastically anything that collides with them.
+
+An R-Code that calculates the time evolution of a Gaussian initial wavefunction
+
+in an area of zero potential:
+
+for a domain 0 < x < 6, a lattice spacing $\Delta x = 0.05$, time interval 0 < t < 2 and time step $\Delta t = 0.01$, is given below:
+
+library(graphics) #load the graphics library needed for plotting
+
+lx <- 6.0 #length of the computational domain
+lt <- 2.0 #length of the simulation time interval
+nx <- 120 #number of discrete lattice points
+nt <- 200 #number of timesteps
+dx <- lx/nx #length of one discrete lattice cell
+dt <- lt/nt #length of timestep
+
+V = c(1:nx) #potential energies at discrete points
+
+for(j in c(1:nx)) {
+V[j] = 0 #zero potential
+}
+
+kappa1 = (1i)*dt/(2*dx*dx) #an element needed for the matrices
+kappa2 <- c(1:nx) #another element
+
+for(j in c(1:nx)) {
+kappa2[j] <- as.complex(kappa1*2*dx*dx*V[j])
+}
+
+psi = as.complex(c(1:nx)) #array for the wave function values
+
+for(j in c(1:nx)) {
+psi[j] = as.complex(exp(-2*(j*dx-3)*(j*dx-3))) #Gaussian initial wavefunction
+}
+
+xaxis <- c(1:nx)*dx #the x values corresponding to the discrete lattice points
+
+A = matrix(nrow=nx,ncol=nx) #matrix for forward time evolution
+B = matrix(nrow=nx,ncol=nx) #matrix for backward time evolution
+
+for(j in c(1:nx)) {
+for(k in c(1:nx)) {
+A[j,k]=0
+B[j,k]=0
+if(j==k) {
+A[j,k] = 1 + 2*kappa1 + kappa2[j]
+B[j,k] = 1 - 2*kappa1 - kappa2[j]
+}
+if((j==k+1) || (j==k-1)) {
+A[j,k] = -kappa1
+B[j,k] = kappa1
+}
+}
+}
+
+for (k in c(1:nt)) { #main time stepping loop
+
+sol <- solve(A,B%*%psi) #solve the system of equations
+
+for (l in c(1:nx)) {
+psi[l] <- sol[l]
+}
+
+if(k %% 3 == 1) { #make plots of |psi(x)|^2 on every third timestep
+jpeg(file = paste("plot_",k,".jpg",sep=""))
+plot(xaxis,abs(psi)^2,xlab="position (x)", ylab="Abs(Psi)^2",ylim=c(0,2))
+title(paste("|psi(x,t)|^2 at t =",k*dt))
+lines(xaxis,abs(psi)^2)
+dev.off()
+}
+}
+
+The output files are plots of the absolute squares of the wavefunction, and a few of them are shown below.
+
+In the next simulation, I set the domain and discrete step sizes the same as above, but the initial state is:
+
+Which is a Gaussian wave packet that has a nonzero momentum in the positive x-direction. This is done by changing the line
+
+for(j in c(1:nx)) {
+psi[j] = as.complex(exp(-2*(j*dx-3)*(j*dx-3))) #Gaussian initial wavefunction
+}+(1i)*j*dx
+
+into
+
+for(j in c(1:nx)) {
+psi[j] = as.complex(exp(-2*(j*dx-3)*(j*dx-3)+(1i)*j*dx)) #Gaussian initial wavefunction
+}
+
+The plots of $|\Psi (x,t)|^2$ for several values of $t$ are shown below
+
+and there you can see how the wave packet collides with the right boundary of the domain and bounces back.
+
+In the last simulation, I will set the potential function to be
+
+which is a harmonic oscillator potential, and with the nondimensional mass $m =1$ and Planck constant $\hbar = 1$ the ground state $\psi _0 (x)$ of this system is
+
+If I’d set the initial state to be $\Psi (x,0) = \psi_0 (x)$, or any other solution of the time-independent SE, the modulus of the wavefunction would not change at all. To get something interesting to happen, I instead set an initial state that is a displaced version of the ground state:
+
+The solution can be obtained with the code shown below:
+
+library(graphics) #load the graphics library needed for plotting
+
+lx <- 6.0 #length of the computational domain
+lt <- 3.0 #length of the simulation time interval
+nx <- 360 #number of discrete lattice points
+nt <- 300 #number of timesteps
+dx <- lx/nx #length of one discrete lattice cell
+dt <- lt/nt #length of timestep
+
+V = c(1:nx) #potential energies at discrete points
+
+for(j in c(1:nx)) {
+V[j] = as.complex(2*(j*dx-3)*(j*dx-3)) #Harmonic oscillator potential with k=4
+}
+
+kappa1 = (1i)*dt/(2*dx*dx) #an element needed for the matrices
+kappa2 <- c(1:nx) #another element
+
+for(j in c(1:nx)) {
+kappa2[j] <- as.complex(kappa1*2*dx*dx*V[j])
+}
+
+psi = as.complex(c(1:nx)) #array for the wave function values
+
+for(j in c(1:nx)) {
+psi[j] = as.complex(exp(-(j*dx-2)*(j*dx-2))) #Gaussian initial wavefunction, displaced from equilibrium
+}
+
+xaxis <- c(1:nx)*dx #the x values corresponding to the discrete lattice points
+
+A = matrix(nrow=nx,ncol=nx) #matrix for forward time evolution
+B = matrix(nrow=nx,ncol=nx) #matrix for backward time evolution
+
+for(j in c(1:nx)) {
+for(k in c(1:nx)) {
+A[j,k]=0
+B[j,k]=0
+if(j==k) {
+A[j,k] = 1 + 2*kappa1 + kappa2[j]
+B[j,k] = 1 - 2*kappa1 - kappa2[j]
+}
+if((j==k+1) || (j==k-1)) {
+A[j,k] = -kappa1
+B[j,k] = kappa1
+}
+}
+}
+
+for (k in c(1:nt)) { #main time stepping loop
+
+sol <- solve(A,B%*%psi) #solve the system of equations
+
+for (l in c(1:nx)) {
+psi[l] <- sol[l]
+}
+
+if(k %% 3 == 1) { #make plots of Abs(psi(x))^2 on every third timestep
+jpeg(file = paste("plot_",k,".jpg",sep=""))
+plot(xaxis,abs(psi)^2, xlab="position (x)", ylab="Abs(Psi)^2",ylim=c(0,2))
+title(paste("|psi(x,t)|^2 at t =",k*dt))
+lines(xaxis,abs(psi)^2)
+lines(xaxis,V)
+dev.off()
+}
+}
+
+and the solution at different values of $t$ look like this (images and video):
+
+Here the shape of the Hookean potential energy is plotted in the same images. So, here you see how the center of the Gaussian wavefunction oscillates around the point $x = 3$, just like a classical mechanical harmonic oscillator does when set free from a position that is displaced from equilibrium.
+
+By changing the code that produces the output images, we can also get a sequence of plots of the imaginary part of the wavefunction:
+
+if(k %% 3 == 1) { #make plots of Im(psi(x)) on every third timestep
+jpeg(file = paste("plot_",k,".jpg",sep=""))
+plot(xaxis,Im(psi), xlab="position (x)", ylab="Im(Psi)",ylim=c(-1.5,1.5))
+title(paste("Im(psi(x,t)) at t =",k*dt))
+lines(xaxis,Im(psi))
+lines(xaxis,V)
+dev.off()
+}
+
+and the resulting plots look like this:
+
+## Numerical solution of PDE:s, Part 3: 2D diffusion problem
+
+In the earlier posts related to PDE numerical integration, I showed how to discretize 1-dimensional diffusion or heat conduction equations either by explicit or implicit methods. The 1d model can work well in some situations where the symmetry of a physical system makes the concentration or temperature field practically depends on only one cartesian coordinate and is independent of the position along two other orthogonal coordinate axes.
+
+The 2-dimensional version of the diffusion/heat equation is
+
+assuming that the diffusion is isotropic, i.e. its rate does not depend on direction.
+
+In a discretized description, the function C(x,y,t) would be replaced by a three-index object
+
+assuming that one of the corners of the domain is at the origin. Practically the same can also be done with two indices, as in
+
+where $N_x$ is the number of discrete points in x-direction.
+
+Using the three-index version of the 2D diffusion equation and doing an explicit discretization, we get this kind of a discrete difference equation:
+
+which can be simplified a bit if we have $\Delta x = \Delta y$ .
+
+Below, I have written a sample R-Code program that calculates the evolution of a Gaussian concentration distribution by diffusion, in a domain where the x-interval is 0 < x < 6 and y-interval is 0 < y < 6. The boundary condition is that nothing diffuses through the boundaries of the domain, i.e. the two-dimensional integral of C(x,y,t) over the area $[0,6]\times [0,6]$ does not depend on t.
+
+library(graphics) #load the graphics library needed for plotting
+
+lx <- 6.0 #length of the computational domain in x-direction
+ly <- 6.0 #length of the computational domain in y-direction
+lt <- 6 #length of the simulation time interval
+nx <- 30 #number of discrete lattice points in x-direction
+ny <- 30 #number of discrete lattice points in y-direction
+nt <- 600 #number of timesteps
+dx <- lx/nx #length of one discrete lattice cell in x-direction
+dy <- ly/ny #length of one discrete lattice cell in y-direction
+dt <- lt/nt #length of timestep
+
+D <- 1.0 #diffusion constant (assumed isotropic)
+
+Conc2d = matrix(nrow=ny,ncol=nx)
+DConc2d <- matrix(nrow=ny, ncol=nx) #a vector for the changes in concentration during a timestep
+xaxis <- c(0:(nx-1))*dx #the x values corresponding to the discrete lattice points
+yaxis <- c(0:(ny-1))*dy #the y values corresponding to the discrete lattice points
+
+kappax <- D*dt/(dx*dx) #a parameter needed in the discretization
+kappay <- D*dt/(dy*dy) #a parameter needed in the discretization
+
+for (i in c(1:ny)) {
+for (j in c(1:nx)) {
+Conc2d[i,j] = exp(-(i*dy-3)*(i*dy-3)-(j*dx-3)*(j*dx-3)) #2D Gaussian initial concentration distribution

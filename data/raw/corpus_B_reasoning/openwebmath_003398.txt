@@ -1,0 +1,145 @@
+## Stardust Blog
+
+Archive
+
+Mailing List Articles Atom Feed Comments Atom Feed Twitter Reddit Facebook
+
+## Tag Cloud
+
+3d account algorithms android announcement architecture archives arduino artificial intelligence artix assembly async audio automation backups bash batch blog bookmarklet booting bug hunting c sharp c++ challenge chrome os code codepen coding conundrums coding conundrums evolved command line compilers compiling compression css dailyprogrammer debugging demystification distributed computing documentation downtime electronics email embedded systems encryption es6 features event experiment external first impressions future game github github gist gitlab graphics hardware hardware meetup holiday holidays html html5 html5 canvas infrastructure interfaces internet interoperability io.js jabber jam javascript js bin labs learning library linux lora low level lua maintenance manjaro network networking nibriboard node.js operating systems performance photos php pixelbot portable privacy problem solving programming problems projects prolog protocol protocols pseudo 3d python reddit redis reference releases resource review rust searching secrets security series list server software sorting source code control statistics storage svg technical terminal textures three thing game three.js tool tutorial twitter ubuntu university update updates upgrade version control virtual reality virtualisation visual web website windows windows 10 xmpp xslt
+
+## Animated PNG for all!
+
+I recently discovered that Animated PNGs are now supported by most major browsers:
+
+I stumbled across the concept of an animated PNG a number of years ago (on caniuse.com actually if I remember right!), but at the time browser support was very bad (read: non-existent :P) - so I moved on to other things.
+
+I ended up re-discovering it a few weeks ago (also through caniuse.com!), and since browser support is so much better now I decided that I just had to play around with it.
+
+It hasn't disappointed. Traditional animated GIFs (Graphics Interchange Format for the curious) are limited to 256 colours, have limited transparency support (a pixel is either transparent, or it isn't - there's no translucency support), and don't compress terribly well.
+
+Animated PNGs (Portable Network Graphics), on the other hand, let you enjoy all the features of a regular PNG (as many colours as you want, translucent pixels, etc.) while also supporting animation, and compressing better as well! Best of all, if a browser doesn't support the animated PNG standard, they will just see and render the first frame as a regular PNG and silently ignore the rest.
+
+Let's take it out for a spin. For my test, I took an image and created a 'panning' animation from one side of it to the other. Here's the image I've used:
+
+(Credit: The background on the download page for Mozilla's Firefox Nightly builds. It isn't available on the original source website anymore (and I've lost the link), but can still be found on various wallpaper websites.)
+
+The first task is to generate the frames from the original image. I wrote a quick shell script for this purpose. Firstly, I defined a bunch of variables:
+
+#!/usr/bin/env bash
+set -e; # Crash if we hit an error
+
+input_file="Input.png";
+output_file="Output.apng"
+
+# The maximum number of frames
+max_frame=32;
+end_x=960; end_y=450;
+start_x=0; start_y=450;
+
+crop_size_x=960; crop_size_y=540;
+
+mkdir -p ./frames;
+Variable Meaning
+input_file The input file to generate frames from
+output_file The file to write the animated png to
+max_frame The number of frames (plus 1) to generate
+start_x The starting position to pan from on the x axis
+start_y The starting position to pan from on the y axis
+end_x The ending position to pan to on the x axis
+end_y The ending position to pan to on the y axis
+crop_size_x The width of the cropped frames
+crop_size_y The height of the cropped frames
+
+It's worth noting here that it's probably a good idea to implement a proper CLI to this script at this point, but since it's currently only a one-off script I didn't bother. Perhaps in the future I'll come back and improve it if I find myself needing it again for some other purpose.
+
+With the parameters set up (and a temporary directory created - note that you should use mktemp -d instead of the approach I've taken here!), we can then use a for loop to repeatedly call ImageMagick to crop the input image to generate our frames. This won't run in parallel unfortunately, but since it's only a few frames it shouldn't take too long to render. This is only a quick shell script after all :P
+
+
+for ((frame=0; frame <= "${max_frame}"; frame++)); do this_x="$(calc -p "${start_x}+((${end_x}-${start_x})*(${frame}/${max_frame}))")"; this_y="$(calc -p "${start_y}+((${end_y}-${start_y})*(${frame}/${max_frame}))")"; percent="$(calc -p "round((${frame}/${max_frame})*100, 2)")";
+
+convert "${input_file}" -crop "${crop_size_x}x${crop_size_y}+${this_x}+${this_y}" "frames/Frame-$(printf "%02d" "${frame}").jpeg"; echo -ne "${frame} / ${max_frame} (${percent}%)          \r";
+done
+echo ""; # Move to the line after the progress indicator
+
+This looks complicated, but it really isn't. The for loop iterates over each of the frame numbers. We do some maths to calculate the (x, y) co-ordinates of the frame we want to extract, and then get ImageMagick's convert command to do the cropping for us. Finally we write a quick progress indicator out to stdout (\r resets the cursor to the beginning of the line, but doesn't go down to the next one).
+
+The maths there is probably better represented like this:
+
+$this_x=start_x+((end_x-start_x)*\frac{currentframe}{max_frame})$
+
+$this_y=start_y+((end_y-start_y)*\frac{currentframe}{max_frame})$
+
+Much better :-) In short, we convert the current frame number into a percentage (between 0 and 1) of how far through the animation we are and use that as a multiplier to find the distance between the starting and ending points.
+
+I use the calc command-line tool (in the apcalc package on Ubuntu) here to do the calculations, because the bash built-in result=$(((4 + 5))) only supports integer-based maths, and I wanted floating-point support here. With the frames generated, we only need to stitch them together to make the final animated png. Unfortunately, an easy-to-use tool does not yet exist (like gifsicle for GIFs) - so we'll have to make-do with ffpmeg (which, while very powerful, has a rather confusing CLI!). Here's how I stitched the frames together: ffmpeg -r 10 -i frames/Frame-%02d.jpeg -plays 0 "${output_file}";
+• -r - The frame rate
+• -i - The input filename
+• -plays - The number of times to loop (0 = infinite; defaults to no looping if omitted)
+• "${output_file}" - The output file Here's the final result: (Filesize: ~2.98MiB) Of course, it'd be cool to compare it to a traditional animated gif. Let's do that too! First, we'll need to convert the frames to gif (gifsicle, our tool of choice, doesn't support anything other than GIFs as far as I'm aware): mogrify -format gif frames/*.jpeg Easy-peasy! mogrify is another tool from ImageMagick that makes such in-place conversions trivial. Note that the frames themselves are stored as JPEGs because I was experiencing an issue whereby each of the frames apparently had a slightly different colour palette, and ffmpeg wasn't smart enough to correct for this - choosing instead to crash. With the frames converted, we can make our animated GIF like so: gifsicle --optimize --colors=256 --loopcount=10 --delay=10 frames/*.gif >Output.gif; Lastly, we probably want to delete the intermediate frames: rm -r ./frames Here's the animated GIF version: (Filesize: ~3.28MiB) Woah! That's much bigger. (Generated (and then extracted & edited with the Firefox developer tools) from Meta-Chart) It's ~9.7% bigger in fact! Though not a crazy amount, smaller resulting files are always good. I suspect that this effect will stack the more frames you have. Others have tested this too, finding pretty similar results to those that I've found here - though it does of course depend on your specific scenario. With that observation, I'll end this blog post. The next time you think about inserting an animation into a web page or chat window, consider making it an Animated PNG. Found this interesting? Found a cool CLI tool for manipulating APNGs? Having trouble? Comment below! ### Sources and Further Reading ## Easy Node.JS Dependencies Updates Once you've had a project around for a while, it's inevitable that dependency updates will become available. Unfortunately, npm (the Node Package Manager), while excellent at everything else, is completely terrible at notifying you about updates. The solution to this is, of course, to use an external tool. Personally, I use npm-check, which is also installable via npm. It shows you a list of updates to your project's dependencies, like so: (Can't see the above? View it directly on asciinema.org) It even supports the packages that you've install globally too, which no other tool appears to do as far as I can tell (although it does appear to miss some packages, such as npm and itself). To install it, simply do this: sudo npm install --global npm-check Once done, you can then use it like this: # List updates, but don't install them npm-check # Interactively choose the updates to install npm-check -u # Interactively check the globally-installed packages sudo npm-check -gu The tool also checks to see which of the dependencies are actually used, and prompts you to check the dependencies it think you're not using (it doesn't always get it right, so check carefully yourself before removing!). There's an argument to disable this behaviour: npm-check --skip-unused Speaking of npm package dependencies, the other big issue is security vulnerabilities. GitHub have recently started giving maintainers of projects notifications about security vulnerabilities in their dependencies, which I think is a brilliant idea. Actually fixing said vulnerabilities is a whole other issue though. If you don't want to update all the dependencies of a project to the latest version (perhaps you're just doing a one-off contribution to a project or aren't very familiar with the codebase yet), there's another tool - this time built-in to npm - to help out - the npm audit subcommand. # Check for reported security issues in your dependencies npm audit # Attempt to fix said issues by updating packages *just* enough npm audit fix (Can't see the above? View it directly on asciinema.org) This helps out a ton with contributing to other projects. Issues arise when the vulnerabilities are not in packages you directly depend on, but instead in packages that you indirectly depend on via dependencies of the packages you've installed. Thankfully the vulnerabilities in the above can all be traced back to development dependencies (and aren't essential for Peppermint Wiki itself), but it's rather troubling that I can't install updated packages because the packages I depend on haven't updated their dependencies. I guess I'll be sending some pull requests to update some dependencies! To help me in this, the output of npm audit even displays the dependency graph of why a package is installed. If this isn't enough though, there's always the npm-why which, given a package name, will figure out why it's installed. Found this interesting? Got a better solution? Comment below! ## Generating Atom 1.0 Feeds with PHP (the proper way) I've generated Atom feeds in PHP before, but recently I went on the hunt to discover if PHP has something like C♯'s XMLWriter class - and it turns out it does! Although poorly documented (probably why I didn't find it in the first place :P), it's actually quite logical and easy to pick up. To this end, I thought I'd blog about how I used to write the Atom 1.0 feed generator for recent changes on Pepperminty Wiki that I've recently implemented (coming soon in the next release!), as it's so much cleaner than atom.gen.php that I blogged about before! It's safer too - as all the escaping is handled automatically by PHP - so there's no risk of an injection attack because I forgot to escape a character in my library code. It ends up being a bit verbose, but a few helper methods (or a wrapper class?) should alleviate this nicely - I might refactor it at a later date. To begin, we need to create an instance of the aptly-named XMLLWriter class. It's probable that you'll need the php-xml package installed in order to use this. $xml = new XMLWriter();
+$xml->openMemory();$xml->setIndent(true); $xml->setIndentString("\t");$xml->startDocument("1.0", "utf-8");
+
+In short, the above creates a new XMLWriter instance, instructs it to write the XML to memory, enables pretty-printing of the output, and writes the standard XML document header.
+
+With the document created, we can begin to generate the Atom feed. To figure out the format (I couldn't remember from when I wrote atom.gen.php - that was ages ago :P), I ended following this helpful guide on atomenabled.org. It seems familiar - I think I might have used it when I wrote atom.gen.php. To start, we need something like this:
+
+<feed xmlns="http://www.w3.org/2005/Atom">
+......
+</feed>
+
+In PHP, that translates to this:
+
+$xml->startElement("feed");$xml->writeAttribute("xmlns", "http://www.w3.org/2005/Atom");
+
+$xml->endElement(); // </feed> Next, we probably want to advertise how the Atom feed was generated. Useful for letting the curious know what a website is powered by, and for spotting usage of your code out in the wild! Since I'm writing this for Pepperminty Wiki, I'm settling on something not unlike this: <generator uri="https://github.com/sbrl/Pepperminty-Wiki/" version="v0.18-dev">Pepperminty Wiki</generator> In PHP, this translates to this: $xml->startElement("generator");
+$xml->writeAttribute("uri", "https://github.com/sbrl/Pepperminty-Wiki/");$xml->writeAttribute("version", $version); // A variable defined elsewhere in Pepperminty Wiki$xml->text("Pepperminty Wiki");
+$xml->endElement(); Next, we need to add a <link rel="self" /> tag. This informs clients as to where the feed was fetched from, and the canonical URL of the feed. I've done this: xml->startElement("link");$xml->writeAttribute("rel", "self");
+$xml->writeAttribute("type", "application/atom+xml");$xml->writeAttribute("href", full_url());
+$xml->endElement(); That full_url() function is from StackOverflow, and calculates the full URI that was used to make a request. As Pepperminty Wiki can be run in any directory on ayn server, I can't pre-determine this url - hence the complexity. Note also that I output type="application/atom+xml" here. This specifies the type of content that can be found at the supplied URL. The idea here is that if you represent the same data in different ways, you can advertise them all in a standard way, with other formats having rel="alternate". Pepperminty Wiki does this - generating the recent changes list in HTML, CSV, and JSON in addition to the new Atom feed I'm blogging about here (the idea is to make the wiki data as accessible and easy-to-parse as possible). Let's advertise those too: $xml->startElement("link");
+$xml->writeAttribute("rel", "alternate");$xml->writeAttribute("type", "text/html");
+$xml->writeAttribute("href", "$full_url_stem?action=recent-changes&format=html");
+$xml->endElement();$xml->startElement("link");
+$xml->writeAttribute("rel", "alternate");$xml->writeAttribute("type", "application/json");
+$xml->writeAttribute("href", "$full_url_stem?action=recent-changes&format=json");
+$xml->endElement();$xml->startElement("link");
+$xml->writeAttribute("rel", "alternate");$xml->writeAttribute("type", "text/csv");
+$xml->writeAttribute("href", "$full_url_stem?action=recent-changes&format=csv");
+$xml->endElement(); Before we can output the articles themselves, there are a few more pieces of metadata left on our laundry list - namely <updated />, <id />, <icon />, <title />, and <subtitle />. There are others in the documentation too, but aren't essential (as far as I can tell) - and not appropriate in this specific case. Here's what they might look like: <updated>2019-02-02T21:23:43+00:00</updated> <id>https://wiki.bobsrockets.com/?action=recent-changes&amp;format=atom</id> <icon>https://wiki.bobsrockets.com/rocket_logo.png</icon> <title>Bob's Wiki - Recent Changes</title> <subtitle>Recent Changes on Bob's Wiki</subtitle> The <updated /> tag specifies when the feed was last updated. It's unclear as to whether it's the date/time the last change was made to the feed or the date/time the feed was generated, so I've gone with the latter. If this isn't correct, please let me know and I'll change it. The <id /> element can contain anything, but it must be a globally-unique string that identifies this feed. I've seen other feeds use the canonical url - and I've gone to the trouble of calculating it for the <link rel="self" /> - so it seems a shame to not use it here too. The remaining elements (<icon />, <title />, and <subtitle />) are pretty self explanatory - although it's worth mentioning that the icon must be square apparently. Let's whip those up with some more PHP: $xml->writeElement("updated", date(DateTime::ATOM));
+$xml->writeElement("id", full_url());$xml->writeElement("icon", $settings->favicon);$xml->writeElement("title", "$settings->sitename - Recent Changes");$xml->writeElement("subtitle", "Recent Changes on $settings->sitename"); PHP even has a present for generating a date string in the correct format required by the spec :D $settings is an object containing the wiki settings that's a parsed form of peppermint.json, and contains useful things like the wiki's name, icon, etc.
+
+Finally, with all the preamble done, we can turn to the articles themselves. In the case of Pepperminty Wiki, the final result will look something like this:
+
+<entry>
+<title type="text">Edit to Compute Core by Sean</title>
+<id>https://seanssatellites.co.uk/wiki/?page=Compute%20Core</id>
+<updated>2019-01-29T10:21:43+00:00</updated>
+<content type="html">&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Change type:&lt;/strong&gt; edit&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;User:&lt;/strong&gt;  Sean&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Page name:&lt;/strong&gt; Compute Core&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Timestamp:&lt;/strong&gt; Tue, 29 Jan 2019 10:21:43 +0000&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;New page size:&lt;/strong&gt; 1.36kb&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Page size difference:&lt;/strong&gt; +1&lt;/li&gt;
+&lt;/ul&gt;</content>
+<link rel="alternate" type="text/html" href="https://seanssatellites.co.uk/wiki/?page=Compute%20Core"/>
+<author>
+<name>Sean</name>
+<uri>https://seanssatellites.co.uk/wiki/?page=Users%2FSean</uri>
+</author>
+</entry>
+
+There are a bunch of elements here that deserve attention:
+
+• <title /> - The title of the article. Easy peasy!
+• <id /> - Just like the id of the feed itself, each article entry needs an id too. Here I've followed the same system I used for the feed, and given the url of the page content.
+• <updated /> - The last time the article was updated. Since this is part of a feed of recent changes, I've got this information readily at hand.
+• <content /> - The content to display. If the content is HTML, it must be escaped and type="html" present to indicate this.
+• <link rel="alternate" /> Same deal as above, but on an article-by-article level. In this case, it should link to the page the article content is from. In this case, I link to the page & revision of the change in question. In other cases, you might link to the blog post in question for example.
+• <author /> - Can contain <name />, <uri />, and <email />, and should indicate the author of the content. In this case, I use the name of the user that made the change, along with a link to their user page.
+
+Here's all that in PHP:
+
+foreach($recent_changes as$recent_change) {
+if(empty($recent_change->type))$recent_change->type = "edit";
+
+$xml->startElement("entry"); // Change types: revert, edit, de

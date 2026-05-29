@@ -1,0 +1,42 @@
+Question: <p>I have the following two models:</p>
+
+<pre><code>class Activity(models.Model):
+    name = models.CharField(max_length=50, help_text='Some help.')
+    entity = models.ForeignKey(CancellationEntity)
+    ...
+
+
+class Cancellation(models.Model):
+    activity = models.ForeignKey(Activity)
+    date = models.DateField(default=datetime.now().date())
+    description = models.CharField(max_length=250)
+    ...
+</code></pre>
+
+<p>I would like the Activity model to be aware when a Cancellation related to it is saved (both inserted or updated).</p>
+
+<p>What is the best way to go about this? Thanks in advance.</p>
+
+Answer: <p>What you want to look into is <a href="http://docs.djangoproject.com/en/dev/ref/signals/">Django's signals</a> (check out <a href="http://docs.djangoproject.com/en/dev/topics/signals/">this page</a> too), specifically the model signals--more specifically, the <strong>post_save</strong> signal. Signals are Django's version of a plugin/hook system. The post_save signal gets sent every time a model is saved, whether it's updated or created (and it'll let you know if it was created). This is how you'd use signals to get notified when an Activity has a Cancellation</p>
+
+<pre><code>from django.db.models.signals import post_save
+
+class Activity(models.Model):
+    name = models.CharField(max_length=50, help_text='Some help.')
+    entity = models.ForeignKey(CancellationEntity)
+
+    @classmethod
+    def cancellation_occurred (sender, instance, created, raw):
+        # grab the current instance of Activity
+        self = instance.activity_set.all()[0]
+        # do something
+    ...
+
+
+class Cancellation(models.Model):
+    activity = models.ForeignKey(Activity)
+    date = models.DateField(default=datetime.now().date())
+    description = models.CharField(max_length=250)
+    ...
+
+post_save.connect(Activity.cancellation_occurred, sender=Cancellation)</code></pre>

@@ -1,0 +1,125 @@
+Question: <p>I have been playing with the Ruby library "shoes". Basically you can write a GUI application in the following way:</p>
+
+<pre><code>Shoes.app do
+  t = para "Not clicked!"
+  button "The Label" do
+    alert "You clicked the button!" # when clicked, make an alert
+    t.replace "Clicked!" # ..and replace the label's text
+  end
+end
+</code></pre>
+
+<p>This made me think - how would I design a similarly nice-to-use GUI framework in Python? One that doesn't have the usual tyings of basically being wrappers to a C* library (In the case of GTK, Tk, wx, QT etc etc)</p>
+
+<p>Shoes takes things from web devlopment (like <code>#f0c2f0</code> style colour notation, CSS layout techniques, like <code>:margin =&gt; 10</code>), and from ruby (extensively using blocks in sensible ways)</p>
+
+<p>Python's lack of "rubyish blocks" makes a (metaphorically)-direct port impossible:</p>
+
+<pre><code>def Shoeless(Shoes.app):
+    self.t = para("Not clicked!")
+
+    def on_click_func(self):
+        alert("You clicked the button!")
+        self.t.replace("clicked!")
+
+    b = button("The label", click=self.on_click_func)
+</code></pre>
+
+<p>No where near as clean, and wouldn't be <em>nearly</em> as flexible, and I'm not even sure if it would be implementable.</p>
+
+<p>Using decorators seems like an interesting way to map blocks of code to a specific action:</p>
+
+<pre><code>class BaseControl:
+    def __init__(self):
+        self.func = None
+
+    def clicked(self, func):
+        self.func = func
+
+    def __call__(self):
+        if self.func is not None:
+            self.func()
+
+class Button(BaseControl):
+    pass
+
+class Label(BaseControl):
+    pass
+
+# The actual applications code (that the end-user would write)
+class MyApp:
+    ok = Button()
+    la = Label()
+
+    @ok.clicked
+    def clickeryHappened():
+        print "OK Clicked!"
+
+if __name__ == '__main__':
+    a = MyApp()
+    a.ok() # trigger the clicked action
+</code></pre>
+
+<p>Basically the decorator function stores the function, then when the action occurred (say, a click) the appropriate function would be executed.</p>
+
+<p>The scope of various stuff (say, the <code>la</code> label in the above example) could be rather complicated, but it seems doable in a fairly neat manner..</p>
+
+Answer: <pre><code>## All you need is this class:
+
+class MainWindow(Window):
+    my_button = Button('Click Me')
+    my_paragraph = Text('This is the text you wish to place')
+    my_alert = AlertBox('What what what!!!')
+
+    @my_button.clicked
+    def my_button_clicked(self, button, event):
+        self.my_paragraph.text.append('And now you clicked on it, the button that is.')
+
+    @my_paragraph.text.changed
+    def my_paragraph_text_changed(self, text, event):
+        self.button.text = 'No more clicks!'
+
+    @my_button.text.changed
+    def my_button_text_changed(self, text, event):
+        self.my_alert.show()
+
+
+## The Style class is automatically gnerated by the framework
+## but you can override it by defining it in the class:
+##
+##      class MainWindow(Window):
+##          class Style:
+##              my_blah = {'style-info': 'value'}
+##
+## or like you see below:
+
+class Style:
+    my_button = {
+        'background-color': '#ccc',
+        'font-size': '14px'}
+    my_paragraph = {
+        'background-color': '#fff',
+        'color': '#000',
+        'font-size': '14px',
+        'border': '1px solid black',
+        'border-radius': '3px'}
+
+MainWindow.Style = Style
+
+## The layout class is automatically generated
+## by the framework but you can override it by defining it
+## in the class, same as the Style class above, or by
+## defining it like this:
+
+class MainLayout(Layout):
+    def __init__(self, style):
+        # It takes the custom or automatically generated style class upon instantiation
+        style.window.pack(HBox().pack(style.my_paragraph, style.my_button))
+
+MainWindow.Layout = MainLayout
+
+if __name__ == '__main__':
+    run(App(main=MainWindow))
+</code></pre>
+
+<p>It would be relatively easy to do in python with a bit of that metaclass python magic know how. Which I have. And a knowledge of PyGTK. Which I also have. Gets ideas?</p>

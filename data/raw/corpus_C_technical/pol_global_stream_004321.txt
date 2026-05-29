@@ -1,0 +1,50 @@
+[Source: Wikipedia-stream | Part 3]
+# DMARC
+
+iewed in a tabular form. The XML schema is defined in Appendix C of specifications and a raw record is exemplified in dmarc.org. Here we stick with a relational example, which better conveys the nature of the data. DMARC records can also be directly transformed in HTML by applying an XSL stylesheet.
+
+Rows are grouped by source IP and authentication results, passing just the count of each group. The leftmost result columns, labelled SPF and DKIM show DMARC-wise results, either pass or fail, taking alignment into account. The rightmost ones, with similar labels, show the name of the domain which claims to participate in the sending of the message and (in parentheses) the authentication status of that claim according to the original protocol, SPF or DKIM, regardless of Identifier Alignment. On the right side, SPF can appear at most twice, once for the Return-Path: test and once for the HELO test; DKIM can appear once for each signature present in the message. In the example, the first row represents the main mail flow from example.org, and the second row is a DKIM glitch, such as signature breakage due to a minor alteration in transit. The third and fourth rows show typical failures modes of a forwarder and a mailing list, respectively. DMARC authentication failed for the last row only; it could have affected the message disposition if example.org had specified a strict policy.
+
+The disposition reflects the policy published actually applied to the messages, none, quarantine, or reject. Along with it, not shown in the table, DMARC provides for a policy override. Some reasons why a receiver can apply a policy different from the one requested are already provided for by the specification:
+
+ forwarded while keeping the same bounce address, usually doesn't break DKIM,
+ sampled out because a sender can choose to only apply the policy to a percentage of messages only,
+ trusted forwarder the message arrived from a locally known source
+ mailing list the receiver heuristically determined that the message arrived from a mailing list,
+ local policy receivers are obviously free to apply the policy they like, it is just cool to let senders know,
+ other if none of the above applies, a comment field allows to say more.
+
+Forensic reports 
+
+Forensic Reports, also known as Failure Reports, are generated in real time and consist of redacted copies of individual messages that failed SPF, DKIM or both based upon what value is specified in the fo tag. Their format, an extension of Abuse Reporting Format, resembles that of regular bounces in that they contain either a "message/rfc822" or a "text/rfc822-headers".
+
+Forensic Reports also contain the following:
+
+ Source of Sending IP Address
+ From email address
+ Recipient email address
+ Email subject line
+ SPF and DKIM authentication results
+ Received time
+ Email message headers which include the sending host, email message ID, DKIM signature, and any other custom header information.
+
+Compatibility
+
+Forwarders
+There are several different types of email forwarding, some of which may break SPF. One of the reasons why email forwarding can affect DMARC authentication results.
+
+Mailing lists
+
+Mailing lists are a frequent cause of legitimate breakage of the original author's domain DKIM signature, for example by adding a prefix to the subject header. A number of workarounds are possible, and mailing list software packages are working on solutions.
+
+Turn off all message modifications
+
+This workaround keeps the standard mailing list workflow, and is adopted by several large mailing list operators, but precludes the list adding footers and subject prefixes. This requires careful configuration of mailing software to make sure signed headers are not reordered or modified. A misconfigured email server may put List-id in its DKIM of messages sent to a mailing list, and then the list operator is forced to reject it or do From: rewriting.
+
+From: rewriting
+One of the most popular and least intrusive workarounds consists of rewriting the From: header field. The original author's address can then be added to the Reply-To: field. Rewriting can range from just appending .INVALID to the domain name, to allocating a temporary user ID where an opaque ID is used, which keeps the user's "real" email address private from the list. In addition, the display name can be changed so as to show both the author and the list (or list operator). Those examples would result, respectively, in one of the following:
+From: John Doe <user@example.com.INVALID>
+From: John Doe <243576@mailinglist.example.org>
+From: John Doe via MailingList <list@mailinglist.example.org>
+Reply-To: John Doe <user@example.com>
+The last line, Reply-To:, has to be designed in order to accommodate reply-to-author functionality, in which case reply-to-list functionality is covered by the preceding change in the From: header field. That way, the original meaning of those fields is reversed.

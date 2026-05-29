@@ -1,0 +1,52 @@
+Question: <p>I use some wx.ListCtrl classes in wx.LC_REPORT mode, augmented with ListCtrlAutoWidthMixin.</p>
+
+<p>The problem is: When user double clicks the column divider (to auto resize column), column width is set to match the width of contents. This is done by the wx library and resizes column to just few pixels when the control is empty.</p>
+
+<p>I tried calling </p>
+
+<blockquote>
+  <p>self.SetColumnWidth(colNumber, wx.LIST_AUTOSIZE_USEHEADER)</p>
+</blockquote>
+
+<p>while creating the list, but it just sets the initial column width, not the minimum allowed width. </p>
+
+<p>Anyone succeeded with setting column minimal width?</p>
+
+<p>EDIT: Tried catching </p>
+
+<pre> wx.EVT_LEFT_DCLICK </pre>
+
+<p>with no success. This event isn't generated when user double clicks column divider. Also tried with </p>
+
+<pre>wx.EVT_LIST_COL_END_DRAG </pre> 
+
+<p>this event is generated, usually twice, for double click, but I don't see how can I retrieve information about new size, or how to differentiate double click from drag&amp;drop. Anyone has some other ideas?</p>
+
+Answer: <p>Ok, after some struggle I got working workaround for that. It is ugly from design point of view, but works well enough for me.</p>
+
+<p>That's how it works:</p>
+
+<ol>
+<li><p>Store the initial width of column.</p>
+
+<pre><code>self.SetColumnWidth(colNum, wx.LIST_AUTOSIZE_USEHEADER)
+
+self.__columnWidth[colNum] = self.GetColumnWidth(c)
+</code></pre></li>
+<li><p>Register handler for update UI event.</p>
+
+<pre><code>wx.EVT_UPDATE_UI(self, self.GetId(), self.onUpdateUI)
+</code></pre></li>
+<li><p>And write the handler function.</p>
+
+<pre><code>def onUpdateUI(self, evt):
+    for colNum in xrange(0, self.GetColumnCount()-1):
+        if self.GetColumnWidth(colNum) &lt; self.__columnWidth[colNum]:
+            self.SetColumnWidth(colNum, self.__columnWidth[colNum])
+    evt.Skip()
+</code></pre></li>
+</ol>
+
+<p>The <em>self.GetColumnCount() - 1</em> is intentional, so the last column is not resized. I know this is not an elegant solution, but it works well enough for me - you can not make columns too small by double clicking on dividers (in fact - you can't do it at all) and double-clicking on the divider after last column resizes the last column to fit list control width. </p>
+
+<p>Still, if anyone knows better solution please post it.</p>

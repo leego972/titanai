@@ -1,0 +1,41 @@
+Question: <p>I've got a couple django models that look like this:</p>
+
+<pre><code>from django.contrib.sites.models import Site
+
+class Photo(models.Model):
+    title = models.CharField(max_length=100)
+    site = models.ForeignKey(Site)
+    file = models.ImageField(upload_to=get_site_profile_path) 
+
+    def __unicode__(self):
+        return self.title
+
+
+class Gallery(models.Model):    
+    name = models.CharField(max_length=40)
+    site = models.ForeignKey(Site)
+    photos = models.ManyToManyField(Photo, limit_choices_to = {'site':name} )    
+
+    def __unicode__(self):
+        return self.name
+</code></pre>
+
+<p>I'm having all kinds of <em>fun</em> trying to get the <code>limit_choices_to</code> working on the Gallery model.  I only want the Admin to show choices for photos that belong to the same site as this gallery.  Is this possible?</p>
+
+Answer: <p>Yes.  You need to override the form that admin uses for the <code>Gallery</code> model, then limit the queryset of the <code>photos</code> field in that form:</p>
+
+<pre><code>class GalleryAdminForm(django.forms.ModelForm):
+
+    class Meta:
+        model = Gallery
+
+    def __init__(self, *args, **kwargs):
+        super(GalleryAdminForm, self).__init__(*args, **kwargs)
+        self.fields['segments'].queryset = Photo.objects.filter(site=self.instance.site)
+
+
+class GalleryAdmin(django.contrib.admin.ModelAdmin):
+    form = GalleryAdminForm
+
+django.contrib.admin.site.register(Gallery, GalleryAdmin)
+</code></pre>

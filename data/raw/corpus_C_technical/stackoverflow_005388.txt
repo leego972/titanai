@@ -1,0 +1,53 @@
+Question: <p>I have embedded a Python interpreter in a C program.  Suppose the C program reads some bytes from a file into a char array and learns (somehow) that the bytes represent text with a certain encoding (e.g., ISO 8859-1, Windows-1252, or UTF-8).  How do I decode the contents of this char array into a Python string?</p>
+
+<p>The Python string should in general be of type <code>unicode</code>âfor instance, a <code>0x93</code> in Windows-1252 encoded input becomes a <code>u'\u0201c'</code>.</p>
+
+<p>I have attempted to use <code>PyString_Decode</code>, but it always fails when there are non-ASCII characters in the string.  Here is an example that fails:</p>
+
+<pre><code>#include &lt;Python.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(int argc, char *argv[])
+{
+     char c_string[] = { (char)0x93, 0 };
+     PyObject *py_string;
+
+     Py_Initialize();
+
+     py_string = PyString_Decode(c_string, 1, "windows_1252", "replace");
+     if (!py_string) {
+          PyErr_Print();
+          return 1;
+     }
+     return 0;
+}
+</code></pre>
+
+<p>The error message is <code>UnicodeEncodeError: 'ascii' codec can't encode character u'\u201c' in position 0: ordinal not in range(128)</code>, which indicates that the <code>ascii</code> encoding is used even though we specify <code>windows_1252</code> in the call to <code>PyString_Decode</code>.</p>
+
+<p>The following code works around the problem by using <code>PyString_FromString</code> to create a Python string of the undecoded bytes, then calling its <code>decode</code> method:</p>
+
+<pre><code>#include &lt;Python.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(int argc, char *argv[])
+{
+     char c_string[] = { (char)0x93, 0 };
+     PyObject *raw, *decoded;
+
+     Py_Initialize();
+
+     raw = PyString_FromString(c_string);
+     printf("Undecoded: ");
+     PyObject_Print(raw, stdout, 0);
+     printf("\n");
+     decoded = PyObject_CallMethod(raw, "decode", "s", "windows_1252");
+     Py_DECREF(raw);
+     printf("Decoded: ");
+     PyObject_Print(decoded, stdout, 0);
+     printf("\n");
+     return 0;
+}
+</code></pre>
+
+Answer: <p>Try calling <a href="https://docs.python.org/c-api/exceptions.html" rel="nofollow"><code>PyErr_Print()</code></a> in the "<code>if (!py_string)</code>" clause.  Perhaps the python exception will give you some more information.</p>

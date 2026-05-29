@@ -1,0 +1,95 @@
+Question: <p>What is the use of the <code>yield</code> keyword in Python? What does it do?</p>
+
+<p>For example, I'm trying to understand this code<sup><strong>1</strong></sup>:</p>
+
+<pre><code>def _get_child_candidates(self, distance, min_dist, max_dist):
+    if self._leftchild and distance - max_dist &lt; self._median:
+        yield self._leftchild
+    if self._rightchild and distance + max_dist &gt;= self._median:
+        yield self._rightchild  
+</code></pre>
+
+<p>And this is the caller:</p>
+
+<pre><code>result, candidates = list(), [self]
+while candidates:
+    node = candidates.pop()
+    distance = node._get_dist(obj)
+    if distance &lt;= max_dist and distance &gt;= min_dist:
+        result.extend(node._values)
+    candidates.extend(node._get_child_candidates(distance, min_dist, max_dist))
+return result
+</code></pre>
+
+<p>What happens when the method <code>_get_child_candidates</code> is called?
+A list is returned? A single element is returned? Is it called again? When will subsequent calls stop?</p>
+
+<hr>
+
+<p><sub>
+1. The code comes from Jochen Schulz (jrschulz), who made a great Python library for metric spaces. This is the link to the complete source: <a href="http://well-adjusted.de/~jrschulz/mspace/">Module mspace</a>.</sub></p>
+
+Answer: <h3>Official Reference on <code>yield</code> : <strong><a href="https://www.python.org/dev/peps/pep-0255/">PEP 255 -- Simple Generators</a></strong>:</h3>
+
+<p>Most questions regarding the <code>yield</code> statement and the semantics/functionality that it introduces are present in <em>PEP 255</em>. The collective knowledge from all previous answers is amazing but I'll add an answer that references the official presentation.</p>
+
+<p>So first of, the form of the <code>yield</code> statement:</p>
+
+<pre><code>yield_stmt:    "yield" expression_list
+</code></pre>
+
+<p>consist of the <em>keyword</em> <strong>yield</strong> along with an optional <code>expression_list</code>. </p>
+
+<p>Syntactically yield can only appear inside a function definition and its presence alone is responsible for tranforming a function into a generator object:</p>
+
+<blockquote>
+  <p>The yield statement may only be used inside functions.  A function
+  that contains a <code>yield</code> statement is called a <a href="http://stackoverflow.com/questions/1756096/understanding-generators-in-python">generator</a> function.  A generator function is an ordinary function object in all respects, but has the new <code>CO_GENERATOR</code> flag set in the code object's <code>co_flags</code> member.</p>
+</blockquote>
+
+<p>So after you define your generator you're left with a generator function that is waiting to be called: </p>
+
+<blockquote>
+  <p>When a generator function is called, the actual arguments are bound to
+  function-local formal argument names in the usual way, <em>but no code in</em>
+  <em>the body of the function is executed.</em>  </p>
+</blockquote>
+
+<p>So parameters are bound in the same way as they do for all callable but the body of the generator object is not executed, what happens is:</p>
+
+<blockquote>
+  <p>Instead a generator-iterator object is returned; this conforms to the iterator protocol[6], so in particular can be used in for-loops in a natural way.</p>
+</blockquote>
+
+<p>We get back an object that comforms to the <strong><a href="https://docs.python.org/2/library/stdtypes.html#iterator-types"><em>iterator protocol</em></a></strong> this means that the <code>generator</code> object implements <code>__iter__</code> and <code>__next__</code> and as such can be used in <code>for</code> loops like any object that supports iteration. </p>
+
+<p>The key difference that <code>yield</code> makes is here, specifically:</p>
+
+<blockquote>
+  <p>Each time the <code>.next()</code> method of a generator-iterator is invoked, the
+  code in the body of the generator-function is executed until a <code>yield</code>
+  or <code>return</code> statement (see below) is encountered, or until the end of
+  the body is reached.</p>
+</blockquote>
+
+<p>So everything <em>until</em> the <code>yield</code> is executed and then execution stops, at that point what happens is: </p>
+
+<blockquote>
+  <p>If a <code>yield</code> statement is encountered, the state of the function is
+  frozen, and the value of expression_list is returned to <code>.next()</code>'s
+  caller.</p>
+</blockquote>
+
+<p>So in the case of a <code>for</code> loop: <code>for i in gen_func(params): pass</code> the value of <code>i</code> is going to be equal to <code>expression_list</code> as previously stated.</p>
+
+<p>But "frozen" you may ask, what does that mean? This is further explained as: </p>
+
+<blockquote>
+  <p>By "frozen" we mean that all local state is retained, including the
+  current bindings of local variables, the instruction pointer, and the
+  internal evaluation stack:  enough information is saved so that the
+  next time .next() is invoked, the function can proceed exactly as if
+  the yield statement were just another external call.</p>
+</blockquote>
+
+<p>So state is retained when <code>yield</code> is encountered thereby allowing consequent calls to <code>next</code> to continue smoothly. When a <code>next</code> call is made the generator is going to execute everything until it finds another <code>yield</code> statement. That cicle is repeated until no <code>yield</code> (i.e control flows off the end of the generator) or a <code>return</code> is found in which case a <code>StopIteration</code> exception is raised signalling that the generator has been exhausted.</p>

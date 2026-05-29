@@ -1,0 +1,127 @@
+# How to perform a test using R to see if data follows normal distribution
+
+I have a data set with following structure:
+
+a word | number of occurrence of a word in a document | a document id
+
+
+How can I perform a test for normal distribution in R? Probably it is an easy question but I am a R newbie.
+
+• @Skarab Maybe I'm totally off, but wouldn't you expect that the frequency of any word will be inversely proportional to its rank in the frequency table of words, according to Zipf's law (j.mp/9er2lv)? In this case, check out the zipfR package. – chl Sep 28 '10 at 9:29
+• I agree with @chl - it would be minor miracle if your data was normally distributed. Perhaps another question about what you want to do with the data would be worthwhile. Don't reinvent the wheel! – csgillespie Sep 28 '10 at 9:32
+• How could your data be distributed according to a model that gives non zero probability to negative occurrence? – user603 Sep 28 '10 at 15:05
+• What is the reason for doing this test? – whuber Sep 28 '10 at 15:12
+• I want to estimate if the huge result of the Information Extraction is correct. I want to check if the distribution of the entities found in the text follows my expectations (I know the domain and the text corpus). – Skarab Sep 29 '10 at 9:06
+
+If I understand your question correctly, then to test if word occurrences in a set of documents follows a Normal distribution you can just use a shapiro-Wilk test and some qqplots. For example,
+
+## Generate two data sets
+## First Normal, second from a t-distribution
+words1 = rnorm(100); words2 = rt(100, df=3)
+
+## Have a look at the densities
+plot(density(words1));plot(density(words2))
+
+## Perform the test
+shapiro.test(words1); shapiro.test(words2)
+
+## Plot using a qqplot
+qqnorm(words1);qqline(words1, col = 2)
+qqnorm(words2);qqline(words2, col = 2)
+
+
+The qqplot commands give:
+
+You can see that the second data set is clearly not Normal by the heavy tails (More Info).
+
+In the Shapiro-Walk normality test, the p-value is large for the first data set (>.9) but very small for the second data set (<.01). This will lead you to reject the null hypothesis for the second.
+
+• Why is it clearly not Normal? – Herman Toothrot Jan 16 '17 at 11:08
+• I think the plotted points should lie on the I-III quadrant bisector as closer as they draw a normal distribution. – Campa Mar 1 '18 at 16:19
+• More generally (mean != 0), the qqline shall have 1 slope and mu intercept. – Campa Mar 1 '18 at 16:25
+• @HermanToothrot it is not Normal when looking at the second plot as there is a very large divergence in the tail values. The QQ plot is a graph of the theoretical quantile (if it was normal) verses the sample quantlie (from the data). If the sample data is normal we expect the observations to be close to line, as they are for the first plot. Also note the very difference scale on the y axis for those plots. – Sheldon Sep 12 '18 at 18:46
+
+Assuming your dataset is called words and has a counts column, you can plot the histogram to have a visualization of the distribution:
+
+hist(words$counts, 100, col="black")  where 100 is the number of bins You can also do a normal Q-Q plot using qqnorm(words$counts)
+
+
+Finally, you can also use the Shapiro-Wilk test for normality
+
+shapiro.test(word\$counts)
+
+
+Although, look at this discussion: Normality Testing: 'Essentially Useless?'
+
+No test will show you that your data has a normal distribution - it will only be able to show you when the data is sufficiently inconsistent with a normal that you would reject the null.
+
+But counts are not normal in any case, they're positive integers - what's the probability that an observation from a normal distribution will take a value that isn't an integer? (... that's an event of probability 1).
+
+Why would you test for normality in this case? It's obviously untrue.
+
+[In some cases it may not necessarily matter that you can tell your data aren't actually normal. Real data are never (or almost never) going to be actually drawn from a normal distribution.]
+
+If you really need to do a test, the Shapiro-Wilk test (?shapiro.test) is a good general test of normality, one that's widely used.
+
+A more formal way of looking at the normality is by testing whether the kurtosis and skewness are significantly different from zero.
+
+To do this, we need to get:
+
+kurtosis.test <- function (x) {
+m4 <- sum((x-mean(x))^4)/length(x)
+s4 <- var(x)^2
+kurt <- (m4/s4) - 3
+sek <- sqrt(24/length(x))
+totest <- kurt/sek
+pvalue <- pt(totest,(length(x)-1))
+pvalue
+}
+
+
+for kurtosis, and:
+
+skew.test <- function (x) {
+m3 <- sum((x-mean(x))^3)/length(x)
+s3 <- sqrt(var(x))^3
+skew <- m3/s3
+ses <- sqrt(6/length(x))
+totest <- skew/ses
+pt(totest,(length(x)-1))
+pval <- pt(totest,(length(x)-1))
+pval
+}
+
+
+for Skewness.
+
+Both these tests are one-tailed, so you'll need to multiply the p-value by 2 to become two-tailed. If your p-value become larger than one you'll need to use 1-kurtosis.test() instead of kurtosis.test.
+
+If you have any other questions you can email me at j.bredman@gmail.com
+
+• What are the differences, of the above two functions, regarding the kurtosis() and skewness() functions from the moments package? Results using rnorm() samples are different. – Nikos Alexandris Sep 16 '14 at 11:18
+
+In addition to the Shapiro-Wilk test of the stats package, the nortest package (available on CRAN) provides other normality tests.
+
+By using the nortest package of R, these tests can be conducted:
+
+• Perform Anderson-Darling normality test
+
+ad.test(data1)
+
+• Perform Cramér-von Mises test for normality
+
+cvm.test(data1)
+
+• Perform Pearson chi-square test for normality
+
+pearson.test(data1)
+
+• Perform Shapiro-Francia test for normality
+
+sf.test(data1)
+
+
+Many other tests can be done by using the normtest package. See description at https://cran.r-project.org/web/packages/normtest/normtest.pdf
+
+• @Nick; I've mentioned these test from 'nortest' package found here: (cran.r-project.org/web/packages/nortest/nortest.pdf). Other useful package is 'normtest' as mentioned above. – Dr Nisha Arora Jun 10 '16 at 10:13
+• OK, thanks. In my ignorance I assumed that one name was a typo. – Nick Cox Jun 10 '16 at 11:23

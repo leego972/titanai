@@ -1,0 +1,91 @@
+# Any way to make this recursive function better/faster?
+
+Is there anything that can be done differently for this function? Any way to make it faster?
+
+public List<Channel> ChildrenOf(Channel startingChannel)
+{
+List<Channel> result = new List<Channel>();
+
+foreach (Channel child in startingChannel.Children)
+{
+}
+
+return result;
+}
+
+• Looks to me like that's it. But maybe someone else has some other ideas.
+– Ivan Crojach Karačić
+Oct 28 '11 at 7:31
+• Your approach has a problem with deeply nested lists. Let's say you have N items at a nesting depth D. Then each item will be copied D times -> O(N*D) time. The "yield return" answer has a similar issue: for each item, it has to execute D 'yield return' statements. Guffa's answer doesn't have this problem and will run in O(N) time. Oct 28 '11 at 12:34
+• Is there a way to do this with tail recursion? HRMMM. Oct 28 '11 at 16:18
+
+I'd separate iteration and adding items to a list:
+
+public IEnumerable<Channel> ChildrenOf(Channel root)
+{
+yield return root;
+foreach(var c in root.Children)
+foreach(var cc in ChildrenOf(c))
+yield return cc;
+}
+
+• does this make it better/faster? How does the IL compare? Oct 28 '11 at 7:47
+• Almost there, dont forget to yield back first level childs though Oct 28 '11 at 7:51
+• @luketorjussen: This method is faster since it doesn't require any allocations on the heap and hence, therefore no deallocations. be aware though that since the data is not cached in a list, manipulation is not possible and multiple iterations will execute the function multiple times Oct 28 '11 at 7:53
+• @Polity: Actually, each "foreach" loop will create an enumerator object which is still an allocation on the heap (the inner loop creates an enumerator for each iteration of the outer loop). Oct 28 '11 at 8:47
+• You should be careful to avoid yield return in recursive functions, the memory usage scales explosively. See stackoverflow.com/a/30300257/284795 . Thus Guffa's and Lippert's solutions are preferable. May 18 '15 at 10:09
+
+Just to round out the other answers: I would be inclined to write your solution like this:
+
+static IEnumerable<T> DepthFirstTreeTraversal<T>(T root, Func<T, IEnumerable<T>> children)
+{
+var stack = new Stack<T>();
+stack.Push(root);
+while(stack.Count != 0)
+{
+var current = stack.Pop();
+// If you don't care about maintaining child order then remove the Reverse.
+foreach(var child in children(current).Reverse())
+stack.Push(child);
+yield return current;
+}
+}
+
+
+And now to achieve your aim, you just say:
+
+    static List<Channel> AllChildren(Channel start)
+{
+return DepthFirstTreeTraversal(start, c=>c.Children).ToList();
+}
+
+
+Now you have a more general-purpose tool that you can use to get a depth-first traversal of any tree structure, not just your particular structure.
+
+Another nice feature of my solution is that it uses a fixed amount of call stack space. Even if your hierarchy is twenty thousand deep, you never run out of stack space because the method is not recursive to begin with. All the information that would be needed for recursion is stored on the "stack" data structure instead of in activation records on the real call stack.
+
+• Damn. And here I was, coming to answer this with just such a generic stack... :) Nov 3 '11 at 4:15
+• +1 for populating a List using this traversal extension. I make a C# Extension for the traversal method and use it on a bunch of stuff. I find it much easier to understand than using a recursive method. May 22 '14 at 13:47
+• Micro-optimisation: I would put the yield before the foreach, to save some cycles and memory in case the iteration of the enumerator is stopped midway. May 27 '17 at 3:09
+
+Put the recursive part in a private method, so that you can add the items directly to the list instead of creating intermediate lists:
+
+public List<Channel> ChildrenOf(Channel startingChannel) {
+List<Channel> result = new List<Channel>();
+return result;
+}
+
+private void AddChildren(Channel channel, List<Channel> list) {
+foreach (Channel child in channel.Children) {
+}
+}
+
+
+(This is basically the same principle as Polity suggested, only it's implemented in two methods so that you don't have to create an empty list to call it.)
+
+Share your result list would be one way of preventing allocations and esspecially collections to happen
+
+ public List<Channel> ChildrenOf(Channel startingChannel, List<Channel> result)
+{
+foreach (Channel child in startingChannel.Children)
+{

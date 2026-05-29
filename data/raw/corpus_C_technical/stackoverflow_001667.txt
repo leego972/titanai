@@ -1,0 +1,42 @@
+Question: <p>The problem: I have a class which contains a template method <code>execute</code> which calls another method <code>_execute</code>. Subclasses are supposed to overwrite <code>_execute</code> to implement some specific functionality. This functionality should be documented in the docstring of <code>_execute</code>. 
+Advanced users can create their own subclasses to extend the library. However, another user dealing with such a subclass should only use <code>execute</code>, so he won't see the correct docstring if he uses <code>help(execute)</code>.</p>
+
+<p>Therefore it would be nice to modify the base class in such a way that in a subclass the docstring of <code>execute</code> is automatically replaced with that of <code>_execute</code>. Any ideas how this might be done?</p>
+
+<p>I was thinking of metaclasses to do this, to make this completely transparent to the user.</p>
+
+Answer: <p>I agree that the simplest, most Pythonic way of approaching this is to simply redefine execute in your subclasses and have it call the execute method of the base class:</p>
+
+<pre><code>class Sub(Base):
+    def execute(self):
+        """New docstring goes here"""
+        return Base.execute(self)
+</code></pre>
+
+<p>This is very little code to accomplish what you want; the only downside is that you must repeat this code in every subclass that extends Base.  However, this is a small price to pay for the behavior you want.</p>
+
+<p>If you want a sloppy and verbose way of making sure that the docstring for execute is dynamically generated, you can use the descriptor protocol, which would be significantly less code than the other proposals here.  This is annoying because you can't just set a descriptor on an existing function, which means that execute must be written as a separate class with a <code>__call__</code> method.</p>
+
+<p>Here's the code to do this, but keep in mind that my above example is much simpler and more Pythonic:</p>
+
+<pre><code>class Executor(object):
+    __doc__ = property(lambda self: self.inst._execute.__doc__)
+
+    def __call__(self):
+        return self.inst._execute()
+
+class Base(object):
+    execute = Executor()
+
+class Sub(Base):
+    def __init__(self):
+        self.execute.inst = self
+
+    def _execute(self):
+        """Actually does something!"""
+        return "Hello World!"
+
+spam = Sub()
+print spam.execute.__doc__  # prints "Actually does something!"
+help(spam)                  # the execute method says "Actually does something!"
+</code></pre>

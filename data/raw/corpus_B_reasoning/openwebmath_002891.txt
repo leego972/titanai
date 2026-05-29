@@ -1,0 +1,358 @@
+# tikz shapes, not quite getting things right (anchors and keys)
+
+So, I'm having a go at defining a tikz/pgf shape. Basically these nodes will not contain any text, and it is just a method of not copying a lot of code to draw a few of these boxes.
+
+I have a few questions
+
+1. In a shape is there an official method of accessing the already defined anchors? I made a macro for it (\pgfutil@useanchor), but thought there might be a better method.
+
+2. The shape it self, is there a better method for drawing these two extra areas? (I'm probably not getting the margins right, just trying to support a thick outer line width)
+
+3. The keys, especially dbox strib width, why doesn't a change away from the initial value, change the extra anchors on the node? See the lower drawing It does change the \beforebackgroundpath, clearly doing something wrong here.
+
+Any ideas?
+
+\documentclass[a4paper]{memoir}
+\pagestyle{empty}
+\usepackage{tikz}
+\usetikzlibrary{shapes}
+
+\makeatletter
+% access to anchor coordinates, got to be a better way
+\def\pgfutil@useanchor#1#2{\csname pgf@anchor@#1@#2\endcsname}
+
+\pgfkeys{/pgf/.cd,
+dbox strib width/.initial=5mm,
+% dbox strib width/.code={%
+%   \def\pgf@lib@temp{#1}%
+%   \pgfkeyslet{/pgf/dbox strib width}{\pgf@lib@temp}%
+% },
+dbox strib color/.initial=blue,
+}
+
+\pgfdeclareshape{dbox}
+{
+% this is just a rectangle with extra colored areas
+\inheritsavedanchors[from=rectangle]
+\inheritanchorborder[from=rectangle]
+\inheritanchor[from=rectangle]{north}
+\inheritanchor[from=rectangle]{north west}
+\inheritanchor[from=rectangle]{north east}
+\inheritanchor[from=rectangle]{center}
+\inheritanchor[from=rectangle]{west}
+\inheritanchor[from=rectangle]{east}
+\inheritanchor[from=rectangle]{mid}
+\inheritanchor[from=rectangle]{mid west}
+\inheritanchor[from=rectangle]{mid east}
+\inheritanchor[from=rectangle]{base}
+\inheritanchor[from=rectangle]{base west}
+\inheritanchor[from=rectangle]{base east}
+\inheritanchor[from=rectangle]{south}
+\inheritanchor[from=rectangle]{south west}
+\inheritanchor[from=rectangle]{south east}
+\anchor{center left}{
+\pgf@process{\pgfutil@useanchor{dbox}{west}}
+\advance\pgf@x by \pgfkeysvalueof{/pgf/dbox strib width}
+\advance\pgf@x by \pgflinewidth
+}
+\anchor{center left above}{
+\pgf@process{\pgfutil@useanchor{dbox}{north west}}
+\advance\pgf@x by \pgfkeysvalueof{/pgf/dbox strib width}
+\advance\pgf@x by \pgflinewidth
+}
+\anchor{center left below}{
+\pgf@process{\pgfutil@useanchor{dbox}{south west}}
+\advance\pgf@x by \pgfkeysvalueof{/pgf/dbox strib width}
+\advance\pgf@x by \pgflinewidth
+}
+\anchor{center right}{
+\pgf@process{\pgfutil@useanchor{dbox}{east}}
+\advance\pgf@x by -\pgfkeysvalueof{/pgf/dbox strib width}
+\advance\pgf@x by -\pgflinewidth
+}
+\anchor{center right above}{
+\pgf@process{\pgfutil@useanchor{dbox}{north east}}
+\advance\pgf@x by -\pgfkeysvalueof{/pgf/dbox strib width}
+\advance\pgf@x by -\pgflinewidth
+}
+\anchor{center right below}{
+\pgf@process{\pgfutil@useanchor{dbox}{south east}}
+\advance\pgf@x by -\pgfkeysvalueof{/pgf/dbox strib width}
+\advance\pgf@x by -\pgflinewidth
+}
+\beforebackgroundpath{
+\pgfsetfillcolor{\pgfkeysvalueof{/pgf/dbox strib color}}
+\pgfpathrectanglecorners{
+\pgfpointadd{\southwest}{
+\pgfpoint{\pgflinewidth}{\pgflinewidth}
+}
+}{
+\pgfpointadd{\pgf@process{\pgfutil@useanchor{dbox}{north  west}}}%
+{\pgfpoint{\pgflinewidth+\pgfkeysvalueof{/pgf/dbox strib width}}{-\pgflinewidth}}
+}
+\pgfusepath{fill}
+\pgfpathrectanglecorners{
+\pgfpointadd{\northeast}{
+\pgfpoint{-\pgflinewidth}{-\pgflinewidth}
+}
+}{
+\pgfpointadd{\pgf@process{\pgfutil@useanchor{dbox}{south  east}}}%
+{\pgfpoint{-\pgflinewidth-\pgfkeysvalueof{/pgf/dbox strib width}}{\pgflinewidth}}
+}
+\pgfusepath{fill}
+}
+%
+% Background path
+%
+\inheritbackgroundpath[from=rectangle]
+}
+
+\makeatother
+
+\begin{document}
+
+\begin{tikzpicture}
+
+\begin{scope}[
+ms/.style = {minimum height=17mm,minimum
+width=6cm,draw,fill=cyan,shape=dbox,
+dbox strib color=red!50!white,
+},
+]
+\node[ms,
+%dbox strib width=1cm,
+] (BBb) at (0,2) {};
+\node[ms,
+dbox strib width=1cm,
+] (BBa) at (0,0) {};
+\end{scope}
+
+\fill[green] (BBa.center left) circle (1mm);
+\fill[green] (BBa.center left above) circle (1mm);
+\fill[green] (BBa.center left below) circle (1mm);
+\fill[green] (BBa.center right) circle (1mm);
+\fill[green] (BBa.center right above) circle (1mm);
+\fill[green] (BBa.center right below) circle (1mm);
+
+\end{tikzpicture}
+\end{document}
+
+
+Here is what it looks like right now
+
+• I'm on the phone but in a nutshell the accesible anchors are \savedanchors. See the manual for the nuance. \anchors are only computed during runtime. – percusse Sep 15 '15 at 14:10
+• @percusse so I have to compute them using \savedanchor and then set the anchor to point to that macro? How annoying. – daleif Sep 15 '15 at 14:23
+• @percusse, hmm, that does not translate very well. At least I cannot replace \anchor{xxx}{ by a simple \savedanchor\xxx{, if I do I get an error in \northeast (which is interited from rectangle). Weird. Presumably because of the use of \pgf@process – daleif Sep 15 '15 at 15:02
+• @percusse, ahh, so because the normal rectangle shape does not set any saved anchors other than what corresponds to south west and north east, one really cannot rely on them in calculations. I'll have to define saved anchors for the anchors I'd like to use in my calculations. (sad smiley) – daleif Sep 15 '15 at 15:11
+• Yet another stangeness, can't we use a saved anchor to define another one? – daleif Sep 15 '15 at 15:36
+
+## 2 Answers
+
+Here's a fully worked through example of (what I understand to be) the required shape from first principles (i.e., without inheritance). I exploit the (undocumented) \addtosavedmacro command which can be used inside a "saved macro" (see \savedmacro in the manual) to define multiple macros at once in side the \getdboxparameters macro.
+
+All the "usual" anchors are defined but the image excludes the anchors based on the node having some text content.
+
+In order to add a fill color it is necessary to add an dbox inner color key.
+
+\documentclass[tikz,border=5]{standalone}
+\usetikzlibrary{plotmarks}
+\makeatletter
+\pgfkeys{/pgf/.cd,
+dbox strib width/.initial=5mm,
+dbox strib color/.initial=red!50,
+dbox inner color/.initial=blue!20
+}
+\pgfdeclareshape{dbox}{%
+\savedmacro\getdboxparameters{%
+\pgfmathsetlength\pgf@xa{\wd\pgfnodeparttextbox}%
+\pgfmathsetlength\pgf@ya{\ht\pgfnodeparttextbox+\dp\pgfnodeparttextbox}%
+\pgfextract@process\centerpoint{%
+\pgfqpoint{.5\pgf@xa}{.5\pgf@ya}%
+}%
+\addtosavedmacro\centerpoint%
+%
+\pgfmathsetlengthmacro\dstrib{\pgfkeysvalueof{/pgf/dbox strib width}}%
+\pgfmathsetlengthmacro\innerxsep{\pgfkeysvalueof{/pgf/inner xsep}}%
+\pgfmathsetlengthmacro\innerysep{\pgfkeysvalueof{/pgf/inner ysep}}%
+\pgfmathsetlengthmacro\outerxsep{\pgfkeysvalueof{/pgf/outer xsep}}%
+\pgfmathsetlengthmacro\outerysep{\pgfkeysvalueof{/pgf/outer ysep}}%
+\pgfmathsetlengthmacro\minimumwidth{\pgfkeysvalueof{/pgf/minimum width}}%
+\pgfmathsetlengthmacro\minimumheight{\pgfkeysvalueof{/pgf/minimum height}}%
+%
+\pgfmathsetlengthmacro\halfwidth{max(\minimumwidth,%
+\pgf@xa+2*(\innerxsep+\dstrib))/2}%
+\pgfmathsetlengthmacro\halfheight{max(\minimumheight,%
+\pgf@ya+2*(\innerysep))/2}%
+\pgfextract@process\southwest{%
+\pgfpointadd{\centerpoint}{%
+\pgfpointadd{\pgfqpoint{-\halfwidth}{-\halfheight}}%
+{\pgfqpoint{-\outerxsep}{-\outerysep}}}%
+}%
+\pgfextract@process\northeast{%
+\pgfpointadd{\centerpoint}{%
+\pgfpointadd{\pgfqpoint{\halfwidth}{\halfheight}}%
+{\pgfqpoint{\outerxsep}{\outerysep}}}%
+}%
+\edef\linewidth{\the\pgflinewidth}%
+\addtosavedmacro{\linewidth}%
+\addtosavedmacro\dstrib%
+\addtosavedmacro\outerxsep%
+\addtosavedmacro\outerysep%
+\addtosavedmacro\southwest%
+\addtosavedmacro\northeast%
+\addtosavedmacro\halfwidth%
+}
+\backgroundpath{%
+\getdboxparameters%
+\pgfpathrectanglecorners%
+{\pgfpointadd{\southwest}{\pgfqpoint{\outerxsep}{\outerysep}}}%
+{\pgfpointadd{\northeast}{\pgfqpoint{-\outerxsep}{-\outerysep}}}%
+}
+\behindbackgroundpath{%
+\getdboxparameters%
+\pgfpathrectanglecorners%
+{\pgfpointadd%
+{\southwest\pgf@xa=\pgf@x\northeast\pgf@x=\pgf@xa%
+\advance\pgf@x by\dstrib}%
+{\pgfqpoint{\outerxsep}{-\outerysep}}}%
+{\pgfpointadd%
+{\northeast\pgf@xa=\pgf@x\southwest\pgf@x=\pgf@xa%
+\advance\pgf@x by-\dstrib}%
+{\pgfqpoint{-\outerxsep}{\outerysep}}}%
+\pgfsetfillcolor{\pgfkeysvalueof{/pgf/dbox inner color}}%
+\pgfusepath{fill}%
+\pgfpathrectanglecorners%
+{\pgfpointadd{\southwest}{\pgfqpoint{\outerxsep}{\outerysep}}}%
+{\pgfpointadd%
+{\southwest\pgf@xa=\pgf@x\northeast\pgf@x=\pgf@xa%
+\advance\pgf@x by\dstrib}%
+{\pgfqpoint{\outerxsep}{-\outerysep}}%
+}%
+\pgfpathrectanglecorners%
+{\pgfpointadd{\northeast}{\pgfqpoint{-\outerxsep}{-\outerysep}}}%
+{\pgfpointadd%
+{\northeast\pgf@xa=\pgf@x\southwest\pgf@x=\pgf@xa%
+\advance\pgf@x by-\dstrib}%
+{\pgfqpoint{-\outerxsep}{\outerysep}}%
+}%
+\pgfsetfillcolor{\pgfkeysvalueof{/pgf/dbox strib color}}%
+\pgfusepath{fill}%
+}
+\anchorborder{%
+\getdboxparameters%
+\pgf@xb=\pgf@x%
+\pgf@yb=\pgf@y%
+\southwest%
+\pgf@xa=\pgf@x% xa/ya is se
+\pgf@ya=\pgf@y%
+\northeast%
+\advance\pgf@x by-\pgf@xa%
+\advance\pgf@y by-\pgf@ya%
+\pgf@xc=.5\pgf@x% x/y is half width/height
+\pgf@yc=.5\pgf@y%
+\advance\pgf@xa by\pgf@xc% xa/ya becomes center
+\advance\pgf@ya by\pgf@yc%
+\edef\pgf@marshal{%
+\noexpand\pgfpointborderrectangle
+{\noexpand\pgfqpoint{\the\pgf@xb}{\the\pgf@yb}}
+{\noexpand\pgfqpoint{\the\pgf@xc}{\the\pgf@yc}}%
+}%
+\pgf@process{\pgf@marshal}%
+\advance\pgf@x by\pgf@xa%
+\advance\pgf@y by\pgf@ya%
+}
+\anchor{center}{\getdboxparameters\centerpoint}
+\anchor{north}{\getdboxparameters\centerpoint%
+\pgf@xa=\pgf@x\northeast\pgf@x=\pgf@xa}
+\anchor{south}{\getdboxparameters\centerpoint%
+\pgf@xa=\pgf@x\southwest\pgf@x=\pgf@xa}
+\anchor{east}{\getdboxparameters\centerpoint%
+\pgf@ya=\pgf@y\northeast\pgf@y=\pgf@ya}
+\anchor{west}{\getdboxparameters\centerpoint%
+\pgf@ya=\pgf@y\southwest\pgf@y=\pgf@ya}
+\anchor{north west}{\getdboxparameters\southwest%
+\pgf@xa=\pgf@x\northeast\pgf@x=\pgf@xa}
+\anchor{south east}{\getdboxparameters\northeast%
+\pgf@xa=\pgf@x\southwest\pgf@x=\pgf@xa}
+\anchor{north east}{\getdboxparameters\northeast}
+\anchor{south west}{\getdboxparameters\southwest}
+\anchor{base}{\getdboxparameters\centerpoint\pgf@y=0pt\relax}
+\anchor{base west}{\getdboxparameters\southwest\pgf@y=0pt\relax}
+\anchor{base east}{\getdboxparameters\northeast\pgf@y=0pt\relax}
+\anchor{mid}{\getdboxparameters\centerpoint%
+\pgfmathsetlength\pgf@y{0.5ex}}
+\anchor{mid west}{\getdboxparameters\southwest%
+\pgfmathsetlength\pgf@y{0.5ex}}
+\anchor{mid east}{\getdboxparameters\northeast%
+\pgfmathsetlength\pgf@y{0.5ex}}
+\anchor{center left}{\getdboxparameters%
+\pgfpointadd{\southwest\pgf@xa=\pgf@x\centerpoint\pgf@x=\pgf@xa}%
+{\pgfpoint{\dstrib+\outerxsep}{+0pt}}}
+\anchor{center left above}{\getdboxparameters%
+\pgfpointadd{\southwest\pgf@xa=\pgf@x\northeast\pgf@x=\pgf@xa}%
+{\pgfpoint{\dstrib+\outerxsep}{+0pt}}}
+\anchor{center left below}{\getdboxparameters%
+\pgfpointadd{\southwest}%
+{\pgfpoint{\dstrib+\outerxsep}{+0pt}}}
+\anchor{center right}{\getdboxparameters%
+\pgfpointadd{\northeast\pgf@xa=\pgf@x\centerpoint\pgf@x=\pgf@xa}%
+{\pgfpoint{-\dstrib-\outerxsep}{+0pt}}}
+\anchor{center right above}{\getdboxparameters%
+\pgfpointadd{\northeast}%
+{\pgfpoint{-\dstrib-\outerxsep}{+0pt}}}
+\anchor{center right below}{\getdboxparameters%
+\pgfpointadd{\southwest\pgf@ya=\pgf@y\northeast\pgf@y=\pgf@ya}%
+{\pgfpoint{-\dstrib-\outerxsep}{+0pt}}}
+}
+\begin{document}
+\begin{tikzpicture}
+\fill [red] circle [radius=.1pt];
+\node [draw=gray!50, line width=0.125in, dbox, dbox strib width=0.5in,
+inner xsep=0.75in, inner ysep=0.5in] (s) {};
+\foreach \anchor/\placement in
+{north west/left, north/below, north east/right,
+west/left, center/above, east/right,
+south west/left, south/above, south east/right,
+10/right, 190/below,
+center left/above, center left above/above, center left below/below,
+center right/above, center right above/above, center right below/below}
+\draw[shift=(s.\anchor)] plot[mark=x] coordinates{(0,0)}
+node[\placement] {\scriptsize\texttt{(s.\anchor)}};
+\end{tikzpicture}
+\end{document}
+
+
+• I guess center left should lie on the right edge of the left red block. (Although it is called center.) And your center left above and center right below are strange. – Symbol 1 Sep 15 '15 at 16:24
+• @Symbol1 some good point about where anchors logically should lie and the inconsistent anchors. I've updated the answer. I'm still using the OP's anchor names though. – Mark Wibrow Sep 15 '15 at 16:44
+• Nice one, I'll learn a great deal by studying this. As for the center left above/below, I just added them for fun. In my application I'll only need center left/right for the rest of the drawing. – daleif Sep 15 '15 at 16:58
+• What is the use of those 0.5ex? – daleif Sep 15 '15 at 17:01
+• @daleif the mid anchors were conventionally defined as being 0.5ex above the baseline of the text in the node. A bit irrelevant if the node has no text, but I included it for reference. – Mark Wibrow Sep 15 '15 at 17:40
+
+This is not a direct answer to your question, but just an example to say that you can use pic to draw your shape with anchors, as a method of not copying a lot of code to draw a few of these boxes.
+
+\documentclass[tikz,border=5,convert={density=2100}]{standalone}
+\tikzset{
+dbox width/.store in=\dboxwidth,dbox width=10mm,
+dbox height/.store in=\dboxheight,dbox height=5mm,
+dbox color/.store in=\dboxcolor,dbox color=blue!50,
+strip width/.store in=\stripwidth,strip width=2mm,
+strip color/.store in=\stripcolor,strip color=red!50,
+set box size/.style = {inner sep=0,minimum width=#1,minimum height=\dboxheight},
+dbox/.pic = {
+\node[pic actions,fill=\dboxcolor,set box size=\dboxwidth] (-main) at (0,0){};
+\node[pic actions,fill=\stripcolor,below right,set box size=\stripwidth] (-left) at (-main.north west){};
+\node[pic actions,fill=\stripcolor,below left,set box size=\stripwidth] (-right) at (-main.north east){};
+}
+}
+\begin{document}
+\begin{tikzpicture}
+\pic[dbox color=green!70] (A) at (0,1) {dbox};
+\pic[strip color=yellow!70, strip width=1mm] (B) at (0,0) {dbox};
+\foreach \a in {center,north,south}
+\fill[green] (A-left.\a) circle(.4pt);
+\draw[-latex] (A-left.center) -- (B-right.center);
+\end{tikzpicture}
+\end{document}
+
+
+• Interesting, more to the arsenal – daleif Sep 15 '15 at 19:56

@@ -1,0 +1,99 @@
+# missing pixel
+
+This topic is 3424 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+## Recommended Posts
+
+Hi, I have made a little toolkit to create basic 2d GUIs to allow me to control my test applications at runtime. I'm facing a strange (at least for me) problem when rendering UI elements. When I draw borders with GL_LINE_LOOP, the bottom-left pixel is missing. The same way, when I draw backgrounds with GL_TRIANGLE_STRIP, left row and botton line are missing. Here is a screenshot with zooms on the relevant parts (sorry for the poor colors) Does anybody have an idea of what I'm doing wrong ? Thanks for your help [Edited by - Sneftel on October 9, 2008 12:37:50 PM]
+
+##### Share on other sites
+Quote:
+ Original post by jeanbonoursDoes anybody have an idea of what I'm doing wrong?
+To be honest, probably nothing. I see these artefacts a lot with lines - it may be a bug in the rasteriser, and I get the impression that line drawing doesn't get much TLC in recent driver versions.
+
+But from a purely aesthetic viewpoint, it probably doesn't matter, and even adds a little extra something to an otherwise boxy GUI ;)
+
+*it helps to give your post a title, more people are likely to look at it. You can edit your post to add one.
+
+##### Share on other sites
+Would you happen to have an nVidia graphics card? Try jittering your drawing around, like by .1 pixels via glTranslate. Here is a link to another thread where a person was experiencing a similar problem.
+
+##### Share on other sites
+I used to have this problem, it turned out that my scaled 2D float coordinates needed type casting to integers. This worked fine with a GL_LINE_STRIP on multiple boxes.
+
+Ex.
+float scale = (float)screenCurrent.height / 1050.0f;	//designed at my max  screen resfloat x = 100 * scale;					//relative x/y positionfloat y = 0 * scale;					//(for OP's clarity)...typedef short	s16x = (s16)x; y = (s16)y;...	glVertex2f( x, y );...
+
+edit: I just tested this at various screen resolutions. Additionally you should add 0.5f to the width/height of your box, then it will always be 100%.
+
+[Edited by - jezham on October 9, 2008 12:46:11 PM]
+
+##### Share on other sites
+yes, I have an nVidia gfx card.
+
+I've read the very interesting thread pointed at by MikeTacular. What I still don't understand is why only ONE pixel (lower/left) is missing when rendering GL_LINE_LOOP ... It sounds more "natural" to me that lower and left lines should be missing ...
+
+(But anyway, I have now a more clear view of the reason why rendering can not be perfect without some manipulation on coords and sizes.)
+
+I've spent some time trying to adjust 2D coords (using glTranslate3f(0.1, 0.1, 0), and/or adding some jitter (0.5) on coords of corners) but it has not fixed the problem, only changed it : the lower/RIGHT pixel of the border was missing, as well as lower line and RIGHT row of the background.
+
+To jezham, in my 2D gui toolkit, all coords and sizes are stored in short or ushort. That is to say, all coordinates sent to glVertexXXX() are integer values, not floating. So I don't think I need to cast them ?
+
+##### Share on other sites
+Perhaps my ATI card acts differently? It just seems everyone is over-fixing this!
+
+As you already have ints then just the additional half-pix to the width/height of your box is required. This of course means that you must supply glVertex2f() and not glVertex2i()
+
+Here is a simple box which I've tested.
+define half (float)0.5f	glBegin( GL_LINE_LOOP );		glVertex2f( 100,       0 );		glVertex2f( 110+half,  0 );		glVertex2f( 110+half, 10+half );		glVertex2f( 100,      10+half );//		glVertex2f( 100,       0 );	glEnd();
+
+The only other thing which I can think of is the way you set ortho mode (mine follows).
+	glOrtho( 0, screenWidth, 0, screenHeight, -1, 1 );
+
+HTH
+
+edit: changed from GL_LINE_STRIP to GL_LINE_LOOP
+
+[Edited by - jezham on October 10, 2008 10:15:18 AM]
+
+##### Share on other sites
+I've just made some tests using the code you supplied, and I've found out that vertices order (CW or CCW) is important ... In one case the result is as expected, in the other one there is still one pixel missing. Maybe this sound obvious to someone, but it does not to me :)
+
+Also I do not use glOrtho() to setup the ortho mode, but I build myself the projection matrix. I suppose my problem lies here.
+
+thanks
+
+##### Share on other sites
+Yes winding order to me is always CCW with graphics, it's a GL thing :)
+
+This all takes me back to the (Commodore) Amiga days. Perhaps then, if you still have the issue with a standard ortho test, then your hardware is doing something differently? What we used to do (on the old blitter chip) was ensure lines/edges were drawn from top to bottom, that would mean standard GL_LINES (rather than loop/strip).
+
+I'll get round to testing mine on other systems eventually!
+
+btw, before I fixed this in my program, I would plot a pixel (after the loop) with GL_POINTS. But mine was always at the top/right - so be sure to test on various hardware.
+
+yw
+
+##### Share on other sites
+Okay !
+So finally it WORKS (fireworks, clap clap, champagne) !
+So :
+- vertices must be in the right order CCW,
+- I add a half-pix to the width/height of boxes,
+- and I jitter gui rendering with glTranslatef(0.01, 0.01, 0)
+
+It seams to work, at least on my laptop :)
+
+The good old Amiga days :) I spent so much time trying to understand how these "megademos" worked, alone with my Amiga bible and my Seka (?) 68k assembler, trying to reproduce those so cooooool effects ! memories, memories ...
+
+Many thanks for your help !
+
+FYI, here is the final test code I used :
+
+Pos position(100, 100);Rectangle rectangle(100, 100);const float half = 0.5;glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0, 1024, 0, 1024, -1, 1);glMatrixMode(GL_MODELVIEW);glLoadIdentity();glTranslatef(0.01, 0.01, 0);glColor3f(1.0, 0, 1.0);glBegin(GL_LINE_LOOP);glVertex2f(position.x, position.y);glVertex2f(position.x + rectangle.width - 1 +half, position.y);glVertex2f(position.x + rectangle.width - 1 +half, position.y + rectangle.height - 1 +half);glVertex2f(position.x, position.y + rectangle.height - 1 +half);glEnd();glColor3f(1.0, 1.0, 0.0);glBegin(GL_QUADS);glVertex2f(position.x+1, position.y+1);glVertex2f(position.x+1 + rectangle.width-3+half, position.y+1);glVertex2f(position.x+1 + rectangle.width-3+half, position.y+1 + rectangle.height-3+half);glVertex2f(position.x+1, position.y+1 + rectangle.height-3+half);glEnd();
+
+##### Share on other sites
+Aha success! Now you can comfortably tweak your test applications :)
+I'll mental note the 'jitter' (for testing on other rigs) as not needed here.
+
+Yes the good old Amiga days, I started learning along with the "Zowee Demo" (Amiga Computing article/demo) and a 68K compiler (Borland perhaps?) from the front of another magazine...Same with 3D, a revolutionary magazine article came along which I actually read in a park on the way home. Lol I suddenly feel slightly old, yet young!

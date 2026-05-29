@@ -1,0 +1,478 @@
+================================================================================
+TITAN AI — TRAINING PACK 021: THREAT HUNTING AND ADVANCED INCIDENT RESPONSE
+PROACTIVE HUNTING, MITRE ATT&CK, FORENSICS, THREAT INTELLIGENCE, IR PLAYBOOKS
+================================================================================
+
+================================================================================
+PART 1: THE THREAT HUNTING PHILOSOPHY
+================================================================================
+
+--- WHAT THREAT HUNTING IS AND ISN'T ---
+
+Threat hunting is NOT:
+  Waiting for an alert to fire and then investigating. That is incident response.
+  Running automated scans. That is vulnerability management.
+  Reviewing logs when something seems wrong. That is reactive analysis.
+
+Threat hunting IS:
+  Proactively searching for indicators of compromise that your alerts have missed.
+  Starting with a hypothesis about attacker behavior.
+  Systematically validating or disproving that hypothesis against your data.
+  Finding adversaries who are inside your network RIGHT NOW but have evaded detection.
+  
+  Key truth: Dwell time (time between breach and detection) average = 197 days (Mandiant M-Trends).
+  An attacker has been in your network for 6 months before you know.
+  Hunting: Reduce that to days or hours.
+
+THE HUNTING LOOP:
+  1. Create hypothesis (based on threat intelligence, recent CVE, behavioral analytics)
+  2. Investigate (collect and analyze relevant data)
+  3. Discover (new IOCs, TTPs, detection gaps)
+  4. Inform analytics (convert discoveries into new detection rules)
+  5. Return to 1
+
+HYPOTHESIS GENERATION:
+  Source 1: Threat intelligence — Recent campaign by APT29 using technique X.
+    Hypothesis: "APT29 recently exploited a similar org in our sector. Do we have their TTPs?"
+  
+  Source 2: MITRE ATT&CK — Known techniques for your adversary profile.
+    Hypothesis: "Living-off-the-land techniques: Is certutil being used to download files?"
+  
+  Source 3: Behavioral analytics — Outliers from baseline.
+    Hypothesis: "This host communicates to 100x more external IPs than peers. C2 beaconing?"
+  
+  Source 4: Threat intel feeds — New C2 infrastructure associated with threat group.
+    Hypothesis: "Is any host in our environment communicating with these IPs?"
+  
+  Source 5: Security incidents at peers — Industry info sharing (FS-ISAC, H-ISAC, ISAC of your sector)
+    Hypothesis: "Our sector peers were hit with supply chain attack via software update mechanism."
+
+================================================================================
+PART 2: MITRE ATT&CK FRAMEWORK
+================================================================================
+
+--- USING ATT&CK FOR HUNTING ---
+
+MITRE ATT&CK:
+  Knowledge base of adversary tactics and techniques.
+  Based on real-world observations of threat actors.
+  
+  Structure:
+  Tactics: The "why" — adversary's goal (14 tactics)
+    TA0001 Initial Access → TA0002 Execution → TA0003 Persistence →
+    TA0004 Privilege Escalation → TA0005 Defense Evasion → TA0006 Credential Access →
+    TA0007 Discovery → TA0008 Lateral Movement → TA0009 Collection →
+    TA0010 Exfiltration → TA0011 Command and Control
+  
+  Techniques: The "how" — specific method to achieve tactic (~200 techniques)
+    T1566 — Phishing (under Initial Access)
+    T1059 — Command and Scripting Interpreter (under Execution)
+    T1053 — Scheduled Task/Job (under Persistence)
+  
+  Sub-techniques: Specific implementation (~400 sub-techniques)
+    T1059.001 — PowerShell
+    T1059.003 — Windows Command Shell
+    T1059.005 — Visual Basic
+
+HIGH-VALUE TECHNIQUES TO HUNT (common across APT groups):
+
+T1059.001 — PowerShell:
+  Hunting query (Sysmon Event ID 1, Windows):
+  SELECT * FROM process_events 
+  WHERE Image LIKE '%powershell.exe'
+  AND (CommandLine LIKE '%-enc %' 
+    OR CommandLine LIKE '%-EncodedCommand %'
+    OR CommandLine LIKE '%-e %'
+    OR CommandLine LIKE '%IEX%'
+    OR CommandLine LIKE '%Invoke-Expression%'
+    OR CommandLine LIKE '%-nop%' AND CommandLine LIKE '%-w hidden%')
+  
+  Encoded PowerShell: Attacker hides payload in base64 to evade string-based detection.
+  IEX/Invoke-Expression: Executes downloaded code. Classic malware pattern.
+  Hidden window + no-profile: Avoids user visibility.
+
+T1003.001 — LSASS Memory Dump:
+  Hunting query:
+  SELECT * FROM process_events
+  WHERE (
+    -- Mimikatz or lsassy reading LSASS memory
+    ParentImage LIKE '%cmd.exe' 
+    AND CommandLine LIKE '%lsass%'
+  ) OR (
+    -- Procdump on LSASS
+    Image LIKE '%procdump%'
+    AND CommandLine LIKE '%lsass%'
+  ) OR (
+    -- Task manager dump
+    Image LIKE '%taskmgr.exe'
+    AND TargetObject LIKE '%lsass%'
+  )
+
+T1053.005 — Scheduled Tasks for Persistence:
+  Hunting query:
+  SELECT * FROM scheduled_task_events
+  WHERE task_name NOT IN (SELECT task_name FROM known_good_tasks)
+  OR action LIKE '%powershell%'
+  OR action LIKE '%cmd%' AND action LIKE '%http%'
+  OR creator NOT IN ('SYSTEM', 'NT AUTHORITY\SYSTEM', 'Local Service')
+  
+  Baseline: Export all scheduled tasks in your environment.
+  Hunt: Any new task not in baseline. Any task with encoded command. Any task calling out to network.
+
+T1071.001 — Web Protocols for C2:
+  Hunting for beaconing patterns:
+  -- Find connections with regular intervals (beaconing)
+  WITH connection_intervals AS (
+    SELECT src_ip, dst_ip, dst_port,
+           timestamp - LAG(timestamp) OVER (PARTITION BY src_ip, dst_ip ORDER BY timestamp) AS interval
+    FROM network_connections
+    WHERE dst_port IN (80, 443, 8080, 8443)
+  )
+  SELECT src_ip, dst_ip, dst_port,
+         AVG(interval) AS avg_interval,
+         STDDEV(interval) AS stddev_interval,
+         COUNT(*) AS connection_count
+  FROM connection_intervals
+  GROUP BY src_ip, dst_ip, dst_port
+  HAVING COUNT(*) > 20                    -- Many connections
+  AND STDDEV(interval) < 30              -- Regular (low deviation)
+  AND AVG(interval) BETWEEN 30 AND 3600  -- 30s to 1h intervals (typical C2)
+  ORDER BY stddev_interval ASC;           -- Most regular first
+
+T1005 — Data from Local System (pre-exfiltration collection):
+  Hunting for collection activity:
+  SELECT * FROM file_events
+  WHERE (
+    -- ZIP/compress of interesting data
+    Image LIKE '%7z.exe' OR Image LIKE '%zip.exe' OR Image LIKE '%rar.exe'
+  ) AND (
+    -- In user document directories
+    TargetFilename LIKE '%\\Documents\\%'
+    OR TargetFilename LIKE '%\\Desktop\\%'
+    OR TargetFilename LIKE '%finance%'
+    OR TargetFilename LIKE '%confidential%'
+    OR TargetFilename LIKE '%password%'
+  )
+
+================================================================================
+PART 3: FORENSIC INVESTIGATION TECHNIQUES
+================================================================================
+
+--- WINDOWS FORENSIC ARTIFACTS ---
+
+REGISTRY PERSISTENCE LOCATIONS (check these first):
+  Run/RunOnce keys:
+  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
+  HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+  HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce
+  
+  Services:
+  HKLM\SYSTEM\CurrentControlSet\Services
+  
+  Logon scripts:
+  HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+  (Check: Userinit, Shell, Taskman values for additions)
+  
+  COM object hijacking:
+  HKCU\Software\Classes\CLSID\  (User-level COM overrides — no admin required)
+  
+  AppInit DLLs (loaded into every process):
+  HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows\AppInit_DLLs
+  
+  Image File Execution Options (debugger persistence):
+  HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\
+  (Any key here with Debugger value causes that process to trigger the debugger binary)
+
+WINDOWS PREFETCH FILES:
+  Location: C:\Windows\Prefetch\
+  Format: APPNAME-HASH.pf
+  Contains: Executable path, last run time, run count, files accessed
+  
+  Forensic value: Evidence of execution even if binary was deleted.
+  If malware.exe prefetch exists: It ran. Even if malware.exe is gone.
+  
+  Analysis:
+  # With WinPrefetchView or:
+  python prefetch_parser.py "C:\Windows\Prefetch\MALWARE.EXE-12345678.pf"
+  # Output: Last run time, number of runs, directories/files accessed
+
+NTFS $MFT AND $LOGFILE:
+  $MFT (Master File Table): Metadata for every file that ever existed.
+  Deleted files: $MFT entry zeroed, but may remain recoverable.
+  
+  $LogFile: Circular log of filesystem transactions.
+  Can reconstruct recent file operations even after deletion.
+  
+  $UsnJrnl (USN Change Journal): Record of all file changes.
+  Evidence: Even if $LogFile overwritten, USN journal shows what changed.
+  
+  Parse with: MFTECmd (Eric Zimmermann tools)
+  MFTECmd.exe -f C:\$MFT --csv ./output/ --csvf mft_output.csv
+  # Shows: All files, creation/modification/access times, deleted files
+
+BROWSER ARTIFACTS:
+  Chrome/Edge:
+  %LOCALAPPDATA%\Google\Chrome\User Data\Default\History        (SQLite)
+  %LOCALAPPDATA%\Google\Chrome\User Data\Default\Downloads      (SQLite)
+  %LOCALAPPDATA%\Google\Chrome\User Data\Default\Login Data     (Encrypted SQLite — saved passwords)
+  %LOCALAPPDATA%\Google\Chrome\User Data\Default\Network\Cookies (Encrypted)
+  
+  Extract from History:
+  sqlite3 History "SELECT url, title, last_visit_time, visit_count FROM urls ORDER BY last_visit_time DESC LIMIT 100"
+  
+  Note: last_visit_time is Windows FILETIME (microseconds since 1601-01-01).
+  Convert: (last_visit_time / 1000000) - 11644473600 = Unix timestamp
+
+WINDOWS EVENT LOG FORENSICS:
+  Key event IDs for investigation:
+  
+  Account logon:
+  4624 — Successful logon (logon type tells you HOW: 2=interactive, 3=network, 4=batch, 10=remote)
+  4625 — Failed logon
+  4648 — Logon with explicit credentials (RunAs, WMI, etc.)
+  4769 — Kerberos service ticket requested
+  4776 — NTLM authentication
+  
+  Process:
+  4688 — Process creation (requires audit process tracking)
+  4689 — Process termination
+  
+  Object access:
+  4656/4663 — File/folder accessed
+  4670 — Permissions changed
+  
+  System:
+  7045 — New service installed
+  7036 — Service changed state
+  
+  PowerShell:
+  4103 — Module logging (PowerShell commands)
+  4104 — ScriptBlock logging (entire scripts, includes deobfuscated content)
+  400/600 — PowerShell engine state
+  
+  Timeline across event logs:
+  Import-Module .\Tools\Get-WinEvent.ps1
+  $Start = [datetime]"2025-01-14 00:00:00"
+  $End = [datetime]"2025-01-15 23:59:59"
+  
+  Get-WinEvent -FilterHashtable @{
+    LogName='Security'
+    StartTime=$Start
+    EndTime=$End
+    Id=4624,4625,4648,4688
+  } | Select-Object TimeCreated, Id, Message |
+  Sort-Object TimeCreated |
+  Export-Csv -Path .\timeline.csv
+
+--- MEMORY FORENSICS HUNTING ---
+
+VOLATILITY 3 HUNTING WORKFLOWS:
+
+Identify malicious processes:
+  # List all processes with parent relationships
+  python vol.py -f memory.dmp windows.pstree | grep -v "System\|svchost\|explorer\|conhost\|csrss\|wininit\|lsass\|services\|smss"
+  
+  # Find processes without proper parent
+  python vol.py -f memory.dmp windows.pstree | awk 'suspicious parent detected'
+  
+  # Example: powershell.exe parent is NOT explorer.exe or cmd.exe → suspicious
+  # Normal: explorer.exe → powershell.exe (user opened it)
+  # Suspicious: svchost.exe → powershell.exe (process spawned PowerShell — possible injection)
+
+Network connections with process correlation:
+  python vol.py -f memory.dmp windows.netstat
+  # Shows: PID, process name, protocol, local addr, remote addr, state
+  # Look for: Unexpected processes with network connections
+  # chrome.exe connecting to non-HTTP port → suspicious
+  # svchost.exe connecting to unusual IPs → suspicious
+  # powershell.exe with ESTABLISHED connections → very suspicious
+
+Injected code detection:
+  python vol.py -f memory.dmp windows.malfind
+  # Finds: Memory regions that are:
+  # - Not backed by a file on disk (VAD entry has no file path)
+  # - Executable (PAGE_EXECUTE_READWRITE permissions)
+  # - Contain PE headers or shellcode
+  
+  # For each finding: Extract and analyze
+  python vol.py -f memory.dmp windows.dumpfiles --physaddr 0x1234567 --output-file injected.bin
+  # Analyze extracted binary:
+  file injected.bin
+  strings injected.bin | grep -E "(http|cmd|exec|CreateProcess)"
+  sha256sum injected.bin | xargs -I{} bash -c 'echo {} >> hashes.txt'
+
+Credential artifacts in memory:
+  python vol.py -f memory.dmp windows.hashdump    # NTLM hashes from SAM
+  python vol.py -f memory.dmp windows.lsadump     # LSA secrets
+  python vol.py -f memory.dmp windows.cachedump   # Cached domain credentials
+
+================================================================================
+PART 4: THREAT INTELLIGENCE OPERATIONS
+================================================================================
+
+--- INTEL TYPES AND SOURCES ---
+
+STRATEGIC INTEL: High-level. Who is targeting our sector? What are their goals?
+  Audience: CISO, board. 
+  Sources: Mandiant reports, CrowdStrike, IBM X-Force annual threat report.
+  Frequency: Quarterly/annual.
+
+OPERATIONAL INTEL: Campaign-level. What is APT29 currently doing?
+  Audience: Threat hunt team, IR team.
+  Sources: Vendor threat reports, government advisories (CISA, NCSC), ISAC.
+  Frequency: Weekly.
+
+TACTICAL INTEL: Technical details. Which CVE? Which malware? Which TTPs?
+  Audience: SOC analysts, detection engineers, red team.
+  Sources: VirusTotal, MalwareBazaar, AlienVault OTX, threat intel platforms.
+  Frequency: Daily.
+
+OPERATIONAL INTEL: IOCs. Specific IPs, domains, hashes to block RIGHT NOW.
+  Audience: Security tools (SIEM, firewall, EDR).
+  Sources: MISP, OpenCTI, commercial threat intel feeds.
+  Frequency: Real-time (automated ingestion).
+
+IOC LIFECYCLE:
+  Not all IOCs are equal or equally long-lived.
+  
+  The Diamond Model shows indicator volatility:
+  Infrastructure (C2 IPs): Changes weekly. Low confidence after 30 days.
+  Capabilities (malware hash): Changes per campaign. Low confidence after 3 months.
+  TTPs (MITRE techniques): Rarely change. High confidence for years.
+  
+  Rule: Build detections on TTPs (stable), not IPs/hashes (ephemeral).
+  Block: IPs/hashes (tactical, short-term). Detect: TTPs (strategic, durable).
+
+STIX/TAXII — THREAT INTEL EXCHANGE STANDARD:
+  STIX: Structured Threat Information eXpression (data format)
+  TAXII: Trusted Automated eXchange of Intelligence Information (transport protocol)
+  
+  STIX Objects:
+  Indicators: What to look for (IOCs with context)
+  Attack Patterns: MITRE ATT&CK techniques
+  Campaigns: Related activities by threat actor
+  Threat Actors: Information about adversary groups
+  Malware: Description of malicious software
+  Courses of Action: Recommended mitigations
+  
+  MISP Integration (free open-source threat intel platform):
+  from pymisp import PyMISP
+  
+  misp = PyMISP('https://your-misp.com', 'your-api-key')
+  
+  # Search for events in last 7 days
+  recent_events = misp.search(from_timestamp=int(time.time()) - 604800)
+  
+  # Get all IPs from threat intel
+  malicious_ips = set()
+  for event in recent_events:
+      for attr in event['Event']['Attribute']:
+          if attr['type'] in ['ip-dst', 'ip-src']:
+              malicious_ips.add(attr['value'])
+  
+  # Push to firewall blocklist
+  update_firewall_blocklist(malicious_ips)
+  
+  # Push to SIEM correlation
+  update_siem_watchlist(malicious_ips)
+
+================================================================================
+PART 5: INCIDENT RESPONSE PLAYBOOKS
+================================================================================
+
+--- RANSOMWARE RESPONSE PLAYBOOK (DETAILED) ---
+
+PHASE 0: DETECTION (T=0 to T+5 minutes)
+  Trigger: EDR alert, user report, encrypted files found, ransom note
+  
+  Immediate actions:
+  □ Time-stamp the detection (critical for forensic timeline)
+  □ Do NOT reboot any affected system (memory contains forensic evidence)
+  □ Do NOT pay ransom yet (hasn't been assessed)
+  □ Alert on-call security team lead
+  □ Open incident tracking ticket (all actions documented here)
+
+PHASE 1: CONTAIN (T+5 to T+30 minutes)
+  Goal: Stop spread. Accept some data loss to prevent more.
+  
+  Network isolation:
+  □ Identify affected systems (EDR: systems with ransomware process or encrypted files)
+  □ Network team: Isolate affected VLAN (emergency change, verbal approval OK)
+  □ If domain controller affected: Critical — isolate but note this affects authentication
+  □ Block known C2 IPs/domains at perimeter firewall
+  
+  Account isolation:
+  □ Identify compromised accounts (attacker lateral movement trail)
+  □ Disable all compromised accounts
+  □ Reset passwords for all administrator accounts (attacker may have them)
+  □ Revoke all active sessions for compromised accounts (Conditional Access in Azure AD)
+  
+  What NOT to do during containment:
+  □ Don't run antivirus scans (modifies files, disrupts forensics)
+  □ Don't move files to try to "save" them (may spread to network shares)
+
+PHASE 2: EVIDENCE COLLECTION (T+30 to T+90 minutes)
+  Goal: Capture volatile evidence before it's lost.
+  
+  □ Memory acquisition: winpmem on running systems (before any restart)
+  □ Disk imaging: If possible, image before forensic analysis
+  □ Network captures: Start packet capture on affected segments
+  □ Log collection: Pull all logs to immutable storage immediately
+     SIEM: Export last 7 days of affected system events
+     Endpoint: EDR telemetry for affected systems
+     Network: Firewall, proxy, DNS logs for affected systems
+     Email: Mail logs for phishing investigation
+  □ Lock log sources: Prevent attacker from wiping logs if still present
+
+PHASE 3: SCOPE ASSESSMENT (T+60 to T+180 minutes)
+  Questions to answer:
+  □ Patient zero: Which system was encrypted first? (Earliest encryption timestamp)
+  □ Attack vector: How did attacker get in? (Phishing? VPN? Vulnerable service?)
+  □ Attacker dwell time: When did breach occur vs. when did encryption start?
+  □ Data exfiltration: Was data stolen before encryption? (Proxy logs: large outbound?)
+  □ Affected systems count: How many encrypted? Any critical systems?
+  □ Backup integrity: Are backups clean? Not encrypted? Not connected to network?
+  
+  Ransomware identification:
+  □ Hash a sample encrypted file → check ID Ransomware (id-ransomware.malwarehunterteam.com)
+  □ Ransom note text → identify family
+  □ Extension of encrypted files → identify family
+  □ Check NoMoreRansom.org → free decryptors available for some families?
+
+PHASE 4: EXECUTIVE AND LEGAL NOTIFICATION (T+120 minutes)
+  □ CISO briefing: Summary, scope, current actions
+  □ Legal counsel: Do we have breach notification obligations? (GDPR 72 hours, HIPAA 60 days)
+  □ PR/Communications: Prepare holding statement (don't publish yet)
+  □ Cyber insurance: Notify carrier (required by most policies within 24-72 hours)
+  □ Law enforcement: FBI IC3 report (recommended, sometimes required)
+
+PHASE 5: RECOVERY
+  Recovery from backup (preferred):
+  □ Verify backup integrity: Test restore on isolated system first
+  □ Clean build if possible: Rebuild from known-good image, restore data from backup
+  □ Don't restore to same network segment without confirmed clean
+  
+  Rebuild order: Critical business systems first → secondary → user workstations
+  
+  If no clean backup: Negotiate/decrypt
+  □ Decryption key verification: Demand proof of decryption on 5 non-sensitive files
+  □ Never pay without proof the decryptor actually works
+  □ Payment: Consult legal counsel first. Some ransomware groups sanctioned by OFAC.
+    Paying sanctioned groups: US persons may violate federal law.
+
+PHASE 6: POST-INCIDENT
+  □ Root cause analysis: How did attacker get in? Fixed?
+  □ Detection gap: Why didn't we detect faster? New rules added?
+  □ Attack path remediation: Every step attacker took → control to prevent/detect
+  □ Tabletop follow-up: Lessons applied to response plan
+  □ Metrics: Dwell time, response time, recovery time → benchmark for next quarter
+
+================================================================================
+END OF PACK 021: THREAT HUNTING AND INCIDENT RESPONSE
+Total: Hunting philosophy, hunting loop, hypothesis generation, MITRE ATT&CK
+structure, high-value technique hunting queries (PowerShell/LSASS/scheduled tasks/C2),
+Windows forensic artifacts (registry/prefetch/MFT/browser), memory forensics
+with Volatility 3, threat intelligence types and IOC lifecycle, MISP integration,
+detailed ransomware response playbook with phased timeline.
+================================================================================

@@ -1,0 +1,72 @@
+Question: <p>I have a python script that is a http-server: <a href="http://paste2.org/p/89701" rel="nofollow">http://paste2.org/p/89701</a>, when benchmarking it against ApacheBench (ab) with a concurrency level (-c switch) that is lower then or equal to the value i specified in the socket.listen()-call in the sourcecode everything works fine, but as soon as put the concurrency level in apache bench above the value in the socket.listen()-call performance drops through the floor, some example:</p>
+
+<ul>
+<li>socket.listen(<strong>10</strong>) and ab -n 50 -c <strong>10</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>1200req/s</strong></li>
+<li>socket.listen(<strong>10</strong>) and ab -n 50 -c <strong>11</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>40req/s</strong></li>
+<li>socket.listen(<strong>100</strong>) and ab -n 5000 -c <strong>100</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>1000req/s</strong></li>
+<li>socket.listen(<strong>100</strong>) and ab -n 5000 -c <strong>101</strong> <a href="http://localhost/" rel="nofollow">http://localhost/</a> = <strong>32req/s</strong></li>
+</ul>
+
+<p>Nothing changes in the code between the two calls, I canât figure out what is wrong - been at this problem for one day now. Also note that: The multiplexing version of the same code (I wrote to compare to the threaded version) works FINE no matter what socket.listen() is set to or what the concurrency (-c switch) in apache is set to.</p>
+
+<p><em>I've spent a day on IRC/python docs, posted on comp.lang.python and on my blog - I can't find ANYONE that even has an idea what could be wrong. Help me!</em></p>
+
+Answer: <p>For the heck of it I also implemented an asynchronous version:</p>
+
+<pre><code>import socket, Queue, select
+
+class Request(object):
+    def __init__(self, conn):
+        self.conn = conn
+        self.fileno = conn.fileno
+        self.perform = self._perform().next
+
+    def _perform(self):
+        data = self.conn.recv(4048)
+        while '\r\n\r\n' not in data:
+            msg = self.conn.recv(4048)
+            if msg:
+                data += msg
+                yield
+            else:
+                break
+        reading.remove(self)
+        writing.append(self)
+
+        data = 'HTTP/1.1 200 OK\r\n\r\nHello World'
+        while data:
+            sent = self.conn.send(data)
+            data = data[sent:]
+            yield
+        writing.remove(self)
+        self.conn.close()
+
+class Acceptor:
+    def __init__(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('', 1234))
+        sock.listen(10)
+        self.sock = sock
+        self.fileno = sock.fileno
+
+    def perform(self):
+        conn, addr = self.sock.accept()
+        reading.append(Request(conn))
+
+if __name__ == '__main__':
+    reading = [Acceptor()]
+    writing = list()
+
+    while 1:
+        readable, writable, error = select.select(reading, writing, [])
+        for action in readable + writable:
+            try: action.perform()
+            except StopIteration: pass
+</code></pre>
+
+<p>which performs:</p>
+
+<pre><code>ab -n 10000 -c 10 http://127.0.0.1:1234/ --&gt; 16822.13 [#/sec]
+ab -n 10000 -c 11 http://127.0.0.1:1234/ --&gt; 15704.41 [#/sec]
+</code></pre>

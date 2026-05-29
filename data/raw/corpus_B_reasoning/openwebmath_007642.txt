@@ -1,0 +1,35 @@
+# Derivation of confidence and prediction intervals of predictions for probit and logit (and GLMs in general)
+
+The derivation of the prediction interval for the linear model is quite simple: Obtaining a formula for prediction limits in a linear model .
+
+How to derive the confidence and prediction intervals for the fitted values of the logit and probit regressions (and GLMs in general)?
+
+• Are you defining "predictions" for a binary outcome to be the sampling average, like a proportion or percentage? – AdamO Feb 14 '18 at 23:26
+• @AdamO I think he/she is defining predictions of logistic regression as the predicted conditional probability. I.e., the prediction is $\hat{p}(x)$, an estimator for $P(Y|X=x)$, not $\hat{Y}(x)$. – DeltaIV Feb 15 '18 at 18:40
+• @AdamO good question, I want an interval that makes my predictions cover the future values of $y$ 95% of the time. That could be done with an interval for $\hat{p}$ that translates into an interval of predictions (which would trivially be either just 0, just 1, or 0 and 1 I guess). – statslearner Feb 16 '18 at 4:16
+• @statslearner I don't understand. Do you want a finite interval, which covers the future value of $y$, $100\%$ of times? Here it is: $I=[0,1]$. It doesn't even depend on $x$, what more you could ask for? Seriously, I don't think it makes sense to ask for a prediction interval with a Bernoulli output. On the other hand, if you were using logistic regression for a Binomial variable, then a prediction interval would make sense... – DeltaIV Feb 20 '18 at 19:34
+• @statslearner hmmm wait, maybe we're talking about the same thing. Are you fixing $x$, sampling $y|x$ $n$ times, and looking for a prediction interval for the number of successes? The point estimate is obviously $n\hat{p}(x)$, and a trivial $100\%$ PI is $[0,n]$, but you would like a better (shorter) interval. If so, look here: stats.stackexchange.com/questions/255570/… – DeltaIV Feb 21 '18 at 9:36
+
+In GLM, prediction is a non-linear function $f$ of the product of covariates $X$ with estimated coefficient vector $\hat{\beta}$: $$\hat{y} = f(X\hat{\beta})$$ Finite-sample distribution of $\hat{\beta}$ is generally unknown, but as long as $\hat{\beta}$ is a maximum likelihood estimate, it has asymptotic normal distribution $\mathcal{N}(\beta, -H^{-1})$, where $H$ is the Hessian matrix of the likelihood function in its maximum. The p-values of $\beta$ that are shown as an output of a regression are nearly always based on this asymptotics. But if you feel your sample is too small for asymptotics, use numerical distribution (e.g. bootstrapping).
+
+When you use asymptotic normal distribution of $\hat{\beta}$ (and therefore $X\hat{\beta}$), distribution of $\hat{y}$ is still non-normal due to non-linear $f$. You can ignore it - get normal confidence bounds $(z_{lower}, z_{upper})$ for $X\beta$, and plug them into $f$, getting bounds for $y$ as $(y_{lower}, y_{upper}) = (f(z_{lower}), f(z_{upper}))$.
+
+Another strategy (called delta method) is to take a Taylor expansion of $f$ around $X\hat{\beta}$ - it will be linear in $\hat{\beta}$. Therefore, you can approximate distribution of $f(X\hat{\beta})$ as $$f(X\hat{\beta}) \sim \mathcal{N}\left(f(X\beta), -(f^{'}(X\beta))^2 X H^{-1} X^T \right)$$
+
+Then the asymptotic 95% confidence interval for $f(X\beta)$ would look like
+
+$$f(X\hat{\beta}) \pm 1.96 \sqrt{(f^{'}(X\hat{\beta}))^2 X H(\hat{\beta})^{-1} X^T}$$
+
+Now you need only to find expression for Hessian matrices for particular models, like logistic regression in this question. And this question presents practical comparison of bootstrap, transformed normal bounds, and delta method for logistic regression.
+
+• But does that give a confidence interval or a prediction interval of $\hat{y}$. It looks like a confidence interval only, doesn't it? It feels there should be an extra noise considered for a prediction interval. – statslearner Feb 16 '18 at 3:19
+• That is only a confidence interval indeed. But for binary responce models (like logit and probit), prediction is already probabilistic - real output is 1 or 0 with some probabilty. That is, "prediction interval" is always either $[0, 1]$, or $[0, 0]$ (if predicted probability is very small), or $[1,1]$ (if predicted probability is very large). But this predicted probability may vary, and confidence interval reflects this. – David Dale Feb 16 '18 at 9:29
+
+When all else fails, you can always construct bootstrapped CIs for any statistic. Here's a simple algorithm:
+
+1. Draw $N$ samples with replacement from $X$ (where $N$ is the number of rows in $X$). You'll find that about 2/3rds of your observations will appear in such a sample.
+2. Use these samples to fit a model
+3. Use this model to generate predictions for the observations in $X$ that weren't used in training.
+4. Repeat this process 100 or so times (the more the merrier) to accumulate a collection of predictions for each observation. This collection is an approximation to the distribution of your predictions. Call these your "bootstrapped predictions".
+5. Construct confidence intervals by taking quantiles on the predictions. E.g. for a particular observation, calculate the .025 and .975 quantiles for a 95% confidence interval.
+• This is interesting, but under what circumstances can you guarantee me this will cover the true y 95% of the time? – statslearner Feb 16 '18 at 4:24

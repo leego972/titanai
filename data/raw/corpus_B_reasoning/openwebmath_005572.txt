@@ -1,0 +1,150 @@
+# Julia end-to-end LSTM for one CPU
+
+#1
+
+I wonder how this core would look like in Julia
+
+Together with a Julia frontend
+
+How do I build a Julia abstraction for all of this, integrated with JuliaDB?
+
+The GPU part would not be a priority at the moment, as I first want to run an LSTM on a macOS CPU. How do I take the first 100 steps?
+
+#2
+
+Are you asking about writing your own backend in Julia or wrapping TensorFlow’s backend? Why would you do any of these when TensorFlow.jl and Knet.jl exist?
+
+#3
+
+Christopher Rackauckas @ChrisRackauckas 16:50 on https://gitter.im/JuliaML/chat
+Knet doesn’t use computational graphs. It uses dispatch on the types in generic Julia code and overloads the methods using their specific array type in order to turn your NN code into GPU code. Take a look at the tutorial, and note that it’s essentially just Julia code with two lines from KNet.jl: one call to Autograd.jl and many calls to create KNet arrays. By making it a KNet array instead of an Array, it then overloads what * etc. all mean to make your Julia NN code run on the GPU and all of that, but that means that the tutorial is essentially just a “how to write an NN in Julia”
+
+Mike Innes: Building a graph has genuine benefits – e.g. parallelism, deployment, fusing operations and memory management. PyTorch and Knet will both struggle with those. Of course, it’s also true that TensorFlow’s API is severely limited by Python
+
+This might be a starting point for a great discourse
+https://www.tensorflow.org/extend/architecture
+
+#4
+
+Isn’t the core of TensorFlow all C++ code (with a C API that makes it easier to interface with)?
+Python is just one of the two languages they concentrated on for the client libraries (along with C++).
+
+#5
+
+TensorFlow.jl is exactly the attempt to make a Julian API for TensorFlow.
+
+#6
+
+Does TensorFlow.jl wrap Python?
+
+#7
+
+Essentially, TensorFlow provides 3 main advantages:
+
+1. Automated differentiation.
+2. Code generation for CPU and GPU.
+3. Distributed computations.
+
+I don’t know much about TF’s model of distributed computations, so can’t really comment on this.
+
+I wrote specifically automated differentiation because in TF it’s not exactly the same as automatic differentiation e.g. in Knet.jl. Citing @denizyuret:
+
+Automatic differentiation is the idea of using symbolic derivatives only at the level of elementary operations, and computing the gradient of a compound function by applying the chain rule to intermediate numerical results. For example, pure symbolic differentiation of \sin^2(x) could give us 2\sin(x)\cos(x) directly. Automatic differentiation would use the intermediate numerical values x_1=\sin(x), x_2=x_1^2 and the elementary derivatives dx_2/dx_1=2x_1, dx_1/dx=\cos(x) to compute the same answer without ever building a full gradient expression.
+
+AD is pretty good, actually, especially being backed by GPU arrays. Yet, as you mentioned, it doesn’t create a computational graph which limits many optimizations.
+
+An alternative approach is to use symbolic differentiation. SD is less straightforward to implement and has its own limitations (e.g. no loops on loss function), but it can produce exactly what AD is missing - computational graph (for which we already have Julia’s AST). To my knowledge, there are currently 2 packages providing symbolic differentiation on array types - ReverseDiffSource.jl by Frédéric Testard and mine XDiff.jl. Both are not in the best shape (ReverseDiffSource doesn’t support Julia 0.6 yet, XDiff.jl is currently under the major refactoring), but if you are looking for symbolic computational graphs like in TensorFlow helping one of these projects may be a good start.
+
+Code generation comes from symbolic graphs and shouldn’t be too hard (especially given awesome CUDANative.jl), yet making it produce really highly optimized code may take many man-hours, and this is exactly where TF has the advantage over not-so-well-known projects.
+
+I can dive deeper into the details of (1) and (2) if you really want to step this way, but you should be aware that this way is quite long yet.
+
+#8
+
+I just want the most correct way for Julia, without rushing.
+
+#9
+
+I understand it doesn’t but is there something to be said if the backend was made with a Python frontend in mind? In the end I just want to assume I don’t want C++ or Python in the design.
+
+#10
+
+TensorFlow.jl wraps the TensorFlow core (mostly C++), not the Python frontend. If you want a pure Julia deep learning framework, check out Knet.jl.
+
+#11
+
+If you scroll up you’ll see from Chris’ comment that Knet doesn’t use computational graphs.
+
+#12
+
+Rather than ask that question here, why don’t you look at the source code instead?
+
+#13
+
+https://github.com/JuliaDiff/ReverseDiff.jl builds up a computational graph for automatic differentiation (in reverse mode).
+
+#14
+
+I looked at the docs, it was sufficient.
+
+#15
+
+So that’s one other decision to make: which type of differentiation to use for the computational graph.
+
+#16
+
+It is good and fun to talk about different design strategies sometimes but it is important to note that you get experience and insight when you actually implement things. You have had your package https://github.com/hpoit/MLN.jl/ going for 10 months now and it has links to tutorials and documentation and release notes. These, as well as all the Julia files, are still after hundreds of commit completely empty. At some point you have to get dirty and actually try write some code instead of just discussing it. Remember that when you ask question you other people spend their time to answer them in order to help you. I think it would be fair that next time you could add a bit of actual runnable Julia code that shows what you have tried so far. That would make it easier to see where you are and how to progress from what you have implemented so far.
+
+#17
+
+I like to ponder before doing anything. For example, it seems like Julia was very well pondered before it was initiated. I’m on the paper stage, which I believe comes before the doing stage.
+
+#18
+
+Julia is not done and I would not say it was very well pondered… Like everything in Julia is changing all the time. The file extension was changed once, the names for the basic types just got changed, the type system gets revamped, function types gets added etc etc. Julia is the result of an incredible amount of work where bad ideas have been scrapped and good ideas have been kept and the only way to know if many of them were good or not was by trying them.
+
+Yes, it is useful to ponder on things sometime but at some point there has to be some action too.
+
+#19
+
+Initiated, not finished or completed, is what I meant. I like action, in the right amount.
+
+#20
+
+I guess you are talking about the tape which indeed is a kind of computational graph. However, it’s different from what you typically get with symbolic differentiation. The key difference is whether you can further transform the graph, e.g. fuse operations, find common subexpression, generate code, etc. Consider following example:
+
+u::Vector{Float32}
+v::Vector{Float32}
+
+x = u + v
+y = 2x
+z = sum(y)
+
+
+in symbolic differentiation you get something like:
+
+dz_dz = 1.0
+dz_dy = dz_dx * ones(size(u))
+dz_dx = dz_dy * 2
+dz_dv = dz_dx * 1
+dz_du = dz_dx * 1
+
+
+which is easily simplified to:
+
+dz_dz = 1.0
+dz_dy = ones(size(u))
+dz_dx = 2 * dz_dy
+dz_dv = dz_dx
+dz_du = dz_dx
+
+
+if you only need derivatives w.r.t. inputs u and v, you can throw away unused variables and get:
+
+dz_dv = fill(2, size(u))
+dz_du = dz_dv
+
+
+Generating code for GPU or, for example, dstributed calculaton on the cluster is also trivial.
+
+ReverseDiff.jl, on the other hand, provides an exact implementation for each of recorded instructions and their derivatives, binding them to the tape and cache. Optimizing the tape looks pretty hard to me (I also didn’t find any such optimizations in the code) and moving the code to GPU will probably require a special kind of GPU tape.

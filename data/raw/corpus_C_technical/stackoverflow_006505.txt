@@ -1,0 +1,81 @@
+Question: <p>I am instantiating a class A (which I am importing from somebody
+else, so I can't modify it) into my class X.</p>
+
+<p>Is there a way I can intercept or wrape calls to methods in A?
+I.e., in the code below can I call</p>
+
+<pre><code>x.a.p1()
+</code></pre>
+
+<p>and get the output</p>
+
+<pre><code>X.pre
+A.p1
+X.post
+</code></pre>
+
+<p>Many TIA!</p>
+
+<pre><code>class A:
+    # in my real application, this is an imported class
+    # that I cannot modify
+    def p1(self): print 'A.p1'
+
+class X:
+    def __init__(self):
+        self.a=A()
+    def pre(self): print 'X.pre'
+    def post(self): print 'X.post'
+
+x=X()
+x.a.p1()
+</code></pre>
+
+Answer: <p>Here's what I've received from Steven D'Aprano on comp.lang.python.</p>
+
+<pre><code># Define two decorator factories.
+def precall(pre):
+    def decorator(f):
+        def newf(*args, **kwargs):
+            pre()
+            return f(*args, **kwargs)
+        return newf
+    return decorator
+
+def postcall(post):
+    def decorator(f):
+        def newf(*args, **kwargs):
+            x = f(*args, **kwargs)
+            post()
+            return x
+        return newf
+    return decorator
+</code></pre>
+
+<p>Now you can monkey patch class A if you want. It's probably not a great
+idea to do this in production code, as it will effect class A everywhere.
+[this is ok for my application, as it is basically a protocol converter and there's exactly one instance of each class being processed.]</p>
+
+<pre><code>class A:
+    # in my real application, this is an imported class
+    # that I cannot modify
+    def p1(self): print 'A.p1'
+
+class X:
+    def __init__(self):
+        self.a=A()
+        A.p1 = precall(self.pre)(postcall(self.post)(A.p1))
+    def pre(self): print 'X.pre'
+    def post(self): print 'X.post'
+
+
+x=X()
+x.a.p1()
+</code></pre>
+
+<p>Gives the desired result.</p>
+
+<pre><code>X.pre
+A.p1
+X.post
+</code></pre>

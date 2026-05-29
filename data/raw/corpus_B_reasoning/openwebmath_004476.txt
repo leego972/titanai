@@ -1,0 +1,98 @@
+# How to Generate Band Limited Gaussian White Noise in MATLAB?
+
+In some papers, I read that the additive noise is band limited Gaussian white.
+How can I simulate this type of noise use MATLAB?
+
+• In continuous-time systems, the concept of band-limited white noise, whether Gaussian or not, is well-defined and well understood. For discrete-time systems, the issue is more complicated and you need to consider what the band limitation is and how it compares to the Nyquist frequency. – Dilip Sarwate Jun 21 '13 at 16:05
+• @DilipSarwate: To me,"band-limited white noise" is an oxymoron! :-) – Peter K. Jun 21 '13 at 23:54
+• @PeterK. The notion of bandlimited white noise is used primarily in bandpass systems where the characteristics of noise outside the passband are irrelevant while within the passband, the noise is indistinguishable from white noise that has been passed through an ideal bandpass filter that passes precisely the frequency band that is the passband. It is no more an oxymoron than white noise (without any pejorative comments about band-limitations). See also, DRazick's comment (which is spot on) following Jason R's answer (which I disagree with). – Dilip Sarwate Jun 22 '13 at 1:59
+• @DilipSarwate: Thanks for the explanation. I get it, but I still think it's a very poor choice of terminology. To me "band-pass filtered white noise" is more accurate, but I suppose it ends up at the same place. – Peter K. Jun 22 '13 at 2:39
+• @PeterK. Unfortunately, "band-pass filtered white noise" generally means the process described in JasonR's answer. Start with white noise and filter it through a filter with transfer function $H(f)$ to get a process with PSD proportional to $|H(f)|^2$. Band-limited white noise is the same except that we insist that$H(f)$ must be the transfer function of an ideal bandpass filter. The key point with white noise is that we can't put the signal where the noise a'i'nt which applies to band-limited white noise too as long as we are constrained to have our signals stay in band. – Dilip Sarwate Jun 22 '13 at 3:04
+
+You would generate bandlimited Gaussian noise by first generating white noise, then filtering it to the bandwidth that you desire. As an example:
+
+% design FIR filter to filter noise to half of Nyquist rate
+b = fir1(64, 0.5);
+% generate Gaussian (normally-distributed) white noise
+n = randn(1e4, 1);
+% apply to filter to yield bandlimited noise
+nb = filter(b,1,n);
+
+• I have always wondered this, but if something like this is done, then what is so Gaussian about it anymore? I dont think the PDF is at all at this point... – Spacey Jun 20 '13 at 2:04
+• One of the special features of Gaussian random variables is that the sum of two independent Gaussian RVs is also Gaussian distributed. Since the input noise is white, you can look at each sample at the filter output as a sum of many independent Gaussian random variables (where the variance of each RV depends upon the input noise variance and the values of the corresponding filter tap). Therefore, the samples at the filter output are also Gaussian distributed. However, the noise is obviously no longer white, as there is correlation between successive samples at the filter output. – Jason R Jun 20 '13 at 4:05
+• This property is described in more detail at Wikipedia. Note that the property still holds even if the input noise is colored (see the "Correlated random variables" section). – Jason R Jun 20 '13 at 4:06
+• facepalm. Of course. – Spacey Jun 20 '13 at 15:20
+• Yet this method won't generate White noise. No need to apply a filter, every discrete sampled noise is band limited to begin with. – Royi Jun 21 '13 at 15:02
+
+Just as a small addition to Jason's answer: usually you need to generate bandlimited noise with a given variance $\sigma^2$. You can add this code to the code given in Jason's answer:
+
+var = 3.0;  % just an example
+scale = sqrt(var)/std(nb);
+nb = scale*nb;  % nb has variance 'var'
+
+
+Note that you have to do the scaling after filtering, because in general the filter changes the noise variance.
+
+• Good point. If you scale the filter coefficients such that $\sum_{n=0}^{N} |h[n]|^2 = 1$, then the filter will not affect the noise variance. – Jason R Jun 20 '13 at 14:39
+• @Matt Nice addition! – Spacey Jun 20 '13 at 15:13
+
+Every time you generate discrete noise samples (Using MATLAB's randn / rand for instance) you actually generate a band limited noise.
+
+All you need to do is the adjustment of the variance of the discrete samples to the variance of the "Continuous" noise those samples are allegedly taken from.
+
+Given a continuous White Noise (Wide Sense) with variance $$\sigma^{2}_{cn} \delta (t)$$ and you want sample it at rate of $$f_{s}$$ you should generate discrete noise samples with variance of $$f_{s} \sigma^{2}_{cn}$$.
+
+This result is valid assuming before sampling the continuous noise you applied an ideal LPF filter with bandwidth of $$f_{s} / 2$$.
+
+Full description is given here - How to Simulate AWGN (Additive White Gaussian Noise) in Communication Systems for Specific Bandwidth.
+
+Why can one not use the approach mentioned in this post?
+
+It starts with the desired frequencies and works backwards to build the signal, instead of filtering. It uses python code, but also links to the original Matlab code.
+
+Are there any drawbacks to doing it that way?
+
+• looking at the original matlab code, it works for a block size of n, your fft length. If I want 2n samples, you can double the fft length, which is more than doing 2 ffts. if you do 2 separate blocks, there will be a discontinuous transition from the first to the second block. you could use a window to smooth out the transition, but then you need to do more than 2 blocks to avoid scalloping your time series. Using the filter method, once the filter is in steady state, you can feed it random numbers as long as you want. The processing increase for the filter method scales linearly. – Stanley Pawlukiewicz Sep 23 at 18:11
+
+i realize this question popped up in current view because @Drazick modified his/her 2013 answer.
+
+if you generate a good uniform p.d.f. pseudo-random number $x$ (say using rand() or frand(), if it's a good version) that ranges from 0 to 1 (that is $0 \le x < 1$), then if you do that 12 times, add up all 12 of the supposedly independent and uncorrelated values, and subtract 6.0 from that sum, you will have something that is very close to a unit-variance and zero-mean gaussian random number. if the uniform p.d.f. pseudo-random numbers are "good" (that is they exhibit independence from each other), this sum will be as "white" as you can get a discrete-time signal to be.
+
+"white noise" is, of course a misnomer, even for analog signals. a "power signal" with flat spectrum all the way to infinity also has infinite power. the virtually-gaussian and "white" signal generated as described has a finite power (which is the variance and is 1) and finite bandwidth which, expressed as one-sided, is Nyquist. (so the 'power spectral density" or power per unit frequency is 1/Nyquist.) scale it and offset it however you please.
+
+i s'pose i can edit this later and add some C-like pseudo-code to show this explicitly.
+
+Producing full spectrum white noise and then filtering it is like you want to paint a wall of your house white, so you decide to paint the whole house white and then paint back all house except the wall. Is idiotic. (But has sense in electronics).
+
+I made a small C program that can generate white noise at any frequency and any bandwidth (let's say at 16kHz central frequency and 2 kHz "wide"). No filtering involved.
+
+What I did is simple: inside the main (infinite) loop I generate a sinusoid at center frequency +/- a random number between -half bandwidth and +halfbandwidth, then I keep that frequency for an arbitrary number of samples (granularity) and this is the result:
+
+White noise 2kHz wide at 16kHz center frequency
+
+Pseudo code:
+
+while (true)
+{
+
+f = center frequency
+r = random number between -half of bandwidth and + half of bandwidth
+
+<secondary loop (for managing "granularity")>
+
+for x = 0 to 8 (or 16 or 32....)
+
+{
+
+[generate sine Nth value at frequency f+r]
+
+output = generated Nth value
+}
+
+}
+
+• The STFT isn’t flat across the band. You have not shown why there is any advantage to your technique. Btw most paint is stocked as a grayish white and then mixed with pigment. Orange paint isn’t made by just using orange ingredients. There isn’t any extra work in generating white noise. – Stanley Pawlukiewicz Sep 22 at 12:59
+• @StanleyPawlukiewicz In electronics you are righe because a noise generator and a filter are two very simple "objects". In programming, a filter is complex in number of instructions way more than just generating the needed data. So when programming is preferable my approach if you have time critical applications. If you downvoted I suggest you to think again about it. – Zibri Sep 23 at 6:21
+• your noise isn’t preferable. the spectrum isn’t flat across the band. calling a transcendental function on the fly isn’t faster than filtering. your arguments are unsubstantiated – Stanley Pawlukiewicz Sep 23 at 11:37
+• Actually the inband ripple is a design parameter. To say they peak at the center frequency is also false – Stanley Pawlukiewicz Sep 24 at 12:32
+• since your technique so easy to modify, why don’t you write your own sine wave routine instead of linking to one and claiming that your code is less complex and compare that to a biquad. while you are add it, how about a fixed point version. you might also think about how your technique scales as you increase the number of samples – Stanley Pawlukiewicz Sep 24 at 13:43

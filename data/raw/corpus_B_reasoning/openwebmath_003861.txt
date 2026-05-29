@@ -1,0 +1,125 @@
+Routine tracker
+
+Rational approximation of tabulated data using genetic programming.
+
+Description
+
+This routine uses Genetic Programming (see below) to compute a multivariate rational approximation $f:\mathbb{R}^n\rightarrow\mathbb{R}$ of a set of scalar samples $\left\{y_k\in\mathbb{R}, k\in [1, N]\right\}$ obtained for different values $\left\{x_k\in\mathbb{R}^n,k \in [1, N]\right\}$ of some explanatory variables $x$. The maximum degree of the rational function is set by the user and a sparse rational expression is usually obtained. Unless specified, its nonsingularity is guaranteed on the whole considered domain (defined as the convex hull of $\left\{x_k\in\mathbb{R}^n,k \in [1, N]\right\}$).
+
+When the model structure has to be determined as a whole (numerator/denominator degrees, number and type of monomials), the problem cannot generally be solved by means of classical techniques. Over a few explanatory variables, a sequential and systematic exploration of the terms cannot reasonably be expected owing to the curse of dimensionality. E.g., for 2 variables and a maximum degree of 10, there are not less than $10^{15}$ rational candidates available! Moreover, this dual-purpose optimization (model structure and parameters) is complicated by the fact that a rational model is no more a Linear-in-its-Parameters (LP) model. Happily, some promising techniques have recently appeared for global optimization, with the purpose of solving symbolic regression problems close to this one. It is especially the case of Genetic Programming and that is why this was adapted to the approximation of a rational function. The interest in combining least-squares methods (LS) with symbolic optimization of the kernel functions has already been studied some years ago and has resulted for instance in the Matlab code GP-OLS [4]. More recently, another Toolbox has been developed (GPTIPS), permitting to encode and to adapt a LP model in a multigene symbolic regression form [6]. However, none of those tools is suitable for directly synthetizing a rational modeling, especially because the parameter optimization becomes a nonlinear process then.
+
+Consequently, the approach proposed here is somewhat different and is dedicated to the rational case. It is issued from several considerations: 1/ the rational case extends the polynomial case (structured modeling expressed as the quotient of two polynomials) 2/ GP is fully justified then since there is no other classical option available for jointly optimizing the structure of numerator and denominator (a brute-force search would not attempt to minimize the number of monomials) 3/ those two components remain LP when considered separately, and it would be a pity not to take advantage of that. In other words, GP is clearly a promising alternative for rational modeling, but a prior adaptation of the method is required to use it with a maximum efficiency. That is why the algorithm called TRACKER (Toolbox for Rational Approximation Computed by Knowing Evolutionary Research) has been developed by ONERA. See [2] for more details.
+
+TRACKER algorithm in a few words
+
+The outlines of TRACKER are the following [2]. Each component of the rational function (numerator and denominator) is represented by a single separate chromosome which comes in a syntax tree form as usual, and a priori includes several genes. The sets F$=\{+,*\}$ and T$=\{x^0=1,x^1,...,x^n\}$ are chosen as for the polynomial case (see section below about GP), and a peculiar syntax rule is defined to ensure that all the non terminal nodes located below a "$*$"-type node are also "$*$"-type nodes. This trick avoids to create useless branching which could result in splitting and multiplying some monomials. Thanks to this architecture, a gene appears as a subtree linked to the root node of its chromosome through one or several "$+$"-type nodes. A parse analysis of the different genes composing a chromosome also permits to avoid the creation of spurious genes by identifying and grouping them if any. As an example, the figure below depicts the tree's architecture corresponding to the function $(a_0+a_1*x_2+a_2*x_1*x_3)/(b_0+b_1*x_1+b_2*x_1^2*x_3+b_3*x_2*x_3^2)$. The 5 genes related to the different monomials are highlighted by colours (except from the constants $a_0$ and $b_0$ which are an integral part of the structure).
+
+To solve the parametric optimization, i.e. to estimate the regression coefficients $(a_j,b_j)$ of any created tree, TRACKER implements a well-known technique, in use for identifying transfer functions in the frequency domain [1,5]. In the general case where $f$ is a rational function expressed as:
+
+$(2)\hspace{3cm}y_k=f(x_k)=P(x_k)\bigg/Q(x_k)=\displaystyle\sum_{j=0}^{n_P}a_j\ r_j^P(x_k)\bigg/\displaystyle\sum_{j=0}^{n_Q}b_j\ r_j^Q(x_k)$
+
+where $\left\{r_j^P,j\in [1,n_P]\right\}$ and $\left\{r_j^Q,j\in [1,n_Q]\right\}$ are two sets of monomial regressors, this consists in iteratively linearizing the expression of the error term involved in the quadratic cost function as:
+
+$(3)\hspace{3cm}\hat{\epsilon}_k\simeq\bigg[\displaystyle\sum_{j=0}^{n_P}a_j\ r_j^P(x_k)-\displaystyle\sum_{j=1}^{n_Q}b_j\ y_k\ r_j^Q(x_k)-y_k\bigg]\bigg/\bigg[1+\displaystyle\sum_{j=1}^{n_Q}\hat{b}_j\ r_j^Q(x_k)\bigg]$
+
+where the approximation of $\epsilon_k$ comes from the replacement of the parameters $b_j$ by their most recent estimates $\hat{b}_j$ at the running iteration, and the denominator is arbitrarily normalized by choosing $b_0=1$. This algorithm relies on the fact that the denominator approximation becomes fully justified when the iterative process has converged. Hence, the parameters $(a_j,b_j)$ to be determined just become solution of a linearized LS problem. In practice, 2 or 3 iterations are usually sufficient to ensure the convergence of this process, conveniently initialized by setting the denominator to 1 at the first iteration. In case of ill-conditioning, a few iterations of Levenberg-Marquardt optimization are used to recover a satisfactory result. Introduced into the GP selection process (see section below about GP), that technique enables to evaluate the performance of every individual very easily, by coming down to a short series of ordinary LS. The overcost remains limited because the major part of the computations required for the regression matrix can be stored and reused throughout the loop. Otherwise, to get well-defined LFRs, an important issue is to check that the denominator has no roots in the considered domain, i.e. $Q(x)\neq0$ for all $x$. Hence, a $\mu$-analysis based technique is implemented to check the nonsingularity of the resulting functions, and additional constraints are introduced until strictly positive denominators are obtained [2].
+
+Syntax
+
+[pop,best,fdata,fdesc,fsym,flfr]=tracker(X,Y,names,maxdeg{,options})
+
+Input arguments
+
+The first four input arguments are mandatory:
+
+ X Values $\left\{x_k\in\mathbb{R}^n,k \in [1, N]\right\}$ of the explanatory variables $x$ ($n\times N$ array, where X(:,k) corresponds to $x_k$). Y Samples $\left\{y_k\in\mathbb{R}, k\in [1, N]\right\}$ to be approximated ($1\times N$ array where Y(k) corresponds to $y_k$). names Names of the explanatory variables $x$ ($1\times n$ cell array of strings). maxdeg Maximum degree of the approximating rational function $f$.
+
+The fifth input argument is an optional structured variable. Default values are given between brackets. Most of the parameters can be left to their default setting, some of them (tree features, evolutionary process) being especially devoted to experienced users. The most important ones are maxexp, nbind and nbgen.
+
+ options $\hspace{0.65cm}$User constraints and settings maxexp: [maxdeg*ones(1,n)] maximum exponent of each explanatory variable in the approximating rational function $f$. weights: [ones(1,N)] vector containing the weighting coefficients applied to the data samples. trace: [1] trace of execution (0=no, 1=text, 2=text+figures). viewpoint: [0 0] deviation with respect to the default viewpoint (see plotapprox) ; applicable only if 3-D graphs are to be displayed (options.trace=2 and $n=2$). Population features nbind: [100] number of individuals in the population. nbgen: [100] maximum number of generations. display: [5] display rate in number of generations. Convergence parameters goal: [false] to stop if a minimum fitness value is reached. target: [0] minimum fitness value for stopping. Remark: Stopping the run at any time is also possible by changing a flag from 0 to 1 in the file stop.dat (flag checked by the code at the end of every generation). Set of terminal nodes nbfvar: [-1] number of fictitious variables added to get simpler trees: $\hspace{1.5cm}$(nbfvar<0 to let the fictitious variables be automatically determined w.r.t. $maxexp$, $\hspace{1.6cm}$ nbfvar=0 to avoid any fictitious variable, $\hspace{1.6cm}$ nbfvar>0 to choose the number and type of fictitious variables). fvar: [ [] ] vector containing the numbers of the explanatory variables associated to the fictitious variables (to be provided only if nbfvar>0). dfvar: [ [] ] vector containing the relative degrees of the explanatory variables associated to the fictitious variables (to be provided only if nbfvar>0). Tree features treedepth: [13] maximum allowed depth of trees (can be automatically incremented during the run till the treedepthigh value is reached). treenodes: [200] maximum allowed number of nodes per tree. treealgo: [3] method used to generate the trees (1=full, 2=grow, 3=ramp half and half). subtreedepth: [min(8,fix(2*treedepth/3))] maximum allowed depth of sub-trees when using mutation operator. treedepthigh: [18] maximum maximorum value of the treedepth parameter. Evolutionary process pmutation: [0.10] probability of mutation. pcrossover: [0.85] probability of crossover. pcopy: [0.05] probability of direct reproduction. Remark: pmutation, pcrossover and pcopy must sum to 1. pmutation_subtree: [0.90] probability of sub-tree mutation. pmutation_termswitch: [0.10] probability of exchange between terminal nodes. Remark: pmutation_subtree and pmutation_termswitch must sum to 1. toursize: [4] tournament size during the selection process. highlevcross: [0.5] proportion of high level crossover allowed for '+'-type nodes. parsipress: [false] lexicographic parsimony pressure. elitism: [0.05] elite proportion of the population kept for the following generation.
+
+Output arguments
+
+ pop Structure containing the main information about the individuals of the final population: nbindiv: number of individuals in the population. nbinputs: number of explanatory variables (including fictitious variables if any). nbfinputs: number of fictitious variables added to get simpler trees. f2nfinputs: row vector (1 x nbfinputs) containing the numbers of the explanatory variables associated to the fictitious variables (only if nbfvar~=0). degfinputs: row vector (1 x nbfinputs) containing the relative degrees of the explanatory variables associated to the fictitious variables (only if nbfvar~=0). indiv: cell vector containing a representation of the parse trees associated to the individuals of the population (each component includes 2 cells of char containing the chromosomes associated to the numerator pop.indiv{i}(1) and denominator pop.indiv{i}(2)). fitness: vector containing the fitnesses of the individuals of the population. nbnodes: vector containing the numbers of nodes of the individuals of the population. param: cell vector containing the monomials coefficients (vector) for the individuals of the population ordered as follows: param{i}(1) = constant term of the numerator for the $i^{th}$ individual of the population, param{i}(2:l+1) = coefficients associated to the $l$ numerator monomials for the $i^{th}$ individual of the population (apart from the constant term), param{i}(l+2:l+m+1) = coefficients associated to the $m$ denominator monomials for the $i^{th}$ individual of the population (apart from the constant term frozen to 1). nbreg: vector containing the number of regressors associated to any individual in the population ($l+m$). degmax: vector containing the max degree of the regressors associated to any individual in the population. sumdeg: vector containing the total degree associated to any individual in the population. best Index of the best individual in the final population (with respect to fitness). fdata Values $\left\{f(x_k)\in\mathbb{R}, k \in [1, N]\right\}$ of the approximating function $f$ corresponding to the best individual (same size as Y). fdesc Description of the approximating function $f$ corresponding to the best individual (fdesc.cnum(j)/cden(j) and fdesc.enum(j,:)/eden(j,:) contain the coefficient and the exponents of the $j$th monomial of the numerator/denominator used to approximate Y). fsym Symbolic representation of the rational function $f$ corresponding to the best individual (symbolic object). flfr Linear fractional representation of the rational function $f$ corresponding to the best individual (GSS object if the GSS library is installed, LFR object otherwise if the LFR toolbox is installed).
+
+lsapprox olsapprox qpapprox koala
+
+Example
+
+Drag coefficient of a generic fighter aircraft model:
+load data_cx % alfa angle converted from radians to degrees (estimation and validation data) X1(2,:)=X1(2,:)*57.3; Xv(2,:)=Xv(2,:)*57.3; % approximation on a rough grid maxdeg=8; [pop,best,fdata,fdesc,fsym,flfr]=tracker(X1,Y1,names,maxdeg,tracker_options);
+
+----------------------------------------------------------------------
+Systems Modeling Analysis and Control (SMAC) Toolbox
+APRICOT Library
+Version 1.0 - April 2014
+Rational approximation using Genetic Programming
+----------------------------------------------------------------------
+Number of samples: 1196
+Number of explanatory variables: 2
+Creation of 4 fictitious variables
+- with degrees w.r.t. explanatory variable #1: 3 5
+- with degrees w.r.t. explanatory variable #2: 3 5
+Maximum degree required for the approximation function: 8
+Maximum degree required for each variable: 8 8
+The population is comprised of 100 individuals and will be evolved over 100 generations at most
+There are 6 explanatory variables, including 4 fictitious variables (added to get simpler trees)
+Generation 0 --> best fitness: 0.00283915 (40 nodes)
+Generation 5 --> best fitness: 0.00118514 (76 nodes)
+Generation 10 --> best fitness: 0.00118290 (72 nodes)
+Generation 15 --> best fitness: 0.00115280 (84 nodes)
+Generation 20 --> best fitness: 0.00111282 (80 nodes)
+Generation 25 --> best fitness: 0.00104232 (88 nodes)
+Generation 30 --> best fitness: 0.00104232 (88 nodes)
+Generation 35 --> best fitness: 0.00102940 (84 nodes)
+Generation 40 --> best fitness: 0.00099021 (86 nodes)
+Generation 45 --> best fitness: 0.00099021 (86 nodes)
+Generation 50 --> best fitness: 0.00095285 (84 nodes)
+Generation 55 --> best fitness: 0.00094642 (98 nodes)
+Generation 60 --> best fitness: 0.00094455 (96 nodes)
+Generation 65 --> best fitness: 0.00092366 (102 nodes)
+Generation 70 --> best fitness: 0.00092366 (102 nodes)
+Generation 75 --> best fitness: 0.00092279 (100 nodes)
+Generation 80 --> best fitness: 0.00092279 (100 nodes)
+Generation 85 --> best fitness: 0.00092257 (94 nodes)
+Generation 90 --> best fitness: 0.00078144 (98 nodes)
+Generation 95 --> best fitness: 0.00078144 (98 nodes)
+Final size of the archive memory: 8615
+Positivity check is successful, everything is OK
+Fitness value of the best individual #96: 0.00078144 (98 nodes)
+Symbolic expression of the rational approximation
+Numerator: 0.0166278+0.00254291*Al^2+6.86357e-006*Al^4-0.000493197*Ma^4*Al^3+7.49538e-005*Ma^3*Al^3
++3.73923e-005*Ma*Al^3-5.59117e-006*Ma*Al^4-6.15747*Ma^4+3.6731e-005*Ma^3*Al^4-0.000507616*Al^3
+-0.0793195*Ma+5.21629*Ma^5+2.02358*Ma^3-5.4279e-007*Al^5
+Denominator: 1.0-16.6575*Ma^2+0.0972086*Ma^5*Al^3+0.261167*Al^2-235.275*Ma^6+0.00194204*Al^4
+-0.073906*Ma^4*Al^3+0.00353226*Ma*Al^3-7.47814e-005*Ma*Al^4-697.819*Ma^4-0.0344331*Al^3+231.866*Ma^3
++0.141067*Al-2.48184e-005*Al^5-3.96694*Ma+765.611*Ma^5
+Size of the LFR: (trial#1 --> 15 / trial#2 --> 20 / trial#3 --> 15) ==> Minimum size = 15
+CPU time for the tracker call = 854 seconds
+
+% Plot 3D surfaces (estimation results on a rough grid and validation results on a fine grid) plosurfs(pop,best,X1,Y1,names,Xv,Yv);
+
+Individual #96 (98 nodes/28 terms/max degree 8/total degree 116)
+Validation errors: Global=3.384660e-003 - RMS=8.539880e-004 - Max Local=4.596582e-003
+
+% Plot Pareto fronts plofronts(pop,best);
+
+% User loop to analyse and plot any individual (Pareto optimal solution) loop=1; while loop  indiv = input('\nIndividual to be displayed (press RETURN to terminate) ?');  if isempty(indiv)   loop=0;  else   plosurfs(pop,indiv,X1,Y1,names,Xv,Yv);   [fdata,fdesc,fsym,flfr]=pop2lfr(pop,indiv,names,X1);  end end
+
+Individual #32 (66 nodes/21 terms/max degree 8/total degree 90)
+Validation errors: Global=5.193755e-003 - RMS=1.057876e-003 - Max Local=6.213335e-003
+Symbolic expression of the rational approximation
+Numerator: 0.0136579-2.66819e-010*Al^6+1.0892e-006*Al^4-0.0020092*Ma^4*Al^3+0.000711613*Ma^3*Al^3
++0.00136296*Ma^5*Al^3-0.000451564*Ma+0.202329*Ma^5-0.0670935*Ma^3-0.000739199*Al-5.0639e-005*Al^3
+-3.52304e-008*Al^5
+Denominator: 1.0+0.0217883*Al^2+0.000157657*Al^4+0.00771755*Ma^5*Al^3-0.00226182*Ma^3*Al^3
+-4.24916e-006*Ma*Al^4+11.9683*Ma^4-0.00272452*Al^3-0.368659*Ma-6.21157*Ma^3-2.14231e-006*Al^5
+Size of the LFR: (trial#1 --> 16 / trial#2 --> 18 / trial#3 --> 16) ==> Minimum size = 16
+
+$\Rightarrow$ the science of LFR sizes is not an exact one, ...and is often disappointing !!!
+
+What is Genetic Programming ?
+
+Genetic Programming (GP) is part of the evolutionary algorithms family, in the same way as GAs, evolutionary programming, etc. It uses the same principles inspired by those of natural evolution to evolve a population of individuals randomly created, improving its behavior progressively until a satisfactory solution is found. However, opposite to GAs, it is not based on a binary coding of information but uses a structured representation instead, as syntax trees. These parse trees appear more suited to solve structural or symbolic optimization problems since they can have different sizes and shapes. The alphabet used to create these models is also flexible enough to cope with different types of problems, and so they can be used to encode mathematical equations as well as behavior models, ... and even computer programs. First works date back to the early sixties, but GP was really implemented and brought up to date only in the early 90s by John Koza, thanks also to an increase of computing power. He was thus able to prove the interest of GP in many application fields, and laid the foundations of a standard paradigm which did not evolve much since then [3]. The iterative process, which breeds a population of programs, transforms them generation after generation by applying genetic mechanisms like those of Darwinian evolution: reproduction, mutation, crossover, but also gene duplication or deletion. Unlike GAs, they are applied to the hierarchically structured trees of the individuals, which comprise a set of nodes and links. These elements fall into two categories: the set F of internal nodes called functions or operators, and the set T of tree's leaves called terminals. An example is given below, corresponding to the mathematical function $f(x_1,x_2)=x_1(x_2-1)/(x_1+x_2)/\sqrt{x_2}$.
+
+All types of functions are acceptable: from elementary ones like arithmetical operators $(+,-,*,/)$ or mathematical operators $(\sqrt,exp,...)$, to logical, conditional (tests), or even more complex (e.g. user-defined). The terminals correspond to the function arguments but can also include some of their internal parameters or predefined constants. By the way, the content of T is a central issue for the problem of a joint structural/parameter optimization. A priori, it requires to discover the best functional structure permitting to fit the data b

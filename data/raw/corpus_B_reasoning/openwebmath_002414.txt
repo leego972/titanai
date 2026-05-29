@@ -1,0 +1,276 @@
+# How I Am Planning My Photovoltaic System Using TimescaleDB, Node-RED, and Grafana
+
+Planning photovoltaic systems isn’t easy, even with a specialist at hand. They ask all kinds of questions regarding your power consumption, typical usage hours, or distribution over a year.
+
+Collecting consumption data at the granularity of a few seconds is key to finding all the answers for the more precision-loving audience, such as myself.
+
+The main reason I spent all this time understanding our actual consumption is simple: cost efficiency. My wife and I have an electricity consumption way out of what is expected of a German household with just two people (and two cats!). That said, I really wanted to get the most out of the system, no matter the cost (well, almost).
+
+This is the story of how I used TimescaleDB, Node-RED, Grafana, a Raspberry Pi, some open-source software, and a photodiode to collect data straight from the power meter to plan my photovoltaic system. More than a year after the first data point came in, I have enough insight to answer anything thrown at me—and you can do that too; just carry on reading!
+
+## Knowing Your Power Consumption and the Lack of Sleep
+
+As a normal consumer, at least in Germany, there is almost no way to answer those questions without making stuff up. Most of us send a single meter reading per year for invoicing reasons. That number is divided by 12 months and defines the monthly prepayment. If you paid too much, you’d get some money back. If you paid less than you consumed, you’d get charged the remaining amount.
+
+If you want to know the actual value for a per-month consumption, you can write down one monthly number. If you want to know how much you spend in a day, here’s your daily routine. Going further is impractical, though, since hopefully you’ll be sleeping for at least a few hours a day. So, unless you can convince your spouse to take shifts, one number per hour isn’t really achievable.
+
+If you ended up here thinking this title is clickbait, allow me to disappoint you. It is all real. At the end of 2019, we bought our house—a nice but older one, built in 1968. From the beginning, we knew we wanted a photovoltaic system on the roof. We’re not the power-saving kind of folks. But while researching, we bumped into a wall of questions to figure out how large (in terms of kWh) the system should be and, even more important, what kind of solar battery storage capacity we should consider.
+
+## Requirements Are Key
+
+Since you have to start somewhere, we set a few basic requirements. The roof needed to be replaced in the next few years so an in-roof system would be interesting. Just for the record, with an in-roof system, the shingle roof is completely replaced with solar panels (a bit like with the Tesla solar tiles). Those things tend to be a bit more expensive but look super cool with the photovoltaic system being the actual roof. That said, we opted for a more expensive system with no shingles in sight. Probably a win-win. :-)
+
+Secondly, we knew we wanted battery storage and that it should function as a power outage emergency backup. So, either the batteries themselves or the inverter needed to be able to create their own island power network in case of an outage.
+
+Last but not least, it had to support home automation to better integrate with the new heating solution (a hybrid system with gas and heat pump) rather than just switching a relay or two. I also want to make sure that during a power outage certain devices will not be able to power on to prevent an emergency system overload, which has a limited kW budget.
+
+What I’m not interested in is providing power back to the net. If the system produces more than I can use or store, fair enough, but I want to delay that as long as possible.
+
+## Duct Tape, the Professional's Favorite Tool
+
+New power meters (or “Smart Meters” as we call them in Germany; and no, they’re not smart, no joke here!) have built-in digital communication. Using an infrared LED, the system morses out its data in certain intervals. You just™ have to capture the impulses, decode the data, store them, and be done. Thank you for reading.
+
+Jokes aside, that is the basic concept. But there are many more non-smart things about the Smart Meter, including a built-in photodiode that reacts to a flashlight blinking (see the link above). Yeah, imagine blinking your four-number pin code. I’m not kidding you!
+
+Anyway, the target is clear. We know the steps; let’s get going.
+
+The first step is to capture the infrared light impulsed out from the power meter. I built a very simple but super professional setup with a breadboard and duct tape, the professional’s best friend.
+
+Using duct tape, I taped the photodiode straight to the power meter’s infrared LED. The breadboard just holds a small resistor. Apart from that, everything’s directly connected to the Raspberry Pi’s UART port.
+
+The Raspberry Pi runs the normal Raspbian Light operating system, as well as the decoder software that decodes the SML (Smart Message Language) protocol and forwards it to an MQTT server (for simplicity, I use Eclipse Mosquitto, which is already running for my home automation system). The decoder software is called sml2mqtt and is available on GitHub. Big thanks to its developer, spacemanspiff2.
+
+A Node-RED workflow handles data transformation and writing into TimescaleDB.
+
+## MQTT, Node-RED, and TimescaleDB
+
+We now receive many messages in Node-RED at the other end of the MQTT topic. We know each value based on the last segment of the topic’s name. All messages look similar to the following:
+
+{
+"topic": "sml2mqtt/090149534b000403de98/watts_l1",
+"qos": 0,
+"retain": false,
+"_msgid": "6a2cd6bb4459e28c"
+}
+
+
+As mentioned before, the topic’s name also defines what the payload means. The payload itself is the value, and the other properties are just MQTT or Node-RED elements. We can just ignore them.
+
+For our storage, we go with a narrow table setup where one column is used for the values (all of the ones we care for are integers, anyway). We have one column to store the information on what type of value is represented (phase 1-3, total or absolute counter value). Some values are sent more often than others, but we’ll handle that with TimescaleDB’s time_bucket function later.
+
+To create the necessary metrics table and transform it into a hypertable, we connect to the database (for example, using psql) and execute the following queries:
+
+create table metrics
+(
+created timestamp with time zone default now() not null,
+type_id integer                                not null,
+value   double precision                       not null
+);
+
+select create_hypertable('metrics', 'created');
+
+
+As I want to store data for quite some time, I’ll also go with TimescaleDB’s columnar compression. We are now ready to insert our data through Node-RED.
+
+alter table metrics set (timescaledb.compress);
+
+
+That said, the next step is to jump into Node-RED and create a flow. Nothing too complicated, though. The Node-RED flow is (almost) “as simple as it gets.”
+
+It takes messages from the MQTT topic, passes them through a switch (with one output per interesting value), does some basic transformation (such as ensuring that the value is a valid integer), moves the type and value into SQL parameters, and eventually calls the actual database insert query with those parameters.
+
+As I said, the switch just channels the messages to different outputs depending on the topic’s name. Since I know the last segment of the topic won’t overlap with other topics, I opt for a simple “contains” selector and the name I’m looking for.
+
+The functions behind that simply create a JSON object like this:
+
+{
+"type": $id, "value": parseInt(msg.payload) }  The term$id is a placeholder for the number of the output (e.g., watts_l1 means 1).
+
+The second transformer step takes the JSON object and transforms it into an array to be passed directly to the database driver.
+
+return {
+params: [msg.type, msg.value]
+};
+
+
+Finally, the last node executes the actual database query against the database. Nothing fancy going on here. TimescaleDB uses standard PostgreSQL syntax to write to a hypertable, which means that the full query is just an insert statement, such as:
+
+INSERT INTO metrics (type_id, value)
+VALUES ($1,$2);
+
+
+After deploying the flow, it is time to wait. For about a year.
+
+## Downsampling for Comprehension
+
+Now that we have collected all the data, it is time to start analyzing it. You obviously won’t have to wait for a year. I found it very interesting to keep an eye on changes around weekdays, months, and the different seasons, especially when the heating is on.
+
+When analyzing data, it is always important to understand the typical scope or time frame you want to look at. While we have sub-minute (sometimes even to the second) granularity, analyzing at such a micro level is not useful.
+
+Using TimescaleDB’s continuous aggregates, we can downsample the information into more comprehensible chunks (chunks are data partitions within a table). I decided that one-hour chunks are granular enough to see the changes in consumption over the day. Apart from that, I also wanted to have daily values.
+
+Eventually, I came up with two continuous aggregates to precalculate the necessary data from the actual (real-time) raw values.
+
+The first one calculates the kWh per day. Living in Germany, I really want the day line in the correct time zone (Europe/Berlin). That was not yet (easily) possible when I initially built the continuous aggregate, but it is now!
+
+create materialized view kwh_day_by_day(time, value)
+with (timescaledb.continuous) as
+SELECT time_bucket('1 day', created, 'Europe/Berlin') AS "time",
+round((last(value, created) - first(value, created)) * 100.) / 100. AS value
+FROM metrics
+WHERE type_id = 5
+GROUP BY 1;
+
+
+The second continuous aggregate performs the same calculation, but instead of downsampling to a day value, it does it by the hour. While the time zone is not strictly required here, I still find it best to add it for clarity.
+
+create materialized view kwh_hour_by_hour(time, value)
+with (timescaledb.continuous) as
+SELECT time_bucket('01:00:00', metrics.created, 'Europe/Berlin') AS "time",
+round((last(value, created) - first(value, created)) * 100.) / 100. AS value
+FROM metrics
+WHERE type_id = 5
+GROUP BY 1;
+
+
+Finally, it’s time to make things visible.
+
+## Visual Data Analytics
+
+For easier data digestion, I prefer a visual representation. While aggregating data on the command line interface (psql) or with simple query tools would work (the largest resulting dataset would comprise 31 days), it is valuable to have your data presented visually. Especially when you want to use the dashboard with your energy consultant or photovoltaic system engineer.
+
+For visualization, I use Grafana. Easy to install, lots of visual plugins, direct support for TimescaleDB (able to generate more specific time-series queries), and I’m just used to it.
+
+Over time, the Grafana dashboard has grown with more and more aggregations. Most out of curiosity.
+
+Apart from that, the dashboard shows the current consumption per electrical phase, which is updated every few seconds. No live push, but Grafana’s 10-second refresh works great for me.
+
+Today, however, I want to focus on the most interesting measurements:
+
+• Energy consumption by hour of day
+• Energy consumption by weekday
+• Energy consumption by month
+
+All those aggregations take the last 12 months into account.
+
+## Catch Me in My Sleep
+
+A single day most commonly has 24 hours. Except when you have work, then it probably needs to have 48 hours.
+
+Anyway, energy consumption heavily depends on the hour of the day. That said, if you consider buying a battery system, what you want is to provide at least enough capacity to compensate for your night consumption. And remember that the summer days are “longer” (meaning there is sunlight for more hours). Therefore, I consider at least 6 p.m. to 6 a.m. as night hours. Twelve hours to compensate. With the consumption we have, that is quite a bit.
+
+But first, let’s figure out how much that is (I’m using the median and the maximum):
+
+WITH per_hour AS (
+select
+time,
+value
+from kwh_hour_by_hour
+where "time" at time zone 'Europe/Berlin' > date_trunc('month', time) - interval '1 year'
+order by 1
+), hourly AS (
+SELECT
+extract(HOUR FROM time) * interval '1 hour' as hour,
+value
+FROM per_hour
+)
+SELECT
+hour,
+approx_percentile(0.50, percentile_agg(value)) as median,
+max(value) as maximum
+FROM hourly
+GROUP BY 1
+ORDER BY 1;
+
+
+Since I’m a big fan of CTE (Common Table Expressions) and find them much more readable than a lot of subqueries, you’ll have to live with it. :-)
+
+Anyway, with our already existing continuous aggregation for hour-by-hour consumption, it is as simple as possible to select all of last year’s values. That will result in a list of time buckets and values. The second step is to extract the hour and transform it into an interval (otherwise, Grafana really really won’t like you), and, last but not least, create the actual time-series result set for Grafana to show. Here, I use the Timescale Toolkit functionality for approximate percentiles (which is good enough for me) and tell it to calculate the 50th percentile (the median). The second value is just using the standard PostgreSQL max function.
+
+We could stop here because what we just created is our baseline of consumption, which answers the most important question: “What does a common day look like?”
+
+For us, as you can see, we wake up just shy of 7 a.m. and take a shower. Since we have hot water through electricity, we can see the consumption increasing quite drastically. You can also see that we head to bed sometime between 11 p.m. to midnight.
+
+Finding out the optimal battery capacity is now as simple as adding up either the median or maximum consumption for “night hours,” depending on how much you want to compensate. Remember, it’s also important that the photovoltaic system manages to charge the battery during the day.
+
+## Weekdays, or the Seven Sins
+
+But we don’t want to stop now. There are two more graphs of interest. Let’s move onward to the aggregation by weekdays.
+
+Spoiler alert: there is a difference in consumption. Well, there would be if we were to head to an office to work. But we don’t. Neither me nor my wife. But if you do, there are certainly differences between weekdays and weekends.
+
+The query to generate the graph is quite similar to the one before. However, instead of using the hour-by-hour continuous aggregation, we’ll use the day-by-day one. Eventually, we map the values to their respective (human-readable) names and have Grafana render out the time series:
+
+WITH per_day AS (
+select
+time,
+value
+from kwh_day_by_day
+where "time" at time zone 'Europe/Berlin' > date_trunc('month', time) - interval '1 year'
+order by 1
+), daily AS (
+SELECT
+to_char(time, 'Dy') as day,
+value
+FROM per_day
+), percentile AS (
+SELECT
+day,
+approx_percentile(0.50, percentile_agg(value)) as value
+FROM daily
+GROUP BY 1
+ORDER BY 1
+)
+SELECT
+d.day,
+d.ordinal,
+pd.value
+FROM unnest(array['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) WITH ORDINALITY AS d(day, ordinal)
+LEFT JOIN percentile pd ON lower(pd.day) = lower(d.day);
+
+
+The result of our work tells us the median consumption per day of the week. One thing I haven’t figured out yet is why Sundays have higher consumption. Maybe the file server is scrubbing the disks; who knows? :-D
+
+## The 12 Months
+
+Last but not least, we also want to see our consumption on a monthly basis. This is what most people collect today by writing down the counter reading on the first day of every month. But since we have the data on a much higher granularity and already have the other graphs, this is as simple as summing up now.
+
+I’ll spare you the details, but here’s the query. Nothing to see here. At least nothing we haven’t seen before. :-)
+
+WITH per_day AS (
+select
+time,
+value
+from kwh_day_by_day
+where "time" > now() - interval '1 year'
+order by 1
+), per_month AS (
+SELECT
+to_char(time, 'Mon') as month,
+sum(value) as value
+FROM per_day
+GROUP BY 1
+)
+SELECT
+m.month,
+m.ordinal,
+pd.value
+FROM unnest(array['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']) WITH ORDINALITY AS m(month, ordinal)
+LEFT JOIN per_month pd ON lower(pd.month) = lower(m.month)
+ORDER BY ordinal;
+
+
+## Why Did I Read Until Here?
+
+If you made it here, congratulations—and I’m sorry. This got much longer than expected, and I already left out quite a few details. If you have any questions, feel free to reach out. Happy to help and answer questions on the setup.
+
+For those amazed at how unprofessional my electrical skills look—I’m scared myself! Jokes aside, this is not the final setup. It was designed for one use case, to collect the information and give me the possibility to make educated decisions. Consider this setup a “temporary workaround.” It will not stay. I promise! Maybe.
+
+The interesting fact about all of this is that time series is much more common in our daily lives than some people think. TimescaleDB, in combination with the other tools, made it perfectly easy to set it up, have it running 24/7 and have me quickly make analytics that would have been impossible without a time-series database.
+
+Unfortunately, I cannot yet present you with a picture of the ready system. Due to shortages all over the world, the system is still not finished.+
+
+Anyway, there are a lot of cool projects and use cases in your home you can use to get started with time-series data, TimescaleDB, and tools such as Grafana and Node-RED. You can sign up for a 30-day free trial here, no credit card required. If you’re interested, check it out! Go!
+
+The open-source relational database for time-series and analytics.
+This post was written by

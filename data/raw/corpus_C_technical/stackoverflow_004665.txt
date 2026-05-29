@@ -1,0 +1,74 @@
+Question: <p>How can I delete the contents of a local folder in Python?</p>
+
+<p>The current project is for Windows but I would like to see *nix also.</p>
+
+Answer: <p><em>Notes: in case someone down voted my answer, I have something to explain here.</em></p>
+
+<ol>
+<li>Everyone likes short 'n' simple answers. However, sometimes the reality is not so simple.</li>
+<li>Back to my answer. I know <code>shutil.rmtree()</code> could be used to delete a directory tree. I've used it many times in my own projects. But you must realize that <strong>the directory itself will also be deleted by <code>shutil.rmtree()</code></strong>. While this might be acceptable for some, it's not a valid answer for <strong>deleting the contents of a folder (without side effects)</strong>.</li>
+<li>I'll show you an example of the side effects. Suppose that you have a directory with <strong>customized</strong> owner and mode bits, where there are a lot of contents. Then you delete it with <code>shutil.rmtree()</code> and rebuild it with <code>os.mkdir()</code>. And you'll get an empty directory with <strong>default</strong> (inherited) owner and mode bits instead. While you might have the privilege to delete the contents and even the directory, you might not be able to set back the original owner and mode bits on the directory (e.g. you're not a superuser).</li>
+<li>Finally, <strong>be patient and read the code</strong>. It's long and ugly (in sight), but proven to be reliable and efficient (in use).</li>
+</ol>
+
+<hr>
+
+<p>Here's a long and ugly, but reliable and efficient solution.</p>
+
+<p>It resolves a few problems which are not addressed by the other answerers:</p>
+
+<ul>
+<li>It correctly handles symbolic links, including not calling <code>shutil.rmtree()</code> on a symbolic link (which will pass the <code>os.path.isdir()</code> test if it links to a directory; even the result of <code>os.walk()</code> contains symbolic linked directories as well).</li>
+<li>It handles read-only files nicely.</li>
+</ul>
+
+<p>Here's the code (the only useful function is <code>clear_dir()</code>):</p>
+
+<pre><code>import os
+import stat
+import shutil
+
+
+# http://stackoverflow.com/questions/1889597/deleting-directory-in-python
+def _remove_readonly(fn, path_, excinfo):
+    # Handle read-only files and directories
+    if fn is os.rmdir:
+        os.chmod(path_, stat.S_IWRITE)
+        os.rmdir(path_)
+    elif fn is os.remove:
+        os.lchmod(path_, stat.S_IWRITE)
+        os.remove(path_)
+
+
+def force_remove_file_or_symlink(path_):
+    try:
+        os.remove(path_)
+    except OSError:
+        os.lchmod(path_, stat.S_IWRITE)
+        os.remove(path_)
+
+
+# Code from shutil.rmtree()
+def is_regular_dir(path_):
+    try:
+        mode = os.lstat(path_).st_mode
+    except os.error:
+        mode = 0
+    return stat.S_ISDIR(mode)
+
+
+def clear_dir(path_):
+    if is_regular_dir(path_):
+        # Given path is a directory, clear its content
+        for name in os.listdir(path_):
+            fullpath = os.path.join(path_, name)
+            if is_regular_dir(fullpath):
+                shutil.rmtree(fullpath, onerror=_remove_readonly)
+            else:
+                force_remove_file_or_symlink(fullpath)
+    else:
+        # Given path is a file or a symlink.
+        # Raise an exception here to avoid accidentally clearing the content
+        # of a symbolic linked directory.
+        raise OSError("Cannot call clear_dir() on a symbolic link")
+</code></pre>

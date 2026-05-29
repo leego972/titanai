@@ -1,0 +1,99 @@
+Question: <p>I still haven't got my head around decorators in Python.</p>
+
+<p>I've already started using a lot of closures to do things like customize functions and classes in my coding.</p>
+
+<p>Eg.</p>
+
+<pre><code>class Node :
+    def __init__(self,val,children) :
+        self.val = val
+        self.children = children
+
+def makeRunner(f) :
+    def run(node) :
+        f(node)
+        for x in node.children :
+            run(x)
+    return run
+
+tree=Node(1,[Node(2,[]),Node(3,[Node(4,[]),Node(5,[])])])
+
+def pp(n) : print "%s," % n.val
+printTree = makeRunner(pp)
+printTree(tree)
+</code></pre>
+
+<p>As far as I can see, decorators are just a different syntax for doing something similar. </p>
+
+<p>Instead of </p>
+
+<pre><code>def pp(n) : print "%s," % n.val
+printTree = makeRunner(pp)
+</code></pre>
+
+<p>I would write :</p>
+
+<pre><code>@makeRunner
+def printTree(n) : print "%s," % n.val
+</code></pre>
+
+<p>Is this all there is to decorators? Or is there a fundamental difference that I've missed? </p>
+
+Answer: <p>Are your examples real code, or just examples?</p>
+
+<p>If they're real code, I think you overuse decorators, probably because of your background (i.e. you are used to other programming languages)</p>
+
+<h3>Stage 1: avoiding decorators</h3>
+
+<pre><code>def run(rootnode, func):
+    def _run(node): # recursive internal function
+        func(node)
+        for x in node.children:
+            _run(x) # recurse
+    _run(rootnode) # initial run
+</code></pre>
+
+<p>This run method obsoletes makeRunner. Your example turns to:</p>
+
+<pre><code>def pp(n): print "%s," % n.val
+run(tree, pp)
+</code></pre>
+
+<p>However, this ignores completely generators, soâ¦</p>
+
+<h3>Stage 2: using generators</h3>
+
+<pre><code>class Node :
+    def __init__(self,val,children) :
+        self.val = val
+        self.children = children
+
+    def __iter__(self): # recursive
+        yield self
+        for child in self.children:
+            for item in child: # recurse
+                yield item
+
+def run(rootnode, func):
+    for node in rootnode:
+        func(node)
+</code></pre>
+
+<p>Your example remains</p>
+
+<pre><code>def pp(n): print "%s," % n.val
+run(tree, pp)
+</code></pre>
+
+<p>Note that the special method <code>__iter__</code> allows us to use the <code>for node in rootnode:</code> construct. If you don't like it, just rename the <code>__iter__</code> method to e.g. <code>walker</code>, and change the <code>run</code> loop into: <code>for node in rootnode.walker():</code><br />
+Obviously, the <code>run</code> function could be a method of <code>class Node</code> instead.</p>
+
+<p>As you see, I suggest you use directly <code>run(tree, func)</code> instead of binding them to the name <code>printTree</code>, but you can use them in a decorator, or you can make use of the <code>functools.partial</code> function:</p>
+
+<pre><code>printTree= functools.partial(run, func=pp)
+</code></pre>
+
+<p>and from then on, you would just</p>
+
+<pre><code>printTree(tree)
+</code></pre>

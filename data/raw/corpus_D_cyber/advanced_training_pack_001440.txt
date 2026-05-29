@@ -1,0 +1,342 @@
+================================================================================
+TITAN AI — TRAINING PACK 015: SYSTEM DESIGN — COMPLEX REAL-WORLD SYSTEMS
+DESIGN URL SHORTENER, DISTRIBUTED CACHE, NOTIFICATION SYSTEM, SEARCH ENGINE,
+PAYMENT PROCESSOR, RIDE-SHARING, REAL-TIME CHAT, VIDEO STREAMING
+================================================================================
+
+================================================================================
+SYSTEM DESIGN METHODOLOGY (Use this framework every time)
+================================================================================
+
+STEP 1: REQUIREMENTS CLARIFICATION (5 minutes)
+  Ask before designing. Always.
+  Functional requirements: What does the system do? Core features only.
+  Non-functional requirements: Scale, latency, availability, durability, security.
+  
+  Key questions to ask:
+  - How many users? Daily active? Peak concurrent?
+  - What's the read:write ratio?
+  - Strong consistency required or eventual ok?
+  - What's the acceptable latency?
+  - What geographic distribution?
+  - Any compliance requirements (GDPR, HIPAA, PCI)?
+
+STEP 2: CAPACITY ESTIMATION (3 minutes)
+  Back-of-envelope math. Round aggressively. Get the order of magnitude right.
+  
+  Throughput → Storage → Network bandwidth → Cache sizing
+  
+  Common approximations:
+  1 day = 86,400 seconds ≈ 100K seconds
+  1 month = 2.5M seconds
+  1 million requests/day = 12 requests/second (100K seconds / 8.6 ≈ 12)
+
+STEP 3: API DESIGN (5 minutes)
+  Define the key endpoints. This forces clarity on what the system does.
+
+STEP 4: HIGH-LEVEL ARCHITECTURE (10 minutes)
+  Draw the main boxes: Client → API Gateway → Services → Databases
+
+STEP 5: DEEP DIVE (15 minutes)
+  Pick 2-3 interesting components. Go deep. Show you know the tradeoffs.
+
+================================================================================
+DESIGN 1: URL SHORTENER (like bit.ly)
+================================================================================
+
+REQUIREMENTS:
+  Functional: Given a URL, generate short code. Redirect short code to original URL.
+  NFR: 100M URLs created per day. 10B redirections per day. URL active for 5 years.
+
+CAPACITY:
+  Writes: 100M / 86400 = 1,157/second
+  Reads: 10B / 86400 = 115,740/second
+  Read:Write ratio = 100:1 (read heavy)
+  
+  Storage per URL: 500 bytes (URL) + 7 bytes (short code) + metadata ≈ 1KB
+  5 years storage: 100M/day × 365 × 5 × 1KB = 182TB
+  
+  Cache: 20% of URLs get 80% of traffic (Pareto principle)
+  Cache size: 115,740 reads/second × 20% × 1KB = 2.3MB/second to serve from cache
+  Keep last 24 hours hot: 115,740 × 86400 × 20% × 1KB = ~2TB daily cache
+
+KEY DESIGN DECISION: How to generate short codes?
+
+Option A: MD5 hash of URL, take first 7 characters
+  Problem: Hash collisions. Different URLs produce same 7-char prefix.
+  Problem: If user submits same URL twice: Gets same short code (good? bad?)
+  
+Option B: Auto-increment ID → Base62 encode
+  Database auto-increment: 1, 2, 3...
+  Base62 (a-z, A-Z, 0-9): 7 characters = 62^7 = 3.5 trillion URLs
+  Predictable but hard to guess (sequential but nobody starts at 1 and increments)
+  
+  def encode_base62(num):
+      chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+      result = []
+      while num > 0:
+          result.append(chars[num % 62])
+          num //= 62
+      return ''.join(reversed(result)).zfill(7)
+  
+  Problem: Single database is bottleneck at 1,157 writes/second (manageable but risky).
+  Problem: Multiple servers need globally unique IDs. Can't both auto-increment.
+
+Option C: Distributed ID generation (Twitter Snowflake)
+  64-bit ID = timestamp(41) + datacenter_id(5) + machine_id(5) + sequence(12)
+  Each machine generates unique IDs without coordination.
+  1024 machines × 4096 IDs/millisecond = 4M IDs/millisecond globally.
+  Best option for distributed, high-throughput requirement.
+
+DATABASE CHOICE:
+  Writes: Key-value store ideal (short_code → original_url)
+  Reads: 100:1 read-heavy → Cache aggressively
+  
+  Primary: PostgreSQL with index on short_code
+  Cache: Redis → short_code → original_url (1-hour TTL for popular URLs)
+  Read path: Redis first. If miss: PostgreSQL. Populate Redis.
+  
+  Why not pure NoSQL (DynamoDB)? Could work. But URL mapping is simple key-value.
+  PostgreSQL with proper indexing handles this comfortably. Don't add complexity without need.
+
+COMPLETE ARCHITECTURE:
+  Client → Load Balancer → URL Service (horizontal scale) → Redis Cache → PostgreSQL
+  
+  Write flow:
+  1. POST /shorten {url: "https://example.com/very-long-url"}
+  2. Generate ID (Snowflake service)
+  3. Encode to Base62 → "ab3Kf9z"
+  4. Write to PostgreSQL: short_code="ab3Kf9z", original_url="https://...", created_at, expires_at
+  5. Optionally cache in Redis
+  6. Return: {"short_url": "https://bit.ly/ab3Kf9z"}
+  
+  Read flow:
+  1. GET /ab3Kf9z → HTTP 301 (permanent) or 302 (temporary, for analytics)
+  2. Check Redis for "ab3Kf9z" → Hit? Return cached URL immediately
+  3. Miss? Query PostgreSQL → Check expiry → Redirect
+  4. Populate Redis with result
+
+  301 vs 302 choice:
+  301 Permanent: Browser caches redirect. Future requests don't hit your servers.
+    Pros: Lower load. Cons: Can't change destination, can't track individual clicks.
+  302 Temporary: Browser always asks your servers.
+    Pros: Can update destination, track every click. Cons: Higher load.
+  If analytics required: 302. If just redirect: 301.
+
+================================================================================
+DESIGN 2: DISTRIBUTED NOTIFICATION SYSTEM (push/SMS/email at scale)
+================================================================================
+
+REQUIREMENTS:
+  Send push notifications, SMS, email to 100M users.
+  Soft real-time: Notification delivered within 30 seconds.
+  Priority levels: Critical (immediate) vs. low (batch okay).
+  Delivery tracking: Did user receive and open notification?
+  User preferences: Users can opt out of specific notification types.
+
+CAPACITY:
+  100M users, average 5 notifications/day each = 500M notifications/day
+  = 5,787 notifications/second
+  Peak: 10x = 57,870/second (major event, all users notified simultaneously)
+  
+  Storage: 200 bytes per notification × 500M/day × 30 days = 3TB/month
+
+THIRD-PARTY PROVIDER DEPENDENCY:
+  Push: APNS (Apple), FCM (Google)
+  SMS: Twilio, Amazon SNS, Vonage
+  Email: SendGrid, Amazon SES
+  
+  These providers have rate limits, downtime, and variable latency.
+  Design must handle: Provider down, rate limited, delivery failure, retries.
+
+ARCHITECTURE — COMPONENTS:
+
+1. Notification Service (API):
+   Accepts notification requests from other services.
+   Validates preferences (is user opted out?).
+   Queues to appropriate channel queue.
+   
+   Request: POST /notifications
+   {
+     "user_id": "user-123",
+     "type": "order_shipped",
+     "title": "Your order shipped!",
+     "body": "Order #456 shipped. Tracking: 1Z999...",
+     "priority": "high",
+     "channels": ["push", "email"]  // or let system decide based on preferences
+   }
+
+2. Preference Service:
+   Stores user channel preferences: Push=enabled, Email=enabled, SMS=disabled
+   Stores quiet hours: Don't send between 11PM-7AM local time
+   Cached in Redis for fast lookup.
+
+3. Message Queues (per channel, per priority):
+   Kafka topics:
+   - notifications.push.high
+   - notifications.push.normal
+   - notifications.email.high
+   - notifications.email.normal
+   - notifications.sms.high
+   - notifications.sms.normal
+   
+   Separate queues = separate consumers = separate scaling and backpressure handling.
+   SMS is expensive: Dedicate small consumer group. Push is cheap: Large consumer group.
+
+4. Channel Workers (per provider):
+   Push Worker: Reads from push queues → Calls APNS/FCM → Records delivery status
+   Email Worker: Reads from email queues → Calls SendGrid → Records delivery status
+   SMS Worker: Reads from sms queues → Calls Twilio → Records delivery status
+   
+   Worker with retry logic:
+   def send_push_notification(notification):
+       device_token = get_device_token(notification.user_id)
+       
+       for attempt in range(5):
+           try:
+               response = fcm_client.send(Message(
+                   notification=Notification(
+                       title=notification.title,
+                       body=notification.body
+                   ),
+                   token=device_token
+               ))
+               record_delivery(notification.id, 'sent', response.message_id)
+               return
+           except FirebaseError as e:
+               if e.code in ['INVALID_ARGUMENT', 'NOT_FOUND']:
+                   # Permanent failure (invalid token): Don't retry
+                   deactivate_device_token(device_token)
+                   record_delivery(notification.id, 'failed_permanent')
+                   return
+               # Transient error: Retry with backoff
+               time.sleep(2 ** attempt)
+       
+       # All retries exhausted
+       route_to_fallback_channel(notification)
+       record_delivery(notification.id, 'failed_transient')
+
+5. Delivery Tracking:
+   receipt table: notification_id, user_id, channel, status, sent_at, delivered_at, opened_at
+   
+   Status flow: queued → sent → delivered → opened (or failed)
+   Delivered: Provider confirms. Opened: User interaction (for push: app opens from notification)
+   
+   Analytics query: Delivery rate by notification type, channel, time of day.
+   This data drives: Which channel to try first, optimal send times, content optimization.
+
+================================================================================
+DESIGN 3: REAL-TIME LEADERBOARD (gaming, financial rankings)
+================================================================================
+
+REQUIREMENTS:
+  100M users. Each user has a score. Update score in real-time.
+  Get top-100 globally. Get rank of specific user. Get top-100 in user's country.
+  Score updates: 1,000/second. Leaderboard reads: 10,000/second.
+  Latency: Rank query <10ms.
+
+REDIS SORTED SETS — THE PERFECT DATA STRUCTURE:
+  Redis Sorted Set: Each member has a score. Sorted by score automatically.
+  O(log N) for add, update, get rank. O(log N + M) for get range.
+  
+  Operations:
+  # Add/update user score
+  ZADD leaderboard:global 98500 "user:12345"  # O(log N)
+  
+  # Get rank (0-indexed, highest first)
+  ZREVRANK leaderboard:global "user:12345"    # Returns 42 → user is rank 43 globally
+  
+  # Get score
+  ZSCORE leaderboard:global "user:12345"      # Returns 98500
+  
+  # Get top 100 with scores
+  ZREVRANGE leaderboard:global 0 99 WITHSCORES   # O(log N + M) where M=100
+  
+  # Count users above a score (for rank without exact position)
+  ZCOUNT leaderboard:global 98500 +inf        # How many users have >= 98500
+
+MULTI-DIMENSIONAL LEADERBOARD:
+  Global: leaderboard:global
+  Per country: leaderboard:country:US, leaderboard:country:GB
+  Per game mode: leaderboard:mode:solo, leaderboard:mode:team
+  Weekly: leaderboard:week:2025-03
+  
+  Update all at once (Redis pipeline — multiple commands in one round-trip):
+  pipe = redis.pipeline()
+  pipe.zadd('leaderboard:global', {f'user:{user_id}': new_score})
+  pipe.zadd(f'leaderboard:country:{country_code}', {f'user:{user_id}': new_score})
+  pipe.zadd(f'leaderboard:week:{current_week}', {f'user:{user_id}': new_score})
+  pipe.execute()  # All 3 updates atomic in one round-trip
+
+PERSISTENCE STRATEGY:
+  Redis is memory-only by default.
+  If Redis fails: Leaderboard lost.
+  
+  Option A: Redis RDB persistence (snapshot) — Acceptable data loss (up to 1 hour)
+  Option B: Redis AOF (append-only file) — Near-zero data loss, slower
+  Option C: Redis as cache, PostgreSQL as source of truth
+  
+  Correct approach for gaming:
+  Writes: Update PostgreSQL first (score history table). Then update Redis.
+  If Redis fails: Rebuild from PostgreSQL (RANK OVER window function).
+  Recovery time: 100M records rebuild from PostgreSQL ≈ minutes.
+  During rebuild: Serve stale leaderboard from cache, display "(updating)" status.
+
+================================================================================
+DESIGN 4: DISTRIBUTED SEARCH (like Elasticsearch internals)
+================================================================================
+
+INVERTED INDEX — THE CORE DATA STRUCTURE:
+  Document 1: "The quick brown fox"
+  Document 2: "The fox sat on the mat"
+  Document 3: "Brown fox quick step"
+  
+  Inverted index:
+  "quick" → [Doc1, Doc3]
+  "fox" → [Doc1, Doc2, Doc3]
+  "brown" → [Doc1, Doc3]
+  "the" → [Doc1, Doc2]
+  
+  Query: "brown fox" 
+  Lookup "brown" → {Doc1, Doc3}
+  Lookup "fox" → {Doc1, Doc2, Doc3}
+  Intersection → {Doc1, Doc3}
+  Score by frequency, return ranked results.
+
+DISTRIBUTED SEARCH ARCHITECTURE:
+  Sharding: Split documents across multiple nodes by document ID hash.
+  Replication: Each shard has 1 primary + 2 replicas.
+  
+  Write: Primary shard → Replicate to replica shards → Acknowledge.
+  Read: Query coordinator → Fan out to primary/replica of each shard → Merge results → Rank globally.
+  
+  Near real-time: Documents indexed within 1 second (not milliseconds).
+  Reason: Segment merging. New documents go to in-memory buffer, flushed every second.
+  Between flush and merge: Document exists but may not be fully indexed.
+
+ELASTICSEARCH PERFORMANCE PATTERNS:
+  Bulk indexing: Don't index one document at a time.
+  Batch 500-1000 documents per bulk request.
+  
+  Mapping optimization: Define explicit field types. Don't let ES auto-detect.
+  Auto-detect "text" + "keyword" doubles storage. Be explicit.
+  
+  Query optimization: 
+  filter context vs. query context.
+  Filter: Yes/no match, cached, no scoring → 10-100x faster.
+  Query: Scored match, not cached → Use only when score matters.
+  
+  # WRONG: Using query for non-scored boolean filter
+  {"query": {"match": {"status": "active"}}}
+  
+  # RIGHT: Filter context (cached, faster)
+  {"query": {"bool": {"filter": [{"term": {"status": "active"}}]}}}
+
+================================================================================
+END OF PACK 015: SYSTEM DESIGN
+Total: Complete design methodology framework, URL shortener (capacity, ID generation,
+301 vs 302, full architecture), distributed notification system (multi-channel,
+preference management, retry patterns), real-time leaderboard (Redis sorted sets,
+multi-dimensional, persistence strategy), distributed search (inverted index,
+sharding, Elasticsearch optimization patterns).
+================================================================================

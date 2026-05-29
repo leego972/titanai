@@ -1,0 +1,49 @@
+Question: <p>Is output buffering enabled by default in Python's interpreter for <code>sys.stdout</code>?</p>
+
+<p>If the answer is positive, what are all the ways to disable it?</p>
+
+<p>Suggestions so far:</p>
+
+<ol>
+<li>Use the <code>-u</code> command line switch</li>
+<li>Wrap <code>sys.stdout</code> in an object that flushes after every write</li>
+<li>Set <code>PYTHONUNBUFFERED</code> env var</li>
+<li><code>sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)</code></li>
+</ol>
+
+<p>Is there any other way to set some global flag in <code>sys</code>/<code>sys.stdout</code> programmatically during execution?</p>
+
+Answer: <pre><code>def disable_stdout_buffering():
+    # Appending to gc.garbage is a way to stop an object from being
+    # destroyed.  If the old sys.stdout is ever collected, it will
+    # close() stdout, which is not good.
+    gc.garbage.append(sys.stdout)
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+
+# Then this will give output in the correct order:
+disable_stdout_buffering()
+print "hello"
+subprocess.call(["echo", "bye"])
+</code></pre>
+
+<p>Without saving the old sys.stdout, disable_stdout_buffering() isn't idempotent, and multiple calls will result in an error like this:</p>
+
+<pre><code>Traceback (most recent call last):
+  File "test/buffering.py", line 17, in &lt;module&gt;
+    print "hello"
+IOError: [Errno 9] Bad file descriptor
+close failed: [Errno 9] Bad file descriptor
+</code></pre>
+
+<p>Another possibility is:</p>
+
+<pre><code>def disable_stdout_buffering():
+    fileno = sys.stdout.fileno()
+    temp_fd = os.dup(fileno)
+    sys.stdout.close()
+    os.dup2(temp_fd, fileno)
+    os.close(temp_fd)
+    sys.stdout = os.fdopen(fileno, "w", 0)
+</code></pre>
+
+<p>(Appending to gc.garbage is not such a good idea because it's where unfreeable cycles get put, and you might want to check for those.)</p>

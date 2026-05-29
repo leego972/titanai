@@ -1,0 +1,51 @@
+Question: <p>I'm interested in compressing data using Python's <code>gzip</code> module.  It happens that I want the compressed output to be deterministic, because that's often a really convenient property for things to have in general -- if some non-gzip-aware process is going to be looking for changes in the output, say, or if the output is going to be cryptographically signed.</p>
+
+<p>Unfortunately, the output is different every time.  As far as I can tell, the only reason for this is the timestamp field in the gzip header, which the Python module always populates with the current time.  I don't think you're actually allowed to have a gzip stream without a timestamp in it, which is too bad.</p>
+
+<p>In any case, there doesn't seem to be a way for the caller of Python's <code>gzip</code> module to supply the correct modification time of the underlying data.  (The actual <code>gzip</code> program seems to use the timestamp of the input file when possible.)  I imagine this is because basically the only thing that ever cares about the timestamp is the <code>gunzip</code> command when writing to a file -- and, now, me, because I want deterministic output.  Is that so much to ask?</p>
+
+<p>Has anyone else encountered this problem?</p>
+
+<p>What's the least terrible way to <code>gzip</code> some data with an arbitrary timestamp from Python?</p>
+
+Answer: <p>Yeah, you don't have any pretty options.  The time is written with this line in _write_gzip_header:</p>
+
+<pre><code>write32u(self.fileobj, long(time.time()))
+</code></pre>
+
+<p>Since they don't give you a way to override the time, you can do one of these things:</p>
+
+<ol>
+<li>Derive a class from GzipFile, and copy the <code>_write_gzip_header</code> function into your derived class, but with a different value in this one line.</li>
+<li>After importing the gzip module, assign new code to its time member.  You will essentially be providing a new definition of the name time in the gzip code, so you can change what time.time() means.</li>
+<li>Copy the entire gzip module, and name it my_stable_gzip, and change the line you need to.</li>
+<li>Pass a CStringIO object in as fileobj, and modify the bytestream after gzip is done.</li>
+<li>Write a fake file object that keeps track of the bytes written, and passes everything through to a real file, except for the bytes for the timestamp, which you write yourself.</li>
+</ol>
+
+<p>Here's an example of option #2 (untested):</p>
+
+<pre><code>class FakeTime:
+    def time(self):
+        return 1225856967.109
+
+import gzip
+gzip.time = FakeTime()
+
+# Now call gzip, it will think time doesn't change!
+</code></pre>
+
+<p>Option #5 may be the cleanest in terms of not depending on the internals of the gzip module (untested):</p>
+
+<pre><code>class GzipTimeFixingFile:
+    def __init__(self, realfile):
+        self.realfile = realfile
+        self.pos = 0
+
+    def write(self, bytes):
+        if self.pos == 4 and len(bytes) == 4:
+            self.realfile.write("XYZY")  # Fake time goes here.
+        else:
+            self.realfile.write(bytes)
+        self.pos += len(bytes)
+</code></pre>

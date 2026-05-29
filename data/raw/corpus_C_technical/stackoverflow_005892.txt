@@ -1,0 +1,72 @@
+Question: <p>While I was investigating a problem I had with lexical closures in Javascript code, I came along this problem in Python:</p>
+
+<pre><code>flist = []
+
+for i in xrange(3):
+    def func(x): return x * i
+    flist.append(func)
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>Note that this example mindfully avoids <code>lambda</code>. It prints "4 4 4", which is surprising. I'd expect "0 2 4". </p>
+
+<p>This equivalent Perl code does it right:</p>
+
+<pre><code>my @flist = ();
+
+foreach my $i (0 .. 2)
+{
+    push(@flist, sub {$i * $_[0]});
+}
+
+foreach my $f (@flist)
+{
+    print $f-&gt;(2), "\n";
+}
+</code></pre>
+
+<p>"0 2 4" is printed.</p>
+
+<p>Can you please explain the difference ?</p>
+
+<p><hr /></p>
+
+<p>Update: </p>
+
+<p>The problem <strong>is not</strong> with <code>i</code> being global. This displays the same behavior:</p>
+
+<pre><code>flist = []
+
+def outer():
+    for i in xrange(3):
+        def inner(x): return x * i
+        flist.append(inner)
+
+outer()
+#~ print i   # commented because it causes an error
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>As the commented line shows, <code>i</code> is unknown at that point. Still, it prints "4 4 4".</p>
+
+Answer: <p>Python is actually behaving as defined. <b>Three separate functions</b> are created, but  they each have the <b>closure of the environment they're defined in</b> - in this case, the global environment (or the outer function's environment if the loop is placed inside another function). This is exactly the problem, though - in this environment, <b>i is mutated</b>, and the closures all <b>refer to the same i</b>.</p>
+
+<p>Here is the best solution I can come up with - create a function creater and invoke <i>that</i> instead. This will force <b>different environments</b> for each of the functions created, with a <b>different i</b> in each one.</p>
+
+<pre><code>flist = []
+
+for i in xrange(3):
+    def funcC(j):
+        def func(x): return x * j
+        return func
+    flist.append(funcC(i))
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>This is what happens when you mix side effects and functional programming. </p>

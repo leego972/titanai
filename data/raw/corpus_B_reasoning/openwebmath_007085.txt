@@ -1,0 +1,46 @@
+Filter for rotary encoder
+
+I'm attempting to use PID for DC motor control. The motor is geared, with a magnet on the motor shaft coupled with a single hall effect sensor to help measure speed. This is all wired up to a capture and compare timer on a STM32.
+
+In my application, the frequency of the measuerment is between 0Hz and 100Hz depending on motor speed. The period between each pulse does vary so wondering what the best kind of SW filter to use ? Currently im averaging over 5 samples, but doesn't seem to be elimnating the error that well.
+
+• You need to be clearer about the error you are seeing and also the period variations. You should also reveal the method you are using to convert the hall effect sensor to a digital value (data sheet links help here). – Andy aka Mar 25 at 10:12
+• Sorry, when I mean error, I'm seeing small variation in the measured intervals between pulses. I'm using the compare and capture module to measure time between adjacent rising edges and converting this to a Hz number. – Dibly Mar 25 at 11:35
+• Numbers are important. It's a numbers game. – Andy aka Mar 25 at 11:42
+• What is the resolution of your measurements? It could easily be in the range of nanoseconds depending on your actual cpu and configuration. In which case you simply have too much resolution. The PID should filter it out anyways. – Kartman Mar 25 at 12:11
+• @Kartman, I'm sampling the sensor input every 10ms – Dibly Mar 25 at 15:09
+
+1. Moving Average
+
+When calcuating the real time moving average of some samples it's always a good idea dividing the sum by 4, 8, 16, etc using the C shift operator.
+
+That allows you to use integer arithmetic instead of floating point one which is way slower. This is especially true if you make calculation in an interrupt function.
+
+Yet, the average variable used should be of a bigger size than the samples. If samples are "unsigned short" than the average variable should be "unsigned long".
+
+Example:
+
+unsigned short samples[256];
+unsigned long average;
+int i;
+
+average = 0;
+for (i = 0; i < 8; i++)
+{
+average += (unsigned long) samples[i];
+}
+
+average >>= 3;
+
+
+Type cast is necessary. Don't trust your C compiler.
+
+1. Interrupts and Critical Sections
+
+If your capture and compare peripheral fires an interrupt at every double edge detection and the pulse width is evaluated in the interrupt function, than calculate the moving average within the the interrupt function (foreground) and not in the main() function (background).
+
+• Even better, use properly defined data types (uint16_t etc) - I hate having to guess what a short or a long is going to be. – awjlogan Mar 25 at 10:48
+• Thanks. Is there any guidance on the size of the window. I guess if the window is too big, the response will be poor ? – Dibly Mar 25 at 11:38
+• The other issue I may be seeing is with a delayed response, the PID is over compensating and i'm seeing big oscilations. – Dibly Mar 25 at 11:41
+• If the windows is big, than the moving average becomes less dependent on input data fluctuations. – Enrico Migliore Mar 25 at 11:48
+• If you see oscillations the PID reacts to fast. Slow down the action on the motor in this way: use a hardware timer that every 100 ms fires an interrupt. Within this interrupt put the C statements that drives the motor. I did that in the past and worked. Then, if the PID becomes too slow than bring 100 ms to 50 ms. The action on the motor must be timer driven. – Enrico Migliore Mar 25 at 11:54

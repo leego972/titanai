@@ -1,0 +1,67 @@
+Providing R1,R2 to macs2
+0
+0
+Entering edit mode
+12 months ago
+Sam ▴ 170
+
+I have paired-end ChIP-Seq data that resulted in a low amount of uniquely mapped reads. When mapping the reads PE, only a small percentage maps concordantly.
+
+I want to check whether the reads give some biological sense. For that, I thought of mapping SE, taking the condition with the best statistics, running macs2, annotating, and seeing whether the annotations make sense.
+
+So, I have separate files for R1 and R2 alignment.
+
+• Here it was advised to used R1 only. Why is it preferred to use R1 only rather than combine both reads?
+
+• When running macs2, is it advisable to combine both files into one? For example
+
+macs2 -t sample_R1.bam sample_R2.bam -c control_R1.bam control_R2.bam
+
+ChIP-Seq macs2 • 364 views
+1
+Entering edit mode
+
+Can you give some details? What is the command line for alignment (paired-end mode) and what is "Low"? If alignment does not go well then this is probably a data quality problem that cannot be solved by tweaking the peak calling process. R1 and R2 come from the same fragment so you either must use them after aligning them in PE mode or use either of them but "combining" them as in this command you provide artificially doubles the total read count which would be improper since the reads come from the same fragment.
+
+0
+Entering edit mode
+bowtie ..Mus_musculus/Ensembl/GRCm38/Sequence/BowtieIndex/genome -1 Sample1_R1.fastq -2 Sample1_R2.fastq -m 1 --fr --sam -p 8 --tryhard --minins 0 --maxins 1000 --chunkmbs 2000 Sample1.sam
+
+
+The average percentage of the reads that failed to align (neither uniquely nor multi mapped) in each sample is 94.5 %
+
+Yes, this is clearly a data problem, that cannot be solved by tweaking the peak alignment process, but all I'd like to do is see if there is some biological sense in the data. For that, I thought of taking the maximum amount of data available. When aligning single-end, "only" 64% are unmapped as the median value of all samples.
+
+R1 and R2 come from the same fragment so you either must use them after aligning them in PE mode or use either of them but "combining" them as in this command you provide artificially doubles the total read count which would be improper since the reads come from the same fragment.
+
+So combining R1 & R2 would lead to more false positives? You say that what we are interested in, biologically, is in the amount of fragments, and using reads, artificially doubles their number.
+
+Would use both reads for control as well compensate for that, or it would just introduce another posible sort of bias?
+
+0
+Entering edit mode
+
+Look, there is obviously something very wrong with your ChIP. Did you use carrier DNA? Try to blast some of the unmapped reads. Maybe a sample swap or wrong starting material? 5% alignment rate is not right at all. I'd figure out why that is, all these tweaks you suggest are not recommended, you have a basic problem with your sample, try to find out why.
+
+0
+Entering edit mode
+
+Thanks. Just for understanding's sake, if you don't mind :
+
+If I would use both R1 and R2 in the way suggested above, it would artificially inflate the number of fragments, considering each read as a fragment. Suppose, just as an artificial example, that there are exactly 1M pairs. So, after after artificially pooling those, we would get 2M reads.
+
+However, the normalization step at macs2, takes into account the number of reads. Suppose we have 4M reads in the control - if we take R1 only, the coverage of control would be scaled down by 0.25. If we take both R1 and R2, then the coverage would be scaled down only by 0.5.
+
+Would not that compensate for the double amount of reads?
+
+0
+Entering edit mode
+
+Also (for the sake of understanding), I was told that when the technology was worse, people merged biological replicates, when they had not enough material in them separately.
+
+What is the substantial difference between merging biological replicates, and merging R1 and R2?
+
+1
+Entering edit mode
+
+Merging biological replicates means pooling DNA on the library prep level. Merging R1 and R2 means to combine reads that come from the same fragment which is not necessary nor meaningful since macs2 will anyway extend reads to fragment size based on its fragment size estimation procedure. If you reads do not align properly when run in paired-end mode then this is what it is, a library quality problem or contamination. You can technically of course try and tweak this but the ground truth (a bad library) will stay and imho you are somewhat lying to yourself. Garden of forked paths comes to mind. If you get a reviewer that has some understanding of the method and the data analysis I do not see how you could ever publish this.

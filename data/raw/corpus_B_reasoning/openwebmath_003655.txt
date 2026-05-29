@@ -1,0 +1,55 @@
+# Introduction of JijModeling-Transpiler
+
+JijModeling-Transpiler is sub-package of jijmodeling. jijmodeling.transpiler provides transpiling methods to other modeling tools such as PyQUBO and Python-MIP. We can use JijModeling-Transpiler to run optimization of our model which we construct with JijModeling locally without JijZept. jijmodeling.transpiler can be installed through pip command.
+
+pip install jijmodeling-transpiler -U
+
+In this tutorial, we would like to take the Knapsack problem as an example to illustrate the usage of jijmodeling.transpiler.
+
+Before we explain the usage of jijmodeling.transpiler, we need to construct the mathematical model with JijModeling.
+
+import jijmodeling as jm# define variablesv = jm.Placeholder('v', dim=1)N = v.shape[0]w = jm.Placeholder('w', shape=(N))W = jm.Placeholder('W')x = jm.Binary('x', shape=(N))i = jm.Element('i', (0, N))# set problemproblem = jm.Problem('Knapsack')    # set objective functionobj = - jm.Sum(i, v[i]*x[i])problem += obj# set total weight constraintconst = jm.Sum(i, w[i]*x[i])problem += jm.Constraint('weight', const<=W)problem
+\begin{alignat*}{4}\text{Problem} & \text{: Knapsack} \\\min & \quad - \sum_{ i = 0 }^{ v_{\mathrm{shape}(0)} - 1 } v_{i} \cdot x_{i} \\\text{s.t.} & \\& \text{weight} :\\ &\quad \quad \sum_{ i = 0 }^{ v_{\mathrm{shape}(0)} - 1 } w_{i} \cdot x_{i} \leq W,\\[8pt]& x_{i_{0}} \in \{0, 1\}\end{alignat*}
+
+We also need to prepare the problem instance data.
+
+# set a list of values & weights inst_v = [5, 7, 2, 1, 4, 3]inst_w = [8, 10, 6, 4, 5, 3]# set maximum weightinst_W = 20instance_data = {'v': inst_v, 'w': inst_w, 'W': inst_W}    
+
+## convert to PyQUBO model​
+
+We can use to_pyqubo to convert jijmodeling to PyQUBO model.
+
+from jijmodeling.transpiler.pyqubo import to_pyqubo# convert to pyqubopyq_model, pyq_chache = to_pyqubo(problem, instance_data, {})
+
+We can create QUBO from PyQUBO model and run annealing using openjij.
+
+import openjij as oj# set multiplierslam1 = 1.0multipliers = {'weight': lam1}    # create quboqubo, bias = pyq_model.compile().to_qubo(feed_dict=multipliers)# set samplersampler = oj.SASampler(num_reads = 10)# solve problemresponse = sampler.sample_qubo(qubo)
+
+.decode can be used to obtain results from openjij's result in a more user-friendly manner.
+
+# decode solutionresult = pyq_chache.decode(response)
+
+Finally, let us check the results we obtained.
+
+import numpy as nplowest_result = result.lowest()[0]indices, _, _ = lowest_result.record.solution['x'][0]sum_w = np.sum([instance_data['w'][i] for i in indices[0]])print('Indices of x = 1: ', indices[0])print('Value of objective function: ', lowest_result.evaluation.objective)print('Value of constraint term: ', lowest_result.evaluation.constraint_violations['weight'])print('Total weight: ', sum_w)
+Indices of x = 1:  [1, 4, 5]Value of objective function:  [-14.0]Value of constraint term:  [0.0]Total weight:  18
+
+## Convert to Python-MIP​
+
+While constructing a mathematical model, you may want to solve the problem with an exact solver to verify your model. JijModeling-Transpiler provides the conversion function to_mip to Python-MIP model which provides modeling and solving tools for Mixed Interger Linearr Problem. The usage is almost same as to_pyqubo.
+
+from jijmodeling.transpiler.mip import to_mip# convert to mipmip_model, mip_cache = to_mip(problem, instance_data, {})
+
+We can solve the problem with .optimize. If you would like to know more detail usage, so please check the Python-MIP document.
+
+status = mip_model.optimize()
+Welcome to the CBC MILP Solver Version: TrunkBuild Date: Oct 24 2021 Starting solution of the Linear programming relaxation problem using Primal SimplexCoin0506I Presolve 1 (0) rows, 6 (0) columns and 6 (0) elementsClp1000I sum of infeasibilities 0 - average 0, 5 fixed columnsCoin0506I Presolve 0 (-1) rows, 0 (-6) columns and 0 (-6) elementsClp0000I Optimal - objective value -15.25Clp0000I Optimal - objective value -15.25Coin0511I After Postsolve, objective -15.25, infeasibilities - dual 0 (0), primal 0 (0)Clp0000I Optimal - objective value -15.25Clp0000I Optimal - objective value -15.25Clp0000I Optimal - objective value -15.25Clp0032I Optimal objective -15.25 - 0 iterations time 0.002, Idiot 0.00Starting MIP optimization
+
+We can also use .decode function to obtain the results in a more user-friendly manner.
+
+result = mip_cache.decode((status,mip_model))result
+SampleSet(record=Record(solution={'x': [(([1, 4, 5],), [1.0, 1.0, 1.0], ())]}, num_occurrences=[1]), evaluation=Evaluation(energy=[], objective=[-14.0], constraint_violations={}, penalty=[]), measuring_time=MeasuringTime(solve=SolvingTime(preprocess=None, solve=None, postprocess=None), system=SystemTime(post_problem_and_instance_data=None, request_queue=None, fetch_problem_and_instance_data=None, fetch_result=None, deserialize_solution=None), total=None))
+indices, _, _ = result.record.solution['x'][0]sum_w = np.sum([instance_data['w'][i] for i in indices[0]])print('Indices of x = 1: ', indices[0])print('Value of objective function: ', result.evaluation.objective)print('Total weight: ', sum_w)
+Indices of x = 1:  [1, 4, 5]Value of objective function:  [-14.0]Total weight:  18
+
+In this tutorial, we explain the basics how to use JijModeling-Transpiler. You can easily convert your model written in jijmodeling to other modeling tools.

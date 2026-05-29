@@ -1,0 +1,49 @@
+Question: <p>I am running my <code>HTTPServer</code> in a separate thread (using the threading module which has no way to stop threads...) and want to stop serving requests when the main thread also shuts down.</p>
+
+<p>The Python documentation states that <code>BaseHTTPServer.HTTPServer</code> is a subclass of <code>SocketServer.TCPServer</code>, which supports a <code>shutdown</code> method, but it is missing in <code>HTTPServer</code>.</p>
+
+<p>The whole <code>BaseHTTPServer</code> module has very little documentation :(</p>
+
+Answer: <p>I should start by saying that "I probably wouldn't do this myself, but I have in the past". The serve_forever (from SocketServer.py) method looks like this:</p>
+
+<pre><code>def serve_forever(self):
+    """Handle one request at a time until doomsday."""
+    while 1:
+        self.handle_request()
+</code></pre>
+
+<p>You could replace (in subclass) <code>while 1</code> with <code>while self.should_be_running</code>, and modify that value from a different thread. Something like:</p>
+
+<pre><code>def stop_serving_forever(self):
+    """Stop handling requests"""
+    self.should_be_running = 0
+    # Make a fake request to the server, to really force it to stop.
+    # Otherwise it will just stop on the next request.
+    # (Exercise for the reader.)
+    self.make_a_fake_request_to_myself()
+</code></pre>
+
+<p>Edit: I dug up the actual code I used at the time:</p>
+
+<pre><code>class StoppableRPCServer(SimpleXMLRPCServer.SimpleXMLRPCServer):
+
+    stopped = False
+    allow_reuse_address = True
+
+    def __init__(self, *args, **kw):
+        SimpleXMLRPCServer.SimpleXMLRPCServer.__init__(self, *args, **kw)
+        self.register_function(lambda: 'OK', 'ping')
+
+    def serve_forever(self):
+        while not self.stopped:
+            self.handle_request()
+
+    def force_stop(self):
+        self.server_close()
+        self.stopped = True
+        self.create_dummy_request()
+
+    def create_dummy_request(self):
+        server = xmlrpclib.Server('http://%s:%s' % self.server_address)
+        server.ping()
+</code></pre>

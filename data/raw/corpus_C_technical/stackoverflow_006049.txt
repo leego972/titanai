@@ -1,0 +1,49 @@
+Question: <p>I have a pretty generic Article model, with m2m relation to Tag model. I want to keep count of each tag usage, i think the best way would be to denormalise count field on Tag model and update it each time Article being saved. How can i accomplish this, or maybe there's a better way?</p>
+
+Answer: <p>You can do this by creating an <a href="http://docs.djangoproject.com/en/dev/topics/db/models/#extra-fields-on-many-to-many-relationships" rel="nofollow">intermediate model</a> for the M2M relationship and use it as your hook for the <code>post_save</code> and <code>post_delete</code> signals to update the denormalised column in the <code>Article</code> table.</p>
+
+<p>For example, I do this for favourited <code>Question</code> counts in <a href="http://code.google.com/p/soclone/" rel="nofollow">soclone</a>, where <code>User</code>s have a M2M relationship with <code>Question</code>s:</p>
+
+<pre><code>from django.contrib.auth.models import User
+from django.db import connection, models, transaction
+from django.db.models.signals import post_delete, post_save
+
+class Question(models.Model):
+    # ...
+    favourite_count = models.PositiveIntegerField(default=0)
+
+class FavouriteQuestion(models.Model):
+    question = models.ForeignKey(Question)
+    user     = models.ForeignKey(User)
+
+def update_question_favourite_count(instance, **kwargs):
+    """
+    Updates the favourite count for the Question related to the given
+    FavouriteQuestion.
+    """
+    if kwargs.get('raw', False):
+        return
+    cursor = connection.cursor()
+    cursor.execute(
+        'UPDATE soclone_question SET favourite_count = ('
+            'SELECT COUNT(*) from soclone_favouritequestion '
+            'WHERE soclone_favouritequestion.question_id = soclone_question.id'
+        ') '
+        'WHERE id = %s', [instance.question_id])
+    transaction.commit_unless_managed()
+
+post_save.connect(update_question_favourite_count, sender=FavouriteQuestion)
+post_delete.connect(update_question_favourite_count, sender=FavouriteQuestion)
+
+# Very, very naughty
+User.add_to_class('favourite_questions',
+                  models.ManyToManyField(Question, through=FavouriteQuestion,
+                                         related_name='favourited_by'))
+</code></pre>
+
+<p>There's been a bit of discussion on the django-developers mailing list about implementing a means of declaratively declaring denormalisations to avoid having to write code like the above:</p>
+
+<ul>
+<li><a href="http://groups.google.com/group/django-developers/browse_thread/thread/9a672d5bbbe67562" rel="nofollow">Denormalisation, magic, and is it really that useful?</a></li>
+<li><a href="http://groups.google.com/group/django-developers/browse_thread/thread/6630273ab1869c19" rel="nofollow">Denormalisation Magic, Round Two</a> </li>
+</ul>

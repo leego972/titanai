@@ -1,0 +1,87 @@
+Question: <p>I've read that it is possible to add a method to an existing object (e.g. not in the class definition) in <strong>Python</strong>, I think this is called <em>Monkey Patching</em> (or in some cases <em>Duck Punching</em>). I understand that it's not always a good decision to do so. But, how might one do this?</p>
+
+<p><strong>UPDATE 8/04/2008 00:21:01 EST:</strong></p>
+
+<p><a href="http://stackoverflow.com/a/982">That</a> looks like a good answer John Downey, I tried it but it appears that it ends up being not a <em>true</em> method.</p>
+
+<p>Your example defines the new patch function with an argument of <strong><code>self</code></strong>, but if you write actual code that way, the now patched class method asks for an argument named <code>self</code> (it doesn't automagically recognize it as the object to which it is supposed to bind, which is what would happen if defined within the class definition), meaning you have to call <strong><code>class.patch(obj)</code></strong> instead of just <strong><code>class.patch()</code></strong> if you want the same functionality as a <em>true</em> method.</p>
+
+<p><strong>It looks like Python isn't really treating it as a method, but more just as a variable which happens to be a function</strong> (and as such is callable).  Is there any way to attach an actual method to a class?</p>
+
+<p>Oh, and Ryan, <a href="http://pypi.python.org/pypi/monkey">that</a> isn't exactly what I was looking for (it isn't a builtin functionality), but it is quite cool nonetheless.</p>
+
+Answer: <p>In Python, there is a difference between functions and bound methods.</p>
+
+<pre><code>&gt;&gt;&gt; def foo():
+...     print "foo"
+...
+&gt;&gt;&gt; class A:
+...     def bar( self ):
+...         print "bar"
+...
+&gt;&gt;&gt; a = A()
+&gt;&gt;&gt; foo
+&lt;function foo at 0x00A98D70&gt;
+&gt;&gt;&gt; a.bar
+&lt;bound method A.bar of &lt;__main__.A instance at 0x00A9BC88&gt;&gt;
+&gt;&gt;&gt;
+</code></pre>
+
+<p>Bound methods have been "bound" (how descriptive) to an instance, and that instance will be passed as the first argument whenever the method is called.</p>
+
+<p>Callables that are attributes of a class (as opposed to an instance) are still unbound, though, so you can modify the class definition whenever you want:</p>
+
+<pre><code>&gt;&gt;&gt; def fooFighters( self ):
+...     print "fooFighters"
+...
+&gt;&gt;&gt; A.fooFighters = fooFighters
+&gt;&gt;&gt; a2 = A()
+&gt;&gt;&gt; a2.fooFighters
+&lt;bound method A.fooFighters of &lt;__main__.A instance at 0x00A9BEB8&gt;&gt;
+&gt;&gt;&gt; a2.fooFighters()
+fooFighters
+</code></pre>
+
+<p>Previously defined instances are updated as well (as long as they haven't overridden the attribute themselves):</p>
+
+<pre><code>&gt;&gt;&gt; a.fooFighters()
+fooFighters
+</code></pre>
+
+<p>The problem comes when you want to attach a method to a single instance:</p>
+
+<pre><code>&gt;&gt;&gt; def barFighters( self ):
+...     print "barFighters"
+...
+&gt;&gt;&gt; a.barFighters = barFighters
+&gt;&gt;&gt; a.barFighters()
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: barFighters() takes exactly 1 argument (0 given)
+</code></pre>
+
+<p>The function is not automatically bound when it's attached directly to an instance:</p>
+
+<pre><code>&gt;&gt;&gt; a.barFighters
+&lt;function barFighters at 0x00A98EF0&gt;
+</code></pre>
+
+<p>To bind it, we can use the <a href="http://docs.python.org/library/types.html?highlight=methodtype#module-types">MethodType function in the types module</a>:</p>
+
+<pre><code>&gt;&gt;&gt; import types
+&gt;&gt;&gt; a.barFighters = types.MethodType( barFighters, a )
+&gt;&gt;&gt; a.barFighters
+&lt;bound method ?.barFighters of &lt;__main__.A instance at 0x00A9BC88&gt;&gt;
+&gt;&gt;&gt; a.barFighters()
+barFighters
+</code></pre>
+
+<p>This time other instances of the class have not been affected:</p>
+
+<pre><code>&gt;&gt;&gt; a2.barFighters()
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+AttributeError: A instance has no attribute 'barFighters'
+</code></pre>
+
+<p>More information can be found by reading about <a href="http://users.rcn.com/python/download/Descriptor.htm">descriptors</a> and <a href="http://www.onlamp.com/pub/a/python/2003/04/17/metaclasses.html">metaclass</a> <a href="http://www.gnosis.cx/publish/programming/metaclass_2.html">programming</a>.</p>

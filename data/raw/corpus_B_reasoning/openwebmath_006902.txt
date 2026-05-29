@@ -1,0 +1,308 @@
+# Simple Heart Rate Monitor Using Reflective Sensor
+
+So I’m sure all of you have seen one of theses at least once, most likely on a visit to a hospital, this device is called a pulse oximeter. This device measures your heart rate and oxygen levels in your blood. The way it works is but having two leds on one side of the finger, usually red and infra-red, and on the other side a phototransistor or light dependant resistor(LDR). When blood passes through your finger, a different amount of light reaches the light sensor and the output spikes because of this.
+
+You could use either the red or IR led for this but if you want to calculate the blood oxygen levels you’d need both. Oxygenated blood lets more red light through and deoxygenated blood lets more IR light through and by alternating the leds and comparing the outputs, you can calculate oxygen levels but in this project I’m just going to be measuring the heart rate.
+
+I wanted to make a simple heart rate monitor so I used cheap components that I had lying around so it definitely isn’t the best heart rate monitor around but it works. From a bit of googling I found a few other people with the same idea, one being Scott Harden which built this device a few years ago that could also be used to record an ECG, his post about building it can be found here, he also has lots of other great projects give it a visit. I used his circuit as reference from mine, I didn’t have the exact same values for each component but choose ones that were close. My circuit can be shown below:
+
+The phototransistor I’m using is the TRCT5000 which is very cheap, around €1.10 for ten on ebay, it also includes an IR led so it had everything I needed. So I’m going to explain all of the parts of the circuit above, first at the top is the operational amplifier (op amp) which I’m using as a virtual ground(VG), a reason for this so we can power the circuit just using one power supply, to get the full range out of an op amp you need to supply it with a negative and positive voltage but using a virtual ground we can just use one supply so for example if we used a 12V supply, the VG op amp outputs 6V(VCC/2) because of the voltage divider and with respect to this ground the other voltages would be seen as +6V and -6V. If the op amp wasn’t there and we just used the voltage divider, the voltage wouldn’t remain constant as the resistant of the bottom half of the divider would change because of being connected in parallel to other resistances on the circuit. Now onto the reflective sensor, like I said before I’m using the TRCT5000 and to limit the current through the IR led I’m using a 1k resistor and for the voltage divider for the phototransistor. If you’re using a different supply voltage you’d have to change the 1k to something appropriate for that voltage and if you want to change the sensitivity for the transistor change the 10k resistor but this value worked well for me.
+
+Now onto the second op amp which is a differentiator which like the name says it differentiates the put into the amp, differentiation also works as a high pass filter. This gets rid of the DC from the input and amplifies the changing voltage. The equation for a differentiator is as follows:
+
+$Vout=R*C*\frac{dVin}{dt}$
+
+R being the resistance R5, C being the capacitance C2, dVin is the change in input Voltage and dt being change in time. Onto the next part of the circuit which is the low pass filter, this is mainly used to get rid of the 50-60Hz noise cause by the mains in your house, by changing the value of the 10k potentiometer, you change the cut off frequency for the filter giving by the equation:
+
+$f_c=\frac{1}{2*\pi*R*C}$
+
+You want to change the pot enough to get rid of the noise but still keep the majority of the input signal, I put a hook I could clip onto at this part of the circuit so I could look at how much I was filtering the signal, this can be seen in the picture of the final project near the end. The next op amp is the buffer or unity gain amplifier, what this does is separate the left side of the amp from the right as this would cause problems with the differentiator and integrator amp, there is no change across the input and output of the amp. The final part of the circuit is the integrator which again like the name says integrates the input, and integration works as a low pass filter as well. The equations for it are as follows:
+
+$DC Voltage Gain=-\frac{R2}{R1}$
+
+$AC Voltage Gain = -\frac{R2}{R1}*\frac{1}{1+2*\pi*f*R2*C}$
+
+$f_c = \frac{1}{2*\pi*R2*C}$
+
+R2 is the resistor between the output and input, I didn’t have one but a 2k potentiometer would work better here but the 1k was the closest I had, having this potentiometer does change the cut off frequency but not by too much. I added some ‘hooks’ I could clip onto easily for measure voltages at different parts of the circuit and for the input voltages, you could also use terminal blokes too. To restrict some of the light coming in from the sides of the sensor I put some white tape. For testing, make it on a breadboard so its easier to troubleshoot of change things then move to a more permanent solution. That’s it, circuit finished now just power it and place your finger on the sensor and measure the output on an oscilloscope, if you’re like me you don’t have an oscilloscope,  you’ll have to improvise. Below is the makeshift oscilloscope using an Arduino Nano:
+
+So the analog digital converter(ADC) of the Nano has a range of 0-5V and a resolution of 1023 bits, our output signal has a range of -6V to +6V so we can’t directly connect to the analog input, first the signal gets passed through a capacitor to filter the DC so we just have zero signal. After that it goes through a potentiometer which is used to reduce the volt if the signal has a large voltage swing and the final potentiometer is connected to the 5V of the Nano, this is used to create a DC offset so we can see the negative parts of the signal. That’s all of that circuit done, just write a simple code to read in the values and print them over serial. Arduino has a great feature called “Serial Plotter” which graphs  whatever is printed over serial. It can be used as a simple oscilloscope but I didn’t find a way to make changes to it like display extra information such as the beats per minute(BPM) or have a set scale to the axis so I decided to write a processing sketch which plots, the data coming in over serial, calculate a displays the BPM of the user and allow saving of the data. A video of me demonstrating the device and code can be seen below:
+
+As I mentioned in the video I couldn’t get the processing sketch to plot the graph in real time even though the Arduino was capable of plotting the data in real time at 10 times the speed, if anyone knows how I would go about getting it to plot in real real, feel free to comment below. In the end I’m happy with how it turned out, I was able to measure my pulse and automatically calculate my BPM to a degree so in my mind it was a success, I might come back to it an measure my O2 levels or make some improvements in the future.
+
+Below is the code and a few other things:
+
+Calculation for BPM:
+
+Samples to Time @ 100Hz:
+
+$t = Samples*0.01$
+
+Time between peaks(seconds per beat):
+
+$\Delta t = t2-t1$
+
+Beats per second(BPS):
+
+$BPS = \frac{1}{\Delta t}$
+
+Beats per minute(BPM):
+
+$BPM=60*BPS$
+
+//
+// Simple_Arduino_Ocscilloscope.ino
+// This code is used to read an analog values from pin A0
+// at a speed at 100Hz and convert this bit value to a voltage.
+// This voltage is sent over Serial to a processing sketch
+// Create By Ronan Byrne, https://roboroblog.wordpress.com/2016/09/05/simple-heart-rate-monitor/
+// Last Updated 06/09/2016
+//
+
+// Include timer library which can be found
+// here http://www.doctormonk.com/search?q=timer
+#include "Timer.h"
+
+Timer t; // Create Timer Object
+float volt;  // Voltage from A0
+
+void setup() {
+Serial.begin(250000); // Baudrate of 250000
+pinMode(ch1, INPUT);  // Set A0 as an Input
+Serial.println('B');  // Print 'B' to the Pc
+// To plot on Serial plotter, comment out 'establishContact()'
+establishContact(); // Wait for response from PC
+}
+
+void loop() {
+t.update();
+}
+
+volt = (analogRead(ch1) / 1023.0) * 5.0;
+Serial.println(volt); // Print This value over Serial
+}
+
+void establishContact() {
+// Send "B" until a response is heard
+while (Serial.available() <= 0) {
+Serial.println("B");
+delay(300);
+}
+}
+
+
+
+//
+// Heart_Rate_Monitor.pde
+// This code reads a heart rate signal over serial
+// and graphs this data as well as calculating the
+// beats per minute(BPM). The user can also record
+// the data by clicking on the record button or by pressing
+// the spacebar.
+// Created By Ronan Byrn, https://roboroblog.wordpress.com/2016/09/05/simple-heart-rate-monitor/
+// Last Updated 06/09/2016
+//
+
+import processing.serial.*;
+import javax.swing.*;
+
+Serial myPort; // Create Serial Object
+
+// Define Variables
+String portid, val;
+float V, Vmax, Vmin, Vold, Vold2, Vthresh, t1, t2,
+X, Y, oldX, oldY;
+boolean port, saved, firstContact, record;
+int i, beatMax, beatMin, beats, t, sample,
+id;
+
+void setup() {
+size(displayWidth, 600);// define screen size(X,Y)
+
+// Look through serial list for your COM port(Your COM Port way not be COM3)
+printArray(Serial.list());
+// Loop through list until your COM port is found
+while (port == false) {
+for ( i=0; i<Serial.list().length; i++) {
+if (Serial.list()[i].equals("COM3") == true) {
+portid = Serial.list()[i];
+port = true;
+}
+}
+if (portid ==null) {// Alert the user that the COM3 isn't connected
+JOptionPane.showMessageDialog(null, "Com port not conntected!!!",
+delay(1000);
+}
+}
+
+// Initialize the serial port and set the baudrate to 250000
+myPort = new Serial(this, portid, 250000);
+myPort.bufferUntil('\n');
+// Set Voltage Threshold at 3 voltage to calculate beats
+// You may need to change this value depending on the peak to peak
+Vthresh = 3.0;
+oldX = 0;
+oldY = 550;
+background(255);
+record =false;
+firstContact = false;
+// Set the max and mins so that they'll be updated straight away
+Vmax =0;
+Vmin = 200;
+beatMax = int(Vmax);
+beatMin = int(Vmin);
+}
+
+void draw() {
+if (myPort.available()>0) { // Wait until something is sent over serial
+processData(); // Process data reads in the serial data
+
+// Convert the value into a range of 0-500 pixels, changing the '550'
+// value will change where 0V will be on the screen
+Y=550-map(V, 0.0, 5.0, 0.0, 500);
+// Set the X axis to 0 to 3s(300 samples @100Hz)
+X = map(sample, 0.0, 300.0, 0.0, float(width));
+
+if (X > width) { // If we go off the screen reset to the left of the screen
+sample = 0;
+X = 0.0;
+oldX = -1.0;
+background(255);
+}
+stroke(0);
+line(oldX, oldY, X, Y); // draw the line for the current sample
+
+// Create white box to cover previous BPM
+fill(255);
+stroke(255);
+rectMode(CENTER);
+rect(width/2, 40, 120, 30);
+
+// Write new BPM over white box
+String bpm = str(beats) + " BPM";
+textAlign(CENTER);
+stroke(0);
+fill(0);
+textSize(15);
+text(bpm, width/2, 40);
+
+oldX= X;
+oldY = Y;
+
+// Record Button
+if (record ==false) { // Small Red Circle Within White Circle
+stroke(0);
+fill(255);
+ellipse(displayWidth-50, 550, 50, 50);
+stroke(255, 0, 0);
+fill(255, 0, 0);
+ellipse(displayWidth-50, 550, 10, 10);
+} else { // White Square Within Red Circle
+stroke(255, 0, 0);
+fill(255, 0, 0);
+ellipse(displayWidth-50, 550, 50, 50);
+rectMode(CENTER);
+stroke(255);
+fill(255);
+rect(displayWidth-50, 550, 20, 20);
+}
+
+if (keyPressed == true && key ==' ') {// If the space bar is pressed, record/stop recording (' ' stands for space bar in this instance)
+if (record==false) {
+println("Recording");
+record = true;
+delay(100); // delay to stop bouncing
+} else {
+// When recording is stopped, save the data to a .csv file named by the date and time
+String date = hour()+"_"+minute()+"_"+second()+"_"+day()+month()+year();
+String Dir = sketchPath("Heart_Beat_Monitor/"+date);
+
+println(Dir+".csv"); // Print directory to be saved to
+saveTable(readings, Dir+".csv"); // Save table as .csv
+delay(100);
+record = false;
+id = 0; // Reset id value
+}
+}
+}
+}
+
+void processData() {
+// Make sure our data isn't empty before continuing
+if (val != null) {
+// Trim whitespace and formatting characters (like carriage return)
+val = trim(val);
+if (firstContact == false) { // Make contact with nano
+firstContact = true;
+myPort.clear();
+myPort.write("A");
+} else if (val.length() > 2) { // Check that the value is more than two characters
+V =float(val);
+heartBeat(); // Calculate Heart Rate
+sample++;
+t++;
+
+// If recording, save values
+if (record == true) {
+id++;
+}
+}
+}
+}
+
+void heartBeat() {
+// Find max and  min voltages
+if (V > Vmax) Vmax = V;
+if (V < Vmin) Vmin = V;
+
+// Calculating bpm
+if (V > Vthresh) { // If the voltage is above the threshold
+// and the current sample is smaller than the previous and the previous is greater than
+// the sample before that (i.e. a peak)
+if (V< Vold && Vold > Vold2) {
+if (t1 == 0)t1 = t; // set time for first peak
+else {
+t1 = t2;
+t2 = t;
+// Clamp bpm so we dont get any very large or very small heart rates
+if ( 130 > round(6000/(t2-t1))&& 40 < round(6000/(t2-t1))) {
+// (t2-t1)*0.01 = s/beat
+// 1/(s/beat) = beats/s
+// 60*beats/s = BPM, below is the simplifed version of that
+beats = int(round(6000/(t2-t1)));
+}
+// Record max and min BPM
+if (beats > beatMax) beatMax = beats;
+if (beats < beatMin) beatMin = beats;
+}
+}
+Vold2 = Vold; // Set old old value
+Vold = V; // Set old value
+}
+}
+
+void mousePressed() {
+if (mouseButton == LEFT) {
+// Toggle record if the left mouse button is clicked within the circle
+// Find distance from center of circle
+float disX = displayWidth-50 - mouseX;
+float disY = 550 - mouseY;
+println(disX + " " + disY);
+if (sqrt(sq(disX)+sq(disY)) < 25) // check if distance is within radius
+{
+record =!record;
+if (record == false) {
+// When recording is stopped, save the data to a .csv file named by the date and time
+// No debouncing necessary for mouse pressed
+String date = hour()+"_"+minute()+"_"+second()+"_"+day()+month()+year();
+String Dir = sketchPath("Heart_Rate_Monitor/"+date);
+
+println(Dir+".csv"); // Print directory to be saved to
+saveTable(readings, Dir+".csv"); // Save table as .csv
+
+record = false;
+id = 0; // reset id value
+} else println("Recording");
+}
+}
+}

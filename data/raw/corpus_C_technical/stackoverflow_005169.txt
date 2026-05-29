@@ -1,0 +1,69 @@
+Question: <p>The following seems strange.. Basically, the somedata attribute seems shared between all the classes that inherited from <code>the_base_class</code>.</p>
+
+<pre><code>class the_base_class:
+    somedata = {}
+    somedata['was_false_in_base'] = False
+
+
+class subclassthing(the_base_class):
+    def __init__(self):
+            print self.somedata
+
+
+first = subclassthing()
+{'was_false_in_base': False}
+first.somedata['was_false_in_base'] = True
+second = subclassthing()
+{'was_false_in_base': True}
+&gt;&gt;&gt; del first
+&gt;&gt;&gt; del second
+&gt;&gt;&gt; third = subclassthing()
+{'was_false_in_base': True}
+</code></pre>
+
+<p>Defining <code>self.somedata</code> in the <code>__init__</code> function is obviously the correct way to get around this (so each class has it's own <code>somedata</code> dict) - but when is such behavior desirable?</p>
+
+Answer: <p>You are right, <code>somedata</code> is shared between all instances of the class and it's subclasses, because it is created at class <em>definition</em> time. The lines </p>
+
+<pre><code>somedata = {}
+somedata['was_false_in_base'] = False
+</code></pre>
+
+<p>are executed when the class is defined, i.e. when the interpreter encounters the <code>class</code> statement - <strong>not</strong> when the instance is created (think static initializer blocks in Java). If an attribute does not exist in a class instance, the class object is checked for the attribute.</p>
+
+<p>At class definition time, you can run arbritrary code, like this:</p>
+
+<pre><code> import sys
+ class Test(object):
+     if sys.platform == "linux2":
+         def hello(self):
+              print "Hello Linux"
+     else:
+         def hello(self):
+              print "Hello ~Linux"
+</code></pre>
+
+<p>On a Linux system, <code>Test().hello()</code> will print <code>Hello Linux</code>, on all other systems the other string will be printed.</p>
+
+<p>In constrast, objects in <code>__init__</code> are created at <em>instantiation</em> time and belong to the instance only (when they are assigned to <code>self</code>):</p>
+
+<pre><code>class Test(object):
+    def __init__(self):
+        self.inst_var = [1, 2, 3]
+</code></pre>
+
+<p>Objects defined on a class object rather than instance can be useful in many cases. For instance, you might want to cache instances of your class, so that instances with the same member values can be shared (assuming they are supposed to be immutable):</p>
+
+<pre><code>class SomeClass(object):
+    __instances__ = {}
+
+    def __new__(cls, v1, v2, v3):
+        try:
+            return cls.__insts__[(v1, v2, v3)]
+        except KeyError:
+            return cls.__insts__.setdefault(
+               (v1, v2, v3), 
+               object.__new__(cls, v1, v2, v3))
+</code></pre>
+
+<p>Mostly, I use data in class bodies in conjunction with metaclasses or generic factory methods.</p>

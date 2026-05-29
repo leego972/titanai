@@ -1,0 +1,74 @@
+Shafi Goldwasser and Silvio Micali won the Turing Award recently.  Crypto theory is both incredibly interesting and useful, and Goldwasser and Micali had a hand in a ton of the foundational papers.  I’m proud to say Ive had both of them as instructors and actually knew Silvio pretty well (TA’ed for a class he taught, in addition to taking two of his classes).  He’s easily one of the most amusing instructors I’ve had, and many of my friends will tell you the same.  He’s full of humor, wisdom, ideas, Italian blood, and other good things.  In his honor, I’ll write a post which tries to teach some cryptography.
+
+I’m not going to try to explain any of the things Goldwasser and Micali came up with.  I’d just be repeating Micali’s lectures, but doing it badly.  Instead, I’m going to try to illustrate the idea of bootstrapping in Gentry’s construction of homomorphic encryption.  I chose this because:
+
+• It was a huge breakthrough in cryptography
+• It can be well-illustrated, to a non-cryptographer, in my opinion.
+• It is one of my favorite proof ideas.
+• I haven’t seen it explained in a super nice way elsewhere.
+• I have presented on this topic in the past, in a presentation skills class at MIT, with similar aim.
+
+My goal is to illustrate the way Micali did, but to an even less technical audience.
+
+First, what is homomorphic encryption?  And even before that, what is encryption?
+
+Encryption is where we start with a message, call it $m$.  Like so:
+
+We want to put a “lock” around it, which I’ll denote by drawing a circle around it:
+
+The “lock” is actually a function you apply; an encryption function.  We’ll denote the encrpyted version of the message $m$ by $E(m)$.
+
+The message, when locked up, looks like complete gibberish.  However, with a certain secret key, this lock can be removed, and the message can be recovered!
+
+Without this secret key, the message becomes very hard to recover.  As far as we can tell, you need to use brute force, which takes a long time
+
+Encryption schemes (ways to generate the locks and keys) have been around for a long time.  One well known one is RSA (named after another group of Turing award winners.  And I taught a class with Rivest too!  (I even have his phone number)), which was developed in the 70s.
+
+Encryption is an extremely useful tool for ensuring privacy.  In its infancy, it was merely a way to pass war messages.  Now it’s fundamental to all security and privacy issues on the internet, from message sending to password storage.
+
+Homomorphic encryption is a whole nother beast.  Suppose I have a lot of private data, like my email, or my sequenced genome, and I want to know something about it.  Perhaps I want to search through it, or perform some complicated algorithm on it.  In general, I may want to apply some arbitrary function, $f$, to my data, $m$.  Unfortunately, my own computer is not nearly powerful enough to process my whole genome, and I don’t trust other people with such private data.  So how can I get from $m$ to $f(m)$?
+
+Homomorphic encryption solves this problem by letting someone with powerful resources do computation on data they can’t even see, and get an output they can’t even see!  Homomorphic encryption is an encryption scheme, with an additional, amazing property.  For any function $f$, you can easily transform it into a “homomorphic” version of the function, call it $f^*$.  Instead of turning inputs into outputs, this homomorphic function can turn encrypted inputs into encrypted outputs!   That is, $f^*(E(m)) = E(f(m))$, for any message $m$!
+
+So essentially, here’s how I would get $f(m)$:  I would take my data $m$, and encrypt it, to get $E(m)$.  I would pass this encrypted data to a powerful computer, as well as tell it the function $f$ I would like to compute.  They can then determine what the magical function $f^*$ should be.  They use their superior computational resources to run $f^*$ on $E(m)$, and produce $E(f(m))$.  They pass this back to me, and I can use my secret key to decrypt and recover $f(m)$!
+
+When using this homomorphic function, the powerful computer doesn’t need to know the secret key.  From their point of view, they only ever see things which are locked up, so I might as well have handed them gibberish.  If they did know the secret key, this would be easy.  Just decrypt, apply, and re-encrypt:
+
+In fact, it’s even possible to make it so that they don’t know what function I’m trying to compute.  In other words, it can be made so that instead of having to tell them $f$ directly, I can tell them something that looks like gibberish instead.  Can you see how?
+
+Homomorphic encryption is an incredibly useful tool, and was considered a holy grail of cryptography.  And while tons of encryption schemes were known by the 70s, nobody knew how to construct a homomorphic one.  At the same time, nobody could show it was impossible.  And trust me:  lots of smart people like the folks mentioned above thought about it for a long time.  So for 30 years, there was a huge question mark.
+
+(… drumroll)
+
+Finally in 2009, Craig Gentry produced a candidate scheme.  First, he constructed a “somewhat” homomorphic encryption scheme.  I’ll explain.
+
+Essentially, he made it so that each time you apply a homomorphic function, the lock around the output gets a little bit screwed up.  The more complicated the function, the more screwed up the lock would get.  If the lock was only screwed up a little bit, then the key could still open it.  But if it got screwed up too much, the key would stop working.  Unfortunately, this meant you couldn’t do very much computation before the output became impossible to read, even for someone with the key.
+
+To illustrate, I’ll use green circles to denote locks that can still be unlocked, and red circles to denote locks that are hopeless.  So a dark green circle is a perfectly fine encryption:
+
+But a red one makes it so even a key can’t recover a message:
+
+Now suppose we wanted to go from $m$ to $m + 6$, by repeatedly adding one.  What might happen is this:
+
+But this is terrible!  This means we can’t even add 6 to a number homomorphically.  We can only add 2 or 3.  This is actually a pretty accurate representation of what a “somewhat” homomorphic encryption scheme can do.
+
+So where do we go from here?  What we’d like is a way to get from a bad encryption to a good one.
+
+Here’s where an amazingly beautiful idea, called bootstrapping, comes in.  First, the picture:
+
+What the hell is going on here?
+
+1. We start with an encryption that is almost red, i.e. almost unusable.
+2. We encrypt this encryption, freshly!  That is, we put a very new, shiny lock around it.
+3. We homomorphically apply the decryption function!  Remember, this means that function is magically applied to whatever is on the inside of the lock.  In this case, what’s inside is an encryption, and the function is decryption.  So the result is that our original message sits inside the lock!
+
+Unfortunately, when we apply the decryption function, our shiny new lock will get worse.  But if it doesn’t get too bad, and is still better than the original lock, then we’ve made progress!  And we can do this over and over, whenever our lock is starting to get bad, in order to continue our computation.
+
+A few things of note:
+
+• Remember, the person doing all this is the person we don’t trust.  But as an input to the decryption function, they need the secret key!  Luckily, their decryption function is homomorphic, so we can just give them an encryption of the secret key.  It’s assumed that this is safe, which it appears to be.
+• A lot of technical details went into making the decryption function simple enough that it didn’t make the new lock worse than the old one.
+
+Whew.  This amazing trick makes it so that we can now have someone blindly apply arbitrary functions to encrypted data.  Unfortunately, because the bootstrapping procedure must be ran often, this scheme is too slow to be practically useful.  But research in this area has accelerating, and cryptographers are now working on bringing this dream to reality.
+
+Can you imagine ways in which the world might be better off with homomorphic encryption?

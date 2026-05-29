@@ -1,0 +1,41 @@
+Question: <p>What is the best way to do cross-platform handling of hidden files?
+(preferably in Python, but other solutions still appreciated)</p>
+
+<p>Simply checking for a leading '.' works for *nix/Mac, and file attributes work on Windows. However, this seems a little simplistic, and also doesn't account for alternative methods of hiding things (.hidden files, etc.). Is there a standard way to deal with this?</p>
+
+Answer: <p>Here's a script that runs on Python 2.5+ and should do what you're looking for:</p>
+
+<pre><code>import ctypes
+import os
+
+def is_hidden(filepath):
+    name = os.path.basename(os.path.abspath(filepath))
+    return name.startswith('.') or has_hidden_attribute(filepath)
+
+def has_hidden_attribute(filepath):
+    try:
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(unicode(filepath))
+        assert attrs != -1
+        result = bool(attrs &amp; 2)
+    except (AttributeError, AssertionError):
+        result = False
+    return result
+</code></pre>
+
+<p>I added something similar to has_hidden_attribute to <a href="https://bitbucket.org/jaraco/jaraco.windows" rel="nofollow">jaraco.windows</a>. If you have jaraco.windows >= 2.3:</p>
+
+<pre><code>from jaraco.windows import filesystem
+
+def has_hidden_attribute(filepath):
+    return filesystem.GetFileAttributes(filepath).hidden
+</code></pre>
+
+<p>As Ben has pointed out, on Python 3.5, you can use the stdlib:</p>
+
+<pre><code>import os, stat
+
+def has_hidden_attribute(filepath):
+    return bool(os.stat(filepath).st_file_attributes &amp; stat.FILE_ATTRIBUTE_HIDDEN)
+</code></pre>
+
+<p>Though you may still want to use jaraco.windows for the more Pythonic API.</p>

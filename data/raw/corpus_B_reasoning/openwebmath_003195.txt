@@ -1,0 +1,151 @@
+English (en) español (es) suomi (fi)
+
+## Introduction
+
+FPSpreadsheet is a powerful package for reading and writing spreadsheet files. The main intention is to provide a platform which is capable of native export/import of an application's data to/from the most important spreadsheet file formats without having these spreadsheet applications installed.
+
+Soon, however, the wish arises to use this package also for editing of file content or formatting. For this purpose, the library contains a dedicated grid control, the FPSpreadsheetGrid, which closely resembles the features of a worksheet of a spreadsheet application. The demo "spready" which comes along with FPSpreadsheet demonstrates usage of this grid. Along with a bunch of formatting options, this demo still comes up to more than 1400 lines of code in the main form unit. Therefore, a set of visual controls was developed which greatly simplify creation of spreadsheet applications.
+
+It is the intention of this tutorial to write a simple spreadsheet program on the basis of these controls.
+
+Although most of the internal structure of the FPSpreadsheet library is covered by the visual controls it is recommended that you have some knowledge of FPSpreadsheet. Of course, you should not have a basic understanding of Lazarus and FPC, and you must know how to work with the object inspector of Lazarus.
+
+FPSpreadsheet exposes non-visual classes, such as TsWorkbook, TsWorksheet etc. This keeps the library general enough for all kind of Pascal programs. For GUI programs, on the other hand, some infrastructure is needed which relates the spreadsheets to forms, grids, and other controls.
+
+### TsWorkbookSource
+
+The heart of the visual FPSpreadsheet controls is the TsWorkbookSource class. This provides a link between the non-visual spreadsheet data and the visual controls on the form. Its purpose is similar to that of a TDataSource component in database applications which links database tables or queries to dedicated "data-aware" controls.
+
+All visual FPSpreadsheet controls have a property WorkbookSource which links them into the information chain provided by the TsWorkbookSource. The WorkbookSource keeps a list of all controls attached. Internally, these controls are called "listeners" because they listen to information distributed by the WorkbookSource.
+
+The workbook and worksheets use events to notify the WorkbookSource of all relevant changes: changes in cell content or formatting, selecting other cells, adding or deleting worksheet etc. Information on these changes is passed on to the listening controls, and they react in their own specialized way on these changes. If, for example, a new worksheet is added to a workbook the visual TsWorkbookTabControl creates a new tab for the new worksheet, and the TsWorksheetGrid loads the new worksheet into the grid.
+
+### TsWorkbookTabControl
+
+This is a tabcontrol which provides a tab for each worksheet of the current workbook. The tab names are identical with the names of the worksheets. Selecting another tab is communicated to the other visual spreadsheet controls via the WorkbookSource.
+
+### TsWorksheetGrid
+
+This is a customized DrawGrid descendant of the LCL and displays cells of the currently selected worksheet. The texts are not stored in the grid (like a StringGrid would do), but are taken from the TsWorksheet data structure. Similarly, the worksheet provides the information of how each cell is formatted. Like any LCL grid it has a bunch of properties and can be tuned for many applications by adapting its Options. The most important one will be described below.
+
+Note: The TsWorksheetGrid can also be operated without a TsWorkbookSource. For this purpose it provides its own set of methods for reading and writing files.
+
+### TsCellEdit
+
+The typical spreadsheet applications provide a line for editing formulas or cell content. This is the purpose of the TsCellEdit. It displays the content of the active cell of the worksheet which is the same as the active cell of the WorksheetGrid. If editing is finished (by pressing Enter, or by selecting another cell in the WorksheetGrid) the new cell value is transferred to the worksheet. Internally, the TsCellEdit is a memo control, i.e. it is able to process multi-line text correctly. Use Ctrl+ Enter to insert a forced line-break.
+
+### TsCellIndicator
+
+This is a TEdit control which displays the address of the currently selected cell in Excel notation, e.g. 'A1' if the active cell is in the first row and first column (row = 0, column = 0). Conversely, if a valid cell address is entered into this control the corresponding cell becomes active.
+
+### TsCellCombobox
+
+This combobox can be used to modify various cell properties by selecting values from the dropdown list. The property affected is determined by the CellFormatItem of the combobox:
+• cfiFontName: the list contains he names of all fonts available on the current system. If an item is selected the corresponding font is used to format the cell of the currently selected cells.
+• cfiFontSize: the list contains the most typical font sizes used in spreadsheets. Selecting an item sets the font size of the currently selected cells accordingly.
+• cfiFontColor: the list contains all colors of the workbook's palette. The selected color is assigned to the font of the selected cells.
+• cfiBackgroundColor: like cfiFontColor - the selected color is used as background fill color of the selected cells.
+
+Inherits from TValueListEditor and displays name-value pairs for properties of the workbook, the selected worksheet, and the content and formatting of the active cell. It's main purpose is to help with debugging.
+
+Enough of theory, let's get started. Let's write a small spreadsheet application. Sure - it cannot compete with the spreadsheets of the main Office applications like Excel or Open/LibreOffice, but it has all the main ingredients due to FPSpreadsheet. And using the FPSpreadsheet controls allows to achieve this with minimum lines of code.
+
+### Preparations
+
+Create a new project and store it in a folder of your liking.
+
+Since Office applications have a menu and a toolbar add a TMainMenu and a TToolbar component to the form. (You could even mimic the ribbon user interface of the new Microsoft applications by adding a TSpkToolbar from Lazarus Code and Components Repository, but be aware that this component does not yet provide all the features of a standard toolbar).
+
+In fact, we will be needing another toolbar for the formula edit line. As you will see later, it will be resizable; as size control add a TSplitter to the form and top-align it such that it is positioned underneath the two toolbars. In order to keep a minimum size of the toolbar you should establish constraints: Look at the current height of the toolbar and enter this number into the MinHeight field of the Constraints property of the toolbar. To separate the formula toolbar from the rest of the main form, activate the option ebBottom of the EdgeBorders property of the second toolbar.
+
+Since menu and toolbars will have to handle same user actions it is advantageous to provide a TActionList to store all possible actions. If assigned to the menu items and toolbuttons both will react on user interaction in the same way without any additional coding. And: The FPSpreadsheet visual controls package contains a bunch of spreadsheet-related standard actions ready to use.
+
+The toolbar of the completed application will contain a lot of of icons. Therefore, we need a TImageList component which has to be linked to the Images property of the TMainMenu, the TToolbars, and the TActionList. Where to get icons? You can have a look in the folder images of your Lazarus installation where you'll find standard icons for loading and saving etc. This is a subset of the famfamfam SILK icon library. Another huge icon set is the Fugue icon collection. Both collections are licensed as "Creative commons" and are free even for commercial use, provided that appropriate reference is given in the created programs. When selecting icons prefer the png image format, and make sure to use always the same size, usually 16x16 pixels.
+
+### Setting up the visual workbook
+
+#### TsWorkbookSource
+
+As described in the introductory section the TsWorkbookSource component is the interface between workbook and controls on the user interface. Add this component to the form and give it a decent name (we'll keep the default name sWorkbookSource1 here, though). As you will see shortly, this component will have to be assigned to the property WorkbookSource of all controls of the FPSpreadsheet_visual package.
+
+The WorkbookSource is responsible for loading and writing data from/to file and for communicating with the workbook. Therefore, it owns a set of options that are passed to the workbook and control these processes:
+
+type
+TsWorkbookOption = (boVirtualMode, boBufStream, boAutoCalc, boCalcBeforeSaving, boReadFormulas);
+TsWorkbookOptions = set of TsWorkbookOption;
+
+The most important ones are
+
+• boAutoCalc: activates automatic calculation of formulas whenever cell content changes.
+• boCalcBeforeSaving: calculated formulas before a workbook is written to file
+• boReadFormulas: if set full formulas are read from the file, otherwise only formula results.
+• boBufStream and boVirtualMode: In non-visual programs, these options can help if running out of memory in case of large workbooks. boVirtualMode, in particular, is not usable for visual applications, though, because it avoids keeping data in the worksheet cells. See also FPSpreadsheet#Virtual_mode.
+
+In this tutorial, it is assumed that the options boAutoCalc and boReadFormulas are activated.
+
+#### TsWorkbookTabControl
+
+The first visual control used in the form is a TsWorkbookTabControl - click it onto the form (into the space not occupied by the toolbar). Client-align it within the form, this shows the TabControl as a bright rectangle only. Now link its WorkbookSource property to the TsWorkbookSource component that we have added just before. Now the TabControl shows a tab labelled "Sheet1". This is because the TsWorkbookSource has created a dummy workkbook containing a single worksheet "Sheet1". The WorkbookSource synchronizes this internal workbook with the TabControl (and the other visual controls to come) such that it displays this worksheet as a tab.
+
+In Excel the worksheet tabs are at the bottom of the form - to achieve this effect you can set the property TabPosition of the TabControl to tpBottom; there are some painting issues of the LCL with this TabPosition, though, therefore, I prefer the default setting, tpTop.
+
+The screenshot shows how far we've got.
+
+#### TsWorksheetGrid
+
+Now we add a TsWorksheetGrid control. Click it somewhere into the space occupied by the TabControl such that it becomes a child a of the TabControl. You see a standard stringgrid-like component. Link its WorkbookSource property to the source added at the beginning, and the grid looks more like a spreadsheet: there are the column headers labelled by letters "A", "B", etc, and the row headers labelled by numbers "1", "2", etc; the active cell, A1, is marked by a thick border.
+
+You may want to switch the grid's TitleStyle to tsNative in order to achieve themed painting of the row and column headers. And here is a good place to adapt the grid's Options in order to activate many features well-known to spreadsheets:
+
+• goEditing must be active, otherwise the grid contents cannot be modified.
+• goAlwaysShowEditor should be off because it interferes with the editing convention of spreadsheet applications.
+• goColSizing enables changing of the column width by dragging the dividing line between adjacent column headers. Dragging occurs with the left mouse button pressed.
+• goRowSizing does the same with the row heights.
+• goDblClickAutoResize activates the feature that optimum column width can be set by double-clicking in the header on its dividing line to the next column. The "optimum" column width is such that no cell content is truncated and no extra space is shown in the column.
+• goHeaderHotTrack gives visual feedback if the mouse is above a header cell.
+• goRangeSelect (which is on by default) enables selection of a rectangular range of cells by dragging the mouse between cells at opposite corners of the rectangle. You can even select multiple rectangles by holding the CTRL key down before the next rectangle is dragged (in older Lazarus releases - before 1.4 - only a single range could be selected).
+• goThumbTracking activates immediate scrolling of the worksheet if one of the scrollbars is dragged with the mouse. The Office applications usually scroll by lines; you can achieve this by turning off goSmoothScroll.
+
+In addition to these Options inherited from TCustomGrid there are some more properties specialized for spreadsheet operation:
+
+• ShowGridLines, if false, hides the row and column grid lines.
+• ShowHeaders can be set to false if the the column and row headers are to be hidden. (The same can be achieved also by the deprecated property DisplayFixedColRow).
+• The LCL grids normally truncate text at the cell border if it is longer than the cell width. If TextOverflow is set to true then text can overflow into adjacent empty cells.
+
+The properties AutoCalc and ReadFormulas are meant for stand-alone usage of the WorksheetGrid (i.e. without a TsWorkbookSource). Please use the corresponding options of the WorkbookSource instead. (AutoCalc enables automatic calculation of formulas whenever cell content changes. ReadFormulas activates reading of formulas from files, otherwise the grid would display only the formula results).
+
+### Editing of values and formulas, Navigating
+
+When you compile and run the program you'll already be able to enter data into the grid. Just select the cell that you want to edit by clicking or using the arrow keys - the active cell is highlighted by a thick border. Then begin typing. If the grid property EditorLineMode has been switched to elmMultiLine then manual line breaks can be entered by the key combination Ctrl+ Enter. When finished select another cell or press the Enter key. Using Enter automatically selects the next cell in the grid. The grid's property AutoAdvance defines what is understood as being the "next cell": by default, Enter moves the active cell down (aaDown), but you can also move it to the right (aaRight), or turn this feature off (aaNone) - see the type TAutoAdvance defined in the unit grids.pas for even more options.
+
+If - as assumed above - the WorkbookSource option boAutoCalc is enabled the worksheet automatically supports calculation of formulas. As an example, go to cell A1, and enter the number 10. Then, go to cell A2 and enter the formula =A1+10. The formula is automatically evaluated, and its result, 20, is displayed in cell A2.
+
+When you navigate in the grid you may notice that cell A2 only displays the formula result, it seems that there is no way to modify the formula once it has been entered. No need to worry - press the key F2 or click into the cell a second time to enter enhanced edit mode in which formulas are visible in the cell.
+
+In order to edit formulas the Office applications offer a dedicated formula editor bar. Of course, fpspreadsheet has this feature, too. It is built into the TsCellEdit component which is set up such as to always show the full content of a cell. You remember the second toolbar from the "Preparations" section? This will house the TsCellEdit. But wait a minute - there's more to consider: Since formulas occasionally may get rather long the control should be capable of managing serval lines. The same with multi-lined text. TsCellEdit can do this since it is inherited from TCustomMemo which is a multi-line control. You also remember that we added a splitter to the form of the second toolbar? This is for height adjustment for the case that we want to use the multi-line feature of the TsCellEdit: just drag the splitter down to show more lines, or drag it upwards to stop at the height of a single line due to the MinHeight constraints that we had assigned to the toolbar.
+
+The TsCellEdit will cover all available space in the second toolbar. Before we add the TsCellEdit we can make life easier if we think about what else will be in the second toolbar. In Excel, there is an indicator which displays the address of the currently active cell. This is the purpose of the TsCellIndicator. Since its height should not change when the toolbar is dragged down we first add a TPanel to the second toolbar; reduce its Width to about 100 pixels, remove its Caption and set its BevelOuter to bvNone.
+
+Add the TsCellIndicator to this panel and align it to the top of the panel. Connect its WorkbookSource to the TsWorkbookSource control on the form, and immediately you'll see the text "A1", the address of the currenly selected cell.
+
+Sometimes it is desirable to change the width of this box at runtime. So, why not add a splitter to the second toolbar? Set its Align property to alLeft. The result is a bit strange: the splitter is at the very left edge of the toolbar, but you'd expect to see it at the right of the panel. This is because the panel is not aligned by default. Set the Align property of the panel to alLeft as well, and drag the splitter to the right of the panel. Now the splitter is at the correct position.
+
+Almost done now... We finally add a TsCellEdit component to the empty space of the toolbar. Client-align it so that it fills the entire rest of the toolbar. As usual, set its WorkbookSource property to the instance of the TsWorkbookSource on the the form.
+
+Compile and run. Play with the program:
+
+• Enter some dummy data. Navigate in the worksheet. You'll see that the CellIndicator always shows the address of the active cell. The contents of the active cell is displayed in the CellEdit box. The CellIndicator is not just a passive display of the current cell, it can also be edited. Type in the address of a cell which you want to become active, press Enter, and see what happens...
+• Enter a formula. Navigate back into the formula cell - the formula is displayed in the CellEdit and can be changed there readily.
+• Enter multi-lined text - you can enforce a lineending in the CellEdit by holding the Ctrl key down when you press Enter. The cell displays only one line of the text. Drag the horizontal splitter underneath the second toolbar down - the CellEdit shows all lines. Another way to see all lines of the text, is to adjust the cell height. You must have activated the grid Option goRowSizing. Then you can drag the lower dividing line of the row with the multi-line cell down to increase the row height - the missing lines now appear in the cell!
+
+### Formatting of cells
+
+In addition to entering data the user usually wants to apply some formatting to the cells in order to enhance or group them. The worksheet grid is set up in such a way that its cells display the formats taken from the workbook. In addition, the visual FPSpreadsheet controls are able to store formatting attributes into the cell. Because of the notification mechanism via the WorkbookSource these formats are returned to the WorksheetGrid for display.
+
+#### Adding comboboxes for font name, font size, and font color
+
+In this section, we want to provide the possibility to modify the font of the cell texts by selecting its name, size and/or color. The visual FPSpreadsheet provide the flexible TsCellCombobox for this purpose. It has the property CellFormatItem which defines which attribute it controls:
+
+• cfiFontName: This option populates the combobox with all fonts found in the current system. The selected item is used for the type face in the selected cells.
+• cfiFontSize fills the combobox with the mostly used font sizes (in points). Again, the selected item defines the font size of the selected cells.
+• cfiFontColor adds all pre-defined colors ("palette") of the workbook to the combobox to set the tex

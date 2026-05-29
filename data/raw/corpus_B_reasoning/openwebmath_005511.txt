@@ -1,0 +1,311 @@
+Home > Numerical Analysis > Using Stata’s random-number generators, part 1
+
+## Using Stata’s random-number generators, part 1
+
+I want to start a series on using Stata’s random-number function. Stata in fact has ten random-number functions:
+
+1. runiform() generates rectangularly (uniformly) distributed random number over [0,1).
+2. rbeta(a, b) generates beta-distribution beta(a, b) random numbers.
+3. rbinomial(n, p) generates binomial(n, p) random numbers, where n is the number of trials and p the probability of a success.
+4. rchi2(df) generates χ2 with df degrees of freedom random numbers.
+5. rgamma(a, b) generates Γ(a, b) random numbers, where a is the shape parameter and b, the scale parameter.
+6. rhypergeometric(N, K, n) generates hypergeometric random numbers, where N is the population size, K is the number of in the population having the attribute of interest, and n is the sample size.
+7. rnbinomial(n, p) generates negative binomial — the number of failures before the nth success — random numbers, where p is the probability of a success. (n can also be noninteger.)
+8. rnormal(μ, σ) generates Gaussian normal random numbers.
+9. rpoisson(m) generates Poisson(m) random numbers.
+10. rt(df) generates Student’s t(df) random numbers.
+
+You already know that these random-number generators do not really produce random numbers; they produce pseudo-random numbers. This series is not about that, so we’ll be relaxed about calling them random-number generators.
+
+You should already know that you can set the random-number seed before using the generators. That is not required but it is recommended. You set the seed not to obtain better random numbers, but to obtain reproducible random numbers. In fact, setting the seed too often can actually reduce the quality of the random numbers! If you don’t know that, then read help set seed in Stata. I should probably pull out the part about setting the seed too often, expand it, and turn it into a blog entry. Anyway, this series is not about that either.
+
+This series is about the use of random-number generators to solve problems, just as most users usually use them. The series will provide practical advice. I’ll stay away from describing how they work internally, although long-time readers know that I won’t keep the promise. At least I’ll try to make sure that any technical details are things you really need to know. As a result, I probably won’t even get to write once that if this is the kind of thing that interests you, StataCorp would be delighted to have you join our development staff.
+
+runiform(), generating uniformly distributed random numbers
+
+Mostly I’m going to write about runiform() because runiform() can solve such a variety of problems. runiform() can be used to solve,
+
+• shuffling data (putting observations in random order),
+• drawing random samples without replacement (there’s a minor detail we’ll have to discuss because runiform() itself produces values drawn with replacement),
+• drawing random samples with replacement (which is easier to do than most people realize),
+• drawing stratified random samples (with or without replacement),
+• manufacturing fictional data (something teachers, textbook authors, manual writers, and blog writers often need to do).
+
+runiform() generates uniformly, a.k.a. rectangularly distributed, random numbers over the interval, I quote from the manual, “0 to nearly 1”.
+
+Nearly 1? “Why not all the way to 1?” you should be asking. “And what exactly do you mean by nearly 1?”
+
+The answer is that the generator is more useful if it omits 1 from the interval, and so we shaved just a little off. runiform() produces random numbers over [0, 0.999999999767169356].
+
+Here are two useful formulas you should commit to memory.
+
+1. If you want to generate continuous random numbers between a and b, use
+
+generate double u = (ba)*runiform() + a
+
+The random numbers will not actually be between a and b, they will be between a and nearly b, but the top will be so close to b, namely 0.999999999767169356*b, that it will not matter.
+
+Remember to store continuous random values as doubles.
+
+2. If you want to generate integer random numbers between a and b, use
+
+generate ui = floor((ba+1)*runiform() + a)
+
+In particular, do not even consider using the formula for continuous values but rounded to integers, which is to say, round(u) = round((ba)*runiform() + a). If you use that formula, and if ba>1, then a and b will be under represented by 50% each in the samples you generate!
+
+I stored ui as a default float, so I am assuming that -16,777,216 ≤ a < b ≤ 16,777,216. If you have integers outside of that range, however, store as a long or double.
+
+I’m going to spend the rest of this blog entry explaining the above.
+
+First, I want to show you how I got the two formulas and why you must use the second formula for generating integer uniform deviates.
+
+Then I want explain why we shaved a little from the top of runiform(), namely (1) while it wouldn’t matter for formula 1, it made formula 2 a little easier, (2) the code would run more quickly, (3) we could more easily prove that we had implemented the random-number generator correctly, and (4) anyone digging deeper into our random numbers would not be misled into thinking they had more than 32 bits of resolution. That last point will be important in a future blog entry.
+
+Continuous uniforms over [a, b)
+
+runiform() produces random numbers over [0, 1). It therefore obviously follows that (ba)*runiform()+a produces number over [a, b). Substitute 0 for runiform() and the lower limit is obtained. Substitute 1 for runiform() and the upper limit is obtained.
+
+I can tell you that in fact, runiform() produces random numbers over [0, (232-1)/232].
+
+Thus (ba)*runiform()+a produces random numbers over [a, ((232-1)/232)*b].
+
+(232-1)/232) approximately equals 0.999999999767169356 and exactly equals 1.fffffffeX-01 if you will allow me to use %21x format, which Stata understands and which you can understand if you see my previous blog posting on precision.
+
+Thus, if you are concerned about results being in the interval [a, b) rather than [a, b], you can use the formula
+
+generate double u = ((ba)*runiform() + a) / 1.fffffffeX-01
+
+There are seven f’s followed by e in the hexadecimal constant. Alternatively, you could type
+
+generate double u = ((ba)*runiform() + a) * ((2^32-1)/2^32)
+
+but multiplying by 1.fffffffeX-01 is less typing so I’d type that. Actually I wouldn’t type either one; the small difference between values lying in [a, b) or [a, b] is unimportant.
+
+Integer uniforms over [a, b]
+
+Whether we produce real, continuous random numbers over [a, b) or [a, b] may be unimportant, but if we want to draw random integers, the distinction is important.
+
+runiform() produces continuous results over [0, 1).
+
+(ba)*runiform()+a produces continuous results over [a, b).
+
+To produce integer results, we might round continuous results over segments of the number line:
+
+           a    a+.5  a+1  a+1.5  a+2  a+2.5       b-1.5  b-1  b-.5    b
+real line  +-----+-----+-----+-----+-----+-----------+-----+-----+-----+
+int  line  |<-a->|<---a+1--->|<---a+2--->|           |<---b-1--->|<-b->|
+
+
+In the diagram above, think of the numbers being produced by the continuous formula u=(ba)*runiform()+a as being arrayed along the real line. Then imagine rounding those values, say by using Stata’s round(u) function. If you rounded in that way, then
+
+• Values of u between a and a+0.5 will be rounded to a.
+• Values of u between a+0.5 and a+1.5 will be rounded to a+1.
+• Values of u between a+1.5 and a+2.5 will be rounded to a+2.
+• Values of u between b-1.5 and b-0.5 will be rounded to b-1.
+• Values of u between b-0.5 and b-1 will be rounded to b.
+
+Note that the width of the first and last intervals is half that of the other intervals. Given that u follows the rectangular distribution, we thus expect half as many values rounded to a and to b as to a+1 or a+2 or … or b-1.
+
+And indeed, that is exactly what we would see:
+
+. set obs 100000
+obs was 0, now 100000
+
+. gen double u = (5-1)*runiform() + 1
+
+. gen i = round(u)
+
+. summarize u i
+
+Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+u |    100000    3.005933    1.156486   1.000012   4.999983
+i |    100000     3.00489    1.225757          1          5
+
+. tabulate i
+
+i |      Freq.     Percent        Cum.
+------------+-----------------------------------
+1 |     12,525       12.53       12.53
+2 |     24,785       24.79       37.31
+3 |     24,886       24.89       62.20
+4 |     25,284       25.28       87.48
+5 |     12,520       12.52      100.00
+------------+-----------------------------------
+Total |    100,000      100.00
+
+
+To avoid the problem we need to make the widths of all the intervals equal, and that is what the formula floor((ba+1)*runiform() + a) does.
+
+           a          a+1         a+2                     b-1          b          b+1
+real line  +-----+-----+-----+-----+-----------------------+-----+-----+-----+-----+
+int  line  |<--- a --->|<-- a+1 -->|                       |<-- b-1 -->|<--- b --->)
+
+
+Our intervals are of equal width and thus we expect to see roughly the same number of observations in each:
+
+. gen better = floor((5-1+1)*runiform() + 1)
+
+. tabulate better
+
+better |      Freq.     Percent        Cum.
+------------+-----------------------------------
+1 |     19,808       19.81       19.81
+2 |     20,025       20.02       39.83
+3 |     19,963       19.96       59.80
+4 |     20,051       20.05       79.85
+5 |     20,153       20.15      100.00
+------------+-----------------------------------
+Total |    100,000      100.00
+
+
+So now you know why we shaved a little off the top when we implemented runiform(); it made the formula
+
+floor((ba+1)*runiform() + a):
+
+easier. Our integer [a, b] formula did not have to concern itself that runiform() would sometimes — rarely — return 1. If runiform() did return the occasional 1, the simple formula above would produce the (correspondingly occasional) b+1.
+
+How Stata calculates continuous random numbers
+
+I’ve said that we shaved a little off the top, but the fact was that it was easier for us to do the shaving than not.
+
+runiform() is based on the KISS random number generator. KISS produces 32-bit integers, meaning integers the range [0, 232-1], or [0, 4,294,967,295]. You might wonder how we converted that range to being continuous over [0, 1).
+
+Start by thinking of the number KISS produces in its binary form:
+
+b31b30b29b28b27b26b25b24b23b22b21b20b19b18b17b16b15b14b13b12b11b10b9b8b7b6b5b4b3b2b1b0
+
+The corresponding integer is b31*231 + b31*230 + … + b0*20. All we did was insert a binary point out front:
+
+. b31b30b29b28b27b26b25b24b23b22b21b20b19b18b17b16b15b14b13b12b11b10b9b8b7b6b5b4b3b2b1b0
+
+making the real value b31*2-1 + b30*2-2 + … + b0*2-32. Doing that is equivalent to dividing by 2-32, except insertion of the binary point is faster. Nonetheless, if we had wanted runiform() to produce numbers over [0, 1], we could have divided by 232-1.
+
+Anyway, if the KISS random number generator produced 3190625931, which in binary is
+
+10111110001011010001011010001011
+
+we converted that to
+
+0.10111110001011010001011010001011
+
+which equals 0.74287549 in base 10.
+
+The largest number the KISS random number generator can produce is, of course,
+
+11111111111111111111111111111111
+
+and 0.11111111111111111111111111111111 equals 0.999999999767169356 in base 10. Thus, the runiform() implementation of KISS generates random numbers in the range [0, 0.999999999767169356].
+
+I could have presented all of this mathematically in base 10: KISS produces integers in the range [0, 232-1], and in runiform() we divide by 232 to thus produce continuous numbers over the range [0, (232-1)/232]. I could have said that, but it loses the flavor and intuition of my longer explanation, and it would gloss over the fact that we just inserted the binary point. If I asked you, a base-10 user, to divide 232 by 10, you wouldn’t actually divide in the same way that they would divide by, say 9. Dividing by 9 is work. Dividing by 10 merely requires shifting the decimal point. 232 divided by 10 is obviously 23.2. You may not have realized that modern digital computers, when programmed by “advanced” programmers, follow similar procedures.
+
+Oh gosh, I do get to say it! If this sort of thing interests you, consider a career at StataCorp. We’d love to have you.
+
+Is it important that runiform() values be stored as doubles?
+
+Sometimes it is important. It’s obviously not important when you are generating random integers using floor((ba+1)*runiform() + a) and -16,777,216 ≤ a < b ≤ 16,777,216. Integers in that range fit into a float without rounding.
+
+When creating continuous values, remember that runiform() produces 32 bits. floats store 23 bits and doubles store 52, so if you store the result of runiform() as a float, it will be rounded. Sometimes the rounding matters, and sometimes it does not. Next time, we will discuss drawing random samples without replacement. In that case, the rounding matters. In most other cases, including drawing random samples with replacement — something else for later — the rounding
+does not matter. Rather than thinking hard about the issue, I store all my non-integer
+random values as doubles.
+
+Tune in for the next episode
+
+Yes, please do tune in for the next episode of everything you need to know about using random-number generators. As I already mentioned, we’ll discuss drawing random samples without replacement. In the third installment, I’m pretty sure we’ll discuss random samples with replacement. After that, I’m a little unsure about the ordering, but I want to discuss oversampling of some groups relative to others and, separately, discuss the manufacturing of fictional data.
+
+Am I forgetting something?
+
+Categories: Numerical Analysis Tags:
+• Simon
+
+Thanks for the very helpful explanation, William.
+I am trying to build up “fake” dataset, using random generated variables. Of each variable I know:
+1) number of observations
+2) mean
+3) std error
+4) min and max values.
+Do you know I can I ask STATA to randomly generate a variable with all those specified parameters?
+Many thanks,
+Simon
+
+• Jorge
+
+This is one of the most useful entries about stata that I have ever read. Thank you William for taking the time of explaining this.
+
+I was working with the code you propose for drawing random integers, and find out that it actually requires a lot of observations to get an even distribution between your intervals. Of course, you would expect to have a decent number of observations in each interval (~30 maybe), but even with this number, you don’t get a distribution as smooth as you expect.
+
+Is there any way to deal with this problem on small size samples, without messing the random process?
+
+Thank you,
+
+Jorge
+
+• A set of random draws is less smooth or regular than many people expect. So the behavior you report is to be expected and is desirable.
+
+There are special circumstances where you may want something more regular than a random draw, e.g. when using maximum simulated likelihood. For those situations one option is to use a Halton set, see -help mf_halton- and the special issue of the Stata Journal on maximum simulated likelihood: http://www.stata-journal.com/sj6-2.html
+
+• mark
+
+I have the same problem as yours. Have you already had a solution to it? if so, can you please share with me? many thanks.
+
+• mark
+
+Have you already had a solution to it? If so, can you please share it with me. I have the same problem. many thanks
+
+• There has been a long discussion of that on the Statalist recently. It started here: http://www.stata.com/statalist/archive/2013-03/msg00417.html
+
+• Hi, I would like to know how I can generate random between two decimals. Example: Random between 0.5 to 0.9.
+thanks
+
+• Ana Milena Plata Fajardo
+
+Please, I generated the random variable and I’m trying to run spmat command. However stata give me an error : “Variable _ID not found”
+
+• David Crow
+
+I know that drawnorm allows one to simulate data for a multivariate normal distribution, but can one simulate data from other multivariate probability distributions, including the uniform?
+
+• Emmanuel Asare-bediako
+
+please, help me to analyse by data using mixed logit
+
+• Pedro
+
+Hello,
+How can I generate a random 3×1 vector, which has a mean-vector = b and a 3×3 variance-covariance matrix = B?
+I need to generate a random vector of 3 coefficients which are related among them by a 3×3 variance-covariance matrix.
+
+• Chek Meout
+
+Is there a program i can use use to generate random numbers between 1-80 by inputting the data from the previous randomly generated numbers ?
+
+• ptd006
+
+Dear William,
+
+is there a C(++) implementation of Stata’s random number generator available? (I am porting some Stata code and would like it for testing purposes)
+
+Thanks!
+
+• ptd006
+
+In case it is useful to anyone else- I wrote a C++ plugin to use mt19937 generated uniforms in Stata, using the default seed. See http://stackoverflow.com/questions/29419165/stata-random-number-generator-in-c/29609299#29609299
+
+• Russell Pieters
+
+HI William,
+
+How would I go about generating a random dummy variable, for a falsification test, i.e. a variable that randomly allocates values 0 or 1 into a vector?
+
+Kind Regards,
+
+Russell
+
+• Mona
+
+I think you can use runiformint(0,1) for that.
+
+• Anne Bendixen
+
+we seek to randomly allocate Don’t know (9) answers, so that 1/4 (25%) of the them is valued as correct. We have a multiple choice question with 4 opportunities, but we already coded them 0/1 – correct/incorrect. Therefore we want to recode DK saying: recode var1 (9=1 “correct” …. every 4th time).
+Is that possible?

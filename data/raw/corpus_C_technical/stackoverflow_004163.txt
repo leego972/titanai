@@ -1,0 +1,42 @@
+Question: <p>How can I find local IP addresses (i.e. 192.168.x.x or 10.0.x.x) in Python platform independently and using only the standard library?</p>
+
+Answer: <p>This answer is my personal attempt to solve the problem of getting the LAN IP, since <code>socket.gethostbyname(socket.gethostname())</code> also returned 127.0.0.1. This method does not require Internet just a LAN connection. Code is for Python 3.x but could easily be converted for 2.x. Using UDP Broadcast:</p>
+
+<pre><code>import select
+import socket
+import threading
+from queue import Queue, Empty
+
+def get_local_ip():
+        def udp_listening_server():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.bind(('&lt;broadcast&gt;', 8888))
+            s.setblocking(0)
+            while True:
+                result = select.select([s],[],[])
+                msg, address = result[0][0].recvfrom(1024)
+                msg = str(msg, 'UTF-8')
+                if msg == 'What is my LAN IP address?':
+                    break
+            queue.put(address)
+
+        queue = Queue()
+        thread = threading.Thread(target=udp_listening_server)
+        thread.queue = queue
+        thread.start()
+        s2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s2.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        waiting = True
+        while waiting:
+            s2.sendto(bytes('What is my LAN IP address?', 'UTF-8'), ('&lt;broadcast&gt;', 8888))
+            try:
+                address = queue.get(False)
+            except Empty:
+                pass
+            else:
+                waiting = False
+        return address[0]
+
+if __name__ == '__main__':
+    print(get_local_ip())
+</code></pre>

@@ -1,0 +1,204 @@
+## 8.3 Gene expression analysis using high-throughput sequencing technologies
+
+With the advent of the second-generation (a.k.a next-generation or high-throughput) sequencing technologies, the number of genes that can be profiled for expression levels with a single experiment has increased to the order of tens of thousands of genes. Therefore, the bottleneck in this process has become the data analysis rather than the data generation. Many statistical methods and computational tools are required for getting meaningful results from the data, which comes with a lot of valuable information along with a lot of sources of noise. Fortunately, most of the steps of RNA-seq analysis have become quite mature over the years. Below we will first describe how to reach a read count table from raw fastq reads obtained from an Illumina sequencing run. We will then demonstrate in R how to process the count table, make a case-control differential expression analysis, and do some downstream functional enrichment analysis.
+
+### 8.3.1 Processing raw data
+
+#### 8.3.1.1 Quality check and read processing
+
+The first step in any experiment that involves high-throughput short-read sequencing should be to check the sequencing quality of the reads before starting to do any downstream analysis. The quality of the input sequences holds fundamental importance in the confidence for the biological conclusions drawn from the experiment. We have introduced quality check and processing in Chapter 7, and those tools and workflows also apply in RNA-seq analysis.
+
+#### 8.3.1.2 Improving the quality
+
+The second step in the RNA-seq analysis workflow is to improve the quality of the input reads. This step could be regarded as an optional step when the sequencing quality is very good. However, even with the highest-quality sequencing datasets, this step may still improve the quality of the input sequences. The most common technical artifacts that can be filtered out are the adapter sequences that contaminate the sequenced reads, and the low-quality bases that are usually found at the ends of the sequences. Commonly used tools in the field (trimmomatic (Bolger, Lohse, and Usadel 2014), trimGalore (Andrews 2010)) are again not written in R, however there are alternative R libraries for carrying out the same functionality, for instance, QuasR (Gaidatzis, Lerch, Hahne, et al. 2015) (see QuasR::preprocessReads function) and ShortRead (Morgan, Anders, Lawrence, et al. 2009) (see ShortRead::filterFastq function). Some of these approaches are introduced in Chapter 7.
+
+The sequencing quality control and read pre-processing steps can be visited multiple times until achieving a satisfactory level of quality in the sequence data before moving on to the downstream analysis steps.
+
+### 8.3.2 Alignment
+
+Once a decent level of quality in the sequences is reached, the expression level of the genes can be quantified by first mapping the sequences to a reference genome, and secondly matching the aligned reads to the gene annotations, in order to count the number of reads mapping to each gene. If the species under study has a well-annotated transcriptome, the reads can be aligned to the transcript sequences instead of the reference genome. In cases where there is no good quality reference genome or transcriptome, it is possible to de novo assemble the transcriptome from the sequences and then quantify the expression levels of genes/transcripts.
+
+For RNA-seq read alignments, apart from the availability of reference genomes and annotations, probably the most important factor to consider when choosing an alignment tool is whether the alignment method considers the absence of intronic regions in the sequenced reads, while the target genome may contain introns. Therefore, it is important to choose alignment tools that take into account alternative splicing. In the basic setting where a read, which originates from a cDNA sequence corresponding to an exon-exon junction, needs to be split into two parts when aligned against the genome. There are various tools that consider this factor such as STAR (Dobin, Davis, Schlesinger, et al. 2013), Tophat2 (Kim, Pertea, Trapnell, et al. 2013), Hisat2 (Kim, Langmead, and Salzberg 2015), and GSNAP (Wu, Reeder, Lawrence, et al. 2016). Most alignment tools are written in C/C++ languages because of performance concerns. There are also R libraries that can do short read alignments; these are discussed in Chapter 7.
+
+### 8.3.3 Quantification
+
+After the reads are aligned to the target, a SAM/BAM file sorted by coordinates should have been obtained. The BAM file contains all alignment-related information of all the reads that have been attempted to be aligned to the target sequence. This information consists of - most basically - the genomic coordinates (chromosome, start, end, strand) of where a sequence was matched (if at all) in the target, specific insertions/deletions/mismatches that describe the differences between the input and target sequences. These pieces of information are used along with the genomic coordinates of genome annotations such as gene/transcript models in order to count how many reads have been sequenced from a gene/transcript. As simple as it may sound, it is not a trivial task to assign reads to a gene/transcript just by comparing the genomic coordinates of the annotations and the sequences, because of confounding factors such as overlapping gene annotations, overlapping exon annotations from different transcript isoforms of a gene, and overlapping annotations from opposite DNA strands in the absence of a strand-specific sequencing protocol. Therefore, for read counting, it is important to consider:
+
+1. Strand specificity of the sequencing protocol: Are the reads expected to originate from the forward strand, reverse strand, or unspecific?
+2. Counting mode: - when counting at the gene-level: When there are overlapping annotations, which features should the read be assigned to? Tools usually have a parameter that lets the user select a counting mode. - when counting at the transcript-level: When there are multiple isoforms of a gene, which isoform should the read be assigned to? This consideration is usually an algorithmic consideration that is not modifiable by the end-user.
+
+Some tools can couple alignment to quantification (e.g. STAR), while some assume the alignments are already calculated and require BAM files as input. On the other hand, in the presence of good transcriptome annotations, alignment-free methods (Salmon (Patro, Duggal, Love, et al. 2017), Kallisto (Bray, Pimentel, Melsted, et al. 2016), Sailfish (Patro, Mount, and Kingsford 2014)) can also be used to estimate the expression levels of transcripts/genes. There are also reference-free quantification methods that can first de novo assemble the transcriptome and estimate the expression levels based on this assembly. Such a strategy can be useful in discovering novel transcripts or may be required in cases when a good reference does not exist. If a reference transcriptome exists but of low quality, a reference-based transcriptome assembler such as Cufflinks (Trapnell, Williams, Pertea, et al. 2010) can be used to improve the transcriptome. In case there is no available transcriptome annotation, a de novo assembler such as Trinity (Haas, Papanicolaou, Yassour, et al. 2013) or Trans-ABySS (Robertson, Schein, Chiu, et al. 2010) can be used to assemble the transcriptome from scratch.
+
+Within R, quantification can be done using: - Rsubread::featureCounts - QuasR::qCount - GenomicAlignments::summarizeOverlaps
+
+### 8.3.4 Within sample normalization of the read counts
+
+The most common application after a gene’s expression is quantified (as the number of reads aligned to the gene), is to compare the gene’s expression in different conditions, for instance, in a case-control setting (e.g. disease versus normal) or in a time-series (e.g. along different developmental stages). Making such comparisons helps identify the genes that might be responsible for a disease or an impaired developmental trajectory. However, there are multiple caveats that needs to be addressed before making a comparison between the read counts of a gene in different conditions (Maza, Frasse, Senin, et al. 2013).
+
+• Library size (i.e. sequencing depth) varies between samples coming from different lanes of the flow cell of the sequencing machine.
+• Longer genes will have a higher number of reads.
+• Library composition (i.e. relative size of the studied transcriptome) can be different in two different biological conditions.
+• GC content biases across different samples may lead to a biased sampling of genes (Risso, Schwartz, Sherlock, et al. 2011).
+• Read coverage of a transcript can be biased and non-uniformly distributed along the transcript (Mortazavi, Williams, McCue, et al. 2008).
+
+Therefore these factors need to be taken into account before making comparisons.
+
+The most basic normalization approaches address the sequencing depth bias. Such procedures normalize the read counts per gene by dividing each gene’s read count by a certain value and multiplying it by 10^6. These normalized values are usually referred to as CPM (counts per million reads):
+
+• Total Counts Normalization (divide counts by the sum of all counts)
+• Upper Quartile Normalization (divide counts by the upper quartile value of the counts)
+• Median Normalization (divide counts by the median of all counts)
+
+Popular metrics that improve upon CPM are RPKM/FPKM (reads/fragments per kilobase of million reads) and TPM (transcripts per million). RPKM is obtained by dividing the CPM value by another factor, which is the length of the gene per kilobase. FPKM is the same as RPKM, but is used for paired-end reads. Thus, RPKM/FPKM methods account for, firstly, the library size, and secondly, the gene lengths.
+
+TPM also controls for both the library size and the gene lengths, however, with the TPM method, the read counts are first normalized by the gene length (per kilobase), and then gene-length normalized values are divided by the sum of the gene-length normalized values and multiplied by 10^6. Thus, the sum of normalized values for TPM will always be equal to 10^6 for each library, while the sum of RPKM/FPKM values do not sum to 10^6. Therefore, it is easier to interpret TPM values than RPKM/FPKM values.
+
+### 8.3.5 Computing different normalization schemes in R
+
+Here we will assume that there is an RNA-seq count table comprising raw counts, meaning the number of reads counted for each gene has not been exposed to any kind of normalization and consists of integers. The rows of the count table correspond to the genes and the columns represent different samples. Here we will use a subset of the RNA-seq count table from a colorectal cancer study. We have filtered the original count table for only protein-coding genes (to improve the speed of calculation) and also selected only five metastasized colorectal cancer samples along with five normal colon samples. There is an additional column width that contains the length of the corresponding gene in the unit of base pairs. The length of the genes are important to compute RPKM and TPM values. The original count tables can be found from the recount2 database (https://jhubiostatistics.shinyapps.io/recount/) using the SRA project code SRP029880, and the experimental setup along with other accessory information can be found from the NCBI Trace archive using the SRA project code SRP029880.
+
+#colorectal cancer
+counts_file <- system.file("extdata/rna-seq/SRP029880.raw_counts.tsv",
+package = "compGenomRData")
+coldata_file <- system.file("extdata/rna-seq/SRP029880.colData.tsv",
+package = "compGenomRData")
+
+counts <- as.matrix(read.table(counts_file, header = T, sep = '\t'))
+
+#### 8.3.5.1 Computing CPM
+
+Let’s do a summary of the counts table. Due to space limitations, the summary for only the first three columns is displayed.
+
+summary(counts[,1:3])
+##      CASE_1              CASE_2              CASE_3
+##  Min.   :        0   Min.   :        0   Min.   :        0
+##  1st Qu.:     5155   1st Qu.:     6464   1st Qu.:     3972
+##  Median :    80023   Median :    85064   Median :    64145
+##  Mean   :   295932   Mean   :   273099   Mean   :   263045
+##  3rd Qu.:   252164   3rd Qu.:   245484   3rd Qu.:   210788
+##  Max.   :205067466   Max.   :105248041   Max.   :222511278
+
+To compute the CPM values for each sample (excluding the width column):
+
+cpm <- apply(subset(counts, select = c(-width)), 2,
+function(x) x/sum(as.numeric(x)) * 10^6)
+
+Check that the sum of each column after normalization equals to 10^6 (except the width column).
+
+colSums(cpm)
+## CASE_1 CASE_2 CASE_3 CASE_4 CASE_5 CTRL_1 CTRL_2 CTRL_3 CTRL_4 CTRL_5
+##  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06
+
+#### 8.3.5.2 Computing RPKM
+
+# create a vector of gene lengths
+geneLengths <- as.vector(subset(counts, select = c(width)))
+
+# compute rpkm
+rpkm <- apply(X = subset(counts, select = c(-width)),
+MARGIN = 2,
+FUN = function(x) {
+10^9 * x / geneLengths / sum(as.numeric(x))
+})
+
+Check the sample sizes of RPKM. Notice that the sums of samples are all different.
+
+colSums(rpkm)
+##   CASE_1   CASE_2   CASE_3   CASE_4   CASE_5   CTRL_1   CTRL_2   CTRL_3
+## 158291.0 153324.2 161775.4 173047.4 172761.4 210032.6 301764.2 241418.3
+##   CTRL_4   CTRL_5
+## 291674.5 252005.7
+
+#### 8.3.5.3 Computing TPM
+
+#find gene length normalized values
+rpk <- apply( subset(counts, select = c(-width)), 2,
+function(x) x/(geneLengths/1000))
+#normalize by the sample size using rpk values
+tpm <- apply(rpk, 2, function(x) x / sum(as.numeric(x)) * 10^6)
+
+Check the sample sizes of tpm. Notice that the sums of samples are all equal to 10^6.
+
+colSums(tpm)
+## CASE_1 CASE_2 CASE_3 CASE_4 CASE_5 CTRL_1 CTRL_2 CTRL_3 CTRL_4 CTRL_5
+##  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06  1e+06
+
+None of these metrics (CPM, RPKM/FPKM, TPM) account for the other important confounding factor when comparing expression levels of genes across samples: the library composition, which may also be referred to as the relative size of the compared transcriptomes. This factor is not dependent on the sequencing technology, it is rather biological. For instance, when comparing transcriptomes of different tissues, there can be sets of genes in one tissue that consume a big chunk of the reads, while in the other tissues they are not expressed at all. This kind of imbalance in the composition of compared transcriptomes can lead to wrong conclusions about which genes are actually differentially expressed. This consideration is addressed in two popular R packages: DESeq2 (Love, Huber, and Anders 2014) and edgeR (Robinson, McCarthy, and Smyth 2010) each with a different algorithm. edgeR uses a normalization procedure called Trimmed Mean of M-values (TMM). DESeq2 implements a normalization procedure using median of Ratios, which is obtained by finding the ratio of the log-transformed count of a gene divided by the average of log-transformed values of the gene in all samples (geometric mean), and then taking the median of these values for all genes. The raw read count of the gene is finally divided by this value (median of ratios) to obtain the normalized counts.
+
+### 8.3.6 Exploratory analysis of the read count table
+
+A typical quality control, in this case interrogating the RNA-seq experiment design, is to measure the similarity of the samples with each other in terms of the quantified expression level profiles across a set of genes. One important observation to make is to see whether the most similar samples to any given sample are the biological replicates of that sample. This can be computed using unsupervised clustering techniques such as hierarchical clustering and visualized as a heatmap with dendrograms. Another most commonly applied technique is a dimensionality reduction technique called Principal Component Analysis (PCA) and visualized as a two-dimensional (or in some cases three-dimensional) scatter plot. In order to find out more about the clustering methods and PCA, please refer to Chapter 4.
+
+#### 8.3.6.1 Clustering
+
+We can combine clustering and visualization of the clustering results by using heatmap functions that are available in a variety of R libraries. The basic R installation comes with the stats::heatmap function. However, there are other libraries available in CRAN (e.g. pheatmap (Kolde 2019)) or Bioconductor (e.g. ComplexHeatmap (Z. Gu, Eils, and Schlesner 2016a)) that come with more flexibility and more appealing visualizations.
+
+Here we demonstrate a heatmap using the pheatmap package and the previously calculated tpm matrix. As these matrices can be quite large, both computing the clustering and rendering the heatmaps can take a lot of resources and time. Therefore, a quick and informative way to compare samples is to select a subset of genes that are, for instance, most variable across samples, and use that subset to do the clustering and visualization.
+
+Let’s select the top 100 most variable genes among the samples.
+
+#compute the variance of each gene across samples
+V <- apply(tpm, 1, var)
+#sort the results by variance in decreasing order
+#and select the top 100 genes
+selectedGenes <- names(V[order(V, decreasing = T)][1:100])
+
+Now we can quickly produce a heatmap where samples and genes are clustered (see Figure 8.1 ).
+
+library(pheatmap)
+pheatmap(tpm[selectedGenes,], scale = 'row', show_rownames = FALSE)
+
+We can also overlay some annotation tracks to observe the clusters. Here it is important to observe whether the replicates of the same sample cluster most closely with each other, or not. Overlaying the heatmap with such annotation and displaying sample groups with distinct colors helps quickly see if there are samples that don’t cluster as expected (see Figure 8.2 ).
+
+colData <- read.table(coldata_file, header = T, sep = '\t',
+stringsAsFactors = TRUE)
+pheatmap(tpm[selectedGenes,], scale = 'row',
+show_rownames = FALSE,
+annotation_col = colData)
+
+#### 8.3.6.2 PCA
+
+Let’s make a PCA plot to see the clustering of replicates as a scatter plot in two dimensions (Figure 8.3).
+
+library(stats)
+library(ggplot2)
+#transpose the matrix
+M <- t(tpm[selectedGenes,])
+# transform the counts to log2 scale
+M <- log2(M + 1)
+#compute PCA
+pcaResults <- prcomp(M)
+
+#plot PCA results making use of ggplot2's autoplot function
+#ggfortify is needed to let ggplot2 know about PCA data structure.
+autoplot(pcaResults, data = colData, colour = 'group')
+
+We should observe here whether the samples from the case group (CASE) and samples from the control group (CTRL) can be split into two distinct clusters on the scatter plot of the first two largest principal components.
+
+We can use the summary function to summarize the PCA results to observe the contribution of the principal components in the explained variation.
+
+summary(pcaResults)
+## Importance of components:
+##                           PC1     PC2     PC3     PC4     PC5    PC6     PC7
+## Standard deviation     24.396 2.50514 2.39327 1.93841 1.79193 1.6357 1.46059
+## Proportion of Variance  0.957 0.01009 0.00921 0.00604 0.00516 0.0043 0.00343
+## Cumulative Proportion   0.957 0.96706 0.97627 0.98231 0.98747 0.9918 0.99520
+##                            PC8     PC9      PC10
+## Standard deviation     1.30902 1.12657 4.616e-15
+## Proportion of Variance 0.00276 0.00204 0.000e+00
+## Cumulative Proportion  0.99796 1.00000 1.000e+00
+
+#### 8.3.6.3 Correlation plots
+
+Another complementary approach to see the reproducibility of the experiments is to compute the correlation scores between each pair of samples and draw a correlation plot.
+
+Let’s first compute pairwise correlation scores between every pair of samples.
+
+library(stats)
+correlationMatrix <- cor(tpm)
+
+Let’s have a look at how the correlation matrix looks (8.1) (showing only two samples each of case and control samples):
+
+TABLE 8.1: Correlation scores between samples
+CASE_1 CASE_2 CTRL_1 CTRL_2
+CASE

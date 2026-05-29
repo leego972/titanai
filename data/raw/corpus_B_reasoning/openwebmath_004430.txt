@@ -1,0 +1,35 @@
+# Data types a la carte — over-engineered?
+
+I'm working through Swierstra's 2008 paper. I'm up to Section 3 eval addExample, just before 'Automating injections'. And boy! does it need automating.
+
+Is it just me, or is the whole thing over-engineered? Compare this in the paper
+
+   addExample :: Expr (Val :+: Add)
+addExample = In (Inr (Add (In (Inl (Val 118))) (In (Inl (Val 1219)))))
+
+
+addExample3 :: Expr (CoPr (CoPr Val Add) (CoPr Add Mul))
+(In (Inr (Inl (Add (In (Inl (Inl (Val 303))))
+(In (Inl (Inl (Val 330))))
+)   )    )    )
+)   )    )
+
+
+(Using type constructor CoPr instead of :+: in the paper. I've used layout there just to make sure I'm balancing my parens. This is as bad as LISP.)
+
+eval addExample3  -- ===> 966 [correct]
+
+
+So it works to have type constructor/functor Add appearing twice in the Expr. There's something wrong in the design here, because the CoProduct just needs to be a set of functors. Rather than using Swierstra's :+: I could use a type-level list(?) I notice the references don't include the HList paper, even though that was some 4 years earlier.
+
+For each 'atomic' type constructor (Val, Add) there needs to be both a Functor instance, which is essentially determined from its arity; and an Eval instance, which makes it do something useful; so later in the paper there's a Render instance for each functor, to do something else useful.
+
+For addExample and addExample3 above, GHC can infer the type. But when it gets to the smart (so-called) constructors, you need to supply the CoProduct type of the Expr. Can't those constructors (there's one for each atomic constructor) build the Expr type as it goes? (If the needed type constructor already appears, use Inl/Inr to get to it; if it doesn't appear, append it to the end of the CoProduct and generate the Inl/r.)
+
+(I started looking at a-la-Carte because it's claimed the approach doesn't fit with Overlapping Instances. Just not so: it was easy to adapt it to use overlaps in Hugs. That's the least of the difficulties.)
+
+• I asked this q in another place (now deleted) and got a comment "the problem being solved is not a simple problem." OK: what about the problem is so complex that all of Swierstra's infrastructure is needed? – AntC Apr 26 '19 at 14:48
+• A few remarks. While it is likely nessecary to read the actual paper to use solve your question, it would help if you at least provide a brief summary of what it tries to achieve. Also, your current question 'is this over-engineered', seems rather subjective. So, you should probably make clear what problem this approach is trying to solve and why you think that it is being too complicated in your specific example. That way, we can at least objectively answer why this approach does something 'complicated' here. – Discrete lizard Apr 26 '19 at 15:23
+• "over-engineered" seems like a matter of opinion, and opinion questions usually aren't a good fit here. Can you figure out why you think it might be overengineered, and whether you are unsure about any those reasons, and see if that leads to an objectively answerable technical question? For instance, perhaps you have some alternative design in mind and want to ask whether it achieves such-and-such requirements? – D.W. Apr 26 '19 at 16:23
+• The paper is tackling Wadler's 'Expression Problem', and is the usual citation as a solution. Summarising its approach would be pointless, because its complexity is exactly what I'm asking about. This isn't a simplify-the-code question, it's a simplify-the-design. If you don't already know W's 'Problem', it's unlikely you could help, but thank you. – AntC Apr 27 '19 at 2:37
+• By "over-engineered" I mean (for example) the :+: type constructor would support arbitrary nesting and repetition of functors within an Expr/evalAlgebra type. But Swierstra doesn't need that richness, and Section 4 uses a much simpler structure. Never the less the addExample has a pile-up of data constructors to build an abstract syntax tree of 3 nodes. It looks like a structural impedance mismatch between the Algebra and the AST. AFAICT from the paper, an evalAlgebra is a set of functors; an adequate representation would be a type-level list(?) – AntC Apr 27 '19 at 2:47

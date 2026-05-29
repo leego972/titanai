@@ -1,0 +1,37 @@
+Question: <p>I am using xmlrpclib.ServerProxy to make RPC calls to a remote server. If there is not a network connection to the server it takes the default 10 seconds to return a socket.gaierror to my program. </p>
+
+<p>This is annoying when doing development without a network connection, or if the remote server is down. Is there a way to update the timeout on my ServerProxy object?</p>
+
+<p>I can't see a clear way to get access to the socket to update it.</p>
+
+Answer: <p>Here is code that works on Python 2.7 (probably for other 2.x versions of Python) without raising <em>AttributeError, instance has no attribute 'getresponse'</em>.</p>
+
+<pre><code>
+class TimeoutHTTPConnection(httplib.HTTPConnection):
+    def connect(self):
+        httplib.HTTPConnection.connect(self)
+        self.sock.settimeout(self.timeout)
+
+class TimeoutHTTP(httplib.HTTP):
+    _connection_class = TimeoutHTTPConnection
+
+    def set_timeout(self, timeout):
+        self._conn.timeout = timeout
+
+class TimeoutTransport(xmlrpclib.Transport):
+    def __init__(self, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, *args, **kwargs):
+        xmlrpclib.Transport.__init__(self, *args, **kwargs)
+        self.timeout = timeout
+
+    def make_connection(self, host):
+        if self._connection and host == self._connection[0]:
+            return self._connection[1]
+
+        chost, self._extra_headers, x509 = self.get_host_info(host)
+        self._connection = host, httplib.HTTPConnection(chost)
+        return self._connection[1]
+
+
+transport = TimeoutTransport(timeout=timeout)
+xmlrpclib.ServerProxy.__init__(self, uri, transport=transport, allow_none=True)
+</code></pre>

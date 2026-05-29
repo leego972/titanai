@@ -1,0 +1,92 @@
+# C++ string handling
+
+The C++ programming language has support for string handling, mostly implemented in its standard library. The language standard specifies several string types, some inherited from C, some designed to make use of the language's features, such as classes and RAII. The most-used of these is .
+
+Since the initial versions of C++ had only the "low-level" C string handling functionality and conventions, multiple incompatible designs for string handling classes have been designed over the years and are still used instead of std::string, and C++ programmers may need to handle multiple conventions in a single application.
+
+History
+The  type is the main string datatype in standard C++ since 1998, but it was not always part of C++. From C, C++ inherited the convention of using null-terminated strings that are handled by a pointer to their first element, and a library of functions that manipulate such strings. In modern standard C++, a string literal such as  still denotes a NUL-terminated array of characters.
+
+Using C++ classes to implement a string type offers several benefits of automated memory management and a reduced risk of out-of-bounds accesses, and more intuitive syntax for string comparison and concatenation. Therefore, it was strongly tempting to create such a class. Over the years, C++ application, library and framework developers produced their own, incompatible string representations, such as the one in AT&T's Standard Components library (the first such implementation, 1983) or the  type in Microsoft's MFC. While  standardized strings, legacy applications still commonly contain such custom string types and libraries may expect C-style strings, making it "virtually impossible" to avoid using multiple string types in C++ programs and requiring programmers to decide on the desired string representation ahead of starting a project.
+
+In a 1991 retrospective on the history of C++, its inventor Bjarne Stroustrup called the lack of a standard string type (and some other standard types) in C++ 1.0 the worst mistake he made in its development; "the absence of those led to everybody re-inventing the wheel and to an unnecessary diversity in the most fundamental classes".
+
+Implementation issues
+The various vendors' string types have different implementation strategies and performance characteristics. In particular, some string types use a copy-on-write strategy, where an operation such as
+
+string a = "hello!";
+string b = a; // Copy constructor
+
+does not actually copy the content of  to ; instead, both strings share their contents and a reference count on the content is incremented. The actual copying is postponed until a mutating operation, such as appending a character to either string, makes the strings' contents differ. Copy-on-write can make major performance changes to code using strings (making some operations much faster and some much slower). Though  no longer uses it, many (perhaps most) alternative string libraries still implement copy-on-write strings.
+
+Some string implementations store 16-bit or 32-bit code points instead of bytes, this was intended to facilitate processing of Unicode text. However, it means that conversion to these types from  or from arrays of bytes is dependent on the "locale" and can throw exceptions. Any processing advantages of 16-bit code units vanished when the variable-width UTF-16 encoding was introduced (though there are still advantages if you must communicate with a 16-bit API such as Windows). Qt's  is an example.
+
+Third-party string implementations also differed considerably in the syntax to extract or compare substrings, or to perform searches in the text.
+
+Standard string types
+
+The  class is the standard representation for a text string since C++98. The class provides some typical string operations like comparison, concatenation, find and replace, and a function for obtaining substrings. An  can be constructed from a C-style string, and a C-style string can also be obtained from one.
+
+The individual units making up the string are of type , at least (and almost always) 8 bits each. In modern usage these are often not "characters", but parts of a multibyte character encoding such as UTF-8.
+
+The copy-on-write strategy was deliberately allowed by the initial C++ Standard for  because it was deemed a useful optimization, and used by nearly all implementations. However, there were mistakes, in particular the  returned a non-const reference in order to make it easy to port C in-place string manipulations (such code often assumed one byte per character and thus this may not have been a good idea!) This allowed the following code that shows that it must make a copy even though it is almost always used only to examine the string and not modify it:
+
+  std::string original("aaaaaaa");
+  std::string string_copy = original; // make a copy
+  char* pointer = &string_copy[3]; // some tried to make operator[] return a "trick" class but this makes it complex
+  arbitrary_code_here(); // no optimizations can fix this
+  *pointer = 'b'; // if operator[] did not copy, this would change original unexpectedly
+
+This caused some implementations to abandon copy-on-write. It was also discovered that the overhead in multi-threaded applications due to the locking needed to examine or change the reference count was greater than the overhead of copying small strings on modern processors (especially for strings smaller than the size of a pointer). The optimization was finally disallowed in C++11, with the result that even passing a  as an argument to a function, viz.
+
+void print(std::string s) { std::cout << s; }
+
+must be expected to perform a full copy of the string into newly allocated memory. The common idiom to avoid such copying is to pass as a const reference:
+
+void print(const std::string& s) { std::cout << s; }
+
+In C++17 added a new  class that is only a pointer and length to read-only data, makes passing arguments far faster than either of the above examples:
+
+void print(std::string_view s) { std::cout << s; }
+...
+  std::string x = ...;
+  print(x); // does not copy x.data()
+  print("this is a literal string"); // also does not copy the characters!
+...
+
+Example usage
+
+#include <iostream>
+#include <iomanip>
+#include <string>
+
+int main() {
+    std::string foo = "fighters";
+    std::string bar = "stool";
+    if (foo != bar) std::cout << "The strings are different!\n";
+    std::cout << "foo = " << std::quoted(foo)
+              << " while bar = " << std::quoted(bar);
+}
+
+Related classes 
+
+ is a typedef for a particular instantiation of the  template class. Its definition is found in the  header:
+
+using string = std::basic_string<char>;
+
+Thus  provides  functionality for strings having elements of type . There is a similar class , which consists of , and is most often used to store UTF-16 text on Windows and UTF-32 on most Unix-like platforms. The C++ standard, however, does not impose any interpretation as Unicode code points or code units on these types and does not even guarantee that a  holds more bits than a . To resolve some of the incompatibilities resulting from 's properties, C++11 added two new classes:  and  (made up of the new types  and ), which are the given number of bits per code unit on all platforms.
+C++11 also added new string literals of 16-bit and 32-bit "characters" and syntax for putting Unicode code points into null-terminated (C-style) strings.
+
+A  is guaranteed to be specializable for any type with a  struct to accompany it. As of C++11, only , ,  and  specializations are required to be implemented.
+
+A  is also a Standard Library container, and thus the Standard Library algorithms can be applied to the code units in strings.
+
+Critiques
+The design of  has been held up as an example of monolithic design by Herb Sutter, who reckons that of the 103 member functions on the class in C++98, 71 could have been decoupled without loss of implementation efficiency.
+
+References
+
+C++
+C++ Standard Library
+C++
+Articles with example C++ code

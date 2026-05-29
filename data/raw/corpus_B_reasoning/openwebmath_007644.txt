@@ -1,0 +1,310 @@
+## WeBWorK Problems
+
+### custom answer checker with multiple inputs
+
+by Siman Wong -
+Number of replies: 8
+I would like to write a custom answer checker that takes in multiple inputs. Here is a simple example to show you what I have in mind (this is strictly for illustration; I know that there are simplier ways to complish this specific example):
+-------------------------------
+Context()->texStrings;
+BEGIN_TEXT
+Please enter a 2x2 symmetric matrix with your prescribed value for determinant:
+
+value of a_11: \{ ans_rule(25) \}
+value of a_12: \{ ans_rule(25) \}
+value of a_21: \{ ans_rule(25) \}
+value of a_22: \{ ans_rule(25) \}
+value of det: \{ ans_rule(25) \}
+
+END_TEXT
+Context()->normalStrings;
+$showPartialCorrectAnswers = 1; ANS($ans->cmp( checker=>sub {
+my ( $correct,$student, $ansHash ) = @_; return ($a_12==$a21) & ( ($a_11*$a_22 -$a_21*a_11) == $det ); } ) ); ---------------------- The problem here is that I don't know how to pick out from the student's input specific values for each of the variable. I checked the wiki and I couldn't find a similar examples. In case that matters, the problem I'd like to code actually has multiple parts so there are additional inputs, but I'm sure that once I work out this example the rest would follow... Your help and comments are most welcome. THANKS! In reply to Siman Wong ### Re: custom answer checker with multiple inputs by Paul Pearson - Hi Siman, Here's an example from Library/FortLewis/DiffEq/2-Higher-order/01-Linear-2nd-order/Lebl-2-1-01.pg that could serve as a template for what you want. Notice that the correct matrix entries are defined as MathObject Formulas (not using Compute) and that the answer checker uses typeMatch. Also, notice that we use$multians1->ans_rule() instead of ans_rule() for the answer blanks that are graded by the MultiAnswer object. The entries in this matrix problem are functions. If the entries in the matrix are real constants, we could have done all of this using MathObjects.
+
+Have a good evening.
+
+Paul Pearson
+
+##############################
+# Initialization
+
+DOCUMENT();
+
+"PGstandard.pl",
+"MathObjects.pl",
+"PGmatrixmacros.pl",
+"parserPopUp.pl",
+);
+
+TEXT(beginproblem());
+
+#############################
+# Setup
+
+Context("Numeric");
+
+$a = random(2,6,1); do {$b = random(2,6,1); } until ($b !=$a);
+
+$a11 = Formula("e^($a x)");
+$a12 = Formula("e^($b x)");
+$a21 = Formula("$a e^($a x)");$a22 = Formula("$b e^($b x)");
+
+$wronskian =$a11 * $a22 -$a12 * $a21;$pop = PopUp(["Choose","zero","nonzero"],"nonzero");
+
+$multians1 = MultiAnswer($a11, $a12,$a21, $a22)->with( singleResult => 1, allowBlankAnswers => 1, checkTypes => 0, format => "<table border='0' cellspacing='10'> <tr><td> %s </td><td> %s </td></tr> <tr><td> %s </td><td> %s </td></tr> </table>", tex_format => "\left\lbrack\begin{array}{rr} %s & %s \\ %s & %s \end{array}\right\rbrack", checker => sub { my ($correct, $student,$answerHash ) = @_;
+my @c = @{$correct}; my @s = @{$student};
+my @score = ();
+foreach my $j (0..3) {$score[$j] = 0; if ($c[$j]->typeMatch($s[$j]) &&$c[$j] ==$s[$j]) {$score[$j] = 1; } } return [ @score ]; } ); ###################### # Main text Context()->texStrings; BEGIN_TEXT Use the Wronskian to show that the functions $$y_1 = e^{a x}$$ and $$y_2 = e^{b x}$$ are linearly independent.$PAR
+$BCENTER \{ mbox( "Wronskian = $$\mathrm{det}$$", display_matrix([ [$multians1->ans_rule(10),$multians1->ans_rule(10)], [$multians1->ans_rule(10),multians1->ans_rule(10)]], align=>'cc'), " = ".SPACE.ans_rule(20)
+);
+\}
+$ECENTER$PAR
+These functions are linearly independent because
+the Wronskian is \{ $pop->menu() \} for all $$x$$. END_TEXT Context()->normalStrings; ###################### # Answer evaluation$showPartialCorrectAnswers = 1;
+
+WEIGHTED_ANS( $multians1->cmp(), 50 ); WEIGHTED_ANS($wronskian->cmp(), 40 );
+
+WEIGHTED_ANS( $pop->cmp(), 10 ); COMMENT("MathObject version. Uses parserMultiAnswer.pl to format the matrix nicely."); ENDDOCUMENT(); In reply to Paul Pearson ### Re: custom answer checker with multiple inputs by Paul Pearson - Hi Siman, This example is probably much closer to what you want and uses MathObject Matrix objects instead of MultiAnswer objects. Notice that to produce a matrix of answer blanks, we use$A->ans_array() instead of $A->ans_rule(). Also, in the custom answer checker, we can get individual entries of the student's answer using$student->element(i,j).
+
+Best Regards,
+
+Paul Pearson
+
+##############################
+# Initialization
+
+DOCUMENT();
+
+"PGstandard.pl",
+"MathObjects.pl",
+);
+
+TEXT(beginproblem());
+
+#############################
+# Setup
+
+Context("Matrix");
+
+$A = Matrix("[[1,2],[2,1]]");$d = Real("-3");
+
+#############################
+# Main text
+
+Context()->texStrings;
+BEGIN_TEXT
+Enter a symmetric $$2 \times 2$$ matrix
+that has determinant $$d$$.
+$BR$BR
+\{ $A->ans_array(5) \} END_TEXT Context()->normalStrings; ############################## # Answer evaluation$showPartialCorrectAnswers = 1;
+
+ANS( $A->cmp( checker => sub { my ($correct, $student,$answerHash ) = @_;
+
+my $A11stu =$student->element(1,1);
+my $A12stu =$student->element(1,2);
+my $A21stu =$student->element(2,1);
+my $A22stu =$student->element(2,2);
+
+if ( ( $student ==$student->transpose() ) &&
+( $A11stu *$A22stu - $A12stu *$A21stu == $d ) ) { return 1; } else { return 0; } })); COMMENT("MathObject version."); ENDDOCUMENT(); In reply to Paul Pearson ### Re: custom answer checker with multiple inputs by Siman Wong - Thanks! Your second example is indeed very close to what I have in mind. Two remaining issues: (1) (For the sake of this example) I would like the student to enter the determinant, as opposed to having it being predetermined. If e.g. I use something like Enter your desired value of det: \{ ans_rule(25) \} then how do I separate this value from the matrix input \{$A->ans_array(5) \} ??
+
+(2) In the actual problem I'd like to code, I need to prescribe values for some of the entries of the matrix (and tell the students what these values are). How can I accomplish that within the framework of your second example?
+
+My original, low-tech approach was to manually layout the matrix, displaying values of the prescribed entries and with answer boxes for entries to be entered. My original question was how to pick up the individual entries of the students' inputs. Your example #2 is clearly a MUCH cleaner way to do this; now if I could figure out how to prescribe values in your setup...
+
+Thanks!
+
+### Re: custom answer checker with multiple inputs
+
+by Paul Pearson -
+Hi Siman,
+
+You will need a MultiAnswer object to accomplish what you want because you will need to make the answer blanks in the matrix and the answer blank for the determinant all controlled by the same MutiAnswer object. Here's an example. Note that $s[i] are the student answers in the order in which they appear in the html (so$s[0] is entry A11, $s[1] is entry A12,$s[2] is entry A22, and $s[3] is the determinant). Also, notice that all of the answer blanks are created using$multians1->ans_rule(), so that they're all controlled by the same MultiAnswer object.
+
+Best Regards,
+
+Paul Pearson
+
+##############################
+# Initialization
+
+DOCUMENT();
+
+"PGstandard.pl",
+"MathObjects.pl",
+"PGmatrixmacros.pl",
+);
+
+TEXT(beginproblem());
+
+#############################
+# Setup
+
+Context("Numeric");
+
+do {
+
+$A11 = random(1,9,1);$A12 = random(1,9,1);
+$A21 =$A12; $A22 = random(1,9,1);$d = $A11 *$A22 - $A12**2; } until ($d != 0);
+
+$multians1 = MultiAnswer(Real($A11), Real($A21), Real($A22), Real($d))->with( singleResult => 1, format => " <table border='0' cellspacing='0'> <tr><td> <table border='0' cellspacing='10'> <tr><td> %s </td><td>$A12 </td></tr>
+<tr><td> %s </td><td> %s </td></tr>
+</table>
+</td>
+<td> %s </td>
+</tr>
+</table>",
+tex_format =>
+"\mathrm{det}
+\left\lbrack
+\begin{array}{rr}
+%s & $A12 \\ %s & %s \end{array} \right\rbrack = %s", checker => sub { my ($correct, $student,$answerHash ) = @_;
+my @c = @{$correct}; my @s = @{$student};
+my @score = ();
+if ( ($s[1] ==$A12) &&
+($s[0] *$s[2] - $s[1] *$A12 == $s[3]) && ($s[3] != 0)
+)
+{ return 1; } else { return 0; }
+}
+);
+
+######################
+# Main text
+
+Context()->texStrings;
+BEGIN_TEXT
+Enter a symmetric $$2 \times 2$$ matrix
+with entry $$A_{1,2} = A12$$ having a
+nonzero determinant, and find
+its determinant.
+$PAR$BCENTER
+\{
+mbox(
+"$$\mathrm{det}$$",
+display_matrix([
+[$multians1->ans_rule(5),"$$A12$$"], [$multians1->ans_rule(5),multians1->ans_rule(5)]], align=>'cc'), " = ".SPACE.$multians1->ans_rule(10) ); \}$ECENTER
+END_TEXT
+Context()->normalStrings;
+
+######################
+
+$showPartialCorrectAnswers = 1; ANS($multians1->cmp() );
+
+COMMENT("MathObject version. Uses parserMultiAnswer.pl to format the matrix nicely.");
+
+ENDDOCUMENT();
+
+### Re: custom answer checker with multiple inputs
+
+by Siman Wong -
+THANK YOU! This thread (more precisely, Paul's answers) absolutely should be moved to FAQ.
+
+### Re: custom answer checker with multiple inputs
+
+by Christopher Heckman -
+The difficulty I am having fits in roughly here.
+
+I am attempting to rewrite a paper test as a WeBWorK test. Two of the problems require a weighted grader, and I got one of them working fine. I'm having trouble with the other one, evidently because it also uses a multi-answer checker. I am getting a strange error (Undefined subroutine &main::50 called).
+
+The code is:
+
+DOCUMENT();
+
+"PGstandard.pl",     # Standard macros for PG language
+"MathObjects.pl",
+"PGchoicemacros.pl",
+#"source.pl",        # allows code to be displayed on certain sites.
+#"PGcourse.pl",      # Customization file for the course
+);
+
+TEXT(beginproblem());
+
+sub random_perm_matrix { # random_perm_matrix ( n )
+my $n = shift; my ($i, $j, @P); my @permutation = NchooseK ($n, $n); push @P, [(0) x$n] for 1 .. $n; for ($i = 0; $i <$n; $i++) {$P[$i][$permutation[$i]] = 1; } Matrix (@P); } sub good_P_matrix { # good_P_matrix (m, (m1, m2, ...)) my$m = shift;  my @mult = @_;
+my $n = 0; my (@P,$Pm, $d,$i, $j,$k, $s);$n  += $_ foreach @mult; push @P, [(0) x$n] for 1 .. n;
+do {
+$s = -1; foreach$i (@mult) {
+$d = random_rref ($i, $n,$i, $m, ()); if ($i == 1) {
+for ($k = 1;$k <= $n;$k++) { $P[$s + 1][$n -$k] = $d -> element ($k); }
+}
+else {
+for ($j = 1;$j <= $i;$j++) { for ($k = 1;$k <= $n;$k++) {
+$P[$s + $j][$n - $k] = ($d -> element ($j,$k)); } }
+}
+$s +=$i;
+}
+$Pm = Matrix (@P); } while ($Pm ->det == 0);
+Matrix ($Pm -> transpose); } sub random_rref { # random_rref (m, n, r, M, L) my$m = shift; my $n = shift; my$r = shift; my $M = shift; my @L = @_; my (@Lrest,$i, $indextoremove,$ro, $c, @pivotCols, @R); my$Llength = scalar @L;
+for ($i = 0;$i < $n;$i++) { $Lrest[$i] = $i + 1; } for ($i = 0; $i <$Llength; $i++) {$pivotCols[$i] =$L[$i]; for ($j = 0; $j <$n - $i;$j++)
+{ if ($L[$i] == $Lrest[$j]) { $indextoremove =$j; } }
+splice (@Lrest, $indextoremove, 1); } my @restOfPivots = NchooseK ($n - $Llength,$r - $Llength); for ($i = 0; $i <$r - $Llength;$i++)
+{ $pivotCols[$i + $Llength] =$Lrest[$restOfPivots[$i]]; }
+@pivotCols = num_sort (@pivotCols);
+push @R, [(0) x $n] for 1 ..$m;
+for ($i = 0;$i < $r;$i ++) { $R[$i][$pivotCols[$i] - 1] = 1; }
+for ($i = 0;$i < $r - 1;$i++) {
+for ($c =$pivotCols[$i] + 1;$c < $pivotCols[$i + 1]; $c ++) { for ($ro = 0; $ro <=$i; $ro++) {$R[$ro][$c-1] = random (-$M,$M); }
+}
+}
+for ($c =$pivotCols[$r - 1] + 1;$c <= $n;$c++) {
+for ($ro = 0;$ro < $r;$ro++) { $R[$ro][$c - 1] = random (-$M, $M); } } Matrix (@R); }$showPartialCorrectAnswers = 1;
+Context("Matrix");
+Context() -> texStrings;
+Context() -> strings -> add (
+Yes => {}, YES => {alias => "Yes"}, Y => {alias => "Yes"}, yes => {alias => "Yes"},
+No => {}, NO => {alias => "No"}, N => {alias => "No"}, no => {alias => "No"});
+Context() -> noreduce ("(-x)-y");
+
+$e1 = non_zero_random (-3, 3); do {$e2 = non_zero_random (-3, 3); } while ($e1 ==$e2);
+$D = Matrix ([$e1, 0], [0, $e2]);$P = good_P_matrix (3, (1, 1));
+$v1 = Vector ($P -> column (1));
+$v2 = Vector ($P -> column (2));
+$A = Matrix ($P * $D * Matrix ($P -> inverse));
+$cp = Formula ("x^2 - ($e1 + $e2) * x + ($e1 * $e2)") -> reduce;$isDiag = String ("Yes");
+
+$ma = MultiAnswer ($e1, $v1,$e2, $v2) -> with ( singleResult => 0, allowBlankAnswers => 0, checker => sub { my ($correct, $student,$self) = @_;
+my ($stuN1,$stuV1, $stuN2,$stuV2) = @{$student}; # don't need$correct
+my ($firstOK,$secondOK) = (0, 0);
+if (($stuN1 ==$e1) && ($stuN2 ==$e2)) {
+$firstOK =$stuV1 -> isParallel ($v1);$secondOK = $stuV2 -> isParallel ($v2);
+}
+if (($stuN1 ==$e2) && ($stuN2 ==$e1)) {
+$firstOK =$stuV1 -> isParallel ($v2);$secondOK = $stuV2 -> isParallel ($v1);
+}
+if ($stuV1 -> isZero) {$firstOK = 0; }
+if ($stuV2 -> isZero) {$secondOK = 0; }
+return [$firstOK,$firstOK, $secondOK,$secondOK];
+}
+);
+
+BEGIN_TEXT
+Let $$A = A.$$ Answer the following questions
+$BR$BR
+(a) Find the characteristic polynomial of $$A.$$ (Enter $$x$$ instead of $$\lambda.$$)
+\{ $cp -> ans_rule (20) \}$BR$BR (b) Find the eigenvalues of $$A.$$ For each eigenvalue of $$A$$, find the corresponding eigenvector(s); put angled brackets $$< >$$ around your answer(s).$BR
+$$~ ~ ~ ~ ~ ~ ~$$ Eigenvalue: \{ $ma -> ans_rule (5) \} $$~ ~ ~$$ Eigenvector: \{$ma -> ans_rule (20) \}
+$BR $$~ ~ ~ ~ ~ ~ ~$$ Eigenvalue: \{$ma -> ans_rule (5) \} $$~ ~ ~$$
+Eigenvector: \{ $ma -> ans_rule (20) \}$BR$BR (c) Is $$A$$ diagonalizable, yes or no? \{$isDiag -> ans_rule (10) \}
+END_TEXT
+
+Context() -> normalStrings;
+
+WEIGHTED_ANS ($cp -> cmp, 25); WEIGHTED_ANS ($ma -> cmp, 50);
+WEIGHTED_ANS ($isDiag -> cmp, 25); COMMENT ('MathObject version.'); ENDDOCUMENT(); The error message is: • Error in Translator.pm::process_answers: Answer AnSwEr0004: |1| • Undefined subroutine &main::50 called at line 208 of (eval 9176) • Error in Translator.pm::process_answers: Answer AnSwEr0004: • Answer evaluators must return a hash or an AnswerHash type, not type || at /opt/webwork/pg/lib/WeBWorK/PG/Translator.pm line 1232 • There is no answer evaluator for the question labeled AnSwEr0006 at /opt/webwork/pg/lib/WeBWorK/PG/Translator.pm line 1203 • Error in Translator.pm::process_answers: Answer AnSwEr0006: • Unrecognized evaluator type || at /opt/webwork/pg/lib/WeBWorK/PG/Translator.pm line 1227 • Error in Translator.pm::process_answers: Answer AnSwEr0006: • Answer evaluators must return a hash or an AnswerHash type, not type || at /opt/webwork/pg/lib/WeBWorK/PG/Translator.pm line 1232 • Use of uninitialized value$credit{"AnSwEr0004"} in numeric eq (==) at (eval 9176) line 287.
+• Use of uninitialized value $credit{"AnSwEr0006"} in numeric eq (==) at (eval 9176) line 287. • Use of uninitialized value$credit{"AnSwEr0004"} in multiplication (*) at (eval 9176) line 303.
+• Use of uninitialized value $credit{"AnSwEr0006"} in multiplication (*) at (eval 9176) line 303. • Use of uninitialized value in numeric ge (>=) at /opt/webwork/webwork2/lib/WeBWorK/ContentGenerator/ProblemUtil/ProblemUtil.pm line 92. • Use of uninitialized value in numeric ge (>=) at /opt/webwork/webwork2/lib/WeBWorK/ContentGenerator/ProblemUtil/ProblemUtil.pm line 92. In reply to Christopher Heckman ### Re: custom answer checker with multiple inputs by Davide Cervone - The issue is not one that you would be able to identify without looking very carefully at the MultiAnswer code. It turns out that when singleResult is 0, $ma->cmp produces an array of answer checkers (one for each answer in the multi-answer), rather than just a single one. But the WEIGHTED_ANS() expects answer checkers interspersed with their weights. That is, the odd arguments are treated as answer checkers and the even ones are the weights. Since here are 4 answers, that means the 50 (intended as a weight) is in the 5th position, and treated as an answer checker, which causes the error you are seeing.
+
+One way to avoid this is to use singleResult => 1 (and use the format and tex_format attributes to format the student answers better). But you may not like that since the coloring for correct/incorrect isn't processed properly for single results.
+
+To work when singleResult => 0, you could intersperse the weights with the answer checkers using map but there is another problem. It turns out that the checkers that the MultiAnswer object produces don't propagate the weight properly, and so even if you do this, you don't get the right result.
+
+I've attached a corrected version of parserMultiAnswer.pl that fixes the problem. If you put this in your course's templates/macros folder, you can then use
+
+   map {WEIGHTED_ANS($_,50/4)} ($ma->cmp);
+
+in place of
+    WEIGHTED_ANS(\$ma->cmp,50);
+
+Here, the 50/4 puts a quarter of the total weight on each part. That means that partial credit will be handled proportionately (so if the first two are correct, you will get 25%.
+
+See if that does what you need.

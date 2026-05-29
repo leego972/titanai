@@ -1,0 +1,190 @@
+### Optimization
+
+Taking the derivative of the loss function of a neural network can be quite cumbersome. Even taking the derivative of a single layer in a neural network often results in expressions cluttered with indices. In this post I’d like to show an index-free way to do it.
+
+Consider the map ${\sigma(Wx+b)}$ where ${W\in{\mathbb R}^{m\times n}}$ is the weight matrix, ${b\in{\mathbb R}^{m}}$ is the bias, ${x\in{\mathbb R}^{n}}$ is the input, and ${\sigma}$ is the activation function. Usually ${\sigma}$ represents both a scalar function (i.e. mapping ${{\mathbb R}\mapsto {\mathbb R}}$) and the function mapping ${{\mathbb R}^{m}\rightarrow{\mathbb R}^{m}}$ which applies ${\sigma}$ in each coordinate. In training neural networks, we would try to optimize for best parameters ${W}$ and ${b}$. So we need to take the derivative with respect to ${W}$ and ${b}$. So we consider the map
+
+$\displaystyle \begin{array}{rcl} G(W,b) = \sigma(Wx+b). \end{array}$
+
+This map ${G}$ is a concatenation of the map ${(W,b)\mapsto Wx+b}$ and ${\sigma}$ and since the former map is linear in the joint variable ${(W,b)}$, the derivative of ${G}$ should be pretty simple. What makes the computation a little less straightforward is the fact the we are usually not used to view matrix-vector products ${Wx}$ as linear maps in ${W}$ but in ${x}$. So let’s rewrite the thing:
+
+There are two particular notions which come in handy here: The Kronecker product of matrices and the vectorization of matrices. Vectorization takes some ${W\in{\mathbb R}^{m\times n}}$ given columnwise ${W = [w_{1}\ \cdots\ w_{n}]}$ and maps it by
+
+$\displaystyle \begin{array}{rcl} \mathrm{Vec}:{\mathbb R}^{m\times n}\rightarrow{\mathbb R}^{mn},\quad \mathrm{Vec}(W) = \begin{bmatrix} w_{1}\\\vdots\\w_{n} \end{bmatrix}. \end{array}$
+
+The Kronecker product of matrices ${A\in{\mathbb R}^{m\times n}}$ and ${B\in{\mathbb R}^{k\times l}}$ is a matrix in ${{\mathbb R}^{mk\times nl}}$
+
+$\displaystyle \begin{array}{rcl} A\otimes B = \begin{bmatrix} a_{11}B & \cdots &a_{1n}B\\ \vdots & & \vdots\\ a_{m1}B & \cdots & a_{mn}B \end{bmatrix}. \end{array}$
+
+We will build on the following marvelous identity: For matrices ${A}$, ${B}$, ${C}$ of compatible size we have that
+
+$\displaystyle \begin{array}{rcl} \mathrm{Vec}(ABC) = (C^{T}\otimes A)\mathrm{Vec}(B). \end{array}$
+
+Why is this helpful? It allows us to rewrite
+
+$\displaystyle \begin{array}{rcl} Wx & = & \mathrm{Vec}(Wx)\\ & = & \mathrm{Vec}(I_{m}Wx)\\ & = & \underbrace{(x^{T}\otimes I_{m})}_{\in{\mathbb R}^{m\times mn}}\underbrace{\mathrm{Vec}(W)}_{\in{\mathbb R}^{mn}}. \end{array}$
+
+So we can also rewrite
+
+$\displaystyle \begin{array}{rcl} Wx +b & = & \mathrm{Vec}(Wx+b )\\ & = & \mathrm{Vec}(I_{m}Wx + b)\\ & = & \underbrace{ \begin{bmatrix} x^{T}\otimes I_{m} & I_{m} \end{bmatrix} }_{\in{\mathbb R}^{m\times (mn+m)}}\underbrace{ \begin{bmatrix} \mathrm{Vec}(W)\\b \end{bmatrix} }_{\in{\mathbb R}^{mn+m}}\\ &=& ( \underbrace{\begin{bmatrix} x^{T} & 1 \end{bmatrix}}_{\in{\mathbb R}^{1\times(n+1)}}\otimes I_{m}) \begin{bmatrix} \mathrm{Vec}(W)\\b \end{bmatrix}. \end{array}$
+
+So our map ${G(W,b) = \sigma(Wx+b)}$ mapping ${{\mathbb R}^{m\times n}\times {\mathbb R}^{m}\rightarrow{\mathbb R}^{m}}$ can be rewritten as
+
+$\displaystyle \begin{array}{rcl} \bar G( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}) = \sigma( ( \begin{bmatrix} x^{T} & 1 \end{bmatrix}\otimes I_{M}) \begin{bmatrix} \mathrm{Vec}(W)\\b \end{bmatrix}) \end{array}$
+
+mapping ${{\mathbb R}^{mn+m}\rightarrow{\mathbb R}^{m}}$. Since ${\bar G}$ is just a concatenation of ${\sigma}$ applied coordinate wise and a linear map, now given as a matrix, the derivative of ${\bar G}$ (i.e. the Jacobian, a matrix in ${{\mathbb R}^{m\times (mn+m)}}$) is calculated simply as
+
+$\displaystyle \begin{array}{rcl} D\bar G( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}) & = & D\sigma(Wx+b)( \begin{bmatrix} x^{T} & 1 \end{bmatrix}\otimes I_{M})\\ &=& \underbrace{\mathrm{diag}(\sigma'(Wx+b))}_{\in{\mathbb R}^{m\times m}}\underbrace{( \begin{bmatrix} x^{T} & 1 \end{bmatrix}\otimes I_{M})}_{\in{\mathbb R}^{m\times(mn+m)}}\in{\mathbb R}^{m\times(mn+m)}. \end{array}$
+
+While this representation of the derivative of a single layer of a neural network with respect to its parameters is not particularly simple, it is still index free and moreover, straightforward to implement in languages which provide functions for the Kronecker product and vectorization. If you do this, make sure to take advantage of sparse matrices for the identity matrix and the diagonal matrix as otherwise the memory of your computer will be flooded with zeros.
+
+Now let’s add a scalar function ${L}$ (e.g. to produce a scalar loss that we can minimize), i.e. we consider the map
+
+$\displaystyle \begin{array}{rcl} F( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}) = L(G(Wx+b)) = L(\bar G( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}). \end{array}$
+
+The derivative is obtained by just another application of the chain rule:
+
+$\displaystyle \begin{array}{rcl} DF( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}) = DL(G(Wx+b))D\bar G( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}). \end{array}$
+
+If we want to take gradients, we just transpose the expression and get
+
+$\displaystyle \begin{array}{rcl} \nabla F( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix}) &=& D\bar G( \begin{pmatrix} \mathrm{Vec}(W)\\b \end{pmatrix})^{T} DL(G(Wx+b))^{T}\\ &=& ([x^{T}\ 1]\otimes I_{m})^{T}\mathrm{diag}(\sigma'(Wx+b))\nabla L(G(Wx+b))\\ &=& \underbrace{( \begin{bmatrix} x\\ 1 \end{bmatrix} \otimes I_{m})}_{\in{\mathbb R}^{(mn+m)\times m}}\underbrace{\mathrm{diag}(\sigma'(Wx+b))}_{\in{\mathbb R}^{m\times m}}\underbrace{\nabla L(G(Wx+b))}_{\in{\mathbb R}^{m}}. \end{array}$
+
+Note that the right hand side is indeed vector in ${{\mathbb R}^{mn+m}}$ and hence, can be reshaped to a tupel ${(W,b)}$ of an ${m\times n}$ matrix and an ${m}$ vector.
+
+A final remark: the Kronecker product is related to tensor products. If ${A}$ and ${B}$ represent linear maps ${X_{1}\rightarrow Y_{1}}$ and ${X_{2}\rightarrow Y_{2}}$, respectively, then ${A\otimes B}$ represents the tensor product of the maps, ${X_{1}\otimes X_{2}\rightarrow Y_{1}\otimes Y_{2}}$. This relation to tensor products and tensors explains where the tensor in TensorFlow comes from.
+
+The problem of optimal transport of mass from one distribution to another can be stated in many forms. Here is the formulation going back to Kantorovich: We have two measurable sets ${\Omega_{1}}$ and ${\Omega_{2}}$, coming with two measures ${\mu_{1}}$ and ${\mu_{2}}$. We also have a function ${c:\Omega_{1}\times \Omega_{2}\rightarrow {\mathbb R}}$ which assigns a transport cost, i.e. ${c(x_{1},x_{2})}$ is the cost that it takes to carry one unit of mass from point ${x_{1}\in\Omega_{2}}$ to ${x_{2}\in\Omega_{2}}$. What we want is a plan that says where the mass in ${\mu_{1}}$ should be placed in ${\Omega_{2}}$ (or vice versa). There are different ways to formulate this mathematically.
+
+A simple way is to look for a map ${T:\Omega_{1}\rightarrow\Omega_{2}}$ which says that thet mass in ${x_{1}}$ should be moved to ${T(x_{1})}$. While natural, there is a serious problem with this: What if not all mass at ${x_{1}}$ should go to the same point in ${\Omega_{2}}$? This happens in simple situations where all mass in ${\Omega_{1}}$ sits in just one point, but there are at least two different points in ${\Omega_{2}}$ where mass should end up. This is not going to work with a map ${T}$ as above. So, the map ${T}$ is not flexible enough to model all kinds of transport we may need.
+
+What we want is a way to distribute mass from one point in ${\Omega_{1}}$ to the whole set ${\Omega_{2}}$. This looks like we want maps ${\mathcal{T}}$ which map points in ${\Omega_{1}}$ to functions on ${\Omega_{2}}$, i.e. something like ${\mathcal{T}:\Omega_{1}\rightarrow (\Omega_{2}\rightarrow{\mathbb R})}$ where ${(\Omega_{2}\rightarrow{\mathbb R})}$ stands for some set of functions on ${\Omega_{2}}$. We can de-curry this function to some ${\tau:\Omega_{1}\times\Omega_{2}\rightarrow{\mathbb R}}$ by ${\tau(x_{1},x_{2}) = \mathcal{T}(x_{1})(x_{2})}$. That’s good in principle, be we still run into problems when the target mass distribution ${\mu_{2}}$ is singular in the sense that ${\Omega_{2}}$ is a “continuous” set and there are single points in ${\Omega_{2}}$ that carry some mass according to ${\mu_{2}}$. Since we are in the world of measure theory already, the way out suggests itself: Instead of a function ${\tau}$ on ${\Omega_{1}\times\Omega_{2}}$ we look for a measure ${\pi}$ on ${\Omega_{1}\times \Omega_{2}}$ as a transport plan.
+
+The demand that we should carry all of the mass in ${\Omega_{1}}$ to reach all of ${\mu_{2}}$ is formulated by marginals. For simplicity we just write these constraints as
+
+$\displaystyle \int_{\Omega_{2}}\pi\, d x_{2} = \mu_{1},\qquad \int_{\Omega_{1}}\pi\, d x_{1} = \mu_{2}$
+
+(with the understanding that the first equation really means that for all continuous function ${f:\Omega_{1}\rightarrow {\mathbb R}}$ it holds that ${\int_{\Omega_{1}\times \Omega_{2}} f(x_{1})\,d\pi(x_{1},x_{2}) = \int_{\Omega_{1}}f(x_{1})\,d\mu_{1}(x_{1})}$).
+
+This leads us to the full transport problem
+
+$\displaystyle \min_{\pi}\int_{\Omega_{1}\times \Omega_{2}}c(x,y)\,d\pi(x_{1}x_{2})\quad \text{s.t.}\quad \int_{\Omega_{2}}\pi\, d x_{2} = \mu_{1},\quad \int_{\Omega_{1}}\pi\, d x_{1} = \mu_{2}.$
+
+There is the following theorem which characterizes optimality of a plan and which is the topic of this post:
+
+Theorem 1 (Fundamental theorem of optimal transport) Under some technicalities we can say that a plan ${\pi}$ which fulfills the marginal constraints is optimal if and only if one of the following equivalent conditions is satisfied:
+
+1. The support ${\mathrm{supp}(\pi)}$ of ${\pi}$ is ${c}$-cyclically monotone.
+2. There exists a ${c}$-concave function ${\phi}$ such that its ${c}$-superdifferential contains the support of ${\pi}$, i.e. ${\mathrm{supp}(\pi)\subset \partial^{c}\phi}$.
+
+A few clarifications: The technicalities involve continuity, integrability, and boundedness conditions of ${c}$ and integrability conditions on the marginals. The full theorem can be found as Theorem 1.13 in A user’s guide to optimal transport by Ambrosio and Gigli. Also the notions ${c}$-cyclically monotone, ${c}$-concave and ${c}$-superdifferential probably need explanation. We start with a simpler notion: ${c}$-monotonicity:
+
+Definition 2 A set ${\Gamma\subset\Omega_{1}\times\Omega_{2}}$ is ${c}$-monotone, if for all ${(x_{1}x_{2}),(x_{1}',x_{2}')\in\Gamma}$ it holds that
+
+$\displaystyle c(x_{1},x_{2}) + c(x_{1}',x_{2}')\leq c(x_{1},x_{2}') + c(x_{1}',x_{2}).$
+
+If you find it unclear what this has to do with monotonicity, look at this example:
+
+Example 1 Let ${\Omega_{1/2}\in{\mathbb R}^{d}}$ and let ${c(x_{1},x_{2}) = \langle x_{1},x_{2}\rangle}$ be the usual scalar product. Then ${c}$-monotonicity is the condition that for all ${(x_{1}x_{2}),(x_{1}',x_{2}')\in\Gamma\subset\Omega_{1}\times\Omega_{2}}$ it holds that
+
+$\displaystyle 0\leq \langle x_{1}-x_{1}',x_{2}-x_{2}'\rangle$
+
+which may look more familiar. Indeed, when ${\Omega_{1}}$ and ${\Omega_{2}}$ are subset of the real line, the above conditions means that the set ${\Gamma}$ somehow “moves up in ${\Omega_{2}}$” if we “move right in ${\Omega_{1}}$”. So ${c}$-monotonicity for ${c(x_{1},x_{2}) = \langle x_{1},x_{2}\rangle}$ is something like “monotonically increasing”. Similarly, for ${c(x_{1},x_{2}) = -\langle x_{1},x_{2}\rangle}$, ${c}$-monotonicity means “monotonically decreasing”.
+
+You may say that both ${c(x_{1},x_{2}) = \langle x_{1},x_{2}\rangle}$ and ${c(x_{1},x_{2}) = -\langle x_{1},x_{2}\rangle}$ are strange cost functions and I can’t argue with that. But here comes: ${c(x_{1},x_{2}) = |x_{1}-x_{2}|^{2}}$ (${|\,\cdot\,|}$ being the euclidean norm) seems more natural, right? But if we have a transport plan ${\pi}$ for this ${c}$ for some marginals ${\mu_{1}}$ and ${\mu_{2}}$ we also have
+
+$\displaystyle \begin{array}{rcl} \int_{\Omega_{1}\times \Omega_{2}}c(x_{1},x_{2})d\pi(x_{1},x_{2}) & = & \int_{\Omega_{1}\times \Omega_{2}}|x_{1}|^{2} d\pi(x_{1},x_{2})\\ &&\quad- \int_{\Omega_{1}\times \Omega_{2}}\langle x_{1},x_{2}\rangle d\pi(x_{1},x_{2})\\ && \qquad+ \int_{\Omega_{1}\times \Omega_{2}} |x_{2}|^{2}d\pi(x_{1},x_{2})\\ & = &\int_{\Omega_{1}}|x_{1}|^{2}d\mu_{1}(x_{1}) - \int_{\Omega_{1}\times \Omega_{2}}\langle x_{1},x_{2}\rangle d\pi(x_{1},x_{2}) + \int_{\Omega_{2}}|x_{2}|^{2}d\mu_{2}(x_{2}) \end{array}$
+
+i.e., the transport cost for ${c(x_{1},x_{2}) = |x_{1}-x_{2}|^{2}}$ differs from the one for ${c(x_{1},x_{2}) = -\langle x_{1},x_{2}\rangle}$ only by a constant independent of ${\pi}$, so may well use the latter.
+
+The fundamental theorem of optimal transport uses the notion of ${c}$-cyclical monotonicity which is stronger that just ${c}$-monotonicity:
+
+Definition 3 A set ${\Gamma\subset \Omega_{1}\times \Omega_{2}}$ is ${c}$-cyclically monotone, if for all ${(x_{1}^{i},x_{2}^{i})\in\Gamma}$, ${i=1,\dots n}$ and all permutations ${\sigma}$ of ${\{1,\dots,n\}}$ it holds that
+
+$\displaystyle \sum_{i=1}^{n}c(x_{1}^{i},x_{2}^{i}) \leq \sum_{i=1}^{n}c(x_{1}^{i},x_{2}^{\sigma(i)}).$
+
+For ${n=2}$ we get back the notion of ${c}$-monotonicity.
+
+Definition 4 A function ${\phi:\Omega_{1}\rightarrow {\mathbb R}}$ is ${c}$-concave if there exists some function ${\psi:\Omega_{2}\rightarrow{\mathbb R}}$ such that
+
+$\displaystyle \phi(x_{1}) = \inf_{x_{2}\in\Omega_{2}}c(x_{1},x_{2}) - \psi(x_{2}).$
+
+This definition of ${c}$-concavity resembles the notion of convex conjugate:
+
+Example 2 Again using ${c(x_{1},x_{2}) = -\langle x_{1},x_{2}\rangle}$ we get that a function ${\phi}$ is ${c}$-concave if
+
+$\displaystyle \phi(x_{1}) = \inf_{x_{2}}-\langle x_{1},x_{2}\rangle - \psi(x_{2}),$
+
+and, as an infimum over linear functions, ${\phi}$ is clearly concave in the usual way.
+
+Definition 5 The ${c}$-superdifferential of a ${c}$-concave function is
+
+$\displaystyle \partial^{c}\phi = \{(x_{1},x_{2})\mid \phi(x_{1}) + \phi^{c}(x_{2}) = c(x,y)\},$
+
+where ${\phi^{c}}$ is the ${c}$-conjugate of ${\phi}$ defined by
+
+$\displaystyle \phi^{c}(x_{2}) = \inf_{x_{1}\in\Omega_{1}}c(x_{1},x_{2}) -\phi(x_{1}).$
+
+Again one may look at ${c(x_{1},x_{2}) = -\langle x_{1},x_{2}\rangle}$ and observe that the ${c}$-superdifferential is the usual superdifferential related to the supergradient of concave functions (there is a Wikipedia page for subgradient only, but the concept is the same with reversed signs in some sense).
+
+Now let us sketch the proof of the fundamental theorem of optimal transport: \medskip
+
+Proof (of the fundamental theorem of optimal transport). Let ${\pi}$ be an optimal transport plan. We aim to show that ${\mathrm{supp}(\pi)}$ is ${c}$-cyclically monotone and assume the contrary. That is, we assume that there are points ${(x_{1}^{i},x_{2}^{i})\in\mathrm{supp}(\pi)}$ and a permutation ${\sigma}$ such that
+
+$\displaystyle \sum_{i=1}^{n}c(x_{1}^{i},x_{2}^{i}) > \sum_{i=1}^{n}c(x_{1}^{i},x_{2}^{\sigma(i)}).$
+
+We aim to construct a ${\tilde\pi}$ such that ${\tilde\pi}$ is still feasible but has a smaller transport cost. To do so, we note that continuity of ${c}$ implies that there are neighborhoods ${U_{i}}$ of ${x_{1}^{i}}$ and ${V_{i}}$ of ${x_{2}^{i}}$ such that for all ${u_{i}\in U_{1}}$ and ${v_{i}\in V_{i}}$ it holds that
+
+$\displaystyle \sum_{i=1}^{n}c(u_{i},v_{\sigma(i)}) - c(u_{i},v_{i})<0.$
+
+We use this to construct a better plan ${\tilde \pi}$: Take the mass of ${\pi}$ in the sets ${U_{i}\times V_{i}}$ and shift it around. The full construction is a little messy to write down: Define a probability measure ${\nu}$ on the product ${X = \bigotimes_{i=1}^{N}U_{i}\times V_{i}}$ as the product of the measures ${\tfrac{1}{\pi(U_{i}\times V_{i})}\pi|_{U_{i}\times V_{i}}}$. Now let ${P^{U_{1}}}$ and ${P^{V_{i}}}$ be the projections of ${X}$ onto ${U_{i}}$ and ${V_{i}}$, respectively, and set
+
+$\displaystyle \nu = \tfrac{\min_{i}\pi(U_{i}\times V_{i})}{n}\sum_{i=1}^{n}(P^{U_{i}},P^{V_{\sigma(i)}})_{\#}\nu - (P^{U_{i}},P^{V_{i}})_{\#}\nu$
+
+where ${_{\#}}$ denotes the pushforward of measures. Note that the new measure ${\nu}$ is signed and that ${\tilde\pi = \pi + \nu}$ fulfills
+
+1. ${\tilde\pi}$ is a non-negative measure
+2. ${\tilde\pi}$ is feasible, i.e. has the correct marginals
+3. ${\int c\,d\tilde \pi<\int c\,d\pi}$
+
+which, all together, gives a contradiction to optimality of ${\pi}$. The implication of item 1 to item 2 of the theorem is not really related to optimal transport but a general fact about ${c}$-concavity and ${c}$-cyclical monotonicity (c.f.~this previous blog post of mine where I wrote a similar statement for convexity). So let us just prove the implication from item 2 to optimality of ${\pi}$: Let ${\pi}$ fulfill item 2, i.e. ${\pi}$ is feasible and ${\mathrm{supp}(\pi)}$ is contained in the ${c}$-superdifferential of some ${c}$-concave function ${\phi}$. Moreover let ${\tilde\pi}$ be any feasible transport plan. We aim to show that ${\int c\,d\pi\leq \int c\,d\tilde\pi}$. By definition of the ${c}$-superdifferential and the ${c}$-conjugate we have
+
+$\displaystyle \begin{array}{rcl} \phi(x_{1}) + \phi^{c}(x_{2}) &=& c(x_{1},x_{2})\ \forall (x_{1},x_{2})\in\partial^{c}\phi\\ \phi(x_{1}) + \phi^{c}(x_{2}) & \leq& c(x_{1},x_{2})\ \forall (x_{1},x_{2})\in\Omega_{1}\times \Omega_{2}. \end{array}$
+
+Since ${\mathrm{supp}(\pi)\subset\partial^{c}\phi}$ by assumption, this gives
+
+$\displaystyle \begin{array}{rcl} \int_{\Omega_{1}\times \Omega_{2}}c(x_{1},x_{2})\,d\pi(x_{1},x_{2}) & =& \int_{\Omega_{1}\times \Omega_{2}}\phi(x_{1}) + \phi^{c}(x_{1})\,d\pi(x_{1},x_{2})\\ &=& \int_{\Omega_{1}}\phi(x_{1})\,d\mu_{1}(x_{1}) + \int_{\Omega_{1}}\phi^{c}(x_{2})\,d\mu_{2}(x_{2})\\ &=& \int_{\Omega_{1}\times \Omega_{2}}\phi(x_{1}) + \phi^{c}(x_{1})\,d\tilde\pi(x_{1},x_{2})\\ &\leq& \int_{\Omega_{1}\times \Omega_{2}}c(x_{1},x_{2})\,d\tilde\pi(x_{1},x_{2}) \end{array}$
+
+which shows the claim.
+
+${\Box}$
+
+Corollary 6 If ${\pi}$ is a measure on ${\Omega_{1}\times \Omega_{2}}$ which is supported on a ${c}$-superdifferential of a ${c}$-concave function, then ${\pi}$ is an optimal transport plan for its marginals with respect to the transport cost ${c}$.
+
+This is a short follow up on my last post where I wrote about the sweet spot of the stepsize of the Douglas-Rachford iteration. For the case $\beta$-Lipschitz + $\mu$-strongly monotone, the iteration with stepsize $t$ converges linear with rate
+
+$\displaystyle r(t) = \tfrac{1}{2(1+t\mu)}\left(\sqrt{2t^{2}\mu^{2}+2t\mu + 1 +2(1 - \tfrac{1}{(1+t\beta)^{2}} - \tfrac1{1+t^{2}\beta^{2}})t\mu(1+t\mu)} + 1\right)$
+
+Here is animated plot of this contraction factor depending on $\beta$ and $\mu$ and $t$ acts as time variable:
+
+What is interesting is, that this factor has increasing or decreasing in $t$ depending on the values of $\beta$ and $\mu$.
+
+For each pair $(\beta,\mu)$ there is a best $t^*$ and also a smallest contraction factor $r(t^*)$. Here are plots of these quantities:
+
+Comparing the plot of te optimal contraction factor to the animated plot above, you see that the right choice of the stepsize matters a lot.
+
+I blogged about the Douglas-Rachford method before here and here. It’s a method to solve monotone inclusions in the form
+
+$\displaystyle 0 \in Ax + Bx$
+
+with monotone multivalued operators ${A,B}$ from a Hilbert space into itself. Using the resolvent ${J_{A} = (I+A)^{-1}}$ and the reflector ${R_{A} = 2J_{A} - I}$, the Douglas-Rachford iteration is concisely written as
+
+$\displaystyle u^{n+1} = \tfrac12(I + R_{B}R_{A})u_{n}.$
+
+The convergence of the method has been clarified is a number of papers, see, e.g.
+
+Lions, Pierre-Louis, and Bertrand Mercier. “Splitting algorithms for the sum of two nonlinear operators.” SIAM Journal on Numerical Analysis 16.6 (1979): 964-979.
+
+for the first treatment in the context of monotone operators and
+
+Svaiter, Benar Fux. “On weak convergence of

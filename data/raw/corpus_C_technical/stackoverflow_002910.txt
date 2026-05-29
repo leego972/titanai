@@ -1,0 +1,32 @@
+Question: <p>In a <a href="http://www.pygame.org/">pyGame</a> application, I would like to render resolution-free GUI widgets described in SVG.</p>
+
+<p>What tool and/or library can I use to reach this goal ?</p>
+
+<p>(I like the <a href="http://ocemp.sourceforge.net/gui.html">OCEMP GUI</a> toolkit but it seems to be bitmap dependent for its rendering)</p>
+
+Answer: <p>Based on other answers, here's a function to read a SVG file into a pygame image - including correcting color channel order and scaling:</p>
+
+<pre><code>def pygame_svg( svg_file, scale=1 ):
+    svg = rsvg.Handle(file=svg_file)
+    width, height= map(svg.get_property, ("width", "height"))
+    width*=scale; height*=scale
+    data = array.array('c', chr(0) * width * height * 4)
+    surface = cairo.ImageSurface.create_for_data( data, cairo.FORMAT_ARGB32, width, height, width*4)
+    ctx = cairo.Context(surface)
+    ctx.scale(scale, scale)
+    svg.render_cairo(ctx)
+
+    #seemingly, cairo and pygame expect channels in a different order...
+    #if colors/alpha are funny, mess with the next lines
+    import numpy
+    data= numpy.fromstring(data, dtype='uint8')
+    data.shape= (height, width, 4)
+    c= data.copy()
+    data[::,::,0]=c[::,::,1]
+    data[::,::,1]=c[::,::,0]
+    data[::,::,2]=c[::,::,3]
+    data[::,::,3]=c[::,::,2]
+
+    image = pygame.image.frombuffer(data.tostring(), (width, height),"ARGB")
+    return image
+</code></pre>

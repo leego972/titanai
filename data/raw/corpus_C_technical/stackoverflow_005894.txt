@@ -1,0 +1,86 @@
+Question: <p>While I was investigating a problem I had with lexical closures in Javascript code, I came along this problem in Python:</p>
+
+<pre><code>flist = []
+
+for i in xrange(3):
+    def func(x): return x * i
+    flist.append(func)
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>Note that this example mindfully avoids <code>lambda</code>. It prints "4 4 4", which is surprising. I'd expect "0 2 4". </p>
+
+<p>This equivalent Perl code does it right:</p>
+
+<pre><code>my @flist = ();
+
+foreach my $i (0 .. 2)
+{
+    push(@flist, sub {$i * $_[0]});
+}
+
+foreach my $f (@flist)
+{
+    print $f-&gt;(2), "\n";
+}
+</code></pre>
+
+<p>"0 2 4" is printed.</p>
+
+<p>Can you please explain the difference ?</p>
+
+<p><hr /></p>
+
+<p>Update: </p>
+
+<p>The problem <strong>is not</strong> with <code>i</code> being global. This displays the same behavior:</p>
+
+<pre><code>flist = []
+
+def outer():
+    for i in xrange(3):
+        def inner(x): return x * i
+        flist.append(inner)
+
+outer()
+#~ print i   # commented because it causes an error
+
+for f in flist:
+    print f(2)
+</code></pre>
+
+<p>As the commented line shows, <code>i</code> is unknown at that point. Still, it prints "4 4 4".</p>
+
+Answer: <p>I'm still not entirely convinced why in some languages this works one way, and in some another way. In Common Lisp it's like Python:</p>
+
+<pre><code>(defvar *flist* '())
+
+(dotimes (i 3 t)
+  (setf *flist* 
+    (cons (lambda (x) (* x i)) *flist*)))
+
+(dolist (f *flist*)  
+  (format t "~a~%" (funcall f 2)))
+</code></pre>
+
+<p>Prints "6 6 6" (note that here the list is from 1 to 3, and built in reverse").
+While in Scheme it works like in Perl:</p>
+
+<pre><code>(define flist '())
+
+(do ((i 1 (+ 1 i)))
+    ((&gt;= i 4))
+  (set! flist 
+    (cons (lambda (x) (* i x)) flist)))
+
+(map 
+  (lambda (f)
+    (printf "~a~%" (f 2)))
+  flist)
+</code></pre>
+
+<p>Prints "6 4 2"</p>
+
+<p>And as I've mentioned already, Javascript is in the Python/CL camp. It appears there is an implementation decision here, which different languages approach in distinct ways. I would love to understand what is the decision, exactly.</p>

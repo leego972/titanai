@@ -1,0 +1,37 @@
+Encoding a Well-founded Relation over pairs in Coq Proof Assistant
+
+This will be my very first post in English in this blog. Therefore, I would like to apologize in advance for any errors.
+
+This post will assume that the reader knows what is a well-founded relation and has a basic knowledge of Coq proof assistant.
+
+First of all, we will need some library definitions of what is a well-founded relation and what is an accessible term (considering some relation). Both definitions are in the module Wellfounded of Coq standard library. So, we start our development importing this module.
+
+</p><p>Require Import Wellfounded.</p><p>
+
+How we can define a well-founded relation for pairs? First, the elements of the given pairs must support some kind of ordering. So, we will parametrize our definition by a type of these elements and a ordering relation between them.  We will assume that the parameter is a strict partial order, but no changes are needed to use an partial order. These definitions are given next:
+
+</p><p>Section LexicographicOrdering.</p><p>       Variable A : Type.</p><p>       Variable ltA : A -&gt; A -&gt; Prop.</p><p>
+
+Given a strict ordering relation $<$ and a equality $=$ over values a given set A, we could order pairs of A using the following definition:
+
+$\forall x\, x'\, y\,y'\in A. x < x' \lor (x = x' \land y < y') \rightarrow (x,y) < (x',y')$.
+
+The previous mathematical formula can be encoded using the following inductive type:
+
+</p><p>  Inductive lexprod : A * A -&gt; A * A -&gt; Prop :=<br />  | left_lex : forall (x1 x2 y1 y2 : A),<br />     ltA x1 x2 -&gt; lexprod (x1, y1) (x2, y2)<br />  | right_lex : forall (x1 x2 y1 y2 : A),<br />     x1 = x2 -&gt; ltA y1 y2 -&gt; lexprod (x1, y1) (x2, y2).</p><p>
+
+The type lexprod uses the ordering relation ltA, previously defined. The constructor left_lex, encodes the condition that if $x < x'$ then the pair $(x,y) < (x',y')$ for any values of y and y’. On the other hand, the constructor right_lex encodes the condition that if $x = x'$ and $y < y’$ then the pair $(x,y) < (x',y')$.
+
+Now, it remains to prove that lexprod definition is a well founded relation, under the assumption that ltA is well founded. This can be easily proved by induction over the proof of accessibility relation for ltA, as shown by the next source code piece:
+
+</p><p>  Lemma acc_A_lexprod : <br />   well_founded ltA -&gt;<br />   forall x, <br />    Acc ltA x -&gt;<br />    forall y, <br />     Acc ltA y -&gt; <br />     Acc lexprod (x, y).<br />  Proof.<br />   intros H x Hx.<br />   induction Hx as [x _ IHacc].<br />   intros y Hy.<br />   induction Hy as [y _ IHacc0].<br />   apply Acc_intro.<br />   intros (x1, y1).<br />   inversion 1; subst; auto.<br />  Qed.<br /><br />  Theorem wf_lexprod :<br />   well_founded ltA -&gt;<br />   well_founded lexprod.<br />  Proof.<br />   intros wfA ; unfold well_founded.<br />   intros (x, y); auto using acc_A_lexprod.<br />  Qed.</p><p>
+
+With this definitions, we can easily define an well founded relation for pairs of natural numbers using:
+
+</p><p>Definition lt2 := lexprod nat lt.<br /><br />Lemma wf_lt2 : well_founded lt2.<br />Proof.<br />  unfold lt2 ; auto using wf_lexprod with arith.<br />Qed.</p><p>
+
+Mission accomplished! We these simple definitions we can define a well founded relation over products of a given type and its well founded relation. Ok, ok… the presentation isn’t in a tutorial style since, I believe, it has a very specific audience.
+
+But why should I care about well founded relations? The reason is simple: Well founded relations can be used to prove termination of programs in Coq proof assistant. A topic that I will discuss in another post.
+
+Anúncios

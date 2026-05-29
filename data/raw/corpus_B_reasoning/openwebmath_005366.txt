@@ -1,0 +1,73 @@
+# The reblocking problem¶
+
+Suppose that Alice wants to send Bob a signed and encrypted message $m$. She will use RSA for both signing and encrypting. She first uses her private key $(n_A, d_A)$ to obtain the signature $s = m^{d_A} \bmod{n_A}$, and then uses Bob's public key $(n_B, e_B)$ to obtain the ciphertext $c = s^{e_B} \bmod{n_B}$. She sends $c$ to Bob, who then decrypts it with his private key $(n_B, d_B)$ to obtain $s' = c^{d_B} \bmod{n_B}$, and finally recovers the message $m' = s'^{e_A} \bmod{n_A}$ using Alice’s public key $(n_A, e_A)$.
+
+In [1]:
+nA = 62894113
+eA = 3
+dA = 41918819
+
+nB = 55465219
+eB = 17
+dB = 26094257
+
+m = 2
+
+
+Let us first sign the message $m$ with Alice's private key, and then encrypt the signature using Bob's public key.
+
+In [2]:
+s = Integer(pow(m, dA, nA))
+s
+
+Out[2]:
+19714331
+In [3]:
+c = Integer(pow(s, eB, nB))
+c
+
+Out[3]:
+20507849
+
+We now decrypt the ciphertext using Bob's private key, and then extract the message with Alice's public key.
+
+In [4]:
+ss = Integer(pow(c, dB, nB))
+ss
+
+Out[4]:
+19714331
+In [5]:
+mm = Integer(pow(ss, eA, nA))
+mm
+
+Out[5]:
+2
+
+Let us try with another message.
+
+In [6]:
+m = 5
+s = Integer(pow(m, dA, nA))
+c = Integer(pow(s, eB, nB))
+ss = Integer(pow(c, dB, nB))
+mm = Integer(pow(ss, eA, nA))
+(m, s, c, ss, mm)
+
+Out[6]:
+(5, 62006589, 51623723, 6541370, 42173672)
+
+We se that since the original signature $s$ was larger than Bob's modulus $n_B$, decrypting $c$ only gives $s' = s \bmod{n_B}$, leading to $m' \ne m$.
+
+The probability of this happening can be expressed as $(n_A - n_B)/n_A$, where $n_A > n_B$. Let us compute it for our case.
+
+In [7]:
+N((nA - nB)/nA)
+
+Out[7]:
+0.118117477863151
+
+Several measures can be taken to prevent this from happening.
+
+• Set a threshold $t$, and use different keys for encryption and signing: the signing keys should have moduli $n < t$, while the encryption keys should have moduli $n > t$.
+• Use hash functions and hybrid encryption schemes: to sign the message, compute the RSA signature of its digest, and append it to the message. Then, randomly choose a key $k$ for a symmetric encryption scheme (say, AES), and encrypt the signed message with $k$ (say, using the CBC mode of operation). Then, encrypt $k$ with RSA ($k$ will be much smaller than the modulus), and prepend its encryption to the symmetric encryption of the message.

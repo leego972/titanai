@@ -1,0 +1,146 @@
+Question: <p>I'm looking to implement a "Contact Us" form with Cherrypy and was wondering: Is there a good recipe (or a BSD licensed set of code) that I could use instead of reinventing the wheel?</p>
+
+<p>Ideally, this would be Cherrpy 3.1 compatible.</p>
+
+Answer: <p>Well, I had to look into a solution.  This works (ugly, and w/o Javascript validation) -- using the smtplib lib.  Also, note that I stole Jeff's captcha for this example.  Anyone using this will need to change it.  </p>
+
+<p><strong>EDIT:</strong> I added validation.</p>
+
+<pre><code>#!/usr/local/bin/python2.4 
+import smtplib 
+import cherrypy
+
+class InputExample:
+   @cherrypy.expose
+   def index(self):
+       return "&lt;html&gt;&lt;head&gt;&lt;/head&gt;&lt;body&gt;&lt;a href="contactus"&gt;Contact Us&lt;/a&gt;&lt;/body&gt;&lt;/html&gt;"
+
+
+        @cherrypy.expose
+        def contactus(self,message=''):
+                return """
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Contact Us&lt;/title&gt;
+&lt;script type="text/javascript"&gt;
+
+   function isNotEmpty(elem)
+   {
+      var str = elem.value;
+      var re = /.+/;
+      if (!str.match(re))
+      {
+         elem.focus();
+         return false;
+      }
+      else
+      {
+         return true;
+      }
+
+   }
+
+   function isEMailAddr(elem)
+   {
+      var str = elem.value;
+      var re = /^[\w-]+(\.[\w-]+)*@([\w-]+\.)+[a-zA-Z]{2,7}$/;
+      if (!str.match(re))
+      {
+         return false;
+      }
+      else
+      {
+         return true;
+      }
+   }
+
+   function validateForm(form)
+   {
+      if (isNotEmpty(form.firstName) &amp;&amp; isNotEmpty(form.lastName))
+      {
+         if (isNotEmpty(form.email))
+         {
+         if (isEMailAddr(form.email))
+         {
+            if (isNotEmpty(form.captcha))
+            {
+               if ( form.captcha.value=='egnaro'.split("").reverse().join(""))
+               {
+                   if (isNotEmpty(form.subject))
+                     {
+                        alert("All required fields are found.  We will respond shortly.");
+                        return true;
+                     }
+               }
+               else
+               {
+                   alert("Please enter the word as displayed in the image.");
+                   return false;
+               }
+            }//captcha empty
+            }
+         else
+         {
+            alert("Please enter a valid email address.");
+            return false;
+         } //email
+         } //email
+      } //first and last name
+      alert("Please fill in all required fields.");
+      return false;
+   }
+
+&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;p&gt;%(message)s&lt;/p&gt;
+&lt;form method='POST' action='contactUsSubmitted' onsubmit='return validateForm(this)'&gt;
+   &lt;label for="firstName"&gt;First Name: &lt;/label&gt;
+   &lt;input type="text" id="firstName" name="firstName" /&gt; (required)&lt;br/&gt;
+   &lt;label for="lastName"&gt;Last Name: &lt;/label&gt;
+   &lt;input type="text" id="lastName" name="lastName" /&gt; (required)&lt;br/&gt;
+   &lt;label for="email"&gt;E-mail address: &lt;/label&gt;
+   &lt;input type="text" id="email" name="email" /&gt; (required)&lt;br/&gt;
+  &lt;label for="phone"&gt;Phone number: &lt;/label&gt;
+   &lt;input type="text" id="phone" name="phone" /&gt; &lt;br/&gt;&lt;br/&gt;
+
+   &lt;!--THIS NEEDS TO BE CHANGED TO MATCH YOUR OWN CAPTCHA SCHEME!! --&gt;
+   &lt;label for="captcha"&gt;Enter the word&lt;br /&gt;&lt;img alt="rhymes with.." src="http://www.codinghorror.com/blog/images/word.png" width="99" height="26" border="0" /&gt;&lt;/label&gt;&lt;br /&gt;
+(&lt;a href="http://www.codinghorror.com/blog/sounds/captcha-word-spoken.mp3"&gt;hear it spoken&lt;/a&gt;)&lt;br /&gt;
+   &lt;input tabindex="3" id="captcha" name="captcha" /&gt;&lt;br /&gt;&lt;br /&gt;
+
+   &lt;label for="subject"&gt;Subject: &lt;/label&gt;
+   &lt;input type="text" id="subject" name="subject" /&gt; (required)&lt;br/&gt;
+   &lt;label for="body"&gt;Details: &lt;/label&gt;
+   &lt;textarea id="body" name="body"&gt;&lt;/textarea&gt;&lt;br/&gt;
+
+&lt;input type='submit' value='Contact Us' /&gt;
+&lt;/form&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"""%{'message':message}
+
+
+        @cherrypy.expose
+        def contactUsSubmitted(self, firstName, lastName, email, phone, captcha, subject, body ):
+                if captcha[::-1] != 'egnaro':
+                        return self.contactus("Please reenter the word you see in the image." )
+                self.sendEmail('mail2.example.com','mailbox_account','mailbox_pwd','me@example.com',email,
+                     'Website Contact: '+subject, 'Sender Email: ' + email + '\r\n'
+                     'Name: ' + firstName + ' ' + lastName + '\r\n' + 'Phone: ' + phone + '\r\n' + body)
+                return self.index()
+
+        def sendEmail(self,smtpServer, mailboxName, mailboxPassword, contactEmail,senderEmail,subject,body):
+                server = smtplib.SMTP(smtpServer) #'smtp1.example.com')
+                server.login(mailboxName, mailboxPassword)
+
+                msg = "To: %(contactEmail)s\r\nFrom: %(senderEmail)s\r\nSubject: %(subject)s\r\nContent-type: text/plain\r\n\r\n%(body)s"
+                msg = msg%{'contactEmail':contactEmail,'senderEmail':mailboxName + '@example.com','subject':subject,'body':body}
+
+                server.sendmail(contactEmail, contactEmail, msg) #This is to send it from an internal account to another internal account.
+                server.quit()
+
+
+cherrypy.root = InputExample()
+cherrypy.config.update ( file = 'development.conf' )
+cherrypy.server.start()
+</code></pre>

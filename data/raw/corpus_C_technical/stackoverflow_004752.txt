@@ -1,0 +1,48 @@
+Question: <p>I've setup a static website on GAE using hints found elsewhere, but can't figure out how to return a 404 error. My app.yaml file looks like</p>
+
+<pre><code>- url: (.*)/
+  static_files: static\1/index.html
+  upload: static/index.html
+
+- url: /
+  static_dir: static
+</code></pre>
+
+<p>with all the static html/jpg files stored under the static directory. The above works for files that exist, but returns a null length file if they don't. The answer is probably to write a python script to return a 404 error, but how do you set things up to serve the static files that exist but run the script for files that don't?</p>
+
+<p>Here is the log from fetching a non-existent file (nosuch.html) on the development application server:</p>
+
+<pre><code>ERROR    2008-11-25 20:08:34,084 dev_appserver.py] Error encountered reading file "/usr/home/ctuffli/www/tufflinet/static/nosuch.html":
+[Errno 2] No such file or directory: '/usr/home/ctuffli/www/tufflinet/static/nosuch.html'
+INFO     2008-11-25 20:08:34,088 dev_appserver.py] "GET /nosuch.html HTTP/1.1" 404 -
+</code></pre>
+
+Answer: <p>You need to register a catch-all script handler. Append this at the end of your app.yaml:</p>
+
+<pre><code>- url: /.*
+  script: main.py
+</code></pre>
+
+<p>In main.py you will need to put this code:</p>
+
+<pre><code>from google.appengine.ext import webapp
+from google.appengine.ext.webapp.util import run_wsgi_app
+
+class NotFoundPageHandler(webapp.RequestHandler):
+    def get(self):
+        self.error(404)
+        self.response.out.write('&lt;Your 404 error html page&gt;')
+
+application = webapp.WSGIApplication([('/.*', NotFoundPageHandler)],
+                                     debug=True)
+
+def main():
+    run_wsgi_app(application)
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+
+<p>Replace <code>&lt;Your 404 error html page&gt;</code> with something meaningful. Or better use a template, you can read how to do that <a href="http://code.google.com/appengine/docs/gettingstarted/templates.html">here</a>.</p>
+
+<p>Please let me know if you have problems setting this up.</p>

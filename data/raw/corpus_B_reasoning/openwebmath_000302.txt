@@ -1,0 +1,54 @@
+Opened 7 years ago
+
+Closed 6 years ago
+
+# 'Cannot operate on a closed cursor' exception causes db to appear as if upgrade is needed
+
+Reported by: Owned by: Daniel Abel Alec Thomas normal TagsPlugin blocker cursor, ProgrammingError, closed Steffen Hoffmann 0.12
+
+I'm trying to configure an existing Trac instance to work from under virtualenv (trac 0.12 with SQLite, wsgi and apache). I ran into a situation where, after running trac-admin /path/to/env upgrade and wiki upgrade, trac, when being called by the webserver says that I have to run the upgrade (i.e. shows an error page to this effect). Running upgrade again on the command line says no upgrade necessary. That is, running trac from command-line and having it called from the webserver (via wsgi) gives two different results to the need to be upgraded? question.
+
+I managed to track this down to the fact that TagModelProvider's environment_needs_upgrade returns True when being called from wsgi, and False when being called from the console. The problem appears to be that the cursor.execute('select count(*) from tags' ) line in there throws an exception, but not because the db is old, but because Cannot operate on a closed cursor.
+
+Moving the cursor = db.cursor() line to below the 'if self._need_migration(db)', ie. to just above the try/except appears to solve this issue.
+
+So, suggestions:
+
+1. the except: line in environment_needs_upgrade() shouldn't be so greedy, i.e. it shouldn't swallow all exceptions (if possible to filter out those caused by an old database)
+2. the 'cursor=db.cursor()' line should be moved to just above where it is first used.
+
+Note that I assume the situation I ran into would be very difficult to reproduce, but the suggestions above won't have any drawbacks, and just help make the code cleaner.
+
+### comment:1 Changed 7 years ago by Ryan J Ollos
+
+Summary: 'Cannot operate on a closed cursor' eception causes db to appear as if upgrade is needed → 'Cannot operate on a closed cursor' exception causes db to appear as if upgrade is needed
+
+### comment:2 Changed 6 years ago by Robert Corsaro
+
+I experience the same issue on a fresh install of trac running with tracd. The described fix (moving the cursor under the need_migration line) fixes it for me.
+
+### comment:3 Changed 6 years ago by Robert Corsaro
+
+Severity: normal → blocker
+
+### comment:5 follow-up:  7 Changed 6 years ago by Ryan J Ollos
+
+Cc: Steffen Hoffmann added; anonymous removed
+
+#5345 appears to be a duplicate. Or, at least much of what is discussed in the comments of that ticket appears to be a duplicate issue.
+
+### comment:6 Changed 6 years ago by Ryan J Ollos
+
+Description: modified (diff)
+
+In particular comment:5:ticket:5345 describes essentially the same fix, and several users report that the fix has successfully worked for them. The trunk has since been modified to move cursor = db.cursor() below if self._need_migration(db):, so it seems unlikely that the issue is that _need_migration is creating another cursor and forcing the close of the cursor in environment_needs_upgrade (see also [5655] and #4996). However, from what I've seen in this and other tickets, it seems to be important that the cursor is obtained within the try block.
+
+I'm still trying to understand this issue, but as far as I can tell it would be at worst case harmless to move cursor = db.cursor() to within the try block.
+
+### comment:7 in reply to:  5 Changed 6 years ago by Steffen Hoffmann
+
+Keywords: cursor added → duplicate new → closed
+
+#5345 appears to be a duplicate. Or, at least much of what is discussed in the comments of that ticket appears to be a duplicate issue.
+
+Confirmed, as you found yourself according to your findings in the following comment. Let's make this trivial fix, before we get even more reasonable complaints, NOW. Following up over there...

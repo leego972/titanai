@@ -1,0 +1,86 @@
+Question: <p>I have two Python dictionaries, and I want to write a single expression that returns these two dictionaries, merged.  The <code>update()</code> method would be what I need, if it returned its result instead of modifying a dict in-place.</p>
+
+<pre><code>&gt;&gt;&gt; x = {'a':1, 'b': 2}
+&gt;&gt;&gt; y = {'b':10, 'c': 11}
+&gt;&gt;&gt; z = x.update(y)
+&gt;&gt;&gt; print z
+None
+&gt;&gt;&gt; x
+{'a': 1, 'b': 10, 'c': 11}
+</code></pre>
+
+<p>How can I get that final merged dict in z, not x?</p>
+
+<p>(To be extra-clear, the last-one-wins conflict-handling of <code>dict.update()</code> is what I'm looking for as well.)</p>
+
+Answer: <p>I know this does not really fit the specifics of the questions ("one liner"), but since <em>none</em> of the answers above went into this direction while lots and lots of answers addressed the performance issue, I felt I should contribute my thoughts.</p>
+
+<p>Depending on the use case it might not be necessary to create a "real" merged dictionary of the given input dictionaries.  A <em>view</em> which does this might be sufficient in many cases, i. e. an object which acts <em>like</em> the merged dictionary would without computing it completely.  A lazy version of the merged dictionary, so to speak.</p>
+
+<p>In Python, this is rather simple and can be done with the code shown at the end of my post.  This given, the answer to the original question would be:</p>
+
+<pre><code>z = MergeDict(x, y)
+</code></pre>
+
+<p>When using this new object, it will behave like a merged dictionary but it will have constant creation time and constant memory footprint while leaving the original dictionaries untouched.  Creating it is way cheaper than in the other solutions proposed.</p>
+
+<p>Of course, if you use the result a lot, then you will at some point reach the limit where creating a real merged dictionary would have been the faster solution.  As I said, it depends on your use case.</p>
+
+<p>If you ever felt you would prefer to have a real merged <code>dict</code>, then calling <code>dict(z)</code> would produce it (but way more costly than the other solutions of course, so this is just worth mentioning).</p>
+
+<p>You can also use this class to make a kind of copy-on-write dictionary:</p>
+
+<pre><code>a = { 'x': 3, 'y': 4 }
+b = MergeDict(a)  # we merge just one dict
+b['x'] = 5
+print b  # will print {'x': 5, 'y': 4}
+print a  # will print {'y': 4, 'x': 3}
+</code></pre>
+
+<p>Here's the straight-forward code of <code>MergeDict</code>:</p>
+
+<pre><code>class MergeDict(object):
+  def __init__(self, *originals):
+    self.originals = ({},) + originals[::-1]  # reversed
+
+  def __getitem__(self, key):
+    for original in self.originals:
+      try:
+        return original[key]
+      except KeyError:
+        pass
+    raise KeyError(key)
+
+  def __setitem__(self, key, value):
+    self.originals[0][key] = value
+
+  def __iter__(self):
+    return iter(self.keys())
+
+  def __repr__(self):
+    return '%s(%s)' % (
+      self.__class__.__name__,
+      ', '.join(repr(original)
+          for original in reversed(self.originals)))
+
+  def __str__(self):
+    return '{%s}' % ', '.join(
+        '%r: %r' % i for i in self.iteritems())
+
+  def iteritems(self):
+    found = set()
+    for original in self.originals:
+      for k, v in original.iteritems():
+        if k not in found:
+          yield k, v
+          found.add(k)
+
+  def items(self):
+    return list(self.iteritems())
+
+  def keys(self):
+    return list(k for k, _ in self.iteritems())
+
+  def values(self):
+    return list(v for _, v in self.iteritems())
+</code></pre>

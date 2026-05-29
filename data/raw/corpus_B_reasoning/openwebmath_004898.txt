@@ -1,0 +1,51 @@
+# Loop until no errors
+
+I am doing some numeric computations, involving FindMinimum and FindDistributionParameters. I think these functions have some stochastic element because the answers I get on identical input sometimes are different. In rare occasions, I get an error message indicating no convergence. If this happens, I would like to repeat the calculation from the start, and repeat until convergence. If possible, I do not want to generate any messages, since in the end I am sure it will converge.
+
+So I am looking for a wrapper of the form:
+
+wrap[computation[]]
+
+where computation[] is a complicated function involving FindMinimum and FindDistributionParameters that might generate messages. If messages are generated, I want wrap to detect these messages, not print them, and simply attempt to execute computation[] again. Repeat this until computation[] does not generate messages, and simply return the output of computation[].
+
+Update: Sometimes computation[] seems to get stuck, taking a very long time. Is it possible to add a second argument to wrap[..., time], so that if computation[] takes longer than time to complete, it aborts, and starts running computation[] again?
+
+• Check ? reference.wolfram.com/language/ref/Check.html i think you can use Catch and Throw to exit a loop when a value shows up – Alucard Sep 21 '17 at 8:38
+• check also: TimeConstrained and $MessageList – kglr Sep 21 '17 at 8:47 • @kglr But how can I keep the loop going, until no messages are generated? – becko Sep 21 '17 at 8:52 • becko, While[$MessageList =!= {}, computation[]]? – kglr Sep 21 '17 at 9:11
+• Check[computation[],computation[] ] ? – Alucard Sep 21 '17 at 9:21
+
+If you want to repeat evaluation of some expression until no messages have been generated (possibly indefinitely) you can use Check recursively.
+
+SetAttributes[repeatOnMessage, HoldAll];
+repeatOnMessage[expr_] := Quiet@Check[expr, repeatOnMessage[expr]]
+
+Let's define a test function that issues a message (and takes some time doing so) most of the time.
+
+f::msg = "some message has been issued.";
+f[] := If[RandomReal[] > 0.1, (Pause[1]; Message[f::msg]), "result"]
+
+Now the following loops until a result is returned (possibly indefinitely if f were to never return without a message):
+
+repeatOnMessage[f[]]
+
+To address your second question you can use TimeConstrained inside repeatOnMessage as in
+
+failed::msg = "Computation has been aborted";
+repeatOnMessage[TimeConstrained[f[], 0.5, Message[failed::msg]]]
+
+Note that using the third argument of TimeConstrained is needed to issue a message, otherwise TimeConstrained returns \$Aborted which is not caught by Check inside repeatOnMessage.
+
+In a real setting it would probably be wise to use TimeConstrained on the call of repeatOnMessage itself, to not have it recurse indefinitely if the expression does never return without a message.
+
+TimeConstrained[repeatOnMessage[TimeConstrained[f[], 0.5, Message[failed::msg]]], 4]
+
+Using this scheme allows you to
+
+1. specify how long each inner call may take to reach a result before retrying
+
+2. specify how long the expression should be reevaluated before giving up completely (and what to do in this case)
+
+• I think that repeatOnMessage[TimeConstrained[f[], 0.5, Message[failed::msg]]] will repeat the calculation whenever f[] takes less than 0.5 seconds to complete. This is the opposite of what I want. – becko Sep 21 '17 at 13:12
+• @becko repeatOnMessage[expr] repeats evaluating expr whenever a message is issues from within expr. That is all it does. TimeConstrained[f[], 0.5, Message[failed::msg]] does evaluate f[] and issues a message if the time constrained is reached. repeatOnMessage then kicks in and tries evaluating TimeConstrained[f[], 0.5, Message[failed::msg]] again. – Sascha Sep 21 '17 at 13:51
+• Actually, TimeConstrained[f[], 0.5, Message[failed::msg]] issues a message if the time constraint is not met. reference.wolfram.com/language/ref/TimeConstrained.html. – becko Sep 21 '17 at 14:12
+• Isn't this what you want? Evaluation is aborted by TimeConstrained if it takes longer than 0.5s and the result returned if a result is found in time. Try TimeConstrained[(Pause[1]; "finished in time!"), 0.5, "not finished in time!"] to see what is returned when. – Sascha Sep 21 '17 at 14:26

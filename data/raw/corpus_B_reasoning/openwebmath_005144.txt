@@ -1,0 +1,92 @@
+## Estimating Password Strength
+
+This post was originally intended to be part of my guest series on cryptography at a friends blog, but I haven’t had word from him about it for a while. So, it’s mine now :P
+
+The strength of a password is usually based on the idea that an attacker will have to guess the password by trying lots of different possibilities. Depending on the nature of the password this may be the kind of ‘lots’ that a computer can try very quickly, or it could be the kind of ‘lots’ that would take years.
+
+### Entropy
+
+To start with, let us assume that the attacker knows absolutely nothing about the password. Let us assume also that they are going to brute-force the password, either through necessity or by choice. This gives essentially the best possible case of password security.
+
+The number of possibilities that the attacker will have to try in order to be guaranteed to find the password is related to the information entropy of the password, or more precisely the information entropy.
+
+$H(X) = - \sum^n_{i=1}p_{x_i}\text{log}_2p_{x_i}$
+
+The information entropy measures how close to random data the contents of a set are. In the context we will be using it, things are not too complicated. The set $X$ will be all the possible values of a byte (0-255 or 0x00-0xFF). The values $p_{x_i}$ are the probability of a particular value occurring.
+
+### Best Case Scenario
+
+To start with however we are going to leave the probability approximated, predicated on an assumption. Let us assume that the attacker only knows which classes of characters are used in the password. Take an example password: Hello!42. We would be assuming that the attacker knows that lower and upper case letters are use, numbers are used, and the character ‘!’ is used.
+
+However, the attacker does not know how many times each of these characters is used in the password. This means that as far as the attacker knows, each possibility is equally likely. This means that each value in our set $X$ which falls within the classes we’ve just stated has a probability of $1/N$, $N$ being the number of characters in the classes. This allows us to make a simplification of the formula.
+
+$H(X) = - \sum^N_{i=1} \frac{1}{N}\text{log}_2\left(\frac{1}{N}\right) = - \text{log}_2\frac{1}{N} = \text{log}_2 N$
+
+This is vastly simpler. In our case $N = 26 + 26 + 10 + 1 = 63$. So the entropy of our character set is $\text{log}_2 63 \approx 5.977$. This may seem tiny, but this is the entropy of our character set, which should be roughly equivalent for the number of tries needed to guess each character. So to get the estimate of the strength of our password, we multiply by the length (8) to get 47.818 bits. So we can see that, even in this best case scenario, this password is a lot weaker than most encryption algorithms (hence why passwords are usually the weak link in a security system).
+
+### Not All Characters Are Equal
+
+However, another way of making a somewhat less ideal case estimate of the password strength is by directly using the entropy calculation. In this case we have to use the full formula, because $p_{x_i}$ will no longer be assumed to be a particular value and we will actually calculate it. This is simple to do, simply count the number of times the character occurs in the password, and then divide that by the length of the password.
+
+However, introducing this into the calculation means that it’s more complicated to do, and so I wrote myself a python script to perform this calculation. The full script is available as one of the scripts in this one of my Github repositories. However the section which I will use for this is shown below:
+
+
+def H_data(data, base = 2):
+if not data:
+return 0
+
+entropy = float(0)
+n = float(len(data))
+
+for x in xrange(256):
+p_x = float(data.count(chr(x))/n)
+
+if p_x > 0:
+entropy += - p_x*math.log(p_x, base)
+
+return entropy
+
+
+Running the above code on our example password gave an entropy of 2.750 bits, significantly less than our best case scenario. Multiply this by the length and you get a strength of only 22 bits. However, for the attacker to be able to break the password with this many tries he must know exactly which characters appear in the password, and how many times they appear – in other words the only thing he does not know is the order.
+
+### Take a Chance
+
+Thus far we have assumed that we will measure the strength of the password by the number of tries an attacker must make before he is guaranteed to find the password. So, using the first (and I suggest using this one usually) method, our password has a strength of 47.818 bits. This means the attacker must make $2^47.818 \approx 248114606917826$ guesses. This seems like a lot, although depending on various factors it could be just the blink of an eye for a computer. However, due to the laws of chance and probability, an attacker is more likely to have found the password than not found it as soon as he has searched half the possibilities. In other words, he will probably find it half way through.
+
+This means he will probably have to make only half as many guesses. However, we need not deal with that large number, because of the rules of logs to base 2 etc. the end effect of this reduction of the number of tries is that the password strength goes down by one bit. In this case $47.818 - 1 = 46.818$. Nice and simple, n’est pas?
+
+### Best Estimate
+
+The first method of estimating password strength is usually used because it is assumed that the attacker is unlikely to learn the information required it make the second method valid without just finding out the whole password, in which case it will be useless to estimate how many tries he would need :P.
+
+Thus, accounting for probability, our password is probably 46.818 bits strong. This is however far less strong than symmetric encryption algorithms which usually have 128 bit or 256 bit keys, so this password will still be a problem in security. Especially in the worst case scenario.
+
+### From Bad to Worst
+
+However, sometimes passwords can be even less secure. Other attacks can sometimes be used to guess a password, drawing on insecurities either of the password or the algorithms used to store it.
+
+Dictionary attacks are used to crack weak passwords based on words. They shorten the number of possibilities by trying possibilities involving known words in English or another language first. They may also use additional algorithms to also crack passwords that are words with substitutions or additions. Our password would be vulnerable to a dictionary attack, because it is largely composed of the word ‘Hello’. Exactly how much quicker a dictionary attack would be is difficult to estimate, but it is thought to usually be a lot quicker.
+
+Another method to speed the search can be used if passwords are stored in an insecure way. I won’t go into specifics in this post, but if a password is stored using a one way hash with a weak and or non-existent salt, a time-memory tradeoff technique can be used to reduce the time to crack passwords. The most common of these techniques is the use of Rainbow Tables. This form of password cracking may not seem all that bad seeing as using a one way hash without a salt is horrifically bad practice on the part of software developers.
+
+However, guess who does it? That’s right, all Windows passwords are vulnerable to Rainbow Tables, meaning that specially made software such as Ophcrack can be used to crack most Windows passwords in a matter of seconds. Yet another reason to consider windows insecure.
+
+### Windows Password Security
+
+It is pointless trying to use a strong password for your windows login – as these passwords are vulnerable to Rainbow tables, any attacker will still be able to crack it well within an acceptable time-frame. This is one of the many reasons why I follow the following rule:
+
+Any information that has been stored on a Windows computer is publicly accessible
+
+This may be a bit paranoid and/or extreme, but at least this way I should stay as secure as possible :P.
+
+This entry was posted in Uncategorized. Bookmark the permalink.
+
+### 2 Responses to Estimating Password Strength
+
+1. shor7.com says:
+
+great article, thanks for sharing.
+
+• Dark Otter says:
+
+You’re welcome, thanks for the congrats.

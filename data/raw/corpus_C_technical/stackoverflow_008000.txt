@@ -1,0 +1,19 @@
+Question: <p>I'm looking for a production quality bloom filter implementation in Python to handle fairly large numbers of items (say 100M to 1B items with 0.01% false positive rate). </p>
+
+<p><a href="http://www.imperialviolet.org/pybloom.html">Pybloom</a> is one option but it seems to be showing its age as it throws DeprecationWarning errors  on Python 2.5 on a regular basis. Joe Gregorio also has <a href="http://bitworking.org/news/380/bloom-filter-resources">an implementation</a>. </p>
+
+<p>Requirements are fast lookup performance and stability. I'm also open to creating Python interfaces to particularly good c/c++ implementations, or even to Jython if there's a good Java implementation.</p>
+
+<p>Lacking that, any recommendations on a bit array / bit vector representation that can handle ~16E9 bits?</p>
+
+Answer: <p>In reaction to Parand, saying "common practice seems to be using something like SHA1 and split up the bits to form multiple hashes", while that may be true in the sense that it's common practice (PyBloom also uses it), it still doesn't mean it's the right thing to do ;-)</p>
+
+<p>For a Bloom filter, the only requirement a hash function has is that its output space must be uniformly distributed given the expected input. While a cryptographic hash certainly fulfils this requirement, it's also a little bit like shooting a fly with a bazooka.</p>
+
+<p>Instead try the <a href="http://www.isthe.com/chongo/tech/comp/fnv/" rel="nofollow">FNV Hash</a> which uses just one XOR and one multiplication per input byte, which I estimate is a few hundred times faster than SHA1 :)</p>
+
+<p>The FNV hash is not cryptographically secure, but you don't need it to be. It has slightly <a href="https://web.archive.org/web/20130617200738/http://bretm.home.comcast.net/~bretm/hash/6.html" rel="nofollow">imperfect avalanche behaviour</a>, but you're not using it for integrity checking either.</p>
+
+<p>About uniformity, note that the second link only did a Chi-square test for the 32-bit FNV hash. It's better to use more bits and the FNV-1 variant, which swaps the XOR and the MUL steps for better bit-dispersion. For a Bloom Filter, there's a few more catches, such as mapping the output uniformly to the index range of the bit-array. If possible, I'd say round up the size of the bit-array to the nearest power of 2 and adjust <em>k</em> accordingly. That way you get better accuracy and you can use simple XOR-folding to map the range.</p>
+
+<p>Additionally, here's a reference explaining why you don't want SHA1 (or any cryptographic hash) when you need <a href="https://web.archive.org/web/20120722074824/http://bretm.home.comcast.net/~bretm/hash/9.html" rel="nofollow">a general purpose hash</a>.</p>

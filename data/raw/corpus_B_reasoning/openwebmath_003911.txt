@@ -1,0 +1,24 @@
+InfluxDB is a quite new timeseries database. I was having a look at it during my search for alternatives for Graphites carbon/whisper backend. Since it looks pretty promising, right now it need some effort to get it up and running, especially if you want to build up a cluster (one of the reasons I was searching for an alternative to carbon).
+
+Using version 0.6.5 I’m going to describe what you have to do to setup a 3-Node cluster with a replication level of two. Primarily for me as a reminder, but maybe someone will find this usefull. I assume you use the Debian package provided on the influxdb website.
+
+Install influxdb:
+
+$aptitude install influxdb At least in this version, the package starts the influxdb instantly after installing it. Which is bad, because you have to configure clustering BEFORE the first start of you shiny new timeseries database. So stop it again, and delete the data directory that has just been created: $ service influxdb stop
+$rm -rf$datadir
+
+Now you can configure the database for clustering. On the fist node (we will use this as our seeder host) DO NOT configure any seeders! Just set the replication level to the desired amount of replicas:
+
+[sharding]
+...
+replication-factor = 3
+
+If on your system hostname will not return a name that is resolvable from the other node (which can happen a lot, since it doesn’t return a FQDN, just the hostname portion), you need to set the hostname parameter to a value that is resolvable from the other nodes (you should do that on all three nodes!)
+
+hostname = "my.fqdn.net"
+
+Start the first node!
+
+$service influxdb start On the second and third node, configure the same replication level as on the first node. Additionally, set the first node as the seed server hostname = "my.fqdn.net" [cluster] ... seed-servers = ["first.node.fqdn.net:8090"] [sharding] ... replication-factor = 3 Start the second and third node! $ service influxdb start
+
+At this point, your cluster should be up and running and you should see all three nodes in the cluster section of the web gui.

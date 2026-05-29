@@ -1,0 +1,41 @@
+Question: <p>If I have a Django form such as:</p>
+
+<pre><code>class ContactForm(forms.Form):
+    subject = forms.CharField(max_length=100)
+    message = forms.CharField()
+    sender = forms.EmailField()
+</code></pre>
+
+<p>And I call the as_table() method of an instance of this form, Django will render the fields as the same order as specified above.</p>
+
+<p>My question is how does Django know the order that class variables where defined?  </p>
+
+<p>(Also how do I override this order, for example when I want to add a field from the classe's <strong>init</strong> method?)</p>
+
+Answer: <p>As of Django 1.7 forms use OrderedDict which does not support the append operator.  So you have to rebuild the dictionary from scratch...</p>
+
+<pre><code>class ChecklistForm(forms.ModelForm):
+
+  class Meta:
+    model = Checklist
+    fields = ['name', 'email', 'website']
+
+  def __init__(self, guide, *args, **kwargs):
+    self.guide = guide
+    super(ChecklistForm, self).__init__(*args, **kwargs)
+
+    new_fields = OrderedDict()
+    for tier, tasks in guide.tiers().items():
+      questions = [(t['task'], t['question']) for t in tasks if 'question' in t]
+      new_fields[tier.lower()] = forms.MultipleChoiceField(
+        label=tier,
+        widget=forms.CheckboxSelectMultiple(),
+        choices=questions,
+        help_text='desired set of site features'
+      )
+
+    new_fields['name'] = self.fields['name']
+    new_fields['email'] = self.fields['email']
+    new_fields['website'] = self.fields['website']
+    self.fields = new_fields 
+</code></pre>

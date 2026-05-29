@@ -1,0 +1,138 @@
+# S3 (programming language)
+
+S3 is a structured, imperative high-level computer programming language.  It was developed by the UK company International Computers Limited (ICL) for its 2900 Series mainframes. It is a system programming language with syntax influenced by ALGOL 68 but with data types and operators aligned to those offered by the 2900 Series.  It was the implementation language of the operating system VME.
+
+Annotated Example
+A rare example of an S3 program available in the public domain is the implementation of Kermit developed at the South-West Universities Regional Computer Centre, and archived in the Columbia University archive of Kermit implementations. The examples below are selected highlights of the main module (kmt_main_module).
+
+The program starts with a module identification, and comments which we quote by way of acknowledgment to the authors:
+
+ MODULE KMT_MAIN_MODULE;                                         @ Version 1.01 @
+ 
+ @------------------------------------------------------------------------------@
+ @                                                                              @
+ @                                                                              @
+ @               -----  S W U R C C   V M E   K E R M I T  -----                @
+ @                                                                              @
+ @                                                                              @
+ @       ----------------------------------------------------------------       @
+ @                                                                              @
+ @                                                                              @
+ @       Version 1.00   (February 1986)                                         @
+ @                                                                              @
+ @         Written by : Richard Andrews and David Lord,                         @
+ @                      South West Universities Regional Computer Centre,       @
+ @                      Claverton Down, Bath BA2 7AY, U.K.                      @
+ @                                                                              @
+ @                                                                              @
+ @       ----------------------------------------------------------------       @
+ @                                                                              @
+ @                                                                              @
+ @       Version 1.01   (October 1986)                                          @
+ @                                                                              @
+ @           Fixes by : Dave Allum and David Lord, SWURCC.                      @
+ @       ----------------------------------------------------------------       @
+
+Next follow a number of "mode declarations". Mode is the Algol 68 term for a type.
+ MODE KMT_BUFFER IS (96)BYTE;
+ MODE KMT_STRING IS REF()BYTE;
+ MODE KMT_WORD IS REF()BYTE;
+  
+ MODE KMT_MTM_VALUES IS ANY
+   (LONG WORD      LW_VALUE,
+    LONG INT       LI_VALUE,
+    REF WORD       RW_VALUE,
+    REF INT        RI_VALUE,
+    REF LONG WORD  RLW_VALUE,
+    REF LONG INT   RLI_VALUE,
+    REF()BYTE      RVB_VALUE,
+    REF()REF()BYTE RVRVB_VALUE);
+  
+ MODE KMT_PP_PACKET_STATISTICS_S IS STRUCT
+    (INT INPUT_TOTAL,
+         OUTPUT_TOTAL);
+The first type is an array of 96 bytes; the next two are references (pointers) to arrays of bytes. KMT_MTM_VALUES is a union type allowing a variety of different types to appear. Note that WORD is a 32-bit unsigned integer, INT is a 32-bit signed integer; LONG makes it 64 bits. The last option in the union is marked REF()REF()BYTE, which means it is a pointer to an array whose members are pointers to arrays of bytes.
+
+The final type declared here is a STRUCT, specifically a tuple containing two integers.
+
+The program continues by declaring external procedures on which the module depends. RESPONSE indicates a return value containing error information:
+ EXT PROC (RESPONSE)                              KMT_UI;
+  
+ EXT PROC (REF INT,INT,RESPONSE)                  KMT_PH;
+  
+ EXT PROC (REF INT,REF INT,RESPONSE)              KMT_PP_GET_PACKET,
+     PROC (INT,INT,BOOL,RESPONSE)                 KMT_PP_SEND_PACKET,
+     PROC (REF()BYTE,RESPONSE)            KMT_PP_BUILD_STRING_PACKET_DATA; 
+and also some external variables:
+ EXT REF () BYTE KMT_VERSION;
+  
+ EXT REF BOOL ASG_ROUTE;
+  
+ EXT REF()KMT_MTM_VALUES KMT_MTM_AREA;
+ EXT REF()BYTE MTM_TEXT;
+ EXT REF INT MTM_TEXT_LEN;
+ EXT REF ()REF ()BYTE MTM_RECALL_DATA; 
+The rest of the program consists of a number of procedure definitions. One of these, which actually defines the entry point to the program, is reproduced here:
+ GLOBAL STATIC (<STATUS 5;PSPACE 10001; TEMPLATE>) PROC KERMIT_THE_FROG IS
+       ((<LIT "COMMAND">)             REF()BYTE OPTION,
+        (<LIT ""       >)             REF()BYTE VME_FILE,
+        (<LIT ""       >)             REF()BYTE REM_FILE,
+        (<KEY RESPONSE;DEF N'RESULT>) RESPONSE RESULT):
+  
+    BEGIN
+  
+       ()BYTE JSV_NAME := "ASG";              @ obtain value for ASG_ROUTE bool @
+       CTM_JS_READ(JSV_NAME,NIL,NIL,ASG_ROUTE,RC_IGNORED);
+       IF RC_IGNORED NE 0 THEN ASG_ROUTE := FALSE FI;
+  
+       @ verify parameter references (parameter values validated later):        @
+       @    OPTION   must be of mode REF () BYTE, may not be ZLR or NIL         @
+       @    VME_FILE must be of mode REF () BYTE, may be ZLR, must not be NIL   @
+       @    REM_FILE must be of mode REF () BYTE, may be ZLR, must not be NIL   @
+  
+       UNLESS (VERIFY OPTION AND VALIDR OPTION)
+       AND    (VERIFY VME_FILE AND (VALIDR VME_FILE OR NOT(VME_FILE IS NIL)))
+       AND    (VERIFY REM_FILE AND (VALIDR REM_FILE OR NOT(REM_FILE IS NIL)))
+       THEN                                       @ invalid parameter reference @
+          RESULT := 10002 @ ARCH_INACCESSIBLE_PARAMETER @
+  
+       ELSF                                             @ create resource block @
+          CTM_JS_BEGIN(RESULT);
+          RESULT <= 0
+       THEN                                            @ resource block created @
+          LONG LONG WORD KERMIT_RESULT;
+          ANY((3)LONG WORD AS_LW,(6) WORD AS_W) PARAMS;
+          PARAMS.AS_LW := (BDESC OPTION,BDESC VME_FILE,BDESC REM_FILE);
+  
+                                                 @ set up program error handler @
+          IF  KMT_EH_INFORM_PE_CONTINGENCY(RESULT);
+               RESULT > 0
+          THEN                                    @ failed to set error handler @
+             SKIP
+          ELSF CTM_JS_CALL(NIL,PDESC KERMIT_SUPPORT,PARAMS.AS_W,KERMIT_RESULT,
+                           RESULT);                           @ create firewall @
+               RESULT <= 0
+          THEN                         @ either exited normally or via CTM_STOP @
+             RESULT := IF (S'S'KERMIT_RESULT) <= 0
+                       THEN 0                                 @ ignore warnings @
+                       ELSE 52000              @ error return common resultcode @
+                       FI
+          FI;
+  
+          CTM_JS_END(RC_IGNORED)                           @ end resource block @
+       FI
+  
+    END
+Features to note here include:
+
+ The declaration of the procedure is decorated with annotations that define a command line syntax allowing the program to be called from SCL, or used from an interactive shell with prompting for default parameter values.
+ Procedure calls prefixed CTM are calls to the "Compiler Target Machine", an API offered by the VME operating system.
+ "JSV" means "job space variable", VME's term for an environment variable, and the call on CTM_JS_READ reads the value of the variable.
+ UNLESS means "if not"; ELSF means "else if".
+ LONG LONG WORD declares a 128-bit integer, which is a native type supported by the 2900 architecture
+ The bulk of the processing is delegated to another procedure, KERMIT_SUPPORT, which can be found in the same module. This is called indirectly via the operating system CTM_JS_CALL, similar to an exec() call on Unix systems; this ensures clean failure handling and tidying up of any resources in the event of a fatal error. The PDESC keyword constructs a "procedure descriptor": essentially it treats KERMIT_SUPPORT as a first-class function which can be passed as an argument to another function, making CTM_JS_CALL a higher-order function that calls its supplied argument with appropriate error handling.
+
+References
+
+ALGOL 68 dialect
+ICL programming languages

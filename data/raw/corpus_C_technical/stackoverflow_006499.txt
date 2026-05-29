@@ -1,0 +1,55 @@
+Question: <p>I've automated my Ubuntu installation - I've got Python code that runs automatically (after a clean install, but before the first user login - it's in a temporary /etc/init.d/ script) that sets up everything from Apache &amp; its configuration to my personal Gnome preferences. It's the latter that's giving me trouble.</p>
+
+<p>This worked fine in Ubuntu 8.04 (Hardy), but when I use this with 8.10 (Intrepid), the first time I try to access gconf, I get this exception:</p>
+
+<p>Failed to contact configuration server; some possible causes are that you need to enable TCP/IP networking for ORBit, or you have stale NFS locks due to a system crash. See <a href="http://www.gnome.org/projects/gconf/" rel="nofollow">http://www.gnome.org/projects/gconf/</a> for information. (Details -  1: <strong>Not running within active session</strong>)</p>
+
+<p>Yes, right, there's no Gnome session when this is running, because the user hasn't logged in yet - however, this worked before; this appears to be new with Intrepid's Gnome (2.24?).</p>
+
+<p>Short of modifying the gconf's XML files directly, is there a way to make some sort of proxy Gnome session? Or, any other suggestions?</p>
+
+<p>(More details: this is python code that runs as root, but setuid's &amp; setgid's to be me before setting my preferences using the "gconf" module from the python-gconf package.)</p>
+
+Answer: <p>I can reproduce this by installing GConf 2.24 on my machine. GConf 2.22 works fine, but 2.24 breaks it.</p>
+
+<p>GConf is failing to launch because D-Bus is not running. Manually spawning D-Bus and the GConf daemon makes this work again.</p>
+
+<p>I tried to spawn the D-Bus session bus by doing the following:</p>
+
+<pre><code>import dbus
+dummy_bus = dbus.SessionBus()
+</code></pre>
+
+<p>...but got this:</p>
+
+<pre><code>dbus.exceptions.DBusException: org.freedesktop.DBus.Error.Spawn.ExecFailed: dbus-launch failed to autolaunch D-Bus session: Autolaunch error: X11 initialization failed.
+</code></pre>
+
+<p>Weird. Looks like it doesn't like to come up if X isn't running. To work around that, start dbus-launch manually (IIRC use the <a href="http://www.python.org/doc/2.5.2/lib/os-process.html">os.system()</a> call):</p>
+
+<pre><code>$ dbus-launch 
+DBUS_SESSION_BUS_ADDRESS=unix:abstract=/tmp/dbus-eAmT3q94u0,guid=c250f62d3c4739dcc9a12d48490fc268
+DBUS_SESSION_BUS_PID=15836
+</code></pre>
+
+<p>You'll need to parse the output somehow and inject them into environment variables (you'll probably want to use <a href="http://www.python.org/doc/2.5.2/lib/os-procinfo.html">os.putenv</a>). For my testing, I just used the shell, and set the environment vars manually with <code>export DBUS_SESSION_BUS_ADDRESS=blahblah...</code>, etc.</p>
+
+<p>Next, you need to launch <code>gconftool-2 --spawn</code> with those environment variables you received from <code>dbus-launch</code>. This will launch the GConf daemon. If the D-Bus environment vars are not set, the daemon will not launch.</p>
+
+<p>Then, run your GConf code. Provided you set the D-Bus session bus environment variables for your own script, you will now be able to communicate with the GConf daemon.</p>
+
+<p>I know it's complicated.</p>
+
+<p><code>gconftool-2</code> provides a <code>--direct</code> option that enables you to set GConf variables without needing to communicate with the server, but I haven't been able to find an equivalent option for the Python bindings (short of outputting XML manually).</p>
+
+<p><em>Edit:</em> For future reference, if anybody wants to run <code>dbus-launch</code> from within a normal <code>bash</code> script (as opposed to a Python script, as this thread is discussing), it is quite easy to retrieve the session bus address for use within the script:</p>
+
+<pre><code>#!/bin/bash
+
+eval `dbus-launch --sh-syntax`
+
+export DBUS_SESSION_BUS_ADDRESS
+export DBUS_SESSION_BUS_PID
+
+do_other_stuff_here
+</code></pre>

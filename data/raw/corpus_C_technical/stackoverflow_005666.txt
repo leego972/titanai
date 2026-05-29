@@ -1,0 +1,66 @@
+Question: <p>Is there a fairly easy way to convert a datetime object into an RFC 1123 (HTTP/1.1) date/time string, i.e. a string with the format</p>
+
+<pre><code>Sun, 06 Nov 1994 08:49:37 GMT
+</code></pre>
+
+<p>Using <code>strftime</code> does not work, since the strings are locale-dependant. Do I have to build the string by hand?</p>
+
+Answer: <p>You can use wsgiref.handlers.format_date_time from the stdlib which does not rely on locale settings</p>
+
+<pre><code>from wsgiref.handlers import format_date_time
+from datetime import datetime
+from time import mktime
+
+now = datetime.now()
+stamp = mktime(now.timetuple())
+print format_date_time(stamp) #--&gt; Wed, 22 Oct 2008 10:52:40 GMT
+</code></pre>
+
+<p>You can use email.utils.formatdate from the stdlib which does not rely on locale settings </p>
+
+<pre><code>from email.utils import formatdate
+from datetime import datetime
+from time import mktime
+
+now = datetime.now()
+stamp = mktime(now.timetuple())
+print formatdate(
+    timeval     = stamp,
+    localtime   = False,
+    usegmt      = True
+) #--&gt; Wed, 22 Oct 2008 10:55:46 GMT
+</code></pre>
+
+<p>If you can set the locale process wide then you can do:</p>
+
+<pre><code>import locale, datetime
+
+locale.setlocale(locale.LC_TIME, 'en_US')
+datetime.datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+</code></pre>
+
+<p>If you don't want to set the locale process wide you could use <a href="http://babel.edgewall.org/">Babel</a> <a href="http://babel.edgewall.org/wiki/Documentation/dates.html">date formating</a></p>
+
+<pre><code>from datetime import datetime
+from babel.dates import format_datetime
+
+now = datetime.utcnow()
+format = 'EEE, dd LLL yyyy hh:mm:ss'
+print format_datetime(now, format, locale='en') + ' GMT'
+</code></pre>
+
+<p>A manual way to format it which is identical with wsgiref.handlers.format_date_time is:</p>
+
+<pre><code>def httpdate(dt):
+    """Return a string representation of a date according to RFC 1123
+    (HTTP/1.1).
+
+    The supplied date must be in UTC.
+
+    """
+    weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
+    month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+             "Oct", "Nov", "Dec"][dt.month - 1]
+    return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
+        dt.year, dt.hour, dt.minute, dt.second)
+</code></pre>

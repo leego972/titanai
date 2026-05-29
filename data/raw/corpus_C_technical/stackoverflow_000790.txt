@@ -1,0 +1,50 @@
+Question: <p>I'm reading some MPEG Transport Stream protocol over UDP and it has some funky bitfields in it (length 13 for example). I'm using the "struct" library to do the broad unpacking, but is there a simple way to say "Grab the next 13 bits" rather than have to hand-tweak the bit manipulation? I'd like something like the way C does bit fields (without having to revert to C).</p>
+
+<p>Suggestions?</p>
+
+Answer: <p>The <a href="http://python-bitstring.googlecode.com">bitstring</a> module is designed to address just this problem. It will let you read, modify and construct data using bits as the basic building blocks. The latest versions are for Python 2.6 or later (including Python 3) but version 1.0 supported Python 2.4 and 2.5 as well.</p>
+
+<p>A relevant example for you might be this, which strips out all the null packets from a transport stream (and quite possibly uses your 13 bit field?):</p>
+
+<pre><code>from bitstring import Bits, BitStream  
+
+# Opening from a file means that it won't be all read into memory
+s = Bits(filename='test.ts')
+outfile = open('test_nonull.ts', 'wb')
+
+# Cut the stream into 188 byte packets
+for packet in s.cut(188*8):
+    # Take a 13 bit slice and interpret as an unsigned integer
+    PID = packet[11:24].uint
+    # Write out the packet if the PID doesn't indicate a 'null' packet
+    if PID != 8191:
+        # The 'bytes' property converts back to a string.
+        outfile.write(packet.bytes)
+</code></pre>
+
+<p>Here's another example including reading from bitstreams:    </p>
+
+<pre><code># You can create from hex, binary, integers, strings, floats, files...
+# This has a hex code followed by two 12 bit integers
+s = BitStream('0x000001b3, uint:12=352, uint:12=288')
+# Append some other bits
+s += '0b11001, 0xff, int:5=-3'
+# read back as 32 bits of hex, then two 12 bit unsigned integers
+start_code, width, height = s.readlist('hex:32, 2*uint:12')
+# Skip some bits then peek at next bit value
+s.pos += 4
+if s.peek(1):
+    flags = s.read(9)
+</code></pre>
+
+<p>You can use standard slice notation to slice, delete, reverse, overwrite, etc. at the bit level, and there are bit level find, replace, split etc. functions. Different endiannesses are also supported.</p>
+
+<pre><code># Replace every '1' bit by 3 bits
+s.replace('0b1', '0b001')
+# Find all occurrences of a bit sequence
+bitposlist = list(s.findall('0b01000'))
+# Reverse bits in place
+s.reverse()
+</code></pre>
+
+<p>The full documentation is <a href="http://packages.python.org/bitstring/">here</a>.</p>

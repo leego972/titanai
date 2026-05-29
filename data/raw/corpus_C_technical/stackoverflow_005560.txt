@@ -1,0 +1,39 @@
+Question: <p>I'm working on a GUI application in WxPython, and I am not sure how I can ensure that only one copy of my application is running at any given time on the machine. Due to the nature of the application, running more than once doesn't make any sense, and will fail quickly. Under Win32, I can simply make a named mutex and check that at startup. Unfortunately, I don't know of any facilities in Linux that can do this. </p>
+
+<p>I'm looking for something that will automatically be released should the application crash unexpectedly. I don't want to have to burden my users with having to manually delete lock files because I crashed.</p>
+
+Answer: <p>This builds upon the <a href="https://stackoverflow.com/a/221159/832230">answer</a> by user <a href="https://stackoverflow.com/users/12138/zgoda">zgoda</a>. It mainly addresses a tricky concern having to do with write access to the lock file. In particular, if the lock file was first created by <code>root</code>, another user <code>foo</code> can then no successfully longer attempt to rewrite this file due to an absence of write permissions for user <code>foo</code>. The obvious solution seems to be to create the file with write permissions for everyone. This solution also builds upon a different <a href="https://stackoverflow.com/a/15015748/832230">answer</a> by me, having to do creating a file with such custom permissions. This concern is important in the real world where your program may be run by any user including <code>root</code>.</p>
+
+<pre><code>import fcntl, os, stat, tempfile
+
+app_name = 'myapp'  # &lt;-- Customize this value
+
+# Establish lock file settings
+lf_name = '.{}.lock'.format(app_name)
+lf_path = os.path.join(tempfile.gettempdir(), lf_name)
+lf_flags = os.O_WRONLY | os.O_CREAT
+lf_mode = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH  # This is 0o222, i.e. 146
+
+# Create lock file
+# Regarding umask, see https://stackoverflow.com/a/15015748/832230
+umask_original = os.umask(0)
+try:
+    lf_fd = os.open(lf_path, lf_flags, lf_mode)
+finally:
+    os.umask(umask_original)
+
+# Try locking the file
+try:
+    fcntl.lockf(lf_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except IOError:
+    msg = ('Error: {} may already be running. Only one instance of it '
+           'can run at a time.'
+           ).format('appname')
+    exit(msg)
+</code></pre>
+
+<p>A limitation of the above code is that if the lock file already existed with unexpected permissions, those permissions will not be corrected.</p>
+
+<p>I would've liked to use <code>/var/run/&lt;appname&gt;/</code> as the directory for the lock file, but creating this directory requires <code>root</code> permissions. You can make your own decision for which directory to use.</p>
+
+<p>Note that there is no need to open a file handle to the lock file.</p>

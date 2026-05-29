@@ -1,0 +1,51 @@
+Question: <p>I've made this decorator, which results in an infinite redirect loop.</p>
+
+<p>The problem is this: </p>
+
+<pre><code>args[0].redirect(users.create_login_url(args[0].request.path))
+</code></pre>
+
+<p>It appears to be a perfectly valid URL. So why wouldn't it properly redirect?</p>
+
+<pre><code>def admin_only(handler, *args):
+
+    def redirect_to_login(*args, **kwargs):
+        return args[0].redirect(users.create_login_url(args[0].request.path))
+
+    user = users.get_current_user()
+    if user:
+        if authorized(user):
+            return handler(args[0])
+        else:
+            logging.warning('An unauthorized user has attempted to enter an authorized page')
+            return redirect_to_login
+    else:
+        return redirect_to_login
+</code></pre>
+
+Answer: <p>It seems that you aren't defining your decorator properly.</p>
+
+<p>A decorator is called only <strong>once</strong> every time you wrap a function with it; from then on the function that the decorator <strong>returned</strong> will be called. It seems that you (mistakenly) believe that the decorator function <strong>itself</strong> will be called every time.</p>
+
+<p>Try something like this instead:</p>
+
+<pre><code>def redirect_to_login(*args, **kwargs):
+    return args[0].redirect(users.create_login_url(args[0].request.path))
+
+def admin_only(handler):
+    def wrapped_handler(*args, **kwargs):    
+        user = users.get_current_user()
+        if user:
+            if authorized(user):
+                return handler(args[0])
+            else:
+                logging.warning('An unauthorized user has attempted '
+                                'to enter an authorized page')
+                return redirect_to_login(*args, **kwargs)
+        else:
+            return redirect_to_login(*args, **kwargs)
+
+    return wrapped_handler
+</code></pre>
+
+<p>Note that in the above code, the decorator just defines a new function and returns it, and this new function itself does the relevant checks.</p>

@@ -1,0 +1,107 @@
+Question: <p>(Django 1.x, Python 2.6.x)</p>
+
+<p>I have models to the tune of:</p>
+
+<pre><code>class Animal(models.Model):
+  pass
+
+class Cat(Animal):
+  def __unicode__(self):
+    return "This is a cat"
+
+class Dog(Animal):
+  def __unicode__(self):
+    return "This is a dog"
+
+class AnimalHome(models.Model):
+  animal = models.ForeignKey(Animal)
+</code></pre>
+
+<p>I have instantiated no Animals, because this is supposed to be a virtual class.  I have instantiated Cats and Dogs, but in the Admin Page for AnimalHome, my choices for Animals are displayed as "Animal object" (the default __unicode__(), I guess) as opposed to the __unicode__ I have defined for the two subclasses.  Help.</p>
+
+<p><hr /></p>
+
+<p>The abstract base class issue is a red herring wrt to this question, I think.  Even if Animal was not supposed to be abstract, I still have the problem that, for some reason, since the ForeignKey is defined on Animal and not one of its subclasses, the superclass method is being called instead of the subclass.  In OO programming when you call object.method() you're supposed to get the lowest-subclass's implementation, and you have to do extra work to get any superclass's implementation.  So why is it that having __unicode__ defined on the subclasses is not sufficient for --- actually the problem might be that __unicode__ is not getting called at all because introspection on the Animal class reveals that it's not defined.  So maybe if I define __unicode__ for Animal and have it call subclasses' __unicode__ I could get the desired effect.</p>
+
+<p><hr /></p>
+
+<p>Okay, I think that I understand the ORM issues.  Both these answers have helped me understand this, thank you.  While experimenting with this, I discovered that when Django saves a subclassed model, it does two things: (1) it creates a row for the subclassed object in the superclass's table, and (2) it makes the PK in the subclass table identical to the PK assigned in the superclass table.  This PK in the subclass table is named superclass_ptr.  Based upon this I've concocted the following.  I'd appreciate feedback.</p>
+
+<pre><code>Class Animal(models.Model)
+  def __unicode__(self):
+    if Dog.objects.filter(pk=self.pk).count() &gt; 0:
+      return unicode(Dog.objects.get(pk=self.pk))
+    elif Cat.objects.filter(pk=self.pk).count() &gt; 0:
+      return unicode(Cat.objects.get(pk=self.pk))
+    else:
+      return "An Animal!"
+</code></pre>
+
+<p><hr /></p>
+
+<p>It seems that Lawrence is most on-point wrt this question.  Cat and Dog will have disjoint PK sets (and any subclass of Animal will have a PK identical to the record of its superclass), but unfortunately Django does not perform any work behind the scenes a la: "I'm an Animal.  I know Animals have subclasses Dog and Cat.  Specifically, I'm Animal number 3, and furthermore I just checked and there's a Cat number 3 too.  That means that I'm actually Cat number 3".  Even though this seems entirely possible and very reasonable (since a Cat won't do anything an Animal couldn't do itself) using Python's introspection.  Thank you all.</p>
+
+Answer: <p>You want an <a href="http://docs.djangoproject.com/en/dev/topics/db/models/#id5" rel="nofollow">Abstract base class</a> ("virtual" doesn't mean anything in Python.)</p>
+
+<p>From the documentation:</p>
+
+<pre><code>class CommonInfo(models.Model):
+    name = models.CharField(max_length=100)
+    age = models.PositiveIntegerField()
+
+    class Meta:
+        abstract = True
+</code></pre>
+
+<p><hr /></p>
+
+<p>Edit</p>
+
+<p>"In OO programming when you call object.method() you're supposed to get the lowest-subclass's implementation."</p>
+
+<p>True.  But not the whole story.</p>
+
+<p>This is not a OO issue.  Or even a Python or Django issue.  This is an ORM issue.</p>
+
+<p>The question is "What object is reconstructed at the end of the FK reference?"  And the answer is that there's no standard, obvious answer of how to handle the transformation from FK value to object.  </p>
+
+<p>I've got a row in <code>AnimalHome</code> with an <code>animals</code> value of 42.  It refers to <code>Animal.objects.get(pk=42)</code>.  Which subclass of Animal?  Cat?  Dog?  How does the ORM layer know if it should do <code>Dog.objects.get(pk=42)</code> or <code>Cat.objects.get(pk=42)</code>?</p>
+
+<p>"But wait," you say.  "It should fetch the Animal object, not a Dog or Cat object."  You can hope for that, but that's not how the Django ORM works.  Each class is a distinct table.  Cat and Dog are -- by definition -- separate tables, with separate queries.  You're not using an object store.  You're using ORM to relational tables.</p>
+
+<p><hr /></p>
+
+<p>Edit</p>
+
+<p>First, your query only works if Dog and Cat share a common key generator, and don't have an overlapping set of PK's.</p>
+
+<p>If you have a Dog with PK of 42 AND a Cat with PK of 42, you've got a problem.  And since you can't easily control the key generation, your solution can't work.</p>
+
+<p>Run Time Type Identification is bad.  It's not Object-Oriented in a number of ways.  Almost anything you can do to avoid RTTI is better than an ever-expanding sequence of if-statements to distinguish subclasses.</p>
+
+<p>However, the model you're trying to build is -- specifically -- a pathological problem for ORM systems.  Indeed, so specifically pathological that I'm almost willing to bet it's homework.  [There are pathological problems for pure SQL systems, also.  They often show up as homework.]</p>
+
+<p>The issue is that the ORM cannot do what you think it should do.  So you have two choices.</p>
+
+<ul>
+<li>Stop using Django.</li>
+<li>Do something Django does directly.</li>
+<li>Break OO design guidelines and resort to brittle things like RTTI, which make it remarkably hard to add another subclass of animals.</li>
+</ul>
+
+<p>Consider this way to do RTTI -- it includes the class name as well as the PK</p>
+
+<pre><code>KIND_CHOICES = (
+   ( "DOG", "Dog" ),
+   ( "CAT", "Cat" ),
+)
+
+class Animal( models.Model ):
+    kind = models.CharField( max_length= 1, choices=KIND_CHOICES )
+    fk = models.IntegerField()
+    def get_kind( self ):
+        if kind == "DOG":
+            return Dog.objects.get( pk = fk )
+        elif kind == "CAT":
+            return Cat.objects.get( pk = fk )
+</code></pre>

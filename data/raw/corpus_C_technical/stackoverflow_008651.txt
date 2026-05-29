@@ -1,0 +1,57 @@
+Question: <p>What would be the best way to do this.</p>
+
+<p>The input string is </p>
+
+<pre><code>&lt;133_3&gt;&lt;135_3&gt;&lt;116_2&gt;The other system worked for about 1 month&lt;/116_2&gt; got some good images &lt;137_3&gt;on it then it started doing the same thing as the first one&lt;/137_3&gt; so then I quit using either camera now they are just sitting and collecting dust.&lt;/135_3&gt;&lt;/133_3&gt;
+</code></pre>
+
+<p>the expected output is </p>
+
+<pre><code>{'The other system worked for about 1 month got some good images on it then it started doing the same thing as the first one so then I quit \
+using either camera now they are just sitting and collecting dust.':[133, 135],
+
+'The other system worked for about 1 month': [116],
+
+'on it then it started doing the same thing as the first one':[137]
+
+}
+</code></pre>
+
+<p>that seems like a recursive regexp search but I can't figure out how exactly.</p>
+
+<p>I can think of a tedious recursive function as of now, but have a feeling that there should be a better way.</p>
+
+<p>Related question: <a href="http://stackoverflow.com/questions/133601/can-regular-expressions-be-used-to-match-nested-patterns">Can regular expressions be used to match nested patterns?</a></p>
+
+Answer: <p>Here's an unreliable inefficient recursive regexp solution:</p>
+
+<pre><code>import re
+
+re_tag = re.compile(r'&lt;(?P&lt;tag&gt;[^&gt;]+)&gt;(?P&lt;content&gt;.*?)&lt;/(?P=tag)&gt;', re.S)
+
+def iterparse(text, tag=None):
+    if tag is not None: yield tag, text
+    for m in re_tag.finditer(text):
+        for tag, text in iterparse(m.group('content'), m.group('tag')):
+            yield tag, text
+
+def strip_tags(content):
+    nested = lambda m: re_tag.sub(nested, m.group('content'))
+    return re_tag.sub(nested, content)
+
+
+txt = "&lt;133_3&gt;&lt;135_3&gt;&lt;116_2&gt;The other system worked for about 1 month&lt;/116_2&gt; got some good images &lt;137_3&gt;on it then it started doing the same thing as the first one&lt;/137_3&gt; so then I quit using either camera now they are just sitting and collecting dust. &lt;/135_3&gt;&lt;/133_3&gt;"
+d = {}
+for tag, text in iterparse(txt):
+    d.setdefault(strip_tags(text), []).append(int(tag[:-2]))
+
+print(d)
+</code></pre>
+
+<p>Output:</p>
+
+<pre><code>{'on it then it started doing the same thing as the first one': [137], 
+ 'The other system worked for about 1 month': [116], 
+ 'The other system worked for about 1 month got some good images on it then it started doing the same thing as the first one so then I quit using \
+ either camera now they are just sitting and collecting dust. ': [133, 135]}
+</code></pre>

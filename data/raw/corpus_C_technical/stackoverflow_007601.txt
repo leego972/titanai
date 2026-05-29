@@ -1,0 +1,39 @@
+Question: <p>I need to test a function that needs to query a page on an external server using urllib.urlopen (it also uses urllib.urlencode). The server could be down, the page could change; I can't rely on it for a test.</p>
+
+<p>What is the best way to control what urllib.urlopen returns?</p>
+
+Answer: <p>Did you give <a href="https://pypi.python.org/pypi/mox" rel="nofollow">Mox</a> a look? It should do everything you need. Here is a simple interactive session illustrating the solution you need:</p>
+
+<pre><code>&gt;&gt;&gt; import urllib
+&gt;&gt;&gt; # check that it works
+&gt;&gt;&gt; urllib.urlopen('http://www.google.com/')
+&lt;addinfourl at 3082723820L ...&gt;
+&gt;&gt;&gt; # check what happens when it doesn't
+&gt;&gt;&gt; urllib.urlopen('http://hopefully.doesnotexist.com/')
+#-- snip --
+IOError: [Errno socket error] (-2, 'Name or service not known')
+
+&gt;&gt;&gt; # OK, let's mock it up
+&gt;&gt;&gt; import mox
+&gt;&gt;&gt; m = mox.Mox()
+&gt;&gt;&gt; m.StubOutWithMock(urllib, 'urlopen')
+&gt;&gt;&gt; # We can be verbose if we want to :)
+&gt;&gt;&gt; urllib.urlopen(mox.IgnoreArg()).AndRaise(
+...   IOError('socket error', (-2, 'Name or service not known')))
+
+&gt;&gt;&gt; # Let's check if it works
+&gt;&gt;&gt; m.ReplayAll()
+&gt;&gt;&gt; urllib.urlopen('http://www.google.com/')
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+  File "/usr/lib/python2.5/site-packages/mox.py", line 568, in __call__
+    raise expected_method._exception
+IOError: [Errno socket error] (-2, 'Name or service not known')
+
+&gt;&gt;&gt; # yay! now unset everything
+&gt;&gt;&gt; m.UnsetStubs()
+&gt;&gt;&gt; m.VerifyAll()
+&gt;&gt;&gt; # and check that it still works
+&gt;&gt;&gt; urllib.urlopen('http://www.google.com/')
+&lt;addinfourl at 3076773548L ...&gt;
+</code></pre>

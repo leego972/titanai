@@ -1,0 +1,35 @@
+Last week was Aprils fools day, which means that for the days before and after you tend to be especially skeptical about the things you read on the web. So when I read that Redis had added one of my favorite algorithms the HyperLogLog I was in two minds as to whether this was real or not. The detailed analysis that Salvatore put together was very convincing but the date of the post was really off-putting.
+
+If you haven’t heard of HyperLogLog before, it’s a method to work out the cardinality of some measure. Which in non-set based terms means, being able to efficiently count the number of unique items. One of the best implementations I’ve seen is the HyperLogLog Postgresql extension. This lets you define a new native data type. To use it you must use the various hash methods when inserting data, this is a required part of the HyperLogLog algorithm. The examples used in the readme.md page of the Github repo shows the real power of the extension.
+
+Consider a data warehouse that stores analytic data;
+
+-- Create the destination table
+CREATE TABLE daily_uniques (
+date            date UNIQUE,
+users           hll
+);
+-- Fill it with the aggregated unique statistics
+INSERT INTO daily_uniques(date, users)
+FROM facts
+GROUP BY 1;
+
+Imagine that we have inserted a number of items into this table from some fact table. We can then query the table:
+
+SELECT date, hll_cardinality(users) FROM daily_uniques;
+
+Now the queries will look like:
+
+SELECT hll_cardinality(hll_union_agg(users)) FROM daily_uniques WHERE date >= '2012-01-02'::date AND date <= '2012-01-08'::date;
+
+or
+
+SELECT date, #hll_union_agg(users) OVER seven_days
+FROM daily_uniques
+WINDOW seven_days AS (ORDER BY date ASC ROWS 6 PRECEDING);
+
+Remember as well that the amount of storage space used here is absolutely minimal, Often in the order of bytes.
+
+So as you can see HyperLogLog is really cool and it’s a great credit to the team behind Redis for bringing this into the product. Even if they do publish the announcement on April Fools day
+
+Redis is a fantastic tool, it is so much more than just a memcache replacement, I like to think of it as Comp Sci in a box. It has all of the goodies: Lists with set based operations, sliding caches, queues, single threaded event based goodness. It’s a very exciting tool and I’m very glad to see it evolve.

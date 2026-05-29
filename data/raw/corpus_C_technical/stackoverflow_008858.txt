@@ -1,0 +1,55 @@
+Question: <p>I'm trying to make a proxy object in IronPython, which should dynamically present underlying structure. The proxy itself shouldn't have any functions and properties, I'm trying to catch all the calls in the runtime. Catching the function calls is easy, I just need to define <strong>getattr</strong>() function for my object, and check does appropriate function exists in the underlying layer, and return some function-like object.</p>
+
+<p>I have problems with properties - I don't know how to distinguish the calling context, is my property called as a lvalue or rvalue:</p>
+
+<p>o = myproxy.myproperty # *I need to call underlying.myproperty_get()*</p>
+
+<p>or</p>
+
+<p>myproxy.myproperty = o # *I need to call underlying.myproperty_set(o)*</p>
+
+<p>I looked at the list of special functions in Python, but I didn't found anything appropriate.</p>
+
+<p>I also tried to make property in the object on the fly, with combination of exec() and builtin property() function, but I found that IronPython 1.1.2 lacks of entire 'new' module (which is present in IronPython 2.x beta, but I'll rather use IP 1.x, because of .NET 2.0 framework).</p>
+
+<p>Any ideas?</p>
+
+Answer: <p>Try this:</p>
+
+<pre><code>class Test(object):
+    _test = 0
+
+    def test():
+        def fget(self):
+            return self._test
+        def fset(self, value):
+            self._test = value
+        return locals()
+    test = property(**test())
+
+    def greet(self, name):
+        print "hello", name
+
+
+class Proxy(object):
+    def __init__(self, obj):
+        self._obj = obj
+
+    def __getattribute__(self, key):
+        obj = object.__getattribute__(self, "_obj")
+        return getattr(obj, key)
+
+    def __setattr__(self, name, value):
+        if name == "_obj":
+            object.__setattr__(self, name, value)
+        else:
+            obj = object.__getattribute__(self, "_obj")
+            setattr(obj, name, value)
+
+
+t = Test()
+p = Proxy(t)
+p.test = 1
+assert t.test == p.test
+p.greet("world")
+</code></pre>

@@ -1,0 +1,53 @@
+Question: <p>Im a coding a library inluding textual feedback that I need to translate.</p>
+
+<p>I put the following lines in a _config.py module that I import everywhere in my app :</p>
+
+<pre><code>import gettext, os, sys
+pathname = os.path.dirname(sys.argv[0])
+localdir = os.path.abspath(pathname) + "/locale"
+gettext.install("messages", localdir)
+</code></pre>
+
+<p>I have the *.mo files in ./locale/lang_LANG/LC_MESSAGES and I apply the _() function to all the strings that need to be translated.</p>
+
+<p>Now I just added a feature for the user, supposedly a programmer, to be able to create his own messages. I don't want him to care about the underlying implementation, so I want him to be apple to make it something straightforward like :</p>
+
+<pre><code>lib_object.message = "My message"
+</code></pre>
+
+<p>I used properties to make it clean, but what if my user whats to translate his own code (that uses mine) and does something like :</p>
+
+<pre><code>import gettext, os, sys
+pathname = os.path.dirname(sys.argv[0])
+localdir = os.path.abspath(pathname) + "/locale"
+gettext.install("user_app", localdir)
+
+lib_object.message = _("My message")
+</code></pre>
+
+<p>Is it a problem ? What can I do to avoid troubles without bothering my user ?</p>
+
+Answer: <p>You can use the class based gettext api to isolate message catalogs. This is also what is recommended in the <a href="http://docs.python.org/library/gettext.html#class-based-api" rel="nofollow">python gettext documentation</a>.</p>
+
+<p>The drawback is that you, or the other dev, will have to use the gettext method or define the <code>_()</code> method in the local scope, bound to the specific gettext class. An example of a class with its own string catalog:</p>
+
+<pre><code>import gettext
+
+class MyClass(object):
+    def __init__(self, locale_for_instance):
+        self.lang = gettext.translation("appname", localedir, \
+                                         locale=locale_for_instance)
+
+    def some_method(self, arg):
+        return self.lang.gettext("You called some method")
+
+    def other_method(self, arg): # does the same thing
+        _ = self.lang.gettext
+        return _("You called some method")
+</code></pre>
+
+<p>You could stick the code for adding the <code>_()</code> in a decorator, so all the methods that need it is prefixed with something like <code>@with_local_gettext</code></p>
+
+<p>(Note, I've not tested the above could but It Should Work Just Fine(tm) )</p>
+
+<p>If the goal is to not bother your user (and he's not very good) I guess you could use the class based approach in your code and let the user use the global one.</p>

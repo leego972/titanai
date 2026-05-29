@@ -1,0 +1,126 @@
+Question: <p>I'm sure there's a simpler way of doing this that's just not occurring to me.</p>
+
+<p>I'm calling a bunch of methods that return a list.  The list may be empty.  If the list is non-empty, I want to return the first item; otherwise, I want to return None.  This code works:</p>
+
+<pre><code>my_list = get_list()
+if len(my_list) &gt; 0: return my_list[0]
+return None
+</code></pre>
+
+<p>It seems to me that there should be a simple one-line idiom for doing this, but for the life of me I can't think of it.  Is there?</p>
+
+<p><strong>Edit:</strong></p>
+
+<p>The reason that I'm looking for a one-line expression here is not that I like incredibly terse code, but because I'm having to write a lot of code like this:</p>
+
+<pre><code>x = get_first_list()
+if x:
+    # do something with x[0]
+    # inevitably forget the [0] part, and have a bug to fix
+y = get_second_list()
+if y:
+    # do something with y[0]
+    # inevitably forget the [0] part AGAIN, and have another bug to fix
+</code></pre>
+
+<p>What I'd like to be doing can certainly be accomplished with a function (and probably will be):</p>
+
+<pre><code>def first_item(list_or_none):
+    if list_or_none: return list_or_none[0]
+
+x = first_item(get_first_list())
+if x:
+    # do something with x
+y = first_item(get_second_list())
+if y:
+    # do something with y
+</code></pre>
+
+<p>I posted the question because I'm frequently surprised by what simple expressions in Python can do, and I thought that writing a function was a silly thing to do if there was a simple expression could do the trick.  But seeing these answers, it seems like a function <em>is</em> the simple solution.</p>
+
+Answer: <blockquote>
+  <p><strong>Python idiom to return first item or None?</strong></p>
+</blockquote>
+
+<p>The most Pythonic approach is what the most upvoted answer demonstrated, and it was the first thing to come to my mind when I read the question. Here's how to use it, first if the possibly empty list is passed into a function:</p>
+
+<pre><code>def get_first(l): 
+    return l[0] if l else None
+</code></pre>
+
+<p>And if the list is returned from a <code>get_list</code> function:</p>
+
+<pre><code>l = get_list()
+return l[0] if l else None
+</code></pre>
+
+<h2>Other ways demonstrated to do this here, with explanations</h2>
+
+<h3><code>for</code></h3>
+
+<p>When I began trying to think of clever ways to do this, this is the second thing I thought of:</p>
+
+<pre><code>for item in get_list():
+    return item
+</code></pre>
+
+<p>This presumes the function ends here, implicitly returning <code>None</code> if <code>get_list</code> returns an empty list. The below explicit code is exactly equivalent:</p>
+
+<pre><code>for item in get_list():
+    return item
+return None
+</code></pre>
+
+<h3><code>if some_list</code></h3>
+
+<p>The following was also proposed (I corrected the incorrect variable name) which also uses the implicit <code>None</code>. This would be preferable to the above, as it uses the logical check instead of an iteration that may not happen. This should be easier to understand immediately what is happening. But if we're writing for readability and maintainability, we should also add the explicit <code>return None</code> at the end:</p>
+
+<pre><code>some_list = get_list()
+if some_list:
+    return some_list[0]
+</code></pre>
+
+<h3>slice <code>or [None]</code> and select zeroth index</h3>
+
+<p>This one is also in the most up-voted answer:</p>
+
+<pre><code>return (get_list()[:1] or [None])[0]
+</code></pre>
+
+<p>The slice is unnecessary, and creates an extra one-item list in memory.  The following should be more performant. To explain, <code>or</code> returns the second element if the first is <code>False</code> in a boolean context, so if <code>get_list</code> returns an empty list, the expression contained in the parentheses will return a list with 'None', which will then be accessed by the <code>0</code> index:</p>
+
+<pre><code>return (get_list() or [None])[0]
+</code></pre>
+
+<p>The next one uses the fact that and returns the second item if the first is <code>True</code> in a boolean context, and since it references my_list twice, it is no better than the ternary expression (and technically not a one-liner):</p>
+
+<pre><code>my_list = get_list() 
+return (my_list and my_list[0]) or None
+</code></pre>
+
+<h3><code>next</code></h3>
+
+<p>Then we have the following clever use of the builtin <code>next</code> and <code>iter</code></p>
+
+<pre><code>return next(iter(get_list()), None)
+</code></pre>
+
+<p>To explain, <code>iter</code> returns an iterator with a <code>.next</code> method. (<code>.__next__</code> in Python 3.) Then the builtin <code>next</code> calls that <code>.next</code> method, and if the iterator is exhausted, returns the default we give, <code>None</code>.</p>
+
+<h3>redundant ternary expression (<code>a if b else c</code>) and circling back</h3>
+
+<p>The below was proposed, but the inverse would be preferable, as logic is usually better understood in the positive instead of the negative. Since <code>get_list</code> is called twice, unless the result is memoized in some way, this would perform poorly:</p>
+
+<pre><code>return None if not get_list() else get_list()[0]
+</code></pre>
+
+<p>The better inverse:</p>
+
+<pre><code>return get_list()[0] if get_list() else None
+</code></pre>
+
+<p>Even better, use a local variable so that <code>get_list</code> is only called one time, and you have the recommended Pythonic solution first discussed:</p>
+
+<pre><code>l = get_list()
+return l[0] if l else None
+</code></pre>

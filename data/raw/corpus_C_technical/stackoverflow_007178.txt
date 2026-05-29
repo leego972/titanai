@@ -1,0 +1,45 @@
+Question: <p>I have a file <code>test.txt</code> that is inside a zip archive <code>test.zip</code>.  The permissions on <code>test.txt</code> are out of my control when it's compressed, but now I want them to be group-writeable.  I am extracting the file with Python, and don't want to escape out to the shell.</p>
+
+<p><strong>EDIT:</strong>
+Here's what I've got so far:</p>
+
+<pre><code>import zipfile
+
+z = zipfile.ZipFile('test.zip', 'w')
+zi = zipfile.ZipInfo('test.txt')
+zi.external_attr = 0777 &lt;&lt; 16L
+z.writestr(zi, 'FOO')
+z.close()
+
+z = zipfile.ZipFile('test.zip', 'r')
+for name in z.namelist():
+    newFile = open(name, "wb")
+    newFile.write(z.read(name))
+
+    newFile.close()
+z.close()
+</code></pre>
+
+<p>This works perfectly on OS X using 2.5.1, but it doesn't work on my home box (Debian, Python 2.4 &amp; 2.5) or on RHEL 5 with Python 2.4.  On anything but OS X it doesn't error, but doesn't change the permissions either.  Any ideas why?  Also, how does <code>writestr()</code> work?  I know I'm using it incorrectly here.</p>
+
+<p>Is there a way to do this without <code>os.chmod</code> (the user extracting the file doesn't have permissions to use <code>os.chmod</code> after it's extracted)?  I have full write access to the zip file.</p>
+
+<p>More info:</p>
+
+<pre><code>&gt; ls -l test.zip
+-rwxrwxrwx 1 myuser mygroup 2008-11-11 13:24 test.zip
+&gt; unzip test.zip
+Archive:  test.zip
+  inflating: test.txt 
+&gt; ls -l test.txt
+-rw-r--r-- 1 myuser mygroup 2008-11-11 13:34 test.txt
+</code></pre>
+
+<p>The user extracting is not <code>myuser</code>, but is in <code>mygroup</code>.</p>
+
+Answer: <p>Extract to stdout (unzip -p) and redirect to a file?  If there's more than one file in the zip, you could list the zip contents, and then extract one at a time.</p>
+
+<pre><code>for n in `unzip -l test.zip | awk 'NR &gt; 3 &amp;&amp; NF == 4 { print $4 }'`; do unzip -p test.zip $n &gt; $n; done
+</code></pre>
+
+<p>(yeah, I know you tagged this 'python' :-) )</p>

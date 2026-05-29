@@ -1,0 +1,66 @@
+Question: <p>I'm trying to find the actual class of a django-model object, when using model-inheritance.</p>
+
+<p>Some code to describe the problem:</p>
+
+<pre><code>class Base(models.model):
+    def basemethod(self):
+        ...
+
+class Child_1(Base):
+    pass
+
+class Child_2(Base):
+    pass
+</code></pre>
+
+<p>If I create various objects of the two Child classes and the create a queryset containing them all:</p>
+
+<pre><code>Child_1().save()
+Child_2().save()
+(o1, o2) = Base.objects.all()
+</code></pre>
+
+<p>I want to determine if the object is of type Child_1 or Child_2 in basemethod, I can get to the child object via o1.child_1 and o2.child_2 but that reconquers knowledge about the childclasses in the baseclass.</p>
+
+<p>I have come up with the following code:</p>
+
+<pre><code>def concrete_instance(self):
+    instance = None
+    for subclass in self._meta.get_all_related_objects():
+        acc_name = subclass.get_accessor_name()
+        try:
+            instance = self.__getattribute__(acc_name)
+            return instance
+        except Exception, e:
+            pass
+</code></pre>
+
+<p>But it feels brittle and I'm not sure of what happens when if I inherit in more levels.</p>
+
+Answer: <p>Slightly modified version of <a href="http://stackoverflow.com/a/349494/1042635">what Daniel Naab proposed</a>:</p>
+
+<pre><code>from django.contrib.contenttypes.models import ContentType
+from django.db import models
+
+def ParentClass(models.Model):
+    superclass = models.CharField(max_length = 255, blank = True)
+
+    def save(self, *args, **kwargs):
+        if not self.superclass:
+            self.superclass = ContentType.objects.get_for_model(self.__class__)
+
+        super(ParentClass, self).save(*args, **kwargs)
+
+    def getChild(self):
+        s = getattr(self, self.superclass)
+        if hasattr(s, 'pk'):
+            return s
+        else:
+            return None
+
+class Child1(ParentClass):
+    pass
+
+class Child2(ParentClass):
+    pass
+</code></pre>

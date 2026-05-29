@@ -1,0 +1,40 @@
+Question: <p>I'm writing a C parser using PLY, and recently ran into a problem.
+This code:</p>
+
+<pre><code>typedef int my_type;
+my_type x;
+</code></pre>
+
+<p>Is correct C code, because my_type is defined as a type previously to
+being used as such. I handle it by filling a type symbol table in the
+parser that gets used by the lexer to differentiate between types and
+simple identifiers.</p>
+
+<p>However, while the type declaration rule ends with SEMI (the ';' token), PLY shifts the token <code>my_type</code> from the second line before deciding it's done with the first one. Because of this, I have no chance to pass the update in the type symbol table to the lexer and it
+sees my_type as an identifier and not a type.</p>
+
+<p>Any ideas for a fix ?</p>
+
+<p>The full code is at: <a href="http://code.google.com/p/pycparser/source/browse/trunk/src/c_parser.py" rel="nofollow">http://code.google.com/p/pycparser/source/browse/trunk/src/c_parser.py</a>
+Not sure how I can create a smaller example out of this. </p>
+
+<p><strong>Edit:</strong></p>
+
+<p>Problem solved. See my solution below.</p>
+
+Answer: <p>With <a href="http://groups.google.com/group/ply-hack/tree/browse_frm/thread/cf31e8334801eabd/b9cdf4a6682635c1?rnum=1&amp;_done=%2Fgroup%2Fply-hack%2Fbrowse_frm%2Fthread%2Fcf31e8334801eabd%3F#doc_5c415da045e77a6e" rel="nofollow">some help</a> from Dave Beazley (PLY's creator), my problem was solved.</p>
+
+<p>The idea is to use special sub-rules and do the actions in them. In my case, I split the <code>declaration</code> rule to:</p>
+
+<pre><code>def p_decl_body(self, p):
+    """ decl_body : declaration_specifiers init_declarator_list_opt
+    """
+    # &lt;&lt;Handle the declaration here&gt;&gt;        
+
+def p_declaration(self, p):
+    """ declaration : decl_body SEMI 
+    """
+    p[0] = p[1]
+</code></pre>
+
+<p><code>decl_body</code> is always reduced before the token after SEMI is shifted in, so my action gets executed at the correct time.</p>

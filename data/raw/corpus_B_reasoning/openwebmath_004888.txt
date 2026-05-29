@@ -1,0 +1,69 @@
+# Is there a way to automate a switch into text mode after a _
+
+I am a physics student and we have been told that indices that abbreviate some descriptive word or indices that are just to distinguish between say different objects like the mass of two objects A and B shouldn't be in italics in an equation. An example for that would be $m_\text{tot} = m_\text{A} + m_\text{B}$. For physical constants, or any non made up index for that matter, the indices should be in italics as the rest of the equation. Here an example would be the mass of an electron $m_e$.
+
+Since basically every index is for things you make up, for almost every index I have to write out _\text{...}. This just clutters my equations so much that I tried to find a way to automate a switch into text mode after a _ character, but found nothing. So here I am asking you people: Do you know a way?
+
+• Welcome to TeX.SE.
+– Mico
+Jan 16 at 12:34
+• note that you should not use \text otherwise you will get the current font from before the math, eg italic in theorems. use m_{\mathrm{tot}} Jan 16 at 12:38
+• I would not redefine the math primitives, although that is possible just do \newcommand\z[1]{_{\mathrm{#1}} then you can use m\z{tot} which is only one character more than m_{tot} Jan 16 at 12:40
+
+You might use a different character to introduce textual subscripts, so you can keep _ to do its usual job.
+
+I chose ? because it's unlikely to show up in math formulas.
+
+\documentclass{article}
+\usepackage{amsmath}
+
+\newcommand{\textualsubscript}[1]{%
+_{\textnormal{\upshape#1}}%
+}
+\begingroup\lccode~=? \lowercase{\endgroup\let~}\textualsubscript
+\AtBeginDocument{\mathcode?="8000 }
+
+\begin{document}
+
+$m?{tot}=m?{A}+m?{B}-m_{e}$
+
+\end{document}
+
+
+• Thanks a lot for the help. Since I'm new to LaTeX I don't know a lot about the things you can customize, but I'm eager to learn. Would you care to briefly explain what your code does? Jan 16 at 16:18
+• @Luguza This has been explained elsewhere in the site. Basically, \mathcode@="8000 tells TeX to treat ? as a command \let equal to the one introduced beforehand with a known trick. Look for “math active”. Jan 16 at 16:24
+
+If you're willing and able to use LuaLaTeX to compile your document, the following solution may be of interest to you. The solution defines a Lua function, called sub2mathrm, which encases subscript terms in \mathrm wrappers if there is no whitespace between the _ (underscore) character and (a) material encased in curly braces -- e.g., {tot} -- or (b) a single alphabetic character -- e.g., A or B. Conversely, if there is some whitespace after the _ character, the Lua function does nothing. The Lua function does nothing with A_\sigma either, since the backslash character in \sigma is not an alphabetical character. sub2mathrm performs its work with the help of Lua's powerful string.gsub ("generalized substitution") function.
+
+The Lua function is activated by executing \SubToMathrmOn, a utility macro that assigns sub2mathrm to the LuaTeX process_input_buffer callback. It is deactivated by running the utility macro \SubToMathrmOn.
+
+% !TEX TS-program = lualatex
+\documentclass{article}
+\usepackage{luacode} % for 'luacode' environment
+\begin{luacode}
+
+  function sub2mathrm ( s )
+s = s:gsub ( "_(%b{})" , "_{\\mathrm%1}" )
+s = s:gsub ( "_(%a)" , "_{\\mathrm{%1}}" )
+return s
+end
+
+\end{luacode}
+
+%% define two utility macros:
+"process_input_buffer" , sub2mathrm , "sub2mathrm" )}}
+\newcommand\SubToMathrmOff{\directlua{luatexbase.remove_from_callback (
+"process_input_buffer" , "sub2mathrm" )}}
+
+\begin{document}
+\SubToMathrmOn % Activate the Lua function
+
+$m_{tot} = m_A + m_B$     % no whitespace after "_"
+
+$m_ {tot} = m _ A + m_ B$ % whitespace after "_"
+
+\SubToMathrmOff % Deactivate the Lua function
+
+$m_{tot} = m_A + m_B$
+
+\end{document}

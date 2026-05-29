@@ -1,0 +1,52 @@
+Question: <p>I am hoping to dynamically update a ModelForm's inline Meta class from my view. Although this code seems to update the exclude list in the Meta class, the output from <code>as_p()</code>, <code>as_ul()</code>, etc does not reflect the updated Meta exclude.</p>
+
+<p>I assume then that the html is generated when the ModelForm is created not when the <code>as_*()</code> is called. Is there a way to force the update of the HTML? </p>
+
+<p>Is this even the best way to do it? I just assumed this <em>should</em> work.</p>
+
+<p>Thoughts?</p>
+
+<pre><code>from django.forms import ModelForm
+
+from testprogram.online_bookings.models import Passenger
+
+class PassengerInfoForm(ModelForm):
+
+    def set_form_excludes(self, exclude_list):
+        self.Meta.exclude = excludes_list
+
+    class Meta:
+        model = Passenger
+        exclude = []
+</code></pre>
+
+Answer: <p>The Meta class is used to dynamically construct the form definition - so by the time you've created the ModelForm instance, the fields not in the exclude have already been added as the new object's attributes.</p>
+
+<p>The normal way to do it would be to just have multiple class definitions for each possible exclude list.  But if you want the form itself to be dynamic, you'll have to create a class definition on the fly.  Something like:</p>
+
+<pre><code>def get_form(exclude_list):
+    class MyForm(ModelForm):
+        class Meta:
+            model = Passenger
+            exclude = exclude_list
+    return MyForm
+
+form_class = get_form(('field1', 'field2'))
+form = form_class()
+</code></pre>
+
+<p><strong>UPDATE</strong>:  I just revisited this post and thought I'd post a little more idiomatic way to handle a dynamic class:</p>
+
+<pre><code>def PassengerForm(exclude_list, *args, **kwargs):
+    class MyPassengerForm(ModelForm):
+        class Meta:
+            model = Passenger
+            exclude = exclude_list
+
+        def __init__(self):
+            super(MyPassengerForm, self).__init__(*args, **kwargs)
+
+    return MyPassengerForm()
+
+form = PassengerForm(('field1', 'field2'))
+</code></pre>

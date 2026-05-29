@@ -1,0 +1,89 @@
+# 4.3. Thermo-optic phase shifter (Heater)¶
+
+A thermo-optic phase shifter works by varying the temperature of the waveguide. This modulates the refractive index of the waveguide material through the thermo-optic effect. This, in turn, modulates the effective index and the phase of the light at the end of the waveguide.
+
+## 4.3.1. Layout¶
+
+SiFab contains a heater that is used in this tutorial. This heated waveguide can be used as any other waveguide in IPKISS.
+
+from si_fab import all as pdk
+from ipkiss3 import all as i3
+
+# Heater
+
+ht = pdk.HeatedWaveguide(contact_pitch=0.6,
+heater_width=0.6,
+heater_offset=1.0,
+m1_width=1.0,
+length_via_section=3.0,
+via_pitch=1.0,)
+ht_lv = ht.Layout(shape=[(0.0, 0.0), (10.0, 0.0)])
+ht_lv.visualize(annotate=True)
+
+xs = ht_lv.cross_section(cross_section_path=i3.Shape([(1.0, -8.0), (1.0, 8.0)]))
+xs.visualize()
+
+
+## 4.3.2. Model¶
+
+As described here, the phase shift is proportional to the dissipated power in the heater. As the dynamics controlling the temperature are much slower than the electro-optic effects in the phase shifter, we chose an instantaneous model. By doing so, we can reach steady-state without immediately in simulations. The heater in SiFab has a simulation recipe, which is used to ramp up the voltage and check the phase variation.
+
+from si_fab import all as pdk
+from si_fab.components.heater.simulate.simulate import simulate_heater
+from si_fab.components.heater.pcell.cell import r_sheet, j_max
+import pylab as plt
+import numpy as np
+import os
+# Phase Shifter
+
+name = "heater_sweep"
+results_array = []
+length = 100
+ht = pdk.HeatedWaveguide(contact_pitch=0.6,
+heater_width=0.6,
+heater_offset=1.0,
+m1_width=1.0,
+length_via_section=3.0,
+via_pitch=1.0,)
+ht_lv = ht.Layout(shape=[(0.0, 0.0), (length, 0.0)])
+
+P_pi = 30e-3  # W
+p_pi_sq = r_sheet * P_pi
+
+ht.CircuitModel(p_pi_sq=p_pi_sq)
+
+results = simulate_heater(cell=ht,
+v_bias_start=0,
+v_bias_end=1,
+nsteps=500,
+center_wavelength=1.5,
+simulate_sources=True,
+simulate_circuit=True,
+debug=False)
+times = results["timesteps"]
+results_array.append(results)
+
+def phase_unwrap_normalize(results):
+unwrapped = np.unwrap(np.angle(results))
+return (unwrapped - unwrapped[0]/np.pi)
+
+outputs = ["in", "elec1", "elec2", "out", "current_density"]
+process = [np.real, np.real, np.real, phase_unwrap_normalize, np.real]
+axis_y = ["V", "V", "V", "[rad/pi]", "A/um^2"]
+fig, axs = plt.subplots(nrows=len(outputs), ncols=1, figsize=(6, 10))
+
+for cnt, (f, pn) in enumerate(zip(process, outputs)):
+axs[cnt].set_title(pn)
+axs[cnt].plot(times, f(results[pn]), label="length: {}".format(length))
+axs[cnt].set_ylabel(axis_y[cnt])
+
+axs[len(process)-1].axhline(y=j_max)
+
+plt.tight_layout()
+fig.savefig(os.path.join("{}.png".format(name)), bbox_inches='tight')
+
+
+1. Open topical_training/mzm/explore_heater/example_heaterwaveguide.py.
+1. Open topical_training/mzm/explore_heater/example_heater_simulation.py.
+3. With the heater having a $$P_{\pi}=30 mW$$, find the the length of the heater that would lead to a tuning range of $$\pi/2$$ under a voltage swing of 0 to 1.
+Solution

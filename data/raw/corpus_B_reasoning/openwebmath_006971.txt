@@ -1,0 +1,86 @@
+Tikz draw contour without some edges, and fill
+
+I'd like to draw two wave-shaped contours, as in the figure below, and fill the area between. I tried the following code, but it produces an undesired black vertical edge on the right. How do I remove that?
+
+\documentclass[tikz]{standalone}
+\begin{document}
+\begin{tikzpicture}
+\useasboundingbox (-1,-1) rectangle (6,2);
+\draw[fill=black!10] (0,1) to[out=0,in=180] ++(5,-0.6) -- ++(0,0.6) to[out=180,in=0] ++(-5,-0.6);
+\end{tikzpicture}
+\end{document}
+
+
+I also tried to remove the -- between ++(5,-0.6) and ++(0,0.6) in the 5th line, it doesn't draw the undesired edge, but it messes up the filling.
+
+\documentclass[tikz]{standalone}
+\begin{document}
+\begin{tikzpicture}
+\useasboundingbox (-1,-1) rectangle (6,2);
+\draw[fill=black!10] (0,1) to[out=0,in=180] ++(5,-0.6) ++(0,0.6) to[out=180,in=0] ++(-5,-0.6);
+\end{tikzpicture}
+\end{document}
+
+
+Quick and dirty: fill the area first and then draw what you want to draw. It is not easily possible to switch off the drawing of a part of a path (but it is possible yet considerably more effort).
+
+\documentclass[tikz]{standalone}
+\begin{document}
+\begin{tikzpicture}
+\useasboundingbox (-1,-1) rectangle (6,2);
+\path[fill=black!10] (0,1) to[out=0,in=180] ++(5,-0.6) -- ++(0,0.6) to[out=180,in=0] ++(-5,-0.6);
+\draw (0,1) to[out=0,in=180] ++(5,-0.6)++(0,0.6) to[out=180,in=0] ++(-5,-0.6);
+\end{tikzpicture}
+\end{document}
+
+
+You can switch the path on and off e.g. using this answer.
+
+\documentclass[tikz]{standalone}
+\pgfkeys{tikz/.cd,
+edge options/.code={\tikzset{edge style/.style={#1}}},
+}
+\begin{document}
+\begin{tikzpicture}[every edge/.append code = {% https://tex.stackexchange.com/a/396092/121799
+\global\let\currenttarget\tikztotarget % save \tikztotarget in a global variable
+\pgfkeysalso{append after command={to[edge style] (\currenttarget)}}},
+every edge/.append style={edge style}   ]
+\useasboundingbox (-1,-1) rectangle (6,2);
+\path[fill=black!10]
+(0,1) [edge options={out=0,in=180,draw=black}]  edge  ++(5,-0.6)
+-- ++(0,0.6)
+[edge options={out=180,in=0,draw=black}] edge ++(-5,-0.6);
+\end{tikzpicture}
+\end{document}
+
+
+With use TikZ library pgfplots.fillbetween
+
+\documentclass[margin=3mm]{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+\usetikzlibrary{pgfplots.fillbetween}
+
+\begin{document}
+\begin{tikzpicture}
+\draw[name path=A]  (0, 0.3) to [out=0,in=180] ++(5,-0.6);
+\draw[name path=B]  (0,-0.3) to [out=0,in=180] ++(5, 0.6);
+\tikzfillbetween[of=A and B] {fill=gray!30};
+\end{tikzpicture}
+\end{document}
+
+
+For comparison, with plain Metapost, where filling and drawing are kept separate, and where you can concatenate path variables directly.
+
+\documentclass[border=5mm]{standalone}
+\usepackage{luatex85}
+\usepackage{luamplib}
+\begin{document}
+\begin{mplibcode}
+beginfig(1);
+z0 = (-72, 8.5);
+
+path A, B;
+A = z0 {right} .. {right} z0 rotated 180;
+
+(compile with lualatex...)

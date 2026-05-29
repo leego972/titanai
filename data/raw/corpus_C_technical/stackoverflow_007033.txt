@@ -1,0 +1,64 @@
+Question: <p>My friend produced a small proof-of-concept assembler that worked on x86. I decided to port it for x86_64 as well, but I immediately hit a problem.</p>
+
+<p>I wrote a small piece of program in C, then compiled and objdumped the code. After that I inserted it to my python script, therefore the x86_64 code is correct:</p>
+
+<pre><code>from ctypes import cast, CFUNCTYPE, c_char_p, c_long
+
+buffer = ''.join(map(chr, [ #0000000000000000 &lt;add&gt;:
+  0x55,                     # push   %rbp
+  0x48, 0x89, 0xe5,         # mov    %rsp,%rbp
+  0x48, 0x89, 0x7d, 0xf8,   # mov    %rdi,-0x8(%rbp)
+  0x48, 0x8b, 0x45, 0xf8,   # mov    -0x8(%rbp),%rax
+  0x48, 0x83, 0xc0, 0x0a,   # add    $0xa,%rax
+  0xc9,                     # leaveq 
+  0xc3,                     # retq
+]))
+
+fptr = cast(c_char_p(buffer), CFUNCTYPE(c_long, c_long))
+print fptr(1234)
+</code></pre>
+
+<p>Now, why does this script keeps doing segmentation fault whenever I run it?</p>
+
+<p>I have yet a question about mprotect and no execution flag. It is said to protect against most basic security exploits like buffer overruns. But what is the real reason it's in use? You could just keep on writing until you hit the .text, then inject your instructions into a nice, PROT_EXEC -area. Unless, of course, you use a write protection in .text</p>
+
+<p>But then, why have that PROT_EXEC everywhere anyway? Wouldn't it just help tremendously that your .text section is write protected?</p>
+
+Answer: <p>As <a href="http://stackoverflow.com/questions/275207/python-ctypes-and-function-calls#275333">vincent</a> mentioned, this is due to the allocated page being marked as non executable.  Newer processors support this <a href="http://en.wikipedia.org/wiki/NX_bit">functionality</a>, and its used as an added layer of security by OS's which support it.  The idea is to protect against certain buffer overflow attacks.  Eg. A common attack is to overflow a stack variable, rewriting the return address to point to code you have inserted.  With a non-executable stack this now only produces a segfault, rather than control of the process.  Similar attacks also exist for heap memory.</p>
+
+<p>To get around it, you need to alter the protection.  This can only be performed on page aligned memory, so you'll probably need to change your code to something like the below:</p>
+
+<pre><code>libc = CDLL('libc.so')
+
+# Some constants
+PROT_READ = 1
+PROT_WRITE = 2
+PROT_EXEC = 4
+
+def executable_code(buffer):
+    """Return a pointer to a page-aligned executable buffer filled in with the data of the string provided.
+    The pointer should be freed with libc.free() when finished"""
+
+    buf = c_char_p(buffer)
+    size = len(buffer)
+    # Need to align to a page boundary, so use valloc
+    addr = libc.valloc(size)
+    addr = c_void_p(addr)
+
+    if 0 == addr:  
+        raise Exception("Failed to allocate memory")
+
+    memmove(addr, buf, size)
+    if 0 != libc.mprotect(addr, len(buffer), PROT_READ | PROT_WRITE | PROT_EXEC):
+        raise Exception("Failed to set protection on buffer")
+    return addr
+
+code_ptr = executable_code(buffer)
+fptr = cast(code_ptr, CFUNCTYPE(c_long, c_long))
+print fptr(1234)
+libc.free(code_ptr)
+</code></pre>
+
+<p>Note: It may be a good idea to unset the executable flag before freeing the page.  Most C libraries don't actually return the memory to the OS when done, but keep it in their own pool.  This could mean they will reuse the page elsewhere without clearing the EXEC bit, bypassing the security benefit. </p>
+
+<p>Also note that this is fairly non-portable.  I've tested it on linux, but not on any other OS.  It won't work on windows, buy may do on other unixes (BSD, OsX?).</p>

@@ -1,0 +1,349 @@
+================================================================================
+TITAN AI — TRAINING PACK 022: CLOUD SECURITY — AWS, AZURE, GCP DEEP DIVE
+IAM MISCONFIGURATIONS, CLOUD ATTACK PATHS, POSTURE MANAGEMENT, CSPM
+================================================================================
+
+================================================================================
+PART 1: AWS SECURITY — COMPLETE DEEP DIVE
+================================================================================
+
+--- IAM — THE HEART OF AWS SECURITY ---
+
+THE PRINCIPLE OF LEAST PRIVILEGE IN AWS:
+  Every IAM principal should have exactly the permissions it needs — no more.
+  This is harder than it sounds. AWS has 10,000+ API actions.
+  Most teams err heavily on the side of "give more, deal with problems later."
+  This error costs companies millions when misconfigs are exploited.
+
+DANGEROUS IAM PATTERNS:
+
+1. Wildcard permissions:
+  {"Effect": "Allow", "Action": "*", "Resource": "*"}
+  This is full AWS admin. Only root should have this.
+  Often seen on EC2 instance roles because "it was easier."
+  
+  Real consequence: Attacker compromises EC2 instance → finds instance role credentials
+  in metadata service → uses wildcard role → full account takeover.
+
+2. PassRole abuse:
+  iam:PassRole allows assigning a role to a service.
+  If a user has iam:PassRole on a high-privilege role + ability to create Lambda/EC2:
+  → User can create a Lambda with admin role → execute code → full admin.
+  
+  Common path: Dev user has iam:PassRole → creates Lambda with admin role → privilege escalation.
+  
+  Defense: iam:PassRole should always have resource constraint:
+  {"Effect": "Allow", "Action": "iam:PassRole", 
+   "Resource": "arn:aws:iam::*:role/AllowedRoles*"}
+
+3. Assume role without external ID:
+  Cross-account role without ExternalId condition:
+  Confused deputy attack: Attacker tricks your service (which has cross-account role)
+  to call AssumeRole with the attacker's target account.
+  Defense:
+  {"Condition": {"StringEquals": {"sts:ExternalId": "unique-secret-value"}}}
+  External ID acts as secret only legitimate caller knows.
+
+IAM PRIVILEGE ESCALATION PATHS (PMapper tool finds these automatically):
+  
+  Path 1: CreatePolicyVersion
+  User can create new version of existing policy → add * permissions → attach to self.
+  iam:CreatePolicyVersion + iam:SetDefaultPolicyVersion = full privilege escalation.
+  
+  Path 2: iam:AddUserToGroup
+  User can add themselves to group with admin permissions.
+  
+  Path 3: EC2 + PassRole + ssm:SendCommand
+  Create EC2 with high-priv role → Send SSM command to EC2 → Execute as that role.
+  
+  PMapper scan:
+  python -m principalmapper graph create --account 123456789012
+  python -m principalmapper analysis find_paths --who arn:aws:iam::123456789012:user/developer
+  # Shows: All paths from developer to admin
+
+AWS METADATA SERVICE (IMDS) ATTACKS:
+  
+  v1 (legacy, DANGEROUS): Accessible to any process on EC2
+  curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+  → Returns: AccessKeyId, SecretAccessKey, Token (temp credentials for instance role)
+  
+  SSRF on EC2 → IMDS query → Instance role credentials → API access.
+  Example: Log4Shell on EC2 with IMDS v1 → Full AWS account compromise in many cases.
+  
+  v2 (IMDSv2 — much safer):
+  Requires a PUT request first to get a session token (TTL up to 6 hours).
+  SSRF with GET only cannot get metadata (PUT request required first).
+  Most SSRFs are GET-only.
+  
+  # Enable IMDSv2 requirement on new instances:
+  aws ec2 modify-instance-metadata-options \
+    --instance-id i-1234567890abcdef0 \
+    --http-tokens required \
+    --http-endpoint enabled
+  
+  # Enforce at organization level (prevent IMDSv1):
+  # AWS Organizations SCP:
+  {
+    "Effect": "Deny",
+    "Action": "ec2:RunInstances",
+    "Resource": "arn:aws:ec2:*:*:instance/*",
+    "Condition": {
+      "StringNotEquals": {
+        "ec2:MetadataHttpTokens": "required"
+      }
+    }
+  }
+
+--- S3 SECURITY ---
+
+S3 PUBLIC ACCESS — DEFENSE IN DEPTH:
+  Level 1: Account-level Block Public Access (BPA) — prevents any bucket from being public
+  Level 2: Bucket-level Block Public Access — per-bucket protection
+  Level 3: Bucket ACLs — deprecated but still exist on old buckets
+  Level 4: Bucket policies — explicit allows/denies
+
+  # Enable account-level BPA (do this on every account):
+  aws s3control put-public-access-block \
+    --account-id 123456789012 \
+    --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+S3 BUCKET POLICY MISCONFIGURATIONS:
+  
+  Bad (allows anyone to get objects):
+  {"Principal": "*", "Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::my-bucket/*"}
+  
+  Good (restrict to specific role or AWS account):
+  {"Principal": {"AWS": "arn:aws:iam::123456789012:role/specific-role"},
+   "Effect": "Allow", "Action": "s3:GetObject", 
+   "Resource": "arn:aws:s3:::my-bucket/*"}
+  
+  Good with VPC endpoint restriction (only accessible from within VPC):
+  {"Effect": "Deny", "Principal": "*", "Action": "s3:*",
+   "Resource": ["arn:aws:s3:::my-bucket", "arn:aws:s3:::my-bucket/*"],
+   "Condition": {"StringNotEquals": {"aws:sourceVpce": "vpce-1234abcd"}}}
+
+S3 ENCRYPTION:
+  Server-Side Encryption (SSE-S3): AWS manages keys. Default. Minimum acceptable.
+  SSE-KMS: Customer managed keys. Audit key usage. Better.
+  SSE-C: Customer provides key per request. Maximum control. Operational complexity.
+  Client-Side: Encrypted before upload. AWS never sees plaintext. Maximum security.
+  
+  # Enforce encryption in transit (deny HTTP):
+  {"Effect": "Deny", "Principal": "*", "Action": "s3:*",
+   "Resource": "arn:aws:s3:::my-bucket/*",
+   "Condition": {"Bool": {"aws:SecureTransport": "false"}}}
+  
+  # Enforce SSE-KMS encryption at rest:
+  {"Effect": "Deny", "Principal": "*", "Action": "s3:PutObject",
+   "Resource": "arn:aws:s3:::my-bucket/*",
+   "Condition": {"StringNotEquals": {"s3:x-amz-server-side-encryption": "aws:kms"}}}
+
+--- CLOUDTRAIL AND LOGGING ---
+
+WHAT TO LOG (minimum for security):
+  □ CloudTrail: All management events in all regions (multi-region trail)
+  □ CloudTrail: S3 data events on sensitive buckets (GetObject, PutObject, DeleteObject)
+  □ CloudTrail: Lambda data events (invocation logging)
+  □ VPC Flow Logs: All traffic in and out of VPCs
+  □ Route53 Query Logs: All DNS queries
+  □ ALB Access Logs: All HTTP requests through load balancer
+  □ WAF Logs: All evaluated web requests
+
+CLOUDTRAIL FORENSICS:
+  # Find all API calls from specific IP (post-breach investigation)
+  aws cloudtrail lookup-events \
+    --lookup-attributes AttributeKey=SourceIPAddress,AttributeValue=1.2.3.4 \
+    --start-time "2025-01-14T00:00:00" \
+    --end-time "2025-01-15T00:00:00"
+  
+  # Find all actions by compromised access key
+  aws cloudtrail lookup-events \
+    --lookup-attributes AttributeKey=AccessKeyId,AttributeValue=AKIAIOSFODNN7EXAMPLE \
+    --query 'Events[].{Time:EventTime,Event:EventName,User:Username,IP:CloudTrailEvent}'
+  
+  # Athena query for large-scale analysis (CloudTrail logs in S3):
+  SELECT 
+    useridentity.arn,
+    eventtime,
+    eventsource,
+    eventname,
+    sourceipaddress,
+    errorcode
+  FROM cloudtrail_logs
+  WHERE 
+    year = '2025' AND month = '01' AND day = '14'
+    AND eventname IN ('CreateUser', 'AttachUserPolicy', 'CreateAccessKey', 
+                      'PutUserPolicy', 'CreateRole', 'AttachRolePolicy')
+  ORDER BY eventtime;
+
+--- AWS SECURITY SERVICES ---
+
+GUARDDUTY:
+  Threat detection service. Analyzes:
+  - CloudTrail (API calls)
+  - VPC Flow Logs (network traffic)
+  - DNS logs
+  - S3 access logs
+  - Kubernetes audit logs
+  
+  Key finding types:
+  UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS
+    → Instance credentials used from outside AWS (SSRF/compromised EC2)
+  CryptoCurrency:EC2/BitcoinTool.B
+    → Instance making crypto mining connections
+  Trojan:EC2/DNSDataExfiltration
+    → Instance doing DNS tunneling
+  Backdoor:EC2/XORDDOS
+    → Known malware C2 communication
+  
+  Enable in every account:
+  aws guardduty create-detector --enable-kubernetes-audit-logs --enable-s3-logs
+
+SECURITY HUB:
+  Aggregates findings from: GuardDuty, Inspector, Macie, IAM Access Analyzer, 
+  Config, 3rd party tools (CrowdStrike, Palo Alto)
+  
+  Security Standards: Checks against CIS AWS Benchmark, AWS Foundational Security Best Practices
+  
+  High priority findings to fix immediately:
+  - Root account has active access keys (should have none)
+  - MFA not enabled on root account
+  - S3 bucket publicly readable
+  - Security groups allow unrestricted access to port 22 or 3389
+  - CloudTrail not enabled in all regions
+
+================================================================================
+PART 2: AZURE SECURITY
+================================================================================
+
+--- AZURE AD (ENTRA ID) SECURITY ---
+
+AZURE AD PRIVILEGED IDENTITY MANAGEMENT (PIM):
+  Regular: Admin roles permanently assigned. Any compromise = instant admin.
+  PIM: Admin roles assigned just-in-time (JIT). Request → Approve → Time-limited.
+  
+  PIM settings (best practice):
+  Global Admin role: Require justification, MFA, approval by second admin, max 8 hours.
+  All other privileged roles: Require justification, MFA, max 4 hours.
+  
+  # PIM audit: Who currently has what privileged access?
+  az rest --method get \
+    --url "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" \
+    --query "value[].{principal:principalId, role:roleDefinitionId}"
+
+CONDITIONAL ACCESS POLICIES:
+  Conditional Access: If [conditions] then [grant/block/require MFA].
+  
+  Essential policies:
+  
+  Policy 1: Require MFA for all users
+  If: User = All users AND App = All cloud apps
+  Then: Require MFA
+  
+  Policy 2: Block legacy authentication (no MFA support)
+  If: Client app = Exchange ActiveSync clients, Other clients
+  Then: Block
+  Why: Legacy auth protocols (SMTP AUTH, IMAP, POP3, MAPI) don't support MFA.
+  
+  Policy 3: Require compliant device for admin portals
+  If: User = Admin roles AND App = Azure Management, Azure AD Admin
+  Then: Require compliant device (Intune managed, encrypted)
+  
+  Policy 4: Block risky sign-ins (Identity Protection integration)
+  If: User risk = High OR Sign-in risk = High
+  Then: Block OR Require password change + MFA
+
+AZURE ATTACK PATHS (common):
+  
+  1. Phishing → OAuth consent attack:
+  Attacker creates app requesting mail.read, user.readwrite permissions.
+  Phishes admin to consent. App now has permanent access to all mail.
+  Defense: Restrict user consent to admin-approved apps only.
+  Admin consent workflow: Users request → admin approves/denies.
+  
+  2. Credential spray → Azure AD accounts:
+  Password spray on Azure AD sign-in endpoint.
+  No account lockout by default for many tenants.
+  Defense: Smart Lockout + Conditional Access + MFA requirement.
+  
+  3. PRT (Primary Refresh Token) theft:
+  PRT: Long-lived token on device. Allows seamless SSO.
+  If attacker gets PRT: Can impersonate user without password or MFA.
+  Steal from: Compromised endpoint (DCOMImplant, mimikatz/roadtx).
+  Defense: Device compliance requirement in Conditional Access.
+  Non-compliant device → PRT rejected for sensitive apps.
+
+--- AZURE KUBERNETES SERVICE (AKS) SECURITY ---
+
+AKS SECURITY CHECKLIST:
+  □ Disable public Kubernetes API endpoint (private cluster)
+  □ Enable Azure AD integration for kubectl authentication
+  □ Enable Azure Policy for Kubernetes (blocks privileged containers, etc.)
+  □ Enable Defender for Containers (runtime threat detection)
+  □ Use managed identities (not service principals with passwords) for pod identity
+  □ Enable private nodes (no public IP on worker nodes)
+  □ Configure network policies (Azure CNI or Calico)
+  □ Enable Container Insights monitoring
+
+================================================================================
+PART 3: CLOUD SECURITY POSTURE MANAGEMENT (CSPM)
+================================================================================
+
+--- CSPM TOOLING ---
+
+PROWLER (AWS, Azure, GCP — open source):
+  python prowler.py aws --output-formats json html csv \
+    --compliance cis_level2_aws_1.4 \
+    --output-directory ./prowler-results
+  
+  Key checks:
+  aws/access_analyzer: IAM unused access findings
+  aws/guardduty: GuardDuty enabled?
+  aws/iam_root_hardware_mfa: Root hardware MFA?
+  aws/s3_bucket_no_public_access: Any public S3 buckets?
+  aws/ec2_securitygroup_allow_ingress_from_internet_to_ssh: Open SSH to internet?
+
+STEAMPIPE (query cloud infrastructure with SQL):
+  # Find all public S3 buckets across all accounts
+  SELECT account_id, name, region, bucket_policy_is_public
+  FROM aws_s3_bucket
+  WHERE bucket_policy_is_public = true OR acl LIKE '%public%';
+  
+  # Find EC2 instances with IMDSv1 still enabled
+  SELECT instance_id, instance_type, state_name, 
+         metadata_options_http_tokens
+  FROM aws_ec2_instance
+  WHERE metadata_options_http_tokens != 'required';
+  
+  # Find IAM users with access keys not rotated in 90 days
+  SELECT user_name, access_key_id,
+         date_diff('day', create_date, now()) AS days_old
+  FROM aws_iam_access_key
+  WHERE status = 'Active' 
+  AND date_diff('day', create_date, now()) > 90;
+  
+  # Find security groups allowing 0.0.0.0/0 on sensitive ports
+  SELECT group_id, group_name, 
+         ip_permissions -> 'FromPort' AS from_port,
+         ip_permissions -> 'ToPort' AS to_port
+  FROM aws_vpc_security_group
+  WHERE ip_permissions @> '[{"IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]'
+  AND (ip_permissions -> 'FromPort')::int IN (22, 3389, 5432, 1433, 3306, 6379, 27017);
+
+CLOUD SECURITY BENCHMARKS:
+  CIS AWS Foundations Benchmark: 200+ checks, tiered (Level 1 = basic, Level 2 = enhanced)
+  AWS Foundational Security Best Practices: AWS-specific, in Security Hub
+  NIST 800-53: US federal standard, maps to cloud controls
+  SOC 2: Service organization controls (commonly required for enterprise sales)
+  
+  Automate: Run CSPM tool weekly. Track score trend. Set minimum score threshold.
+  Alert when: New critical finding appears. Score drops > 5% week over week.
+
+================================================================================
+END OF PACK 022: CLOUD SECURITY
+Total: AWS IAM (wildcard/PassRole abuse/confused deputy/privilege escalation paths),
+IMDS v1/v2 attacks and enforcement, S3 security (BPA/bucket policy/encryption),
+CloudTrail forensics with Athena, GuardDuty/Security Hub, Azure AD (PIM/Conditional
+Access/OAuth consent/PRT theft), AKS security checklist, CSPM (Prowler/Steampipe
+with SQL queries), cloud security benchmarks.
+================================================================================

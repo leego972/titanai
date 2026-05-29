@@ -1,0 +1,142 @@
+# [C++] non const getter in terms of const getter
+
+This topic is 3170 days old which is more than the 365 day threshold we allow for new replies. Please post a new topic.
+
+## Recommended Posts
+
+Do you know the following kind of situation?
+class A
+{
+B b;
+
+public:
+B* getB();
+const B* getB() const;
+};
+
+B* A::getB()
+{
+return &b;
+}
+
+const B* A::getB() const
+{
+return &b;
+}
+
+The intention is simply having both a const and a non const getter so that you can get non const objects if the A is non const, while if A is const, you can still get const ones. note how the two getB's have exactly the same code in their body. But it doesn't really count as code duplication here, because it's both only one line. But I've got the following problem now:
+class A
+{
+public:
+virtual A* hitTest();
+virtual const A* hitTest() const;
+};
+
+A* A::hitTest()
+{
+return complex_resursive_code();
+}
+
+const A* A::hitTest() const
+{
+return complex_resursive_code();
+}
+
+I've got to write the same "complex recursive code" twice. Twice exactly the same. But I couldn't find any way to write the one function in terms of the other or vica versa. Is there a way to avoid code duplication? Is it ok in this case to use a const cast to try to avoid code duplication, for example like this?
+A* A::hitTest()
+{
+return const_cast<A*>((const_cast<const A*>(this))->hitTest());
+}
+
+Does this "phenomenom" have a name? Thanks.
+
+##### Share on other sites
+Quote:
+ Original post by LodeDoes this "phenomenom" have a name?
+
+I could think of a couple of names, but there might be a profanity clause in the TOS.
+
+But:
+struct Foo {	int i;	const int * get() {		std::cout << "non-const" << std::endl;		return get_internal();	}	const int * get() const {		std::cout << "const" << std::endl;		return get_internal();	}private:	const int * get_internal() const {		return &i;	}};int main(){	Foo foo;	foo.get();	const Foo foo2;	foo2.get();}
+
+get_internal() always returns the same value - which is at odds with const/non-const pairs, which actually return different values (a const and non-const).
+
+So regardless of whether foo is const or not, the return value is exactly the same. With this design, there is no (conceptual) way for return value to be modifiable.
+
+And, due to lowest common denominator, the return value from shared function call needs to be const.
+
+##### Share on other sites
+Quote:
+ Original post by LodeIs there a way to avoid code duplication?Is it ok in this case to use a const cast to try to avoid code duplication, for example like this?*** Source Snippet Removed ***Does this "phenomenom" have a name?
+I don't know if it has a name, but Scott Myers actually demonstrates that technique in one of the Effective C++ books as a legitimate use of const_cast ;)
+
+I think he calls it "implementing const in terms of non-const" or "implementing non-const in terms of const".
+
+##### Share on other sites
+Wouldn't it be better to implement the const getter in terms of the non-const getter, rather than the other way around?
+
+##### Share on other sites
+Quote:
+ Original post by Sc4FreakWouldn't it be better to implement the const getter in terms of the non-const getter, rather than the other way around?
+
+You can't (safely) do that if the non-const getter modifies the object's state in any way.
+
+##### Share on other sites
+Quote:
+ Original post by LodeI've got to write the same "complex recursive code" twice. Twice exactly the same. But I couldn't find any way to write the one function in terms of the other or vica versa.Is there a way to avoid code duplication?
+
+Instead of making "complex recursive code" a function that returns a const or non-const pointer, make it a function that returns void..and return the const or non-const pointer separately. Then it can be used in both functions.
+
+I can't actually think of any sensible reason why you should want to do this, and it makes me think that it may just be a result of bad design.
+
+Also it's more usual to return a const-reference, rather than const-pointer.
+
+##### Share on other sites
+Quote:
+Original post by direwulf
+Quote:
+ Original post by LodeI've got to write the same "complex recursive code" twice. Twice exactly the same. But I couldn't find any way to write the one function in terms of the other or vica versa.Is there a way to avoid code duplication?
+
+Instead of making "complex recursive code" a function that returns a const or non-const pointer, make it a function that returns void..and return the const or non-const pointer separately. Then it can be used in both functions.
+
+I can't actually think of any sensible reason why you should want to do this, and it makes me think that it may just be a result of bad design.
+
+Also it's more usual to return a const-reference, rather than const-pointer.
+
+The use is:
+
+hitTest tests if the mouse hits an element. An element can have smaller sub-elements in it. The return value can be the element itself (this), or a pointer to one of the sub elements (if the mouse is over those). Each sub element itself can again have its own sub elements and so on.
+
+Not only is a single function being duplicated, but it's virtual and all different types of elements would have to override twice and do twice the same in it.
+
+It's not possible to return a non const pointer to this from a const member function, and sometimes the hit test is needed in a const case where a const return value is OK, in other cases the hit test is needed for something where you have a non const reference to the object and you also need a non const result from the hit test.
+
+For example, when drawing it, a const one is enough, you just need to get some coordinates from it to draw something on the screen. When editing it with the mouse, you need a non const one, that is modifiable.
+
+Also, I've seen both references and pointers returned for various things in various situations, but I think the advantage of using a pointer, is that you can return "0" if needed to represent "nothing".
+
+In which of his books exactly does Scott Meyer write about this legitimate use of const_cast? I tried to find it with google and did find a thread somewhere else similar to this one where something similar from Scott Meyer is referenced, but not the exact source. I'm interested in it :)
+
+[Edited by - Lode on October 13, 2009 6:55:41 AM]
+
+##### Share on other sites
+Effective C++ 3rd Edition page 23 "avoiding duplication in const and non-const member functions" which boils down to this:
+
+class Foo{    const return_type& some_method() const    {        // usual implementation    }    return_type& some_method()    {        return const_cast<return_type&>             (static_cast<const Foo&>(*this).some_method());    }};
+
+##### Share on other sites
+Const and non-const accesses are normally so different that the methods don't have much in common and what's common can be factored into constness-agnostic and possibly templated helper methods and classes.
+In the specific example of hitTest(), I think that only one const method returning a const pointer to a mutable object would cover all uses.
+
+• 34
+• 12
+• 10
+• 9
+• 9
+• ### Forum Statistics
+
+• Total Topics
+631354
+• Total Posts
+2999497
+×

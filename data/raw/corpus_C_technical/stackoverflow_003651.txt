@@ -1,0 +1,89 @@
+Question: <p>What would be the quickest way to construct a python binding to a C or C++ library?</p>
+
+<p>(using windows if this matters)</p>
+
+Answer: <p>I started my journey in the python &lt;-> C++ binding from this page, with the objective of linking high level data types (multidimensional STL vectors with python lists) :-)</p>
+
+<p>Having tried the solutions based on both <a href="https://docs.python.org/2/library/ctypes.html">ctypes</a> and <a href="http://www.boost.org/doc/libs/1_55_0/libs/python/doc/tutorial/doc/html/index.html">boost.python</a> (and not being a software engineer) I have found them complex when high level datatypes binding is required, while I have found <a href="http://swig.org">swig</a> much more simple for such cases.
+This example uses therefore SWIG and it has been tested in Linux (but swig is available and is widely used in Windows too).</p>
+
+<p>The objective is to make available to python a C++ function that takes a matrix in form of a 2D STL vector and returns an average of each row (as a 1D STL vector).</p>
+
+<p>The code in C++ ("code.cpp") is as follow:</p>
+
+<pre><code>#include &lt;vector&gt;
+#include "code.h"
+
+using namespace std;
+
+vector&lt;double&gt; average (vector&lt; vector&lt;double&gt; &gt; i_matrix) {
+  // compute average of each row..
+  vector &lt;double&gt; averages; 
+  for (int r = 0; r &lt; i_matrix.size(); r++){
+    double rsum = 0.0;
+    double ncols= i_matrix[r].size();
+    for (int c = 0; c&lt; i_matrix[r].size(); c++){
+      rsum += i_matrix[r][c];
+    }
+    averages.push_back(rsum/ncols);    
+  }
+  return averages;
+}
+</code></pre>
+
+<p>The equivalent header ("code.h") is:</p>
+
+<pre><code>#ifndef _code
+#define _code
+
+#include &lt;vector&gt;
+
+std::vector&lt;double&gt; average (std::vector&lt; std::vector&lt;double&gt; &gt; i_matrix);
+
+#endif
+</code></pre>
+
+<p>We first compile the C++ code to create an object file:</p>
+
+<pre><code>g++ -c -fPIC code.cpp
+</code></pre>
+
+<p>We then define a <a href="http://swig.org/Doc3.0/SWIG.html">swig interface definition file</a> ("code.i") for our C++ functions.</p>
+
+<pre><code>%module code
+%{
+#include "code.h"
+%}
+%include "std_vector.i"
+namespace std {
+  /* On a side note, the names VecDouble and VecVecdouble can be changed, but the order of first the inner vector matters !*/
+  %template(VecDouble) vector&lt;double&gt;;
+  %template(VecVecdouble) vector&lt; vector&lt;double&gt; &gt;;
+}
+
+%include "code.h"
+</code></pre>
+
+<p>Using swig, we generate a C++ interface source code from the swig interface definition file..</p>
+
+<pre><code>swig -c++ -python code.i
+</code></pre>
+
+<p>We finally compile the generated C++ interface source file and link everything together to generate a shared library that is directly importable by python (the "_" matters):</p>
+
+<pre><code>g++ -c -fPIC code_wrap.cxx  -I/usr/include/python2.7 -I/usr/lib/python2.7
+g++ -shared -Wl,-soname,_code.so -o _code.so code.o code_wrap.o
+</code></pre>
+
+<p>We can now use the function in python scripts:</p>
+
+<pre><code>#!/usr/bin/env python
+
+import code
+a= [[3,5,7],[8,10,12]]
+print a
+b = code.average(a)
+print "Assignment done"
+print a
+print b 
+</code></pre>

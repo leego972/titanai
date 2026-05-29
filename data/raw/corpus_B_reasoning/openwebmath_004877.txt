@@ -1,0 +1,510 @@
+# Solving Some Image Processing and Computer Vision Problems with Python libraries
+
+In this article, a few image processing / computer vision problems and their solutions  with python libraries (scikit-image, cv2) will be discussed. Some of the problems are from the exercises from this book (available on amazon). This blog will be continued here.
+
+## Removing Gaussian Noise from images by computing mean and median images with scikit-image
+
+1. Start with an input image.
+2. Create n (e.g, n=100) noisy images by adding i.i.d. Gaussian noise (with zero mean) to the original image, with scikit-image.
+3. Compute the mean (median) of the noisy images.
+4. Compare PSNR with the original image.
+5. Vary n and compare the results.
+from skimage import img_as_float
+from skimage.util import random_noise
+from skimage.measure import compare_psnr
+from skimage.io import imread
+import matplotlib.pylab as plt
+import numpy as np
+
+im = img_as_float(imread('../new images/parrot.jpg')) # original image
+np.random.seed(0)
+# generate n noisy images from the original image by adding Gaussian noise
+n = 25
+images = np.zeros((n, im.shape[0], im.shape[1], im.shape[2]))
+sigma = 0.2
+for i in range(n):
+images[i,...] = random_noise(im, var=sigma**2)
+
+im_mean = images.mean(axis=0)
+im_median = np.median(images, axis=0)
+plt.figure(figsize=(20,16))
+plt.subplots_adjust(left=.02, right=.98, bottom=.001, top=.96, wspace=.05, hspace=.01)
+plt.subplot(221), plt.imshow(im), plt.axis('off'), plt.title('Original image', size=20)
+plt.subplot(222), plt.imshow(images[0]), plt.axis('off'), plt.title('Noisy PSNR: ' + str(compare_psnr(im, images[0])), size=20)
+plt.subplot(223), plt.imshow(im_mean), plt.axis('off'), plt.title('Mean PSNR: ' + str(compare_psnr(im, im_mean)), size=20)
+plt.subplot(224), plt.imshow(im_median), plt.axis('off'), plt.title('Median PSNR: ' + str(compare_psnr(im, im_median)), size=20)
+plt.show()
+
+
+
+The next figure shows the original image, a noisy image generated from it by adding Gaussian noise (with 0 mean) to it and the images obtained by taking mean / median over all the n noisy images generated. As can be seen, the Gaussian noise in the images gets cancelled out by taking mean / median.
+
+with n = 25
+
+with n=100
+
+
+plt.hist(images[:,100,100,0], color='red', alpha=0.2, label='red')
+plt.hist(images[:,100,100,1], color='green', alpha=0.2, label='green')
+plt.hist(images[:,100,100,2], color='blue', alpha=0.2, label='blue')
+plt.legend()
+plt.grid()
+plt.show()
+
+
+
+The next figure shows how a pixel value (that can be considered a random variable) for a particular location in different noisy images follows approximately a Gaussian distribution.
+
+Distribution of a pixel value at location (100,100) in the noisy images
+
+
+ns = [25, 50, 100, 200]
+# mean_psnrs contain the PSNR values for different n
+plt.plot(ns, mean_psnrs, '.--', label='PSNR (mean)')
+plt.plot(ns, median_psnrs, '.--', label='PSNR (median)')
+plt.legend()
+plt.xlabel('n'),  plt.ylabel('PSNR')
+plt.show()
+
+
+
+The following figure shows that the PSNR improves with large n (since by SLLN / WLLN, the sample mean converges to population mean 0 of the Gaussian noise). Also, for median the improvement in the image quality is higher for larger values of n.
+
+## Tracking Pedestrians with HOG-SVM with OpenCV / scikit-image
+
+1. Start with a video with pedestrians.
+2. Capture the video / extract frames from the video.
+3. For each frame
+1. Create HOG scale pyramid of the frame image.
+2. At each scale, use a sliding window to extract the corresponding block from the frame, compute the HOG descriptor features.
+3. Use cv2‘s HOGDescriptor_getDefaultPeopleDetector() – a pre-trained SVM classifier on the HOG descriptor to classify whether the corresponding block contains a pedestrian or not.
+4. Run non-max-suppression to get rid of multiple detection of the same person.
+5. Use cv2‘s  detectMultiScale() function to implement steps 3-4.
+
+The code is adapted from the code here and here.
+
+
+# HOG descriptor using default people (pedestrian) detector
+hog = cv2.HOGDescriptor()
+hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+# run detection, using a spatial stride of 4 pixels,
+# a scale stride of 1.02, and zero grouping of rectangles
+# (to demonstrate that HOG will detect at potentially
+# multiple places in the scale pyramid)
+(foundBoundingBoxes, weights) = hog.detectMultiScale(frame, winStride=(4, 4), padding=(8, 8), scale=1.02, finalThreshold=0, useMeanshiftGrouping=False)
+
+# convert bounding boxes from format (x1, y1, w, h) to (x1, y1, x2, y2)
+rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in foundBoundingBoxes])
+
+# run non-max suppression on the boxes based on an overlay of 65%
+nmsBoundingBoxes = non_max_suppression(rects, probs=None, overlapThresh=0.65)
+
+
+
+cv2 functions are used to extract HOG descriptor features and pedestrian detection with SVM,  whereas scikit-image functions are used to visualize the HOG features. The animations below display the original video, what HOG sees and  the detected pedestrians after non-max suppression. Notice there are a few false positive detection.
+
+Original Video
+
+HOG-descriptor features video (what HOG sees)Original Video with detected Pedestrians
+
+## Face Detection with HaarCascade pre-trained AdaBoost classifiers with OpenCV
+
+1. Capture video with webcam with cv2.VideoCapture().
+2. For each frame, use the pre-trained Adaboost Cascade classifiers (the haarcascade_frontalface_default classifier for face detection and haarcascade_eye_tree_eyeglasses classifier for better detection of the eyes with glasses, from the corresponding xml files that come with cv2’s installation) using Haar-like features with cv2.CascadeClassifier().
+3. First detect the face(s) with the detectMultiScale() function and draw a bounding box. Then detect the eyes inside a detected face with the same function.
+4. The following python code snippet shows how to detect faces and eyes with cv2. The code is adapted from here.
+
+
+# read the cascade classifiers from the xml files from the correct path into face_cascade  # and eye_cascade
+gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+# return bounding box of the face(s) if one is detected
+faces = face_cascade.detectMultiScale(gray, 1.03, 5)
+for (x,y,w,h) in faces:
+frame = cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+roi_gray = gray[y:y+h, x:x+w]
+roi_color = frame[y:y+h, x:x+w]
+eyes = eye_cascade.detectMultiScale(roi_gray)
+for (ex,ey,ew,eh) in eyes:
+cv2.rectangle(roi_color,(ex,ey),(ex+ew,ey+eh),(0,255,0),2)
+
+
+
+The next animation shows the results of face detection when scalefactor 1.03 was used to create the scale pyramid.  As can be seen, the eyes with the glasses on and some small faces from the photos are not detected at this scale.
+
+The next animation shows the results of face detection when scalefactor 1.3 was used to create the scale pyramid.  As can be seen, the eyes with/without the glasses on as well as most of the small faces from the photos are detected at this scale most of the time.
+
+## Semantic Segmentation with ENet / DeepLab (Deep Learning  model)
+
+Input video and the segmented Output video
+
+Input video and the segmented Output video
+
+Advertisements
+
+# Solving Some Image Processing Problems with Python libraries
+
+In this article a few popular image processing problems along with their solutions are going to be discussed. Python image processing libraries are going to be used to solve these problems. Some of the problems are from the exercises from this book  (available on amazon).
+
+## Image Transformations and Warping
+
+### 0. Display RGB image color channels in 3D
+
+1. A gray-scale image can be thought of a 2-D function f(x,y) of the pixel locations (x,y), that maps each pixel into its corresponding gray level (an integer in [0,255], e.g.,).
+2. For an RGB image there are 3 such functions, f_R(x,y), f_G(x.y), f_B(x.y).
+3. matplotlib’s 3-D plot functions can be used to plot each function.
+
+The following python code shows how to plot the RGB channels separately in 3D:
+
+import matplotlib.pylab as plt
+from mpl_toolkits.mplot3d import Axes3D
+def plot_3d(X, Y, Z, title, cmap):
+# implement this function to plot the channel pixel values in 3D
+plt.show()
+
+im = imread('../images/parrot.jpg')
+Y = np.arange(im.shape[0])
+X = np.arange(im.shape[1])
+Z1 = im[...,0]
+Z2 = im[...,1]
+Z3 = im[...,2]
+plot_3d(X, Y, Z1, cmap='Reds', title='3D plot for the Red Channel')
+plot_3d(X, Y, Z2, cmap='Greens', title='3D plot for the Green Channel')
+plot_3d(X, Y, Z3, cmap='Blues', title='3D plot for the Blue Channel')
+
+
+
+The RGB image
+
+### 1. Wave Transform
+
+1. Use scikit-image’s warp() function to implement the wave transform.
+2. Note that wave transform can be expressed with the following equations:
+
+We shall use the madrill image to implement the wave transform. The next python code fragment shows how to do it:
+
+
+def wave(xy):
+xy[:, 1] += 20*np.sin(2*np.pi*xy[:, 0]/64)
+return xy
+
+from skimage.io import imread
+from skimage.transform import warp
+import matplotlib.pylab as plt
+im = imread('images/mandrill.jpg')
+im = warp(im, wave)
+plt.imshow(im)
+plt.show()
+
+
+
+The next figure shows the original mandrill input image and the output image obtained after applying the wave transform.
+
+### 2. Swirl Transform
+
+1. Use scikit-image’s warp() function to implement the swirl transform.
+2. Note that swirl transform can be expressed with the following equations
+
+We shall use the madrill image to implement the wave transform. The next python code fragment shows how to do it:
+
+
+def swirl(xy, x0, y0, R):
+r = np.sqrt((xy[:,1]-x0)**2 + (xy[:,0]-y0)**2)
+a = np.pi * r / R
+xy[:, 1] = (xy[:, 1]-x0)*np.cos(a) + (xy[:, 0]-y0)*np.sin(a) + x0
+xy[:, 0] = -(xy[:, 1]-x0)*np.sin(a) + (xy[:, 0]-y0)*np.cos(a) + y0
+return xy
+
+im = imread('../images/mandrill.jpg')
+im = warp(im, swirl, map_args={'x0':112, 'y0':112, 'R':512})
+plt.imshow(im)
+plt.axis('off')
+plt.show()
+
+
+
+The next figure shows the original mandrill input image and the output image obtained after applying the swirl transform.
+
+Compare this with the output of the scikit-image swirl() function.
+
+### 3. Very simple Face morphing with α-blending
+
+1. Start from one face image (e.g., let image1 be the face of Messi) and end into another image (let image2 be the face of Ronaldo) iteratively, creating some intermediate images in between.
+2. At each iteration create an image by using a linear combination of the two image numpy ndarrays given by
+
+3. Iteratively increase α from 0 to 1.
+
+The following code block shows how to implement it using matplotlib’s image and pylab modules.
+
+im1 = mpimg.imread("../images/messi.jpg") / 255 # scale RGB values in [0,1]
+im2 = mpimg.imread("../images/ronaldo.jpg") / 255
+i = 1
+plt.figure(figsize=(18,15))
+for alpha in np.linspace(0,1,20):
+plt.subplot(4,5,i)
+plt.imshow((1-alpha)*im1 + alpha*im2)
+plt.axis('off')
+i += 1
+plt.subplots_adjust(wspace=0.05, hspace=0.05)
+plt.show()
+
+
+The next animation shows the simple face morphing:
+
+There are more sophisticated techniques to improve the quality of morphing, but this is the simplest one.
+
+### 4. Creating Instagram-like Gotham Filter
+
+#### The Gotham filter
+
+The Gotham filter is computed as follows (the steps taken from here), applying the following operations on an image, the corresponding python code, input and output images are shown along with the operations (with the following input image):
+
+1. A mid-tone red contrast boost
+from PIL import Image
+import numpy as np
+import matplotlib.pylab as plt
+im = Image.open('../images/city.jpg') # pixel values in [0,255]
+r, g, b = im.split()
+red_levels = [0., 12.75, 25.5, 51., 76.5, 127.5, 178.5, 204., 229.5, 242.25, 255.]
+r1 = Image.fromarray((np.reshape(np.interp(np.array(r).ravel(), np.linspace(0,255,len(red_levels)), red_levels), (im.height, im.width))).astype(np.uint8), mode='L')
+plt.figure(figsize=(20,15))
+plt.subplot(221)
+plt.imshow(im)
+plt.title('original', size=20)
+plt.axis('off')
+plt.subplot(222)
+im1 = Image.merge('RGB', (r1, g, b))
+plt.imshow(im1)
+plt.axis('off')
+plt.title('with red channel interpolation', size=20)
+plt.subplot(223)
+plt.hist(np.array(r).ravel(), normed=True)
+plt.subplot(224)
+plt.hist(np.array(r1).ravel(), normed=True)
+plt.show()
+
+
+2. Make the blacks a little bluer
+plt.figure(figsize=(20,10))
+plt.subplot(121)
+plt.imshow(im1)
+plt.title('last image', size=20)
+plt.axis('off')
+b1 = Image.fromarray(np.clip(np.array(b) + 7.65, 0, 255).astype(np.uint8))
+im1 = Image.merge('RGB', (r1, g, b1))
+plt.subplot(122)
+plt.imshow(im1)
+plt.axis('off')
+plt.title('with transformation', size=20)
+plt.tight_layout()
+plt.show()
+
+
+3. A small sharpening
+from PIL.ImageEnhance import Sharpness
+plt.figure(figsize=(20,10))
+plt.subplot(121)
+plt.imshow(im1)
+plt.title('last image', size=20)
+plt.axis('off')
+im2 = Sharpness(im1).enhance(3.0)
+plt.subplot(122)
+plt.imshow(im2)
+plt.axis('off')
+plt.title('with transformation', size=20)
+plt.tight_layout()
+plt.show()
+
+
+4. A boost in blue channel for lower mid-tones
+5. A decrease in blue channel for upper mid-tones
+blue_levels = [0., 11.985, 30.09, 64.005, 81.09, 99.96, 107.1, 111.945, 121.125, 143.055, 147.9, 159.885, 171.105, 186.915, 215.985, 235.875, 255.]
+b2 = Image.fromarray((np.reshape(np.interp(np.array(b1).ravel(), np.linspace(0,255,len(blue_levels)), blue_levels), (im.height, im.width))).astype(np.uint8), mode='L')
+plt.figure(figsize=(20,15))
+plt.subplot(221)
+plt.imshow(im2)
+plt.title('last image', size=20)
+plt.axis('off')
+plt.subplot(222)
+im3 = Image.merge('RGB', (r1, g, b2))
+plt.imshow(im3)
+plt.axis('off')
+plt.title('with blue channel interpolation', size=20)
+plt.subplot(223)
+plt.hist(np.array(b1).ravel(), normed=True)
+plt.subplot(224)
+plt.hist(np.array(b2).ravel(), normed=True)
+plt.show()
+
+
+The output image obtained after applying the Gotham filter is shown below:
+
+## Down-sampling with anti-aliasing using Gaussian Filter
+
+1. Start with a large gray-scale image and reduce the image size 16 times, by reducing both height and width by 4 times.
+2. Select every 4th pixel in the x and the y direction from the original image to compute the values of the pixels in the smaller image.
+3. Before down-sampling apply a Gaussian filter (to smooth the image) for anti-aliasing.
+4. Compare the quality of the output image obtained by down-sampling without a Gaussian filter (with aliasing).
+
+The next code block performs the above steps. Since the Gaussian blur is a low-pass filter, it removes the high frequencies from the original input image, hence it’s possible to achieve sampling rate above the Nyquist rate (by sampling theorem) to avoid aliasing.
+
+
+from scipy.ndimage import gaussian_filter
+im = rgb2gray(imread('images/umbc.png'))
+print(im.shape)
+plt.figure(figsize=(20,20))
+plt.imshow(im)
+plt.show()
+plt.figure(figsize=(20,20))
+im_blurred = gaussian_filter(im, sigma=2.5) #(5,5,1)
+plt.imshow(im_blurred)
+plt.show()
+n = 4 # create and image 16 times smaller in size
+w, h = im.shape[0] // n, im.shape[1] // n
+im_small = np.zeros((w,h))
+for i in range(w):
+for j in range(h):
+im_small[i,j] = im[n*i, n*j]
+plt.figure(figsize=(20,20))
+plt.imshow(im_small)
+plt.show()
+im_small = np.zeros((w,h))
+for i in range(w):
+for j in range(h):
+im_small[i,j] = im_blurred[n*i, n*j]
+plt.figure(figsize=(20,20))
+plt.imshow(im_small)
+plt.show()
+
+
+
+Original Image
+
+Image blurred with Gaussian Filter LPF
+
+Down-sampled Image from the original image (with aliasing)
+
+Down-sampled Image from the blurred image (with anti-aliasing)
+
+## Some Applications of DFT
+
+### 0. Fourier Transform of a Gaussian Kernel is another Gaussian Kernel
+
+Also, the spread in the frequency domain  inversely proportional to the spread in the spatial domain (known as Heisenberg’s inequality). Here is the proof:
+
+The following animation shows an example visualizing the Gaussian contours in spatial and corresponding frequency domains:
+
+### 1. Using DFT to up-sample an image
+
+1. Let’s use the lena gray-scale image.
+2. First double the size of the by padding zero rows/columns at every alternate positions.
+3. Use FFT followed by an LPF.
+4. Finally use IFFT to get the output image.
+
+The following code block shows the python code for implementing the steps listed above:
+
+
+import numpy as np
+import numpy.fft as fp
+import matplotlib.pyplot as plt
+
+im = np.mean(imread('images/lena.jpg'), axis=2)
+im1 = np.zeros((2*im.shape[0], 2*im.shape[1]))
+print(im.shape, im1.shape)
+for i in range(im.shape[0]):
+for j in range(im.shape[1]):
+im1[2*i,2*j] = im[i,j]
+
+def padwithzeros(vector, pad_width, iaxis, kwargs):
+vector[:pad_width[0]] = 0
+vector[-pad_width[1]:] = 0
+return vector
+
+# the LPF kernel
+kernel = [[0.25, 0.5, 0.25], [0.5, 1, 0.5], [0.25, 0.5, 0.25]]
+# enlarge the kernel to the shape of the image
+kernel = np.pad(kernel, (((im1.shape[0]-3)//2,(im1.shape[0]-3)//2+1), ((im1.shape[1]-3)//2,(im1.shape[1]-3)//2+1)), padwithzeros)
+
+plt.figure(figsize=(15,10))
+plt.gray() # show the filtered result in grayscale
+
+freq = fp.fft2(im1)
+freq_kernel = fp.fft2(fp.ifftshift(kernel))
+freq_LPF = freq*freq_kernel # by the Convolution theorem
+im2 = fp.ifft2(freq_LPF)
+freq_im2 = fp.fft2(im2)
+
+plt.subplot(2,3,1)
+plt.imshow(im)
+plt.title('Original Image', size=20)
+plt.subplot(2,3,2)
+plt.imshow(im1)
+plt.title('Padded Image', size=20)
+plt.subplot(2,3,3)
+plt.imshow( (20*np.log10( 0.1 + fp.fftshift(freq))).astype(int), cmap='jet')
+plt.title('Original Image Spectrum', size=20)
+plt.subplot(2,3,4)
+plt.imshow( (20*np.log10( 0.1 + fp.fftshift(freq_kernel))).astype(int), cmap='jet')
+plt.title('Image Spectrum of the LPF', size=20)
+plt.subplot(2,3,5)
+plt.imshow( (20*np.log10( 0.1 + fp.fftshift(freq_im2))).astype(int), cmap='jet')
+plt.title('Image Spectrum after LPF', size=20)
+plt.subplot(2,3,6)
+plt.imshow(im2.astype(np.uint8)) # the imaginary part is an artifact
+plt.title('Output Image', size=20)
+
+
+
+The next figure shows the output. As can be seen from the next figure, the LPF removed the high frequency components from the Fourier spectrum of the padded image and with a subsequent inverse Fourier transform  we get a decent enlarged image.
+
+### 2. Frequency Domain Gaussian Filter
+
+1. Use an input image and use DFT to create the frequency 2D-array.
+2. Create a small Gaussian 2D Kernel (to be used as an LPF) in the spatial domain and pad it to enlarge it to the image dimensions.
+3. Use DFT to obtain the Gaussian Kernel in the frequency domain.
+4. Use the Convolution theorem to convolve the LPF with the input image in the frequency domain.
+5. Use IDFT to obtain the output image.
+6. Plot the frequency spectrum of the image, the gaussian kernel and the image obtained after convolution in the frequency domain, in 3D.
+
+The following code block shows the python code:
+
+
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from skimage.color import rgb2gray
+from skimage.io import imread
+import scipy.fftpack as fp
+
+im = rgb2gray(imread('images/temple.jpg'))
+kernel = np.outer(signal.gaussian(im.shape[0], 10), signal.gaussian(im.shape[1], 10))
+freq = fp.fft2(im)
+assert(freq.shape == kernel.shape)
+freq_kernel = fp.fft2(fp.ifftshift(kernel))
+convolved = freq*freq_kernel # by the Convolution theorem
+im_blur = fp.ifft2(convolved).real
+im_blur = 255 * im_blur / np.max(im_blur)
+
+# center the frequency response
+plt.imshow( (20*np.log10( 0.01 + fp.fftshift(freq_kernel))).real.astype(int), cmap='coolwarm')
+plt.colorbar()
+plt.show()
+
+plt.figure(figsize=(20,20))
+plt.imshow(im, cmap='gray')
+plt.show()
+
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.ticker import LinearLocator, FormatStrFormatter
+# ... code for 3D visualization of the spectrums
+
+
+#### The original color temple image (time / spatial domain)
+
+The temple image (frequency domain)
+
+#### The smoothed temple image with the LPF (frequency domain)
+
+If we set the standard deviation of the LPF Gaussian kernel to be 10 we get the following output as shown in the next figures. As can be seen, the frequency response value drops much quicker from the center.
+
+#### The smoothed temple image with the LPF with higher s.d. (frequency d

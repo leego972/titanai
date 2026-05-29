@@ -1,0 +1,262 @@
+I want to generate an ephemeris file containing the Chebyshev coefficients, similar to how we can generate ephemeris file of positions with Horizon tool (https://ssd.jpl.nasa.gov/horizons/app.html#/). I would like to do the same, that is to, say, be able to choose the target body, coordinate center, dates, and generate the ephemeris file containing the Chebyshev coefficients associated.
+
+Do you know a tool, or a program which is able to do this? I have done a lot of research, but I haven't found one.
+
+I tried with SPICE but I didn't find a method allowing to extract Chebyshev coefficients like this.
+
+• I use a CSPICE Python wrapper called SpiceyPy most of the time when working with SPICE kernels. Specifically, the function spkw03 writes SPK (.bsp) kernels using Chebyshev polynomials. You pass in the position and velocity vectors and it creates the binary file ( naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/cspice/spkw03_c.html ). Although if you want just the chebyshev polynomial values, that might involve having the read in the binary file in a different way (maybe a custom function) Oct 27, 2021 at 14:22
+• @AlfonsoGonzalez My reading of the question is that the questioner is asking how to generate the Chebyshev coefficients rather on how to write the coefficients to a file. This is non-trivial. Oct 27, 2021 at 16:16
+• @AlfonsoGonzalez Yes I'm looking for a such function that would be able to get these chebyshev polynomial values. Oct 28, 2021 at 8:32
+• @DavidHammen I don't want to generate the Chebyshev coefficients, I just want to extract a part of an ephemeris file that interests me. For example we can imagine a function to which we give dates and the target body as input and return the Chebyshev coefficients just by extracting the corresponding part in the ephemeris file. Oct 28, 2021 at 8:39
+
+Your question is slightly ambiguous, a file containing the Chebyshev coefficients wouldn't be an ephemeris, but it's something you could use to generate an ephemeris. Regardless, the article Format of the JPL Ephemeris Files will answer both how to get the coefficients and how to use them to generate an ephemeris.
+
+The article goes in to more details, but the short answer: Look at the header file for the JPL Development Ephemeris you want to use. The section labeled "Group 1050" has the most important information. The first column is for Mercury, then Venus, Earth-Moon Barycenter ... 9th is Pluto, Moon, and Sun.
+
+The coefficients are grouped together in 32 day blocks, marked with the Julian Days they're valid for. The Group 1050 information above shows how each bock is broken down. The first row shows the offset into the bock where the coefficients start for that planet, the second is the number of coefficients for each property (e.g. X, Y, and Z), and the last row is the number of sub-intervals each 32 day block is broken down into.
+
+For example, Mercury row is 3, 14, 4. So it starts at offset 3, has 14 coefficents per property (x, y, z) = 3 * 14 = 42, and is divided into 4 sub-intervals, for a total of 42 * 3 = 168 coefficients. Notice the column for Venus has an offset of 171, which is Mercury's offset plus the total coefficients.
+
+Once you have the 168 coefficients, you need to determine which sub-interval you need, since mercury is divided into 4 sub-intervals, or 4 / 32 = 8 day intervals. The first two entries of each block provide the valid Julian Day range, so simply determine which interval you want to compute for, and choose the corresponding 42 coefficients for that range.
+
+With those 42 coefficients, the first 14 are for the x coordinate, the next 14 for the y coordinate, and the last are for the z coordinate. These are the Chebyshev coefficients to use, the first link above provides an example of extracting the coefficients and performing the computation, as well as source code in JavaScript.
+
+This github repository contains source code in several languages, JavaScript, Python, Java, C#, Perl, and maybe others.
+
+• Yes, this is what I want, to extract the Chebyshev coefficients but just over a certain period of time and that for some planets, to then be able to store them in a much smaller file. Your code seems to do it, I'll check that, thanks a lot !! Nov 4, 2021 at 9:19
+• This is a really good explanation, thanks! Dec 7, 2021 at 23:50
+
+The best method I've found is to use Brandon Rhodes' Python "jplephem" from here, specifically using the _load() function of an SPK segment. You get a list of SPK segments when loading a BSP file.
+
+As a quick plug, I'm part of a team of four people who just started working on ANISE a few days ago: https://github.com/anise-toolkit/ . The plan is to create an open-source (Mozilla Public License 2.0) version of SPICE that is flight software ready. I've done similar work before for a private company (and therefore that work is proprietary so I don't have access to it) because CSPICE was not a viable alternative at the time. For ANISE, we're looking for more people to join the conversation and development team, so if you're interested, please reach out on our Element/Matrix space (https://matrix.to/#/#anise:matrix.org).
+
+• Thanks, I'll check this Python tool. This is interesting because I also want to use ephemeris for a flight software, and to do this I would like to store Chebyshev coefficients on board to then do an interpolation of an ephemeris. Oct 28, 2021 at 8:44
+• very very cool !!
+– uhoh
+Oct 28, 2021 at 9:49
+
+## Update :
+
+I have found a way to extract Chebyshev coefficients at a requested date for a particular body using CSPICE.
+
+Here the program that allows to do this :
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "SpiceUsr.h"
+
+/*
+Author : G. Juif
+spk_to_asc.c
+
+Computation : gcc spk_to_asc.c -Iinclude lib/cspice.a -lm -o spk_to_asc
+
+Input : meta-kernel file (name must be modified in the code)
+
+This script extract Chebyshev coefficients from a SPICE bsp file.
+The body for which we want the coefficients must be defined in the code. It is by default MARS BARYCENTER.
+List of name bodies can be find here : https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/naif_ids.html#Planets%20and%20Satellites
+Care to have the associated bsp file.
+The coefficients are written in 3 differents files for X, Y and Z components.
+
+At execution several parameters must be given :
+- Start date in calendar format AAAA/MM/JJ. It is date from which the coefficients will be extract.
+By default this date is in TDB time scale but it can be modified in the code.
+- Duration in days (integer) : duration from the start date
+- Time step in days (integer) : Chebyshev coefficients will be extract at each of theses days step
+
+Output 3 files : coeffs_x ; ceffs_y ; coeffs_z
+In these files, at each time step, it gives :
+# Step_number Date Order Date_start Date_end
+Coefficients at each order line per line
+
+Dates are written in CJD format (number of julian days since January 1st, 1950 0h).
+It can be modified to have J2000 julian days by deleting 18262.5 additions in this code.
+
+- Step_number : gives the step number
+- Date : Date (TDB by default) corresponding of Chebyshev coefficients given below
+- Order : Order of the Chebyshev polynom
+- Date_start Date_end : dates where Chebyshev coefficients are defined in JPL file in CJD days.
+It is usefull in particular to compute scaled time for the Chebyshev polynom.
+
+*/
+int main()
+{
+/*
+Local parameters
+*/
+#define ND                       2
+#define NI                       6
+#define DSCSIZ                   5
+#define SIDLEN1                 41
+#define MAXLEN                  50
+#define utclen 35
+
+/*
+Local variables
+*/
+SpiceBoolean            found;
+
+SpiceChar               segid   [ SIDLEN1 ];
+SpiceChar               utcstr[ utclen  ];
+SpiceChar               calendar[ utclen  ];
+SpiceChar               frname [MAXLEN];
+SpiceChar               cname [MAXLEN];
+SpiceChar               bname [MAXLEN];
+
+SpiceDouble             dc      [ ND ];
+SpiceDouble             descr   [ DSCSIZ ];
+SpiceDouble             et;
+SpiceDouble             record [99];
+SpiceDouble             date [99];
+SpiceDouble             dateCJD;
+SpiceDouble             Cheby_order;
+SpiceDouble             Interv_length;
+SpiceDouble             Start_interv_cheby;
+SpiceDouble             End_interv_cheby;
+
+SpiceInt                handle;
+SpiceInt                ic      [ NI ];
+SpiceInt                idcode;
+SpiceInt                temp;
+SpiceInt                i = 0;
+SpiceInt                j = 0;
+SpiceInt                nbJours = 0;
+SpiceInt                nbInterv = 0;
+SpiceInt                nbCoeffs = 0;
+
+FILE * eph_file_x;
+FILE * eph_file_y;
+FILE * eph_file_z;
+
+eph_file_x = fopen("coeffs_x", "w");
+eph_file_y = fopen("coeffs_y", "w");
+eph_file_z = fopen("coeffs_z", "w");
+/*
+Load a meta-kernel that specifies a planetary SPK file
+and leapseconds kernel. The contents of this meta-kernel
+are displayed above.
+*/
+furnsh_c ( "spksfs_ex1.tm" );
+printf("Retrieve Chebyshev coefficients at a given date with duration and time step in days\n");
+/*
+Get the NAIF ID code for the Pluto system barycenter.
+This is a built-in ID code, so something's seriously
+wrong if we can't find the code.
+*/
+bodn2c_c ( "MARS BARYCENTER", &idcode, &found );
+
+if ( !found )
+{
+sigerr_c( "SPICE(BUG)" );
+}
+
+/*
+Pick a request time; convert to seconds past J2000 TDB.
+*/
+printf("Enter start date aaaa/mm/jj (TDB time scale):\n");
+scanf("%12s", calendar);
+strcat(calendar," TDB");
+
+str2et_c ( calendar, &et );
+et2utc_c ( et, "J", 7, utclen, utcstr );
+printf ( "Date : %s \n",calendar);
+
+printf("Enter duration in days :\n");
+scanf("%d", &nbInterv);
+
+printf("Enter time step in days :\n");
+scanf("%d", &nbJours);
+
+/* Loop on et */
+nbInterv /= nbJours;
+date[0] = et;
+
+for (i = 0 ; i < nbInterv ; i++)
+{
+/*
+Find a loaded segment for the specified body and time.
+*/
+spksfs_c ( idcode, date[i], SIDLEN1, &handle, descr, segid, &found );
+
+if ( !found )
+{
+printf ( "No descriptor was found for ID %d at "
+"TDB %24.17e\n",
+(int) idcode,
+et                                       );
+}
+else
+{
+/* Convert date in CJD CNES date */
+dateCJD = (date[i]/86400 ) + 18262.5;
+
+/*
+Display the segment ID.
+Unpack the descriptor. Display the contents.
+*/
+dafus_c ( descr, ND, NI, dc, ic );
+temp = spkr02_(&handle,descr,&date[i],record);
+/* Chebyshev polynom order (minus 2 because length of record doesn't consider first element, see fortran spice doc)*/
+Cheby_order = (record[0] - 2)/3;
+/* Interval length of chebyshev coefficients in days */
+Interv_length = (record[2]/86400)*2;
+/* Start and end interval dates where Chebyshev coefficients are defined in JPL file in CJD days*/
+Start_interv_cheby = (record[1]/86400) + 18262.5 - Interv_length/2 ;
+End_interv_cheby = (record[1]/86400) + 18262.5 + Interv_length/2 ;
+
+/* Print informations in files */
+fprintf(eph_file_x, "# %ld %lf %lf %lf %lf\n", i+1, dateCJD, Cheby_order, Start_interv_cheby, End_interv_cheby);
+fprintf(eph_file_y, "# %ld %lf %lf %lf %lf\n", i+1, dateCJD, Cheby_order, Start_interv_cheby, End_interv_cheby);
+fprintf(eph_file_z, "# %ld %lf %lf %lf %lf\n", i+1, dateCJD, Cheby_order, Start_interv_cheby, End_interv_cheby);
+
+nbCoeffs = (int) Cheby_order ;
+/* Coeffs for X,Y,Z component */
+for (j = 0 ; j < nbCoeffs ; j++)
+{
+fprintf(eph_file_x, "%24.17e\n", record[3+j]);
+fprintf(eph_file_y, "%24.17e\n", record[3+nbCoeffs+j]);
+fprintf(eph_file_z, "%24.17e\n", record[3+2*nbCoeffs+j]);
+}
+}
+/* Compute next date in seconds past J2000 TDB */
+date[i+1] = date[i] + 86400*nbJours;
+}
+/* Translate SPICE codes into common names */
+frmnam_c ( (int) ic[2], MAXLEN, frname );
+bodc2n_c ( (int) ic[1], MAXLEN, cname, &found );
+bodc2n_c ( (int) ic[0], MAXLEN, bname, &found );
+/* Print configuration*/
+printf ( "Segment ID:        %s\n"
+"\n--------Configuration-------\n"
+"Body ID code:      %s\n"
+"Center ID code:    %s\n"
+"Frame ID code:     %s\n"
+"SPK data type:     %d\n"
+"Start ephemeris file time (TDB):  %24.17e\n"
+"Stop ephemeris file time  (TDB):  %24.17e\n"
+"\n--------Chenbyshev polynom informations-------\n"
+"Chebyshev polynom order:     %lf\n"
+"Time step in days where Chebyshev coefficients are defined:     %lf\n",
+segid,
+bname,
+cname,
+frname,
+(int) ic[3],
+dc[0],
+dc[1],
+Cheby_order,
+Interv_length                             );
+fclose(eph_file_x);
+fclose(eph_file_y);
+fclose(eph_file_z);
+return ( 0 );
+}
+
+
+And the meta-kernal file :
+
+KPL/MK
+
+\begindata

@@ -1,0 +1,153 @@
+With the last Patch cycle from Microsoft we had a bigger problem with the patch MS15-018, which failed on a lot of servers. The patch also prevented all other following patches to be installed. It was downloaded correctly, but could only be installed manually by running the downloaded exe-file from the SCCM cache folder.
+
+To automate this a bit, my colleague Mihaly Kolozsi created a PowerShell script based on my design ideas. A big thank to him for borrowing me his brain and time ;-).
+
+## SCOM 2012: Check greyed out agents
+
+Greyed out agents are can be a nightmare for a System Center Operations Manager admin. An agent gets greyed out if the Health Service is not communicating correctly with the Management Servers. Normally an alert should be created with the name “Health Service Heartbeat Failure” which indicates this status. But sometimes I see the situation that the alert was created, but also auto-resolved by the system after a while (because of an agent recovery etc.). The problem then is if the agent still stays in an unhealthy state but no new alert gets created. I see that from time to time if the agent is stuck or has resource problems. This situation needs to be solved quickly because during that time no monitoring on the agent side takes place.
+
+So how can this be resolved?
+
+I implemented this solution: The management servers already know which agents are greyed out, so I have created a rule which runs on the “All Management Servers Resource Pool” every 5 min (you can select another interval if you like). It checks which agents are greyed out but are not in maintenance mode and then checks for each agent if there is an open “Health Service Heartbeat Failure” alert. It adds the server to a list which will be populated in one alert with the name “Sample – greyed out agents”, if no alert was found.
+
+The main logic of the rule bases on a Powershell script. Here is the part, with the logic – I have skipped everything around it (log function, SCOM module, etc.).
+
+$TotalCount=0$list=””
+$agentclass = Get-SCOMClass -Name “Microsoft.SystemCenter.Agent” # Find greyed out agents which are not in maintenance mode$agentobjects = Get-SCOMMonitoringObject -Class:$agentclass | Where-Object {($_.IsAvailable -eq $false) -and ($_.InMaintenanceMode -eq $False)} if ($agentobjects -is [Object])
+{
+$msg = “rnFound greyed out agents which are not in maintenance mode.”; Log -msg$msg -debug $debug -debugLog$debugLog;
+# Go through agent list
+foreach ($agent in$agentobjects)
+{
+$msg = “rn”+$agent.displayname
+Log -msg $msg -debug$debug -debugLog $debugLog; #Go on if watcher state for the agent is unhealthy if((Get-SCOMClass -name “Microsoft.SystemCenter.HealthServiceWatcher”| get-scomclassinstance | Where-Object {$_.Displayname   -eq $agent.DisplayName}).HealthState -ne ‘Success’) { # Find open Health Service Heartbeat Failure alert for the agent$alert=get-scomalert -name ‘Health Service Heartbeat Failure’ | where {($_.ResolutionState -ne 255) -and ($_.MonitoringObjectDisplayName -eq $agent.DisplayName)} # No alert for greyed out agent found if ($alert -isnot [Object])
+{
+$list+=”rn”+$agent.displayname
+$msg=”rnThe agent “+$agent.displayname + ” has no open Health Service Heartbeat Failure alerts. Add to list.”
+Log -msg $msg -debug$debug -debugLog $debugLog;$Totalcount++
+}
+}
+}
+}
+
+You can find the rule in a small management pack called Sample.BaseMonitoring, which you can download here.
+It is designed for SCOM 2012 SP1. Please test it in your development environment before you add it to production!
+
+There are some clean up tasks a System Center Configuration Manager 2012 Administrator can perform on a regular basis. One should be to check which advertisements are expired.
+
+There is no PowerShell Cmdlet for SCCM 2012 SP1 which could give me this information directly, so I have created a script, that can be used in two ways:
+
+1. document which deployments are expired (only does not document the current assigned schedule) in a CSV format.
+2. delete the expired deployments.
+
+So you can call the script with different parameters.
+
+Command line: Getexpiredadvertisements.ps1 -log [String] -sitecode [String] -siteserver [String] -document [Bool] -delete [Bool]
+
+Example: Getexpiredadvertisements.ps1 -log “c:\it\expiredads.csv” -sitecode “ABC:” -siteserver “SCCM01” -document $True -delete$False
+
+Possible Parameters:
+
+• Log: Defines name and path of the written CSV file
+• Sitecode: SCCM Site Code, Example ABC:
+• Siteserver: SCCM Site Server Name
+• Document:  Defines, if expired Advertisements get documented to the CSV file, possible values: $True/$False
+• Delete: Defines, if expired Advertisements get deleted in SCCM, possible values: $True/$False
+
+Requirements:
+
+• Run this script in PowerShell x86
+• The script is tested with PowerShell 2.0 and SCCM 2012 SP1
+• The Configuration Manager PowerShell Modul must be installed on the machine, where you run the script
+
+## SCOM 2012: Daily Alert Owner Email Report
+
+System Center Operations Manager has a nice way of handling alerts. You can assign an owner for an alert, who should be responsible to resolve it.
+But how does the owner get notified, that he/she is assigned to this alert now? Ok, you can setup a subscription, but this would send out for example an email for each alert.
+I would like to have one email by owner with all alerts listed, which are assigned to him/her on a daily basis.
+I have created a PowerShell script for that, which can be scheduled through a task on a management server.
+
+Background
+
+If you want to set the owner, then you can click on the change button.
+
+SCOM connects to AD and adds the UPN (UserPrincipalName) of the given account to this field, i.e. Userid@logondomain.com
+
+The script reads all open alerts with a critical or warning severity and an owner which contains “@” – some management packs already fill the owner field with additional information. So the “@” indicates that the owner field is set manually.
+
+To be able to send out a report through email to the assigned owner, there must be an email address entered in the Mail field of the Active Directory user ID.
+
+The email to the owner looks like this:
+
+Thanks to Jason Rydstrand, I took parts of his SCOM2012Health-Check script to build my report email with a HTML table.
+
+## Orchestrator 2012: Check SCCM maintenance window and set SCOM maintenance mode
+
+Everyone who uses System Center Configuration Manager 2012 and System Center Operations Manager 2012 knows the problem of setting the server into maintenance mode when patching or software deployment needs to take place.
+
+With System Center Orchestrator 2012 you get the integration packs for both systems and the option to create a workflow for this task. My intetion for this was to use the maintenance windows which are defined on the collections. During this timeframe software updates and deployments can be performed on the servers incl. reboots. So it would be good to set the servers into maintenance mode in SCOM. I only focussed on general maintenance mode windows not OSD ones and non recurring windows.
+
+Here is the summary of the workflow I have created:
+The workflow runs every 2 minutes. It reads a text file on the runbook server with all collection ids it should check, then checks if the collection has a maintenance window defined, that will start within the next 10-15 minutes. If yes, then it gets the collection members in SCCM, gets the FQDN for the server and starts the maintenance mode in SCOM. If successful it writes a log file otherwise it tries again to set the maintenance mode with the Netbios name.
+
+Diagram:
+
+Most of the parts are standard activities, so I only describe the “Get Maintenance Window” activity, which runs a PowerShell script on the Runbook server. This activity needs to run with a user that has SCCM permissions, otherwise it will provide no result. It only will have output data, if the maintenance window will occur within the next 10-15 minutes. So the link to the Get Collection Members activity should have the following include entry: Pure Output from Get Maintenance Window matches pattern .+
+
+Here is the command line for the Get Maintenance Window activity:
+
+cmd.exe /c | c:\Windows\system32\WindowsPowerShell\v1.0\powershell.exe –c “function WMI-DateStringToDate($time) { [System.Management.ManagementDateTimeconverter]::ToDateTime($time);};$collsettings = ([WMIClass] ‘\\SCCM Server FQDN\root\SMS\site_SCCMSiteCode:SMS_CollectionSettings’).CreateInstance();if($collsettings -is [Object]){$collsettings.CollectionID = ‘Link to Line Text of previous activity’;$collsettings.get();$windows=$collsettings.ServiceWindows;if ($windows -is [Object]){$now=Get-Date;Foreach ($window in$windows){$Time=WMI-DateStringToDate($window.StartTime);if (($window.IsEnabled -eq$True) -and ($window.ServiceWindowType -eq ‘1’) -and ($window.RecurrenceType -eq ‘1’)){if (($now.AddMinutes(15).compareto($Time) -eq ‘1’) -and ($now.AddMinutes(10).compareto($Time) -eq ‘-1’)){$Duration=$window.Duration+15;write-host ($Time.ToString(),$Duration) -separator ‘;’}}}}};”
+
+Attention! The command line should not have line breaks! Otherwise it will not work within this activity.
+For better readability I post the script here also with line breaks and comments:
+
+param($SMSSiteCode,$SMSManagementServer, $COLLECTION_ID) # convert WMI date to DateTime format function WMI-DateStringToDate($time)
+{ [System.Management.ManagementDateTimeconverter]::ToDateTime($time)} # get collection settings (incl. Maintenance Windows)$collsettings= ([WMIClass] \\$SMSManagementServer\root\SMS\site_$($SmsSiteCode):SMS_CollectionSettings).CreateInstance() if($collsettings -is [Object])
+{
+$collsettings.CollectionID =$COLLECTION_ID
+$collsettings.get()$windows=$collsettings.ServiceWindows if ($windows -is [Object])
+{
+$now=Get-Date Foreach ($window in $windows) {$Time=WMI-DateStringToDate($window.StartTime) # only check general maintenance and non recurring windows if (($window.IsEnabled -eq$True) -and ($window.ServiceWindowType -eq‘1’) -and ($window.RecurrenceType -eq‘1’)) { # check if starttime is within the next 10-15 min. if (($now.AddMinutes(15).compareto($Time) -eq‘1’) -and ($now.AddMinutes(10).compareto($Time) -eq‘-1’)) { # add 15 min to duration as buffer$duration=$window.Duration+15; write-host ($Time.ToString(),$Duration) -Separator ‘;’ } } } } } Another thing to mention: Please add an exclude to the link between “Get Collection Member” and “Get FQDN” for your Management Servers: Member Name from Get Collection Member equals SCOMMGServerName. Then they will not be set into maintenance mode if they are members of the checked collections. Update I found some problems with the daylight saving settings on the runbook server. We use UTC maintenance windows in SCCM. With daylight saving the local time of the runbook server gets adjusted but the maintenance window stays in standard UTC. The script compares the local time with the maintenance window. With the old version it sets the maintenance window at the wrong time when daylight saving is enabled. Therefore I had to adjust the script. Here is the new version. The italic entries are new. cmd.exe /c | c:\Windows\system32\WindowsPowerShell\v1.0\powershell.exe –c “function WMI-DateStringToDate($time) {  [System.Management.ManagementDateTimeconverter]::ToDateTime($time);};$collsettings = ([WMIClass] ‘\\SCCM Server FQDN\root\SMS\site_SCCMSiteCode:SMS_CollectionSettings’).CreateInstance();if($collsettings -is [Object]){$collsettings.CollectionID = ‘Link to Line Text of previous activity’;$collsettings.get();$windows=$collsettings.ServiceWindows;if ($windows -is [Object]){$now=Get-Date;$universal=$now.ToUniversalTime().AddHours(([System.TimeZoneInfo]::Local).baseutcoffset.hours);$diff=($now.subtract($universal)).Hours;Foreach ($window in$windows){$Time=WMI-DateStringToDate($window.StartTime);if (($window.IsEnabled -eq$True) -and ($window.ServiceWindowType -eq ‘1’) -and ($window.RecurrenceType -eq ‘1’)){if (($now.AddMinutes(15).compareto($Time.AddHours($diff)) -eq ‘1’) -and ($now.AddMinutes(10).compareto($Time.AddHours($diff)) -eq ‘-1’)){$Duration=$window.Duration+15;write-host ($Time.ToString(),$Duration) -separator ‘;’}}}}}”
+
+Here is the link to the runbook.
+
+## Orchestrator 2012: Reset SCOM 2012 monitor for closed alert
+
+Everyone who works with System Center Operations Manager 2012 knows the problem of closed alerts where the monitor has not been reset first. The monitor will stay in the unhealthy state and no new alerts will be created anymore until the monitor gets reset.
+
+You can create a scheduled task with a script on a management server or use Orchestrator for it. I found this blog which describes how to use the “Monitor alert” activity and then run a script afterwards. http://blog.scomfaq.ch/2012/05/05/reset-monitor-using-scom-2012-and-orchestrator-a-must-have-runbook/
+I like the “Monitor alert” activity but I would like to reduce the number of scripts which connect to the management group.
+
+So I have created another runbook.
+
+The first activity “Check every 5 min” triggers the runbook every 5 min. I think that is a good timeframe to check for closed alerts.
+
+The next activity “Reset Monitor” runs on the Runbook server. It uses PowerShell and imports the SCOM 2012 module, so this must be installed on the Runbook Servers and the execution policy should be set to remotesigned.
+
+Here are the details of the activity:
+
+$Alertname=@();$State=@();
+$Displayname=@(); # Import Operations Manager Module and create Connection Import-Module OperationsManager; New-SCOMManagementGroupConnection %ManagementServerName%;$alerts=get-scomalert -Criteria “Severity!=0 AND IsMonitorAlert=1 AND ResolutionState=255″| where {$_.LastModified -ge ((get-date).AddMinutes(-5)).ToUniversalTime()} if ($alerts -is [object])
+{
+foreach ($alert in$alerts)
+{
+$monitoringobject = Get-SCOMClassinstance -id$alert.MonitoringObjectId
+# Reset Monitor
+If (($monitoringobject.HealthState -eq ‘Error’) -or ($monitoringobject.HealthState -eq ‘Warning’))
+{
+$monitoringobject.ResetMonitoringState()$State+=$monitoringobject.HealthState$Displayname+=$monitoringobject.displayname$Alertname+=$alert.Name } } } The script gets all closed alerts from monitors with severity ‘Warning’ or ‘Critical’ within the last 5 min and only resets the monitor if it is still in ‘Error’ or ‘Warning’ HealthState. You could use this script also for a scheduled task on a management server. The published data is Alertname, State, Displayname, you could also publish other data, but that was what I needed for troubleshooting. ## SCOM: Disable Active Directory integration on an agent with PowerShell Some companies use Active Directory integration for agent assignement in System Center Operations Manager. In some circumstances it can be that you have to remove the Active Directory integration from the agent (example: do not use AD integratrion on domain controllers or Exchange servers), perhaps if you have used software distribution without different options for special server classes or if you want to get rid of AD integration. I have written a PowerShell script, that can be run on an agent to remove the AD integration and reenter the management group(s) as manual.$object=New-Object-ComObject‘AgentConfigManager.MgmtSvcCfg’;
+if ($object-is [Object]) { #only change agent if active directory integration is enabled if($object.GetActiveDirectoryIntegrationEnabled())
+{
+#get all ad integrated management groups
+$MGs=$object.GetManagementGroups() | where {$_.IsManagementGroupFromActiveDirectory -eq$True};
+$object.DisableActiveDirectoryIntegration();$object.ReloadConfiguration();
+Foreach($MG in$MGs)
+{
+
+$object.AddManagementGroup($MG.managementGroupName,$MG.ManagementServer,$MG.managementServerPort);
+}
+}
+
+}
+& net stop healthservice
+& net start healthservice

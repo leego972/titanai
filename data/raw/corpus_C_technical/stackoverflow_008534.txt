@@ -1,0 +1,31 @@
+Question: <p>I have a model that looks like this:</p>
+
+<pre><code>class Category(models.Model):
+    name = models.CharField(max_length=60)
+
+class Item(models.Model):
+    name = models.CharField(max_length=60)
+    category = models.ForeignKey(Category)
+</code></pre>
+
+<p>I want select count (just the count) of items for each category, so in SQL it would be as simple as this:</p>
+
+<pre><code>select category_id, count(id) from item group by category_id
+</code></pre>
+
+<p>Is there an equivalent of doing this "the Django way"? Or is plain SQL the only option? I am familiar with the <em>count( )</em> method in Django, however I don't see how <em>group by</em> would fit there.</p>
+
+Answer: <p>(<strong>Update</strong>: Full ORM aggregation support is now included in <a href="http://docs.djangoproject.com/en/dev/releases/1.1/#aggregate-support">Django 1.1</a>. True to the below warning about using private APIs, the method documented here no longer works in post-1.1 versions of Django.  I haven't dug in to figure out why; if you're on 1.1 or later you should use the real <a href="http://docs.djangoproject.com/en/dev/topics/db/aggregation/">aggregation API</a> anyway.)</p>
+
+<p>The core aggregation support was already there in 1.0; it's just undocumented, unsupported, and doesn't have a friendly API on top of it yet.  But here's how you can use it anyway until 1.1 arrives (at your own risk, and in full knowledge that the query.group_by attribute is not part of a public API and could change):</p>
+
+<pre><code>query_set = Item.objects.extra(select={'count': 'count(1)'}, 
+                               order_by=['-count']).values('count', 'category')
+query_set.query.group_by = ['category_id']
+</code></pre>
+
+<p>If you then iterate over query_set, each returned value will be a dictionary with a "category" key and a "count" key.</p>
+
+<p>You don't have to order by -count here, that's just included to demonstrate how it's done (it has to be done in the .extra() call, not elsewhere in the queryset construction chain).  Also, you could just as well say count(id) instead of count(1), but the latter may be more efficient.</p>
+
+<p>Note also that when setting .query.group_by, the values must be actual DB column names ('category_id') not Django field names ('category').  This is because you're tweaking the query internals at a level where everything's in DB terms, not Django terms.</p>

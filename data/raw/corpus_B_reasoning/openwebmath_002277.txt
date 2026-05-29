@@ -1,0 +1,72 @@
+I'm having problems compiling the following code:
+
+\documentclass{article}
+\usepackage{etoolbox}
+\usepackage[pdftex]{graphicx}
+
+\newcommand{\newInfo}[3][]{%
+\edef\@creatingInfo{1}%
+\edef\@printingInfo{0}%
+\edef\currentname{#2}%
+\ifstrempty{#1}{}{\csedef{info#2Img}{#1}}%
+\csedef{info#2Cnt}{#3}%
+\nullfont#3\normalfont%
+\edef\@creatingInfo{0}
+}
+
+\newcommand{\printInfo}[1]{%
+\edef\currentname{#1}%
+\edef\@printingInfo{1}%
+\section{#1}\label{info:#1}%
+\ifcsname info#1Img\endcsname%
+\begin{figure}
+\includegraphics[width=\linewidth]{\csuse{info#1Img}}
+\end{figure}%
+\fi%
+\csuse{info#1Cnt}%
+\ifcsname info#1Ref\endcsname
+\begin{longtable}{p{9cm}}
+\csuse{info#1Ref}
+\end{longtable}
+\fi
+}
+
+\begin{document}
+
+\newInfo[./images/myimage.eps]{Test}{Information content}
+
+\printInfo{Test}
+
+\end{document}
+
+
+It says ./images/myimage.eps not found (regardless of the name, type, absolute/relative path, etc).
+
+If you, however, replace line 21 by \includegraphics[width=\linewidth]{./images/myimage.eps}, then it displays the image correctly.
+
+• Remove the file extension, i.e. use it as ./images/myimage – user31729 Oct 1 '17 at 15:04
+• You should expand \csuse{info#1Img} before executing \includegraphics. But I can't understand several parts of the code which appear to do nothing useful at all. In particular, what's the purpose of \nullfont#3\normalfont? – egreg Oct 1 '17 at 15:13
+
+In order to get the automatic conversion from EPS to PDF the file name in the argument to \includegraphics should be explicit, so you can change the code into
+
+  \ifcsname info#1Img\endcsname
+\begin{figure}
+\begingroup\edef\x{\endgroup
+\noexpand\includegraphics[width=\linewidth]{\csuse{info#1Img}}%
+}\x
+\end{figure}
+\fi
+
+
+Some comments: your example code misses \makeatletter and \makeatother, because you want to define commands with @ in their name. By the way \edef\@creatingInfo{1} is exactly the same as \def\@creatingInfo{1}, just less efficient.
+
+Moreover, several parts of the code seem to do nothing at all, probably because the shown code is just an excerpt. But
+
+\nullfont#3\normalfont
+
+
+is something I can't understand at all. Why typesetting the file name in \nullfont, so nothing appears?
+
+Finally, never use the pdftex option for graphicx.
+
+• Thank you for your comments. the \nullfont#3\normalfont is essential for my package. It forces latex to evaluate several commands (which are stored inside other commands) without printing the output. That's why there is the distinction between \@creatingInfo and \@printingInfo – Benedict Oct 14 '17 at 13:01

@@ -1,0 +1,35 @@
+Question: <p>Right now I have a log parser reading through 515mb of plain-text files (a file for each day over the past 4 years). My code currently stands as this: <a href="http://gist.github.com/12978" rel="nofollow">http://gist.github.com/12978</a>. I've used psyco (as seen in the code) and I'm also compiling it and using the compiled version. It's doing about 100 lines every 0.3 seconds. The machine is a standard 15" MacBook Pro (2.4ghz C2D, 2GB RAM)</p>
+
+<p>Is it possible for this to go faster or is that a limitation on the language/database?</p>
+
+Answer: <p>In the for loop, you're inserting into the 'chats' table repeatedly, so you only need a single sql statement with bind variables, to be executed with different values.  So you could put this before the for loop:</p>
+
+<pre><code>insert_statement="""
+    INSERT INTO chats(person_id, message_type, created_at, channel)
+    VALUES(:person_id,:message_type,:created_at,:channel)
+"""
+</code></pre>
+
+<p>Then in place of each sql statement you execute put this in place:</p>
+
+<pre><code>cursor.execute(insert_statement, person_id='person',message_type='msg',created_at=some_date, channel=3)
+</code></pre>
+
+<p>This will make things run faster because:</p>
+
+<ol>
+<li>The cursor object won't have to reparse the statement each time</li>
+<li>The db server won't have to generate a new execution plan as it can use the one it create previously.</li>
+<li>You won't have to call santitize() as special characters in the bind variables won't part of the sql statement that gets executed.</li>
+</ol>
+
+<p>Note: The bind variable syntax I used is Oracle specific.  You'll have to check the psycopg2 library's documentation for the exact syntax.</p>
+
+<p>Other optimizations:</p>
+
+<ol>
+<li>You're incrementing with the "UPDATE people SET chatscount" after each loop iteration.  Keep a dictionary mapping user to chat_count and then execute the statement of the total number you've seen.  This will be faster then hitting the db after every record.</li>
+<li>Use bind variables on ALL your queries.  Not just the insert statement, I choose that as an example.</li>
+<li>Change all the find_*() functions that do db look ups to cache their results so they don't have to hit the db every time.</li>
+<li>psycho optimizes python programs that perform a large number of numberic operation.  The script is IO expensive and not CPU expensive so I wouldn't expect to give you much if any optimization.</li>
+</ol>

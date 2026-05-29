@@ -1,0 +1,104 @@
+Title: Ziggurat algorithm
+
+The ziggurat algorithm is an algorithm for pseudo-random number sampling.  Belonging to the class of rejection sampling algorithms, it relies on an underlying source of uniformly-distributed random numbers, typically from a pseudo-random number generator, as well as precomputed tables.  The algorithm is used to generate values from a monotonically decreasing probability distribution.  It can also be applied to symmetric unimodal distributions, such as the normal distribution, by choosing a value from one half of the distribution and then randomly choosing which half the value is considered to have been drawn from.  It was developed by George Marsaglia and others in the 1960s.
+
+A typical value produced by the algorithm only requires the generation of one random floating-point value and one random table index, followed by one table lookup, one multiply operation and one comparison. Sometimes (2.5% of the time, in the case of a normal or exponential distribution when using typical table sizes) more computations are required. Nevertheless, the algorithm is computationally much faster than the two most commonly used methods of generating normally distributed random numbers, the Marsaglia polar method and the Box–Muller transform, which require at least one logarithm and one square root calculation for each pair of generated values.  However, since the ziggurat algorithm is more complex to implement it is best used when large quantities of random numbers are required.
+
+The term ziggurat algorithm dates from Marsaglia's paper with Wai Wan Tsang in 2000; it is so named because it is conceptually based on covering the probability distribution with rectangular segments stacked in decreasing order of size, resulting in a figure that resembles a ziggurat.
+
+Theory of operation
+The ziggurat algorithm is a rejection sampling algorithm; it randomly generates a point in a distribution slightly larger than the desired distribution, then tests whether the generated point is inside the desired distribution.  If not, it tries again.  Given a random point underneath a probability density curve, its x coordinate is a random number with the desired distribution.
+
+The distribution the ziggurat algorithm chooses from is made up of n equal-area regions; n − 1 rectangles that cover the bulk of the desired distribution, on top of a non-rectangular base that includes the tail of the distribution.
+
+Given a monotone decreasing probability density function f(x), defined for all x ≥ 0, the base of the ziggurat is defined as all points inside the distribution and below y1 = f(x1).  This consists of a rectangular region from (0, 0) to (x1, y1), and the (typically infinite) tail of the distribution, where x > x1 (and y < y1).
+
+This layer (call it layer 0) has area A.  On top of this, add a rectangular layer of width x1 and height A/x1, so it also has area A.  The top of this layer is at height y2 = y1 + A/x1, and intersects the density function at a point (x2, y2), where y2 = f(x2).  This layer includes every point in the density function between y1 and y2, but (unlike the base layer) also includes points such as (x1, y2) which are not in the desired distribution.
+
+Further layers are then stacked on top.  To use a precomputed table of size n (n = 256 is typical), one chooses x1 such that xn = 0, meaning that the top box, layer n − 1, reaches the distribution's peak at (0, f(0)) exactly.
+
+Layer i extends vertically from yi to yi+1, and can be divided into two regions horizontally: the (generally larger) portion from 0 to xi+1 which is entirely contained within the desired distribution, and the (small) portion from xi+1 to xi, which is only partially contained.
+
+Ignoring for a moment the problem of layer 0, and given uniform random variables U0 and U1 ∈ [0,1), the ziggurat algorithm can be described as:
+
+ Choose a random layer 0 ≤ i < n.
+ Let x = U0xi.
+ If x < xi+1, return x.
+ Let y = yi + U1(yi+1 − yi).
+ Compute f(x).  If y < f(x), return x.
+ Otherwise, choose new random numbers and go back to step 1.
+
+Step 1 amounts to choosing a low-resolution y coordinate.  Step 3 tests if the x coordinate is clearly within the desired density function without knowing more about the y coordinate.  If it is not, step 4 chooses a high-resolution y coordinate, and step 5 does the rejection test.
+
+With closely spaced layers, the algorithm terminates at step 3 a very large fraction of the time. For the top layer n − 1, however, this test always fails, because xn = 0.
+
+Layer 0 can also be divided into a central region and an edge, but the edge is an infinite tail.  To use the same algorithm to check if the point is in the central region, generate a fictitious x0 = A/y1.  This will generate points with x < x1 with the correct frequency, and in the rare case that layer 0 is selected and x ≥ x1, use a special fallback algorithm to select a point at random from the tail.  Because the fallback algorithm is used less than one time in a thousand, speed is not essential.
+
+Thus, the full ziggurat algorithm for one-sided distributions is:
+
+ Choose a random layer 0 ≤ i < n.
+ Let x = U0xi
+ If x < xi+1, return x.
+ If i = 0, generate a point from the tail using the fallback algorithm.
+ Let y = yi + U1(yi+1 − yi).
+ Compute f(x).  If y < f(x), return x.
+ Otherwise, choose new random numbers and go back to step 1.
+
+For a two-sided distribution, the result must be negated 50% of the time.  This can often be done conveniently by choosing U0 ∈ (−1,1) and, in step 3, testing if |x| < xi+1.
+
+Fallback algorithms for the tail
+Because the ziggurat algorithm only generates most outputs very rapidly, and requires a fallback algorithm whenever x > x1, it is always more complex than a more direct implementation.  The specific fallback algorithm depends on the distribution.
+
+For an exponential distribution, the tail looks just like the body of the distribution.  One way is to fall back to the most elementary algorithm E = −ln(U1) and let x = x1 − ln(U1).  Another is to call the ziggurat algorithm recursively and add x1 to the result.
+
+For a normal distribution, Marsaglia suggests a compact algorithm:
+
+ Let x = −ln(U1)/x1.
+ Let y = −ln(U2).
+ If 2y > x2, return x + x1.
+ Otherwise, go back to step 1.
+
+Since x1 ≈ 3.5 for typical table sizes, the test in step 3 is almost always successful.
+
+Optimizations
+The algorithm can be performed efficiently with precomputed tables of xi and yi = f(xi), but there are some modifications to make it even faster:
+ Nothing in the ziggurat algorithm depends on the probability distribution function being normalized (integral under the curve equal to 1), removing normalizing constants can speed up the computation of f(x).
+ Most uniform random number generators are based on integer random number generators which return an integer in the range [0,  232 − 1].  A table of 2−32xi lets you use such numbers directly for U0.
+ When computing two-sided distributions using a two-sided U0 as described earlier, the random integer can be interpreted as a signed number in the range [−231, 231 − 1], and a scale factor of 2−31 can be used.
+ Rather than comparing U0xi to xi+1 in step 3, it is possible to precompute xi+1/xi and compare U0 with that directly.  If U0 is an integer random number generator, these limits may be premultiplied by 232 (or 231, as appropriate) so an integer comparison can be used.
+ With the above two changes, the table of unmodified xi values is no longer needed and may be deleted.
+ When generating IEEE 754 single-precision floating point values, which only have a 24-bit mantissa (including the implicit leading 1), the least-significant bits of a 32-bit integer random number are not used.  These bits may be used to select the layer number.  (See the references below for a detailed discussion of this.)
+ The first three steps may be put into an inline function, which can call an out-of-line implementation of the less frequently needed steps.
+
+Generating the tables
+It is possible to store the entire table precomputed, or just include the values n, y1, A, and an implementation of f −1(y) in the source code, and compute the remaining values when initializing the random number generator.
+
+As previously described, you can find xi = f −1(yi) and yi+1 = yi + A/xi.  Repeat n − 1 times for the layers of the ziggurat.  At the end, you should have yn = f(0).  There will be some round-off error, but it is a useful sanity test to see that it is acceptably small.
+
+When actually filling in the table values, just assume that xn = 0 and yn = f(0), and accept the slight difference in layer n − 1's area as rounding error.
+
+Finding x1 and A
+Given an initial (guess at) x1, you need a way to compute the area t of the tail for which x > x1.  For the exponential distribution,  this is just e−x1, while for the normal distribution, assuming you are using the unnormalized f(x) = e−x2/2, this is  erfc(x/).  For more awkward distributions, numerical integration may be required.
+
+With this in hand, from x1, you can find y1 = f(x1), the area t in the tail, and the area of the base layer A = x1y1 + t.
+
+Then compute the series yi and xi as above.  If yi > f(0) for any i < n, then the initial estimate x1 was too low, leading to too large an area A.  If yn < f(0), then the initial estimate x1 was too high.
+
+Given this, use a root-finding algorithm (such as the bisection method) to find the value x1 which produces yn−1 as close to f(0) as possible.  Alternatively, look for the value which makes the area of the topmost layer, xn−1(f(0) − yn−1), as close to the desired value A as possible.  This saves one evaluation of f −1(x) and is actually the condition of greatest interest.
+
+References
+  This paper numbers the layers from 1 starting at the top, and makes layer 0 at the bottom a special case, while the explanation above numbers layers from 0 at the bottom.
+ C implementation of the ziggurat method for the normal density function and the exponential density function, that is essentially a copy of the code in the paper. (Potential users should be aware that this C code assumes 32-bit integers.)
+ A C# implementation of the ziggurat algorithm and overview of the method.
+   Describes the hazards of using the least-significant bits of the integer random number generator to choose the layer number.
+ Normal Behavior By Cleve Moler, MathWorks, describing the ziggurat algorithm introduced in MATLAB version 5, 2001.
+ The Ziggurat Random Normal Generator Blogs of MathWorks, posted by Cleve Moler, May 18, 2015.
+  Comparison of several algorithms for generating Gaussian random numbers.
+
+ .  Illustrates problems with underlying uniform pseudo-random number generators and how those problems affect the ziggurat algorithm's output.
+ 
+ 
+
+Pseudorandom number generators
+Non-uniform random numbers
+Statistical algorithms

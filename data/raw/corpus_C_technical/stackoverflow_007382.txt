@@ -1,0 +1,69 @@
+Question: <p>I have a fair number of Python scripts that contain reusable code that are used and referenced by other Python scripts. However, these scripts tend to be scattered across different directories and I find it to be somewhat tedious to have to include (most often multiple) calls to sys.path.append on my top-level scripts. I just want to provide the 'import' statements without the additional file references in the same script.</p>
+
+<p>Currently, I have this:</p>
+
+<pre><code>import sys
+sys.path.append('..//shared1//reusable_foo')
+import Foo
+sys.path.append('..//shared2//reusable_bar')
+import Bar
+</code></pre>
+
+<p>My preference would be the following:</p>
+
+<pre><code>import Foo
+import Bar
+</code></pre>
+
+<p>My background is primarily in the .NET platform so I am accustomed to having meta files such as *.csproj, *.vbproj, *.sln, etc. to manage and contain the actual file path references outside of the source files. This allows me to just provide 'using' directives (equivalent to Python's import) without exposing all of the references and allowing for reuse of the path references themselves across multiple scripts.</p>
+
+<p>Does Python have equivalent support for this and, if not, what are some techniques and approaches?</p>
+
+Answer: <p>My solution was to package up one utility that would import the module:
+my_util is in site packages</p>
+
+<pre><code>import my_util
+
+foo = myutil.import_script('..//shared1//reusable_foo')
+if foo == None:
+    sys.exit(1)
+
+
+def import_script(script_path, log_status = True):
+    """
+    imports a module and returns the handle
+    """
+    lpath = os.path.split(script_path)
+
+    if lpath[1] == '':
+        log('Error in script "%s" in import_script' % (script_path))
+        return None
+
+
+    #check if path is already in sys.path so we don't repeat
+    npath = None
+    if lpath[0] == '':
+        npath = '.'
+    else:
+        if lpath[0] not in sys.path:
+            npath = lpath[0]
+
+    if npath != None:
+        try:
+            sys.path.append(npath)
+        except:
+            if log_status == True:
+                log('Error adding path "%s" in import_script' % npath)
+            return None
+
+    try:   
+        mod =  __import__(lpath[1])
+    except:
+        error_trace,error_reason =  FormatExceptionInfo()
+        if log_status == True:
+            log('Error importing "%s" module in import_script: %s' % (script_path, error_trace + error_reason))
+        sys.path.remove(npath)
+        return None
+
+    return mod
+</code></pre>

@@ -1,0 +1,59 @@
+Question: <p>I need to replace character (say) <strong>x</strong> with character (say) <strong>P</strong> in a string, but only if it is contained in a quoted substring.
+An example makes it clearer:</p>
+
+<pre><code>axbx'cxdxe'fxgh'ixj'k  -&gt; axbx'cPdPe'fxgh'iPj'k
+</code></pre>
+
+<p>Let's assume, for the sake of simplicity, that quotes always come in pairs. </p>
+
+<p>The obvious way is to just process the string one character at a time (a simple state machine approach);<br />
+however, I'm wondering if regular expressions can be used to do all the processing in one go.</p>
+
+<p>My target language is C#, but I guess my question pertains to any language having builtin or library support for regular expressions.</p>
+
+Answer: <p>The trick is to use non-capturing group to match the part of the string <em>following</em> the match (character <strong>x</strong>) we are searching for.
+Trying to match the string up to <strong>x</strong> will only find either the first or the last occurence, depending whether non-greedy quantifiers are used.
+Here's Greg's idea transposed to Tcl, with comments.</p>
+
+<pre>
+set strIn {axbx'cxdxe'fxgh'ixj'k}
+set regex {(?x)                     # enable expanded syntax 
+                                    # - allows comments, ignores whitespace
+            x                       # the actual match
+            (?=                     # non-matching group
+                [^']*'              # match to end of current quoted substring
+                                    ##
+                                    ## assuming quotes are in pairs,
+                                    ## make sure we actually were 
+                                    ## inside a quoted substring
+                                    ## by making sure the rest of the string 
+                                    ## is what we expect it to be
+                                    ##
+                (
+                    [^']*           # match any non-quoted substring
+                    |               # ...or...
+                    '[^']*'         # any quoted substring, including the quotes
+                )*                  # any number of times
+                $                   # until we run out of string :)
+            )                       # end of non-matching group
+}
+
+#the same regular expression without the comments
+set regexCondensed {(?x)x(?=[^']*'([^']|'[^']*')*$)}
+
+set replRegex {P}
+set nMatches [regsub -all -- $regex $strIn $replRegex strOut]
+puts "$nMatches replacements. "
+if {$nMatches > 0} {
+    puts "Original: |$strIn|"
+    puts "Result:   |$strOut|"
+}
+exit
+</pre>
+
+<p>This prints:</p>
+
+<pre><code>3 replacements. 
+Original: |axbx'cxdxe'fxgh'ixj'k|
+Result:   |axbx'cPdPe'fxgh'iPj'k|
+</code></pre>

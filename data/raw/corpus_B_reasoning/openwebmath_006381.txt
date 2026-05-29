@@ -1,0 +1,365 @@
+Lately I’ve found monads to be more and more useful in several programming projects. For example, Harlan’s type inferencer uses a monad to keep track of what variables have been unified with each other, among other things. It took me a while to really grok monads. One reason is that many of the tutorials I’ve seen start out with category theory and the monad laws. These things don’t strike me as all that useful when I’m trying to make my code better in some way.
+
+What I have found useful is to think of monads as a style of programming (like continuation passing style), or even a design pattern. I’ve found monads are really handy when you need to thread some object through a sequence of function calls. To see how this works, we’re going to start with a store-passing interpreter for a small language and show how to use monads to hide the store in the cases where we don’t need it.
+
+## A Store Passing Interpreter
+
+Let’s start by looking at an interpreter. This is basically the first interpreter from this post, but we’ve added mutable references.
+
+(define value-of/store
+(lambda (e env store)
+(match e
+(,x (guard (symbol? x))
+(cons (lookup x env) store))
+(,n (guard (number? n))
+(cons n store))
+((λ (,x) ,e)
+(cons (lambda (v store)
+(value-of/store e (extend-env x v env) store))
+store))
+((ref ,e)
+(match (value-of/store e env store)
+((,v . ,store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label v) store))))))
+((deref ,e)
+(match (value-of/store e env store)
+(((ref ,label) . ,store)
+(cons (cdr (assq label store))
+store))))
+((update ,e-ref ,e-val)
+(match (value-of/store e-ref env store)
+(((ref ,label) . ,store)
+(match (value-of/store e-val env store)
+((,val . ,store)
+(cons (ref ,label)
+(cons (cons label val) store)))))))
+((,rator ,rand)
+(match (value-of/store rator env store)
+((,rator . ,store)
+(match (value-of/store rand env store)
+((,rand . ,store)
+(rator rand store)))))))))
+
+
+There are a couple of high level changes from the standard environment passing interpreter. First, we’ve added an additional store parameter. This represents the state of the memory, as opposed to the environment, which tracks variables on the stack. Second, since operations such as ref and update can modify the store, in addition to returning the value of an expression, we also have to return a potentially updated store. We could use Scheme’s support for multiple return values, but I went with cons instead for simplicity’s sake.
+
+The first few cases are pretty straightforward. Starting on line 4, we have the variable lookup line. This reads a value from the environment and returns it. The store is left unchanged, so we just return that as is. Likewise with the number case in line 6.
+
+For the lambda case on line 8, we use Scheme’s lambda to represent functions in our language. There’s a slight subtly here. Instead of having the procedure only take a value argument (v), it also must take a store. The reason is that otherwise this procedure would modify the store that was in effect when it the procedure was created, rather than the store in effect at the call site.
+
+Next we have ref, deref and update. This is where the store starts to be interesting. We’ve represented the store as an association list between labels and values. We use ref to create a new reference (think of it like new in C++ or Java), which we implement by using gensym to create a new label, and then adding a new label:value pair to the store. The value of a ref expression is a value tagged as a reference, containing an address into the store. Think of these as pointers.
+
+For deref, we first evaluate the argument and use match to unpack the label from the returned reference value. Once we have the label, we use assq to look it up in the store then we return its value.
+
+The update expression requires us to evaluate two arguments: the destination location and the new value. We do this with two recursive calls to value-of/store. In the interpreter from previous posts, we could have used match’s catamorphism facility to make this quite a bit shorter, but here we need to be explicit about ordering because of a potentially changing store. When we get around to actually updating the store, we just prepend a new label:value pair. Because assq returns the first match it finds, this results in whatever value was previously there being ignored.
+
+Finally, the application case (line 30) is similar to before. The main changes are that we need to be explicit about the order of evaluation and we pass the current store into the function we are applying.
+
+What we have now is an interpreter for a small language with mutable references. You’ll notice we didn’t use any side effects in creating the interpreter, which is kind of cool. Still, a few things are less than ideal. To go from a language without mutable references to one with mutable references, we had to change basically every line in the interpreter. Every recursive call to value-of/store needs an additional store parameter, and every return from the interpreter has to return a store as well. This is the case even though only ref and update can modify the store. What we’d like is to only have to be aware of the store for cases that interact with the store. Monads can help us do that.
+
+## Cleaning up the Interpreter
+
+To deal with some of the shortcomings in the previous paragraph, we are going to derive a monad through a series of correctness-preserving transformations. Some of the intermediate steps will look rather ugly, but the end should look pretty nice.
+
+The first thing we’re going to do is Curry (Schönfinkel?) the store argument.
+
+(define value-of/store
+(lambda (e env)
+(lambda (store)
+(match e
+(,x (guard (symbol? x))
+(cons (lookup x env) store))
+(,n (guard (number? n))
+(cons n store))
+((λ (,x) ,e)
+(cons (lambda (v)
+(lambda (store)
+((value-of/store e (extend-env x v env)) store)))
+store))
+((ref ,e)
+(match ((value-of/store e env) store)
+((,v . ,store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label v) store))))))
+((deref ,e)
+(match ((value-of/store e env) store)
+(((ref ,label) . ,store)
+(cons (cdr (assq label store))
+store))))
+((update ,e-ref ,e-val)
+(match ((value-of/store e-ref env) store)
+(((ref ,label) . ,store)
+(match ((value-of/store e-val env) store)
+((,val . ,store)
+(cons (ref ,label)
+(cons (cons label val) store)))))))
+((,rator ,rand)
+(match ((value-of/store rator env) store)
+((,rator . ,store)
+(match ((value-of/store rand env) store)
+((,rand . ,store)
+((rator rand) store))))))))))
+
+
+As I said, we’re going to make things worse for a while. Curried functions in Scheme programs are always kind of messy. The nice thing is that now we can push the (lambda (store) ...) part inside each of the match branches. It will become clear why we might want to do this in a second.
+
+(define value-of/store
+(lambda (e env)
+(match e
+(,x (guard (symbol? x))
+(lambda (store)
+(cons (lookup x env) store)))
+(,n (guard (number? n))
+(lambda (store)
+(cons n store)))
+((λ (,x) ,e)
+(lambda (store)
+(cons (lambda (v)
+(lambda (store)
+((value-of/store e (extend-env x v env)) store)))
+store)))
+((ref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+((,v . ,store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label v) store)))))))
+((deref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+(((ref ,label) . ,store)
+(cons (cdr (assq label store))
+store)))))
+((update ,e-ref ,e-val)
+(lambda (store)
+(match ((value-of/store e-ref env) store)
+(((ref ,label) . ,store)
+(match ((value-of/store e-val env) store)
+((,val . ,store)
+(cons (ref ,label)
+(cons (cons label val) store))))))))
+((,rator ,rand)
+(lambda (store)
+(match ((value-of/store rator env) store)
+((,rator . ,store)
+(match ((value-of/store rand env) store)
+((,rand . ,store)
+((rator rand) store))))))))))
+
+
+Notice how we have a couple of cases, such as the variable and number case, where all we do is cons some value onto an unchanged store. Since we repeat this pattern a few times, let’s pull it into a separate function that we’ll call… return.
+
+(define return
+(lambda (v)
+(lambda (store)
+(cons v store))))
+
+
+We can rewrite our previous interpreter using return:
+
+(define value-of/store
+(lambda (e env)
+(match e
+(,x (guard (symbol? x))
+(return (lookup x env)))
+(,n (guard (number? n))
+(return n))
+((λ (,x) ,e)
+(return (lambda (v)
+(value-of/store e (extend-env x v env)))))
+((ref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+((,v . ,store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label v) store)))))))
+((deref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+(((ref ,label) . ,store)
+(cons (cdr (assq label store))
+store)))))
+((update ,e-ref ,e-val)
+(lambda (store)
+(match ((value-of/store e-ref env) store)
+(((ref ,label) . ,store)
+(match ((value-of/store e-val env) store)
+((,val . ,store)
+(cons (ref ,label)
+(cons (cons label val) store))))))))
+((,rator ,rand)
+(lambda (store)
+(match ((value-of/store rator env) store)
+((,rator . ,store)
+(match ((value-of/store rand env) store)
+((,rand . ,store)
+((rator rand) store))))))))))
+
+
+For the first time, we’ve introduced a transformation that makes our program shorter! While I was at it, I also did a transformation called an eta reduction in the lambda line at lines 9-10. The result is that the first three cases in the interpreter make no mention of the store. This is real tangible progress towards our goal.
+
+Let’s look at the last case, the application case, for a bit. Here we take a store, pass it into a call to evaluate the operator, and then thread the resulting store into a call to evaluate operand, and then finally we thread that store into the actual application of the operand. In each case, we don’t really care about the store; we only care about the value of the expression. Let’s see if we can write a function that does the store-threading for us. We’ll call it… bind.
+
+(define bind
+(lambda (m f)
+(lambda (store)
+(match (m store)
+((,v . ,store)
+((f v) store))))))
+
+
+Here, m is for monad, meaning it’s a function that does something when it receives a store. The f parameter is a function describing what to do next. It expects a value and returns a new monad. We get this value by applying a store to the m argument. We expect f to return a function expected a new store, and we apply this function to the updated store returned by m. It’s a bit complicated, but it simplifies our application line somewhat:
+
+(value-of/store
+(lambda (e env)
+(match e
+(,x (guard (symbol? x))
+(return (lookup x env)))
+(,n (guard (number? n))
+(return n))
+((λ (,x) ,e)
+(return (lambda (v)
+(value-of/store e (extend-env x v env)))))
+((ref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+((,v . ,store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label v) store)))))))
+((deref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+(((ref ,label) . ,store)
+(cons (cdr (assq label store))
+store)))))
+((update ,e-ref ,e-val)
+(lambda (store)
+(match ((value-of/store e-ref env) store)
+(((ref ,label) . ,store)
+(match ((value-of/store e-val env) store)
+((,val . ,store)
+(cons (ref ,label)
+(cons (cons label val) store))))))))
+((,rator ,rand)
+(bind (value-of/store rator env)
+(lambda (rator)
+(bind (value-of/store rand env)
+(lambda (rand)
+(rator rand)))))))))
+
+
+Our interpreter just shrunk by another line. The only cases where we see the store actually appears are ref, deref, and update, which are exactly the cases that need to read or write memory. The rest of the interpreter is completely oblivious to the existence of memory.
+
+We can clean up the application line a little further. If you squint a little, you’ll noticed that the calls to bind look a little like the traditional expansion of (let ((x e)) b) to ((lambda (x) b) e). Let’s build some extra syntax to make it easier to chain lots of calls to bind together. We’ll call it… do*.
+
+(define-syntax do*
+(syntax-rules ()
+((_ ((x e) rest ...) body)
+(bind e (lambda (x) (do* (rest ...) body))))
+((_ () body)
+body)))
+
+
+This macro works a little like let*, where it performs a sequence of computations in order and names each of their results. Using this macro, our interpreter becomes:
+
+(define value-of/store
+(lambda (e env)
+(match e
+(,x (guard (symbol? x))
+(return (lookup x env)))
+(,n (guard (number? n))
+(return n))
+((λ (,x) ,e)
+(return (lambda (v)
+(value-of/store e (extend-env x v env)))))
+((ref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+((,v . ,store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label v) store)))))))
+((deref ,e)
+(lambda (store)
+(match ((value-of/store e env) store)
+(((ref ,label) . ,store)
+(cons (cdr (assq label store))
+store)))))
+((update ,e-ref ,e-val)
+(lambda (store)
+(match ((value-of/store e-ref env) store)
+(((ref ,label) . ,store)
+(match ((value-of/store e-val env) store)
+((,val . ,store)
+(cons (ref ,label)
+(cons (cons label val) store))))))))
+((,rator ,rand)
+(do* ((rator (value-of/store rator env))
+(rand  (value-of/store rand  env)))
+(rator rand))))))
+
+
+We’re going to cheat a little for the last few cases. We’re doing to define three new functions, create-ref, get-ref and set-ref, which do the store manipulation for us. Here they are:
+
+(define (create-ref val)
+(lambda (store)
+(let ((label (gensym)))
+(cons (ref ,label)
+(cons (cons label val) store)))))
+
+(define (get-ref ref)
+(lambda (store)
+(match ref
+((ref ,label)
+(cons (cdr (assq label store)) store)))))
+
+(define (set-ref ref val)
+(lambda (store)
+(match ref
+((ref ,label)
+(cons ref (cons (cons label val) store))))))
+
+
+These feel like cheating to me because we got these functions basically by copying and pasting the body of the ref, deref and update cases. But, we can think of it as defining a clean interface to the store, which is just good software engineering. Plus, our interpreter was actually doing two things in each case. First it had to evaluate the arguments and then it had to access the store. Using these helper functions makes that separation clearer.
+
+Using these functions in the interpreter completes our transition over to monads.
+
+(define value-of/store
+(lambda (e env)
+(match e
+(,x (guard (symbol? x))
+(return (lookup x env)))
+(,n (guard (number? n))
+(return n))
+((λ (,x) ,e)
+(return (lambda (v)
+(value-of/store e (extend-env x v env)))))
+((ref ,e)
+(do* ((val (value-of/store e env)))
+(create-ref val)))
+((deref ,e)
+(do* ((ref (value-of/store e env)))
+(get-ref ref)))
+((update ,e-ref ,e-val)
+(do* ((ref (value-of/store e-ref env))
+(val (value-of/store e-val env)))
+(set-ref ref val)))
+((,rator ,rand)
+(do* ((rator (value-of/store rator env))
+(rand  (value-of/store rand  env)))
+(rator rand))))))
+
+
+Our interpreter is now a whole 11 lines shorter than where we started! Granted, we’ve moved some of the functionality into helper functions, so the total length of the program may be longer. Still, this program seems much better factored to me. The interpreter itself shows how to evaluate different language forms, and things like order of evaluation are very clear. The details of how to manipulate the store-related data structures are all hidden in the monad.
+
+## Conclusion
+
+I’ve found that thinking of deriving monads through a series of program transformations has helped them make a lot more sense to me. In functional programming it’s common to simulate stateful things by threading extra arguments around. This quickly gets tedious. Monads help you keep this hidden when you don’t care about it and cleanly expose it in cases where you do.
+
+Another benefit of this style of programming that I’ve found is that once your program is written in terms of return, bind and do*`, you can modify the monad without having to change the rest of your program. In rewriting the Harlan type inferencer, there were a few times I realized I had some more information to thread through the inferencer. In the old style, I would have had to change many lines of code to do this. Since the type inferencer was written monadically, however, I could modify a handful of functions while leaving the bulk of the code unchanged.

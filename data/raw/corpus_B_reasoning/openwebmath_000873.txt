@@ -1,0 +1,78 @@
+Codeforces celebrates 10 years! We are pleased to announce the crowdfunding-campaign. Congratulate us by the link https://codeforces.com/10years. ×
+
+### upobir's blog
+
+By upobir, 3 months ago, ,
+
+One of my favorite algorithms out there is FWHT, but sadly there are not many tutorials about it. So here's a simple attempt by me (feedback is appreciate).
+
+Note: I will be explaining FWHT via DFT/FFT and as such good understanding of theory behind DFT/FFT is required. Also, I won't be going into Hadamard matrices, since I don't know much about them myself.
+
+What is FWHT? Suppose you have two sets $(1, 2, 2)$ and $(3, 4, 5)$ and want to perform all possible xor operations between these two sets, the resulting set being $(1, 1, 2, 4, 5, 6, 6, 7, 7)$. This is commonly called xor convolution. Naively you'd do this in $O(n^2)$ time, where $n=2^k$, $k$ = maximum number of bits (you maintain a frequency count for each possible value and loop on all possible pair). FWHT let's you do this in $O(n\log n)$ time via some black magic FFT tricks. We first build the frequency arrays upto $n=2^k$, apply FWHT to turn them into some mysterious point-value form, perform pointwise multiplication and finally perform inverse FWHT on the resulting array to recover resultant frequency array. But how does this work? And why should you know it?
+
+Let's answer the first question. Though we will need to learn two facts about FFT first:
+
+1) When we want to multiply $(1+2x)$ and $(3+4x)$, we first extend their size to 4, then transfer them to point-value form, then perform pointwise multiplication, and then finally perform inverse transform. Notice the first step, we extend the size because their product is of size 3 and so will require at least 3 distinct $(x, y)$ point-value pairs (we use 4 cause it's a power of two). What if we didn't do this size extention? You will see that after the last step you get the polynomial $(11+10x)$ instead of $(3+10x+8x^2)$. The explanation is that we used quadratic roots of unity $1, -1$. They don't have any square, instead for them, $x^2=1$, so the quadratic term "wraps around", contributing to the constant term. The lesson is that if you don't use sufficiently granular roots, the larger powers "wrap around".
+
+2) We use FFT to multiply monovariable polynomials, what about multivariable polynomials? Everything is same as before, we just need a suitable point value form so that we can recover the polynomial back from it. For a monovariable polynomial of size $n$, we need $n$ distinct values (we use roots of unity in FFT for divide and conquer speeed up). In a multivariable polynomial, take $P(x, y)$ $= (1+2x+3y+4xy)$ for example, all we need is distinct value sets for each of the variables. Here, x is of degree 1 and y is of degree 1. So we can just use two distinct value sets for them. For example, we can use $10, 20$ and $30, 40$ for $x$ and $y$ respectively. Then the values $P(10, 30), P(10, 40), P(20, 30), P(20, 40)$ uniquely define the polynomial $P(x, y)$. We could've used $10, 20$ for both variables and that'd also work.
+We incorporate this into multivariable FFT by by dividing the polynomials into polynomial of $x$ grouping by $y$'s power, like $P(x, y) = (1+2x) +y(3+4x) = Q_0(x) + yQ_1(x)$. First let's apply the FFT on the $Q_i$, to get $Q_0(1), Q_0(-1), Q_1(1), Q_1(-1)$. Then we just note that applying FFT on $Q_0(1)+yQ_1(1)$ and $Q_0(-1)+yQ_1(-1)$ will give us $P(1,1), P(1, -1)$ and $P(-1, 1), P(-1, -1)$. So the lesson is, multivariable FFT is just normal FFT with some grouping of values.
+
+Now to FWHT
+Like it was,previously said, FWHT will convert the frequency arrays to some magical form where performing pointwise multiplication somehow performs xor. Note the similarity with polynomial multiplication here. In polynomial multiplication, $ax^i$ and $bx^j$ multiply to merge into $abx^{i+j}$, we perform this merging for all possible pairs and group them according to $x$'s power. In FWHT, what we want is for $ax^i$ and $bx^j$ to merge into $abx^{i \oplus j}$ (considering the frequency array as a polynomial). We can do an interesting thing here, break variables into more varibles, utilizing a number's binary form! Let me explain. Suppose in a problem xor convolution requires 3 bits maximum, then terms like $ax^3$ and $bx^5$ are brokem into $ax_2^0x_1^1x_0^1$ and $bx_2^1x_1^0x_0^1$ (cause 3 is 011 and 5 is 101).
+In this new form, there are variables representing each bit. So if we can somehow make multiplication behave well in single bit powers, then xor convolution will become easy! More formally, if we can somehow make it that $x_i^0 \cdot x_i^0=x_i^1\cdot x_i^1=x_i^0$ and $x_i^0 \cdot x_i^1 = x_i^1$ then $ax_2^0x_1^1x_0^1$ and $bx_2^1x_1^0x_0^1$ will multiply to form $abx_2^1x_1^1x_0^0$ ($3 \oplus 5 = 6$). This is last obstacle. But if you notice the equations, you will see that they are basically $x_i^p \cdot x_i^q= x_i^{(p+q) \pmod 2}$. And now you can see why I had talked so much about FFT with limited domain at the beginning. If we use the numbers $1, -1$ then as $x^2=1$, behavior's $x_i^p \cdot x_i^q= x_i^{(p+q) \pmod 2}$ has been achieved!
+
+Now bringing it all together, we think of the terms $ax^i$ as being broken upto variables that represent the exponent's binary form. We will multiply this new polynomial using multivariable FFT. And to make sure that they behave like xor-ing, we use the domain $1,-1$ for each variable.(this wraps the $x^2$ term back to constants). So FWHT is now just a fancy FFT, huzzah!
+
+Of course we don't need to do actual FFT algorithm for the variables, a polynomial $a+bx$ can be converted to point value form of $(a+b, a-b)$ by simply hardcoding it. And for inverting the transform, observe that if $u=a+b$ and $v=a-b$ then $a=\frac{u+v}{2}$ and $b=\frac{u-v}{2}$. This is why codes for FWHT perform division by 2 in inverting (after doing ordinary FWHT).
+
+I am not providing any code since one can find many good implementations online.
+
+But now to the second question I asked at the beginning, why should you learn it? The answer is simple really, I believe you should understand an algorithm to be able to modify it to specific needs. For example, I set a problem in Codechef's November Long challenge, where you will definitely need to modify the traditional FWHT (along with some more tricks). If you have found more problems requiring modifications on FWHT, please comment so. Also, constructive criticism is appreciated.
+
+EDIT: Forgot to add two things. First of all there are some well known common modifications of FWHT: "Or convolution" and "And convolution". They are the same thing as xor convolution, except you do, 'or' or 'and'. The "or convolution" is almost the same except the behavior we want is $x_i^0 \cdot x_i^0 = x_i^0$ and $x_i^0 \cdot x_i^1 = x_i^1 \cdot x_i^0 = x_i^1 \cdot x_i^1 = x_i^1$. For this, obviously $1$ is a candidate, another illegal cunning candidate is $0$ (we'll use $0^0 = 1$). So we use the domain $1, 0$. "And convolution" is just "Or convolution" on complements, which in terms of implementation is just reversing the logic of "Or convolution".
+And finally, I learned this interpretation of FWHT from this helpful blog. But I believe the explanation there is not elaborate. Thus my attempt to write this blog.
+
+• +165
+
+By upobir, history, 3 months ago, ,
+
+What is the best process to see if a problem's idea has already been used somewhere or not? There are so many online judges and contests. Is there any good way to find out? It sucks to propose a problem somewhere and later find out it's an almost copy from some oj.
+
+• +25
+
+By upobir, 10 months ago, ,
+
+Sometimes when you are getting WA on a problem, possibly due to missing some corner case or a bug in your code, all you really need are the perfect test cases. Of course you don't know the perfect test cases, so you have to resort to something else. And that something else is checking your code on a bunch of randomly generated testcases. I recently learnt about it and so, am writing this so other noobs like me can get a little help.
+
+First of all, this isn't an unique idea. I myself learnt about it from errichto's youtube video. You should check it out if you haven't seen it before. So the idea is simple, you will write two new c++ programs, one to generate random test cases. And another to get solution for those test cases, but unlike your actual solution code, this will definitely give the correct answer (perhaps not efficiently/ via brute force). You run the test generator a bunch of times and save the tests in a fine input.in. After each generation, you also solve the problem for the test case in output.out (your original solution) and output2.out (your brute force solution). And then you compare the solutions with a script code of your OS.
+
+The test generation part is easy for a lot of problems, you need to just randomly generate a bunch of data. Sometimes these need to follow a strict restriction but that depends on the problem. For random numbers I use
+
+mt19937 rng(chrono::system_clock::now().time_since_epoch().count());
+long long random(long long a, long long b){
+return a + rng() % (b - a + 1);
+}
+
+
+Anyways, about the script part, which is the main goal of this blog. For linux script you can just see errichto's video. For windows sctipt, put all three codes TestGenerator.cpp, solution.cpp, brute.cpp in one folder, compile them, and write the following code in checker.bat file.
+
+@echo off
+for /l %%x in (1, 1, 100) do (
+TestGenerator > input.in
+solution < input.in > output.out
+brute < input.in > output2.out
+fc output.out output2.out > diagnostics || exit /b
+echo %%x
+)
+echo all tests passed
+
+
+The code basically runs a loop 100 times. Each time it calls TestGenerator.exe and puts the randomly generated output in input.in (the > command redirects stdout to input.in). Then solution.exe and brute.exe are run by redirecting stdin to input.in. The output are put in output.out and output2.out respectively. fc is the command for comparing files, if the files have difference then "exit /b" command stops the batch file. Otherwise if there is no difference, the test case number x will be printed showing you the progress. The advantage of the exit command is that after exiting, you will find the corner test case in input.in and you can debug your code. So all you gotta do is just open cmd in the folder of the files and write checker.bat and run.
+
+I myself don't know that much windows scripting, I learned about it from yeputons's comment in this post. Anyways hope this helps. Forgive any mistakes please.
+
+• +32
+
+By upobir, history, 13 months ago, ,
+
+I have been stuck at this problem for quite a long time now. Can someone please provide a detailed solution. I know the trick to be used is broken profile dp, but after that I am in a dead end. Thanks in advance.

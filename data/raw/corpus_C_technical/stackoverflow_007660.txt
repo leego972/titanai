@@ -1,0 +1,72 @@
+Question: <p>I've got a large amount of data (a couple gigs) I need to write to a zip file in Python.  I can't load it all into memory at once to pass to the .writestr method of ZipFile, and I really don't want to feed it all out to disk using temporary files and then read it back.</p>
+
+<p>Is there a way to feed a generator or a file-like object to the ZipFile library?  Or is there some reason this capability doesn't seem to be supported?</p>
+
+<p>By zip file, I mean zip file.  As supported in the Python zipfile package.</p>
+
+Answer: <p>The essential compression is done by zlib.compressobj.  ZipFile (under Python 2.5 on MacOSX appears to be compiled).  The Python 2.3 version is as follows.</p>
+
+<p>You can see that it builds the compressed file in 8k chunks.  Taking out the source file information is complex because a lot of source file attributes (like uncompressed size) is recorded in the zip file header.  </p>
+
+<pre><code>def write(self, filename, arcname=None, compress_type=None):
+    """Put the bytes from filename into the archive under the name
+    arcname."""
+
+    st = os.stat(filename)
+    mtime = time.localtime(st.st_mtime)
+    date_time = mtime[0:6]
+    # Create ZipInfo instance to store file information
+    if arcname is None:
+        zinfo = ZipInfo(filename, date_time)
+    else:
+        zinfo = ZipInfo(arcname, date_time)
+    zinfo.external_attr = st[0] &lt;&lt; 16L      # Unix attributes
+    if compress_type is None:
+        zinfo.compress_type = self.compression
+    else:
+        zinfo.compress_type = compress_type
+    self._writecheck(zinfo)
+    fp = open(filename, "rb")
+
+    zinfo.flag_bits = 0x00
+    zinfo.header_offset = self.fp.tell()    # Start of header bytes
+    # Must overwrite CRC and sizes with correct data later
+    zinfo.CRC = CRC = 0
+    zinfo.compress_size = compress_size = 0
+    zinfo.file_size = file_size = 0
+    self.fp.write(zinfo.FileHeader())
+    zinfo.file_offset = self.fp.tell()      # Start of file bytes
+    if zinfo.compress_type == ZIP_DEFLATED:
+        cmpr = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION,
+             zlib.DEFLATED, -15)
+    else:
+        cmpr = None
+    while 1:
+        buf = fp.read(1024 * 8)
+        if not buf:
+            break
+        file_size = file_size + len(buf)
+        CRC = binascii.crc32(buf, CRC)
+        if cmpr:
+            buf = cmpr.compress(buf)
+            compress_size = compress_size + len(buf)
+        self.fp.write(buf)
+    fp.close()
+    if cmpr:
+        buf = cmpr.flush()
+        compress_size = compress_size + len(buf)
+        self.fp.write(buf)
+        zinfo.compress_size = compress_size
+    else:
+        zinfo.compress_size = file_size
+    zinfo.CRC = CRC
+    zinfo.file_size = file_size
+    # Seek backwards and write CRC and file sizes
+    position = self.fp.tell()       # Preserve current position in file
+    self.fp.seek(zinfo.header_offset + 14, 0)
+    self.fp.write(struct.pack("&lt;lLL", zinfo.CRC, zinfo.compress_size,
+          zinfo.file_size))
+    self.fp.seek(position, 0)
+    self.filelist.append(zinfo)
+    self.NameToInfo[zinfo.filename] = zinfo
+</code></pre>

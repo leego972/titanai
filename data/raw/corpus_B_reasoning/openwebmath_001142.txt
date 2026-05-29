@@ -1,0 +1,100 @@
+What's the deal with biocLite's "Update all/some/none? [a/s/n]"?
+1
+3
+Entering edit mode
+kjo ▴ 60
+@kjo-11078
+Last seen 5.6 years ago
+
+Whenever I install a package with biocLite(...), at the end of the installation I get a prompt like this one:
+
+    Old packages: 'RCurl', 'boot', 'class', 'cluster', 'codetools', 'foreign',
+'KernSmooth', 'lattice', 'MASS', 'Matrix', 'mgcv', 'nlme', 'nnet',
+'rpart', 'spatial', 'survival'
+Update all/some/none? [a/s/n]:
+
+My experience is that answering a(ll) does not prevent my being asked the same question (for the same "Old packages") the next time I install a package with biocLite(...).
+
+In fact, if I run biocLite('some.package'), answer a to the Update all/some/none? [a/s/n]: prompt, and then immediately repeat biocLite('some.package'), I get the exact same Update all/some/none?  [a/s/n]: prompt at the end, for the same "Old packages" that I supposedly updated a few minutes before.
+
+What's going on?  How can I get the "Old packages" to be updated in such a way that biocLite will recognize?
+
+NB: Just be clear, I don't want to simply suppress the "Update all/some/none? [a/s/n]" prompt.  I just want to deal with it once and for all.
+
+bioclite • 8.2k views
+3
+Entering edit mode
+@martin-morgan-1513
+Last seen 1 day ago
+United States
+
+You have packages installed in libraries that you do not have write access to, or you have two versions of the package installed and R finds the old version but updates the new one. So arrange your libraries so that there is only one version of each package, and non-base packages (base packages do not change within an R release) are installed in a directory where you have write access.
+
+0
+Entering edit mode
+
+Just to be clear, the situation described in my question arises both in systems for which I don't have superuser access, and those for which I do.
+
+In the former case, there is no way I can update packages without ending up with multiple versions of the package.
+
+In the latter case, it seems that you're suggesting either that
+
+a. I should always run biocLite(...) as root (so that it updates the system packages); OR
+
+b. after installing updates (as non-root) I selectively remove old system packages (as root).
+
+If this is what you had in mind, then I must say that I'm amazed that the use of biocLite would entail such inconvenient and error-prone maneuvers.
+
+I don't understand why biocLite can't consider only those packages visible to the user (through the user's search path) to decide which need to be updated.
+
+Also, I'm puzzled to learn that "non-base packages ... do not change within an R release".  I thought it would be exactly the opposite: only non-base packages would be liable to change within an R release.
+
+1
+Entering edit mode
+
+I meant that base packages do not change, not that non-base packages do not change.
+
+Yes, biocLite should just say 'these packages are old but can't be updated'; we'll fix that. Mostly the behavior here is inherited from R's update.packages(), but that's not a very good excuse.
+
+I suggest that you install base R (and nothing else) as root, then all other packages as regular user via biocLite().
+
+0
+Entering edit mode
+
+Got it.  Thanks!
+
+But what about the case where I'm working on a system for which I don't have root access, such as the shared computer cluster at work?  The problem is not simply the annoyance of being prompted every time.  The more serious problem is that it is difficult to distinguish between those packages that really need updating from those that only look that way due to update.packages's shortcomings.  One is left with no choice but to answer "a" every time, thereby greatly increasing the time it takes to install or update a single package.
+
+The matter is serious.  Yesterday R was segfault-ing on me, and the only way that I could fix the problem was to re-install my entire personal library from scratch.  There must have been a version mismatch somewhere in there.
+
+Worse yet, after that incident I learned from a coworker that she did a similarly radical overhaul of her personal library because she was getting "screwy results".  In this case, "screwy results" is shorthand for "a paper retraction waiting to happen."  A few segfaults are nothing in comparison.
+
+Therefore, I'm hellbent on keeping my R library up-to-date, and looking for ways to make the process more convenient and less error-prone.  I'm sorry to discover that update.packages is not much of a help here.
+
+0
+Entering edit mode
+
+I don't know what you mean by packages that 'really need updating' versus those that only look that way. There really are packages that are not current, and it's possible to load them (e.g., by specifying lib.loc= in library()) in preference to newer packages occurring earlier in .libPaths(). As I said, I'll work to make biocLite() only prompt about packages that can be updated, while still being informative about packages that are out of date and should be updated (by someone with appropriate permissions).
+
+FWIW, and I know that you were likely taking a pragmatic approach, but there are more effective ways of troubleshooting a segfault than reinstalling all packages. BiocInstaller::biocValid() might point to packages that are too old / too new for the version of Bioconductor in use. Running R under a debugger and figuring out where a segfault occurs can be challenging but not super-impossible; some general approaches are outlined here. And oddly, I don't think that keeping packages current is the way to avoid retraction -- a static set of packages means a static analysis, providing a calm environment to carefully assess each step being performed.
+
+1
+Entering edit mode
+
+Let me clarify that, even though I've been writing code for a long time, I am quite new to R.  I've found your answer and comments extremely instructive.  Thank you, I really appreciate them.
+
+Regarding the "really need updating": if I understand the situation correctly, when one runs biocLite, the test for whether a package is out-of-date (i.e. "needs updating") is performed only on system packages.  This means that packages for which an up-to-date version exists in the user's personal library can still be reported as out-of-date when one runs biocLite.
+
+More specifically, if one chooses to update one such package X (e.g. by answering "a" or "s" to the Update all/some/none? [a/s/n]: prompt), and one does not have permission to modify the system packages, the updated X package will be placed in one's personal library.  This means that this newly updated X package will not be detected next time that biocLite checks for packages that need updating; instead, it will, as before, check only the system's X package, and therefore, as before, it will report that X needs updating.  But this is a spurious report, because I already have an updated X package in my personal library.  The package X in this scenario is an example of what I mean by a package that does not "really need updating."
+
+If, on the other hand, I don't have an updated version of the X package in my personal library, and the system-wide version of the X package is out-of-date, then in this case I'd say that the X package "really needs updating".
+
+(Sorry if I've beaten a dead horse here.)
+
+Thanks for the pointers on debugging a segfault.  Indeed, as you guessed, I did take a pragmatic route.  (I was under severe time pressure.)  As it turns out, I did not erase my personal library; I just renamed the directory.  Therefore I may try to follow your suggestions when I have a chance.
+
+Your point on "a static set of packages" is well taken.  In practice, however, I often add new packages to an existing library.  If there is some subtle incompatibility between a newly added package Z and a pre-existing environment, then what is one supposed to do?  The problem becomes more difficult to diagnose (and therefore deal with) if this incompatibility does not become manifest until well after the Z package was installed.  When this happens, all one knows is that something is broken in the library.  Finding what that is can take a long time.  The pragmatic course of action, as you alluded to, is a full re-installation.
+
+This all points to the need for R's analog of Python's virtualenv.  Maybe this can be achieved simply by having multiple personal library directories, and selecting among them by, e.g., setting the R_LIBS_USER library appropriately; e.g.
+
+    R_LIBS_USER=/path/to/my/production/personal/R_library R

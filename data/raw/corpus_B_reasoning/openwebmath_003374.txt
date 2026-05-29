@@ -1,0 +1,166 @@
+Anonymous 1123
+I tried to draw a cylinder  inscribed a cone like this
+
+\documentclass[border=1mm,tikz]{standalone}
+\usepackage{tikz-3dplot}
+
+\begin{document}
+%polar coordinates of visibility
+\pgfmathsetmacro\th{50}
+\pgfmathsetmacro\az{120}
+\tdplotsetmaincoords{\th}{\az}
+%parameters of the cone
+\pgfmathsetmacro\v{2*\R} %hight of cone
+\pgfmathsetmacro\h{\v/3} %hight of cylinder
+
+\begin{tikzpicture} [tdplot_main_coords,line join = round, line cap = round]
+\coordinate (O) at (0,0,0) ;
+%\coordinate (A) at ({\R*cos(\angA)}, {\R*sin(\angA)},0);
+%\coordinate (B) at ({\R*cos(\angB)}, {\R*sin(\angB)},0);
+\coordinate (S) at (0,0,\v);
+%\draw[thick] (S) -- (A) (S) -- (B);
+\draw[dashed]  (S)--(O) ;
+\begin{scope}[canvas is xy plane at z=0]
+
+\draw[dashed] (\tdplotmainphi:\myr) arc(\tdplotmainphi:\tdplotmainphi+180:\myr);
+
+\draw[dashed] (\tdplotmainphi:\myr) coordinate(BR) arc(\tdplotmainphi:\tdplotmainphi-180:\myr) coordinate(BL);
+\coordinate (O) at (0,0);
+\draw[dashed] (BL) -- (BR);
+\end{scope}
+%
+\begin{scope}[canvas is xy plane at z=\h]
+\coordinate (O') at (0,0);
+
+\draw [dashed](BR) -- (\tdplotmainphi:\myr) (BL) -- (\tdplotmainphi-180:\myr);
+\draw[dashed] (\tdplotmainphi:\myr) arc(\tdplotmainphi:\tdplotmainphi+180:\myr);
+
+\draw[thick] (\tdplotmainphi:\myr) coordinate(BR) arc(\tdplotmainphi:\tdplotmainphi-180:\myr) coordinate(BL);
+\draw[dashed]  (\tdplotmainphi:\myr)  -- (\tdplotmainphi-180:\myr);
+\end{scope}
+
+\pgfmathsetmacro\cott{{cot(\th)}}
+\pgfmathsetmacro\fraction{\R*\cott/\v}
+
+\pgfmathsetmacro\fraction{\fraction<1 ? \fraction : 1}
+
+\pgfmathsetmacro\angle{{acos(\fraction)}}
+
+% % angles for transformed lines
+\pgfmathsetmacro\PhiOne{180+(\az-90)+\angle}
+\pgfmathsetmacro\PhiTwo{180+(\az-90)-\angle}
+
+% % coordinates for transformed surface lines
+\pgfmathsetmacro\sinPhiOne{{sin(\PhiOne)}}
+\pgfmathsetmacro\cosPhiOne{{cos(\PhiOne)}}
+\pgfmathsetmacro\sinPhiTwo{{sin(\PhiTwo)}}
+\pgfmathsetmacro\cosPhiTwo{{cos(\PhiTwo)}}
+
+% % angles for original surface lines
+\pgfmathsetmacro\sinazp{{sin(\az-90)}}
+\pgfmathsetmacro\cosazp{{cos(\az-90)}}
+\pgfmathsetmacro\sinazm{{sin(90-\az)}}
+\pgfmathsetmacro\cosazm{{cos(90-\az)}}
+% % draw basis circle
+\tdplotdrawarc[tdplot_main_coords,thick]{(O)}{\R}{\PhiOne}{360+\PhiTwo}{anchor=north}{}
+\tdplotdrawarc[tdplot_main_coords,dashed]{(O)}{\R}{\PhiTwo}{\PhiOne}{anchor=north}{}
+
+% % displaying tranformed surface of the cone (rotated)
+\draw[thick] (0,0,\v) -- (\R*\cosPhiOne,\R*\sinPhiOne,0);
+\draw[thick] (0,0,\v) -- (\R*\cosPhiTwo,\R*\sinPhiTwo,0);
+\end{tikzpicture}
+\end{document}
+
+![ScreenHunter 816.png](/image?hash=0c22c8966bf1b249f77084849e60d473c3c43ba0a1113c9ca1f58e7585c11c42)
+The dashed line of cylinder incorrect. How can I repair it?
+user 3.14159
+The main message is that you basically answered the question yourself by computing the critical angles of visibility for the larger cone. The same angles can be used for the smaller cone on the top.
+
+The rest is just a series of minor remarks:
+1. Instead of using \th and \az you can just use \tdplotmaintheta and \tdplotmainphi consistently (you are using the latter anyway). That's perhaps a bit less confusing.
+2. I personally like to use declare function instead of a series of macros. Using macros is fine, of course, but if one is to use them, perhaps it is better to define them locally inside the tikzpicture so that you can copy the whole thing and embed it in another document without having to worry about overwriting some global macros.
+3. You can just use the min and max functions instead of the ifthenelse stuff.
+4. You can use the arcs from tikz-3dplot or "ordinary" arcs in planes from the 3d library. However, I would not necessarily want to mix them as both of them have the same purpose.
+
+
+\documentclass[border=1mm,tikz]{standalone}
+\usepackage{tikz-3dplot}
+\begin{document}
+\tdplotsetmaincoords{50}{120}
+\begin{tikzpicture}[tdplot_main_coords,line join = round, line cap = round,
+hidden/.style={thin,dashed},visible/.style={thick,solid},
+declare function={R=3;v=2*R;% parameters of the cone
+h=v/3;r=(v-h)*R/v;% parameters of the cylinder
+f=max(min(R*cot(\tdplotmaintheta)/v,1),-1);% auxiliary
+phicrit=acos(f);% crititcal angles
+phi1=90+\tdplotmainphi+phicrit;
+phi2=90+\tdplotmainphi-phicrit;}]
+\draw[hidden] (0,0,0) coordinate (O)
+--  (0,0,v) coordinate (S);
+\begin{scope}[canvas is xy plane at z=0]
+\draw[hidden] (\tdplotmainphi:r)
+\draw[hidden] (\tdplotmainphi:r) coordinate(BR)
+coordinate(BL) -- cycle;
+\draw[hidden] (phi1:R) coordinate (CL)
+coordinate (CR);
+\draw[visible] (phi1:R)
+-- (S) -- cycle;
+\end{scope}
+%
+\begin{scope}[canvas is xy plane at z=h]
+\draw [hidden](BR) -- (\tdplotmainphi:r)
+(BL) --	(\tdplotmainphi-180:r);
+\draw[hidden] (phi1:r)
+\draw[visible] (phi1:r)
+\end{scope}
+\end{tikzpicture}
+\end{document}
+
+![Screen Shot 2020-08-23 at 7.58.19 PM.png](/image?hash=d06baf50645eb394ccd7590f1cb5b85b2819c7744d0a432a36694a140d5bddff)
+
+Given the height of the cylinder, one can compute its radius, or the other way around.
+
+\documentclass[border=1mm,tikz]{standalone}
+\usepackage{tikz-3dplot}
+\begin{document}
+\tdplotsetmaincoords{60}{120}
+\begin{tikzpicture}[tdplot_main_coords,line join = round, line cap = round,
+hidden/.style={thin,dashed},visible/.style={thick,solid},
+declare function={R=2;v=R;% base radius and height of the cone
+h=(R-r)*v/R;%
+f=max(min(R*cot(\tdplotmaintheta)/v,1),-1);% auxiliary
+phicrit=acos(f);% crititcal angles
+phi1=90+\tdplotmainphi+phicrit;
+phi2=90+\tdplotmainphi-phicrit;}]
+\draw[hidden] (0,0,0) coordinate (O)
+--  (0,0,v) coordinate (S);
+\begin{scope}[canvas is xy plane at z=0]
+\draw[hidden] (\tdplotmainphi:r)
+\draw[hidden] (\tdplotmainphi:r) coordinate(BR)
+coordinate(BL) -- cycle;
+\draw[hidden] (phi1:R) coordinate (CL)
+coordinate (CR);
+\draw[visible] (phi1:R)
+-- (S) -- cycle;
+\end{scope}
+%
+\begin{scope}[canvas is xy plane at z=h]
+\draw [hidden](BR) -- (\tdplotmainphi:r)
+(BL) --	(\tdplotmainphi-180:r);
+\draw[hidden] (phi1:r)
+\draw[visible] (phi1:r)
+\end{scope}
+\end{tikzpicture}
+\end{document}
+
+![Screen Shot 2020-08-23 at 9.04.38 PM.png](/image?hash=7c51212ccbc61773e041e9a4735212fa2026214d154b6965e4139c52a987ca79)
+
+With some more recent additions to the [3dtools library](https://github.com/marmotghost/tikz-3dtools) the code can be condensed to
+
+\documentclass[border=1mm,tikz]{standalone}
+\usetikzlibrary{calc,3dtools}% https://github.com/marmotghost/tikz-3dtools
+\begin{document}
+\begin{tikzpicture}[3d/install view={phi=110,theta=70},line join = round, line cap = round,
+declare function={R=2;v=R;% base radius and height of the cone
+h=(R-r)*v/R;%  height of the base of the upper circle
+}]

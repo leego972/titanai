@@ -1,0 +1,46 @@
+Question: <p>How can I distribute a standalone Python application in Linux?</p>
+
+<p>I think I can take for granted the presence of a recent Python interpreter in any modern distribution. The problem is dealing with those libraries that do not belong to the standard library, i.e. wxPython, scipy, python cryptographic toolkit, reportlab, and so on.</p>
+
+<p>Is there a working Linux counterpart to, say, py2exe (which, by the way, I have never tried)?
+Is there a free, opensource one?</p>
+
+Answer: <p>Setuptools is overkill for me since my program's usage is quite limited, so here's my homegrown alternative.</p>
+
+<p>I bundle a "third-party" directory that includes all prerequisites, and use site.addsitedir so they don't need to be installed globally.</p>
+
+<pre><code># program startup code
+import os
+import sys
+import site
+path = os.path.abspath(os.path.dirname(__file__))
+ver = 'python%d.%d' % sys.version_info[:2]
+thirdparty = os.path.join(path, 'third-party', 'lib', ver, 'site-packages')
+site.addsitedir(thirdparty)
+</code></pre>
+
+<p>Most of my prereqs have setup.py installers.  Each bundled module gets its own "install" process, so any customized stuff (e.g. ./configure) can be run automatically.  My install script runs this makefile as part of the install process.</p>
+
+<pre><code># sample third-party/Makefile
+PYTHON_VER = `python -c "import sys; \
+        print 'python%d.%d' % sys.version_info[:2]"`
+PYTHON_PATH = lib/$(PYTHON_VER)/site-packages
+MODS = egenix-mx-base-3.0.0 # etc
+
+.PHONY: all init clean realclean $(MODS)
+all: $(MODS)
+$(MODS): init
+init:
+    mkdir -p bin
+    mkdir -p $(PYTHON_PATH)
+clean:
+    rm -rf $(MODS)
+realclean: clean
+    rm -rf bin
+    rm -rf lib
+
+egenix-mx-base-3.0.0:
+    tar xzf $@.tar.gz
+    cd $@ &amp;&amp; python setup.py install --prefix=..
+    rm -rf $@
+</code></pre>

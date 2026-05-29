@@ -1,0 +1,189 @@
+CSE 559A: Computer Vision
+
+Fall 2018: T-R: 11:30-1pm @ Lopata 101
+
+Instructor: Ayan Chakrabarti (ayan@wustl.edu).
+Course Staff: Zhihao Xia, Charlie Wu, Han Liu
+
+November 20, 2018
+
+# General
+
+• Problem Set 5: Deadline Extended to Dec 4th.
+
+• Recitation on Nov 30th (Friday after Thanksgiving)
+
+# Batch Normalization
+
+He et al., "Identity Mappings in Deep Residual Networks". 2016.
+
+# Regularization
+
+• Given a limited amount of training data, deep architectures will begin to overfit.
+• Important: Keep track of training and dev-set errors
+Training errors will keep going down, but dev will saturate. Make sure you don't train to a point when dev errors start going up.
+• So how do we prevent, or delay, overfitting so that our dev performance increases ?
+
+Solution 1: Get more data.
+
+# Regularization
+
+Data Augmentation
+
+• Think of transforms to the images that you have that would still keep them in the distribution of real images.
+• Typical Transforms
+• Scaling the image
+• Taking random crops
+• Applying Color-transformations (change brightness, hue, saturation randomly)
+• Horizontal Flips (but not vertical)
+• Rotations upto +- 5 degrees.
+• Are a good way of getting more training data for 'free'.
+• Teaches your network to be invariant to these transformations ....
+• Unless your output isn't. If your output is a bounding box, segmentation map, or other quantities that would change with these augmentation operations, you need to apply them to the outputs too.
+
+# Regularization
+
+Weight Decay
+
+• Add a squared or absolute value penalty on all weight values (for example, on each element of every convolutional kernel, matmul matrix) except biases. $$\sum_i w_i^2$$ or $$\sum_i |w_i|$$
+• So now your effective loss is $$L' = L + \lambda \sum_i w_i^2$$
+• How would you train for this ?
+• Let's say you use backprop to compute $$\nabla_{w_i} L$$.
+• What gradient would you apply to your weights ? What is $$\nabla_{w_i} L'$$ ?
+
+$\nabla L' = \nabla L + 2\lambda w_i$
+
+• So in addition to the standard update, you will also be subtracting a scaled version of the weight itself.
+• What about for $$L' = L + \lambda \sum_i |w_i|$$ ?
+
+$\nabla L' = \nabla L + \lambda Sign(w_i)$
+
+# Regularization
+
+Regularization: Dropout
+
+• Key Idea: Prevent a network from "depending" too much on the presence of a specific activation.
+• So, randomly drop these values during training.
+
+$$g=$$Dropout($$f$$,p): $$f$$ and $$g$$ will have the same shape.
+
+Different behavior during training and testing.
+
+• Training
+• For each element $$f_i$$ of $$f$$,
+• Set $$g_i=0$$ with probability $$p$$, and $$\frac{f_i}{(1-p)}$$ with probability $$(1-p)$$
+• Testing: $$g_i = f_i$$
+• Why does this make sense ? Because in expectation, our value during training and test will be the same.
+• Dropout is a layer. You will backpropagate through it ! How ?
+
+# Regularization
+
+Regularization: Dropout
+
+• Write the function as $$g = f \cdot \epsilon$$
+• Here $$\epsilon$$ is a random array same size as $$f$$, with values 0 and $$1/(1-p)$$ with probability $$p$$ and $$(1-p)$$.
+• $$\cdot$$ denotes element-wise multiplication.
+• $$\nabla_f = \nabla_g \cdot \epsilon$$
+• Even though $$\epsilon$$ is random, you must use the same $$\epsilon$$ in the backward pass that you generated for the forward pass.
+• Don't backpropagate to $$\epsilon$$ because it is not a function of the input.
+• Like RELU, but kills gradients based on an external random source---whether you dropped that activation or not in the forward pass. If you didn't, remember to multiply by the $$1/(1-p)$$.
+
+# Regularization
+
+Regularization: Early Stopping
+
+• Keep track of dev set error. Stop optimization when it starts going up.
+• This is a legitimate regularization technique !
+• Essentially, you are restricting your hypothesis space to functions that are reachable within $$N$$ iterations of a random initialization.
+
+# Different Optimization Methods
+
+• Standard SGD
+
+$w_i \leftarrow w_i - \lambda \nabla_{w_i}$
+
+• Momentum
+
+$g_i \leftarrow \nabla_{w_i} + \gamma g_i$ $w_i \leftarrow w_i - \lambda g_i$
+
+• But we are still applying the same learning rate for all parameters / weights.
+
+# Different Optimization Methods
+
+Adaptive Learning Rate Methods
+
+Key idea: Set the learning rate for each parameter based on the magnitude of its gradients.
+
+$g^2_i \leftarrow g^2_i + (\nabla_{w_i})^2$ $w_i \leftarrow w_i - \lambda \frac{\nabla_{w_i}}{\sqrt{g^2_i+\epsilon}}$
+
+Global learning rate divided by sum of magnitudes of past gradients.
+
+Problem: Will always keep dropping the effective learning rate.
+
+• RMSProp
+
+$g^2_i \leftarrow \gamma g^2_i + (1-\gamma)(\nabla_{w_i})^2$ $w_i \leftarrow w_i - \lambda \frac{\nabla_{w_i}}{\sqrt{g^2_i+\epsilon}}$
+
+# Different Optimization Methods
+
+Adaptive Learning Rate Methods
+
+• Adam: RMSProp + Momentum
+
+$m_i \leftarrow \beta_1 m_i + (1-\beta_1) \nabla_{w_i}$ $v_i \leftarrow \beta_2 v_i + (1-\beta_2) (\nabla_{w_i})^2$
+
+$w_i \leftarrow w_i - \frac{\lambda}{\sqrt{v_i}+\epsilon}m_i$
+
+• How do you initialize $$m_i$$ and $$v_i$$ ? Typically as 0 and 1.
+• This won't matter once the values of $$m_i, v_i$$ stabilize. But in initial iterations, they will be biased towards their initial values.
+
+# Different Optimization Methods
+
+Adaptive Learning Rate Methods
+
+• Adam: RMSProp + Momentum + Bias Correction
+
+$m_i \leftarrow \beta_1 m_i + (1-\beta_1) \nabla_{w_i}$ $v_i \leftarrow \beta_2 v_i + (1-\beta_2) (\nabla_{w_i})^2$
+
+$\hat{m}_i = \frac{m_i}{1-\beta_1^t}$ $\hat{v}_i = \frac{v_i}{1-\beta_2^t}$
+
+$w_i \leftarrow w_i - \frac{\lambda}{\sqrt{\hat{v}_i}+\epsilon}\hat{m}_i$
+
+Here, $$t$$ is the iteration number.
+
+As $$t\rightarrow \infty$$, $$1-\beta^t=1$$.
+
+# Distributed Training
+
+• Neural Network Training is Slow.
+• But many operations are parallelizable. In particular, operations for different batches are independent.
+• That's why GPUs are great for deep learning! But even so, you will begin to saturate the computation (or worse, memory) on a GPU.
+• Solution: Break up computation across multiple GPUs.
+• Two possibilities:
+• Model Parallelism
+• Data Parallelism
+
+# Distributed Training
+
+Model Parallelism
+
+• Less popular, doesn't help for many networks.
+• Essentially, if you have two independent "paths" in your network, you can place them on different devices. And sync, when they join.
+
+Was used in the Sutskever et al., 2012 ImageNet paper.
+
+# Distributed Training
+
+Data Parallelism
+
+• Begin with all devices having the same model weights.
+• One each device, load a separate batch of data.
+• Do forward-backward to compute weight gradients on each GPU with its own batch.
+• Have a single device (one of the GPUs, or a CPU) recover gradients from all devices.
+• Average these gradients and apply the update to the weights.
+• Distribute new weights to all devices.
+• Works well in practice, especially for multiple GPUs in the same machine.
+• Communication overhead of transferring gradients and weights back and forth. Can be large if distributing across multiple machines.
+• Approximate Distributed Training
+• Let each worker keep updating its own weights independently for multiple iterations. Then, transmit back weights to single device, average weights, and sync to all devices.
+• Other options, quantize gradients when sending back and forth (while making sure all workers have the same models).

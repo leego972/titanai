@@ -1,0 +1,92 @@
+# Construct tensor with complicated symmetries
+
+I have a tensor with following symmetries
+
+Clear[G]
+G[i_, j_, k_, l_] := G[3 - i, 3 - j, 3 - k, 3 - l]
+G[i_, j_, k_, l_] := G[j, i, l, k]
+G[i_, j_, k_, l_] := Conjugate[G[k, l, i, j]]
+
+
+where $$i,\,j,\,k,\,l\in\{1,\,2\}$$. It is fully specified by
+
+G[1, 1, 1, 1] = r[1];
+G[1, 1, 2, 2] = r[2];
+G[1, 2, 1, 2] = r[3];
+G[1, 2, 2, 1] = r[4];
+G[1, 1, 1, 2] = z;
+
+
+where $$r\in\mathbb{R}$$ and $$z\in\mathbb{C}$$. I would like to specify the whole tensor by writing
+
+Array[G, {2, 2, 2, 2}]
+
+
+This is obviously not possible due to infinite recursion. One can type all the elements manually. But is there an automatic way? Relation 2 can be specified with the help of SymmetrizedArray, but I do not know how to specify 1 and 3.
+
+It's just a matter of ordering your definitions appropriately. Start by defining the simple symmetries:
+
+Clear[G];
+G[i_, j_, k_, l_] /; ! OrderedQ[{{i, j, k, l}, {j, i, l, k}}] := G[j, i, l, k];
+G[i_, j_, k_, l_] /; ! OrderedQ[{{i, j, k, l}, {k, l, i, j}}] := Conjugate[G[k, l, i, j]];
+
+
+Here are your (minimal) specification of the elements:
+
+G[1, 1, 1, 1] = r[1];
+G[1, 1, 2, 2] = r[2];
+G[1, 2, 1, 2] = r[3];
+G[1, 2, 2, 1] = r[4];
+G[1, 1, 1, 2] = z;
+
+
+Finally, for the cases that do not match, subtract all indices from 3:
+
+G[i_, j_, k_, l_] := G[3 - i, 3 - j, 3 - k, 3 - l]
+
+
+With these definitions in that order, you get what you are looking for:
+
+Array[G, {2, 2, 2, 2}]
+(*
+{{{{r[1], z}, {z, r[2]}},
+{{Conjugate[z], r[3]}, {r[4], Conjugate[z]}}},
+{{{Conjugate[z], r[4]}, {r[3], Conjugate[z]}},
+{{Conjugate[r[2]], z}, {z, r[1]}}}}
+*)
+
+• Nice, however, r[2] is real and in the final result there should not appear Conjugate[r[2]]. Dec 30, 2021 at 8:50
+
+The problem of recursion happens because the order of evaluation in Mathematica is inherently depth-first. Below is my very very hacky solution – some sort of a random-walk evaluation order. Obviously, one could (and someone surely did it already) write a proper breadth-first evaluation, but I think this random walk will do just fine for small enough tensors.
+
+Clear[G];
+
+ind = {{1, 1, 1, 1}, {1, 1, 2, 2}, {1, 2, 1, 2},
+{1, 2, 2, 1}, {1, 1, 1, 2}};
+
+r /: Conjugate[r[a_]] = r[a];
+G[1, 1, 1, 1] = r[1];
+G[1, 1, 2, 2] = r[2];
+G[1, 2, 1, 2] = r[3];
+G[1, 2, 2, 1] = r[4];
+G[1, 1, 1, 2] = z;
+
+G[i_, j_, k_, l_] := G[3 - i, 3 - j, 3 - k, 3 - l] /; {j, i, l, k} \[Element] ind
+G[i_, j_, k_, l_] := G[j, i, l, k] /; {j, i, l, k} \[Element] ind
+G[i_, j_, k_, l_] := Conjugate[G[k, l, i, j]] /; {k, l, i, j} \[Element] ind
+
+G[i_, j_, k_, l_] := ReleaseHold@RandomChoice[{
+Hold@G[3 - i, 3 - j, 3 - k, 3 - l],
+Hold@G[j, i, l, k],
+Hold@Conjugate[G[k, l, i, j]]
+}]
+
+Array[G, {2, 2, 2, 2}] // Refine[#, r[_] \[Element] Reals] &
+
+(* {{{{r[1], z}, {z, r[2]}}, {{Conjugate[z], r[3]}, {r[4],
+Conjugate[z]}}}, {{{Conjugate[z], r[4]}, {r[3],
+Conjugate[z]}}, {{r[2], z}, {z, r[1]}}}} *)
+
+• Nice, however, r[2] is real and in the final result there should not appear Conjugate[r[2]]. Dec 30, 2021 at 8:50
+• @yarchik, oh, right, I fixed it. Dec 30, 2021 at 10:02
+• This is one possibility. However, I believe that the final result could be obtained without invoking the assumption of being real, by means of the two first rules. This brings me to the point: rule with Conjugate should only be used when two others bring no simplification. Dec 30, 2021 at 10:13

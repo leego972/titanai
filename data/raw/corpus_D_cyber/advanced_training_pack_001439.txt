@@ -1,0 +1,597 @@
+================================================================================
+TITAN AI — TRAINING PACK 014: CLOUD-NATIVE ARCHITECTURE AND SYSTEM INTEGRATION
+AWS/AZURE/GCP PATTERNS, KUBERNETES, SERVERLESS, INFRASTRUCTURE AS CODE
+================================================================================
+
+================================================================================
+PART 1: CLOUD-NATIVE DESIGN PRINCIPLES
+================================================================================
+
+--- THE TWELVE-FACTOR APP (expanded to fifteen) ---
+
+1. CODEBASE — One codebase per app, many deployments
+   Multiple services = multiple codebases (monorepo OK, but separate deployable units)
+   Never: Different configs embedded in different branches for different environments
+
+2. DEPENDENCIES — Explicitly declare, isolate
+   requirements.txt / package.json / go.mod: Every dependency pinned
+   Never assume system-installed libraries: Run in clean container
+   Lock files (requirements.lock, yarn.lock): Reproducible builds
+
+3. CONFIG — Store in environment variables, NOT in code
+   Code that changes between environments: Bad
+   Config that changes between environments: Expected
+   What is config: DB URLs, API keys, feature flags, service endpoints
+   Environment variables: Can be set per environment without code change
+   NEVER in code: Secrets, environment-specific URLs
+   Tool: dotenv for local dev, Vault/SSM/Secrets Manager for production
+
+4. BACKING SERVICES — Treat as attached resources
+   Database, cache, queue: Should be swappable by changing URL
+   Local MySQL and RDS MySQL: Indistinguishable to app (same driver, different URL)
+   Test: Can you swap backing service without code change? If yes: Factor 4 compliant.
+
+5. BUILD, RELEASE, RUN — Strict separation
+   Build: Transform code into executable (compile, bundle, build Docker image)
+   Release: Combine build with config (Docker image + environment config)
+   Run: Execute the release in the environment
+   
+   Critical: Never change code at runtime. If release needs change: New release.
+   This enables rollback: Release v45 is broken → Roll back to v44 (image still exists).
+
+6. PROCESSES — Execute as stateless, share-nothing processes
+   Every request handled completely (no state carried between requests)
+   User sessions: In Redis, not server memory (server can be killed anytime)
+   Uploads: To S3, not local disk (next request might hit different instance)
+   Principle: Any process can be killed. No data lost.
+
+7. PORT BINDING — Export services via port binding
+   App is self-contained web server (not deployed into external web server)
+   Bind to $PORT environment variable (provided by platform)
+   In container: PORT=8080 python app.py
+
+8. CONCURRENCY — Scale out via process model
+   Scale horizontally (more instances) not vertically (bigger instance)
+   Different workload types = different process types:
+       Web processes: Handle HTTP requests
+       Worker processes: Process background jobs
+       Beat processes: Cron job scheduling
+   Scale each type independently based on demand.
+
+9. DISPOSABILITY — Maximize robustness with fast startup and graceful shutdown
+   Fast startup: Seconds, not minutes. Slow start = slow scaling response.
+   Graceful shutdown: SIGTERM → finish current work → exit.
+   Don't drop in-flight requests on shutdown.
+   
+   Python Flask graceful shutdown:
+   import signal
+   def shutdown_handler(signum, frame):
+       logger.info("SIGTERM received, shutting down gracefully")
+       # Wait for current requests to complete
+       server.shutdown()
+   signal.signal(signal.SIGTERM, shutdown_handler)
+
+10. DEV/PROD PARITY — Keep development, staging, production similar
+    Gap types: Time (weeks old code in dev), Personnel (devs don't deploy), Tools (SQLite dev, Postgres prod)
+    Solution: Docker Compose in dev mirrors prod. Same DBs. Same services. Same configs (minus secrets).
+
+11. LOGS — Treat as event streams
+    App writes to stdout. Platform aggregates, routes, stores.
+    Never: File-based logging in containerized apps (files are ephemeral)
+    Never: Log aggregation inside app (not the app's responsibility)
+    Format: JSON structured logs, sent to Splunk/Datadog/CloudWatch by platform.
+
+12. ADMIN PROCESSES — Run admin/management tasks as one-off processes
+    DB migrations: Not in app startup. As a separate one-off process before deploy.
+    Data fixes: One-off script in same environment, not interactive SSH.
+    Principle: Admin tasks should be as automated and reproducible as the app itself.
+
+--- BEYOND 12-FACTOR: CLOUD-NATIVE ADDITIONS ---
+
+13. API FIRST — Design APIs before implementing
+    OpenAPI spec first. Generate server stubs, client SDKs, documentation.
+    APIs are contracts. Contracts must be stable. Plan before building.
+
+14. TELEMETRY — Distributed tracing, metrics, logs as first-class concerns
+    Not an afterthought. Instrumented from day 1.
+    Without telemetry: You cannot debug, cannot scale, cannot on-call responsibly.
+
+15. AUTH AND SECURITY — Zero trust, least privilege, all the time
+    Every service has its own identity. Every call is authenticated.
+    No implicit trust because "it's internal."
+
+================================================================================
+PART 2: KUBERNETES — PRODUCTION PATTERNS
+================================================================================
+
+--- KUBERNETES OBJECT DESIGN PATTERNS ---
+
+DEPLOYMENT STRATEGY COMPARISON:
+
+Rolling Update (default):
+  Gradually replace old pods with new pods.
+  Always some old, some new running simultaneously.
+  
+  spec:
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 1         # Allow 1 extra pod during update
+        maxUnavailable: 0   # Never have fewer than desired (zero downtime)
+  
+  Best for: Stateless services where old and new can coexist.
+  Problem: If new version has DB schema change, old pods break.
+  Solution: Backward-compatible migrations first, then rolling update.
+
+Blue/Green:
+  Run old (blue) and new (green) side by side.
+  Switch traffic at load balancer level (Service selector change).
+  
+  # Blue deployment: app=payments, version=blue
+  # Green deployment: app=payments, version=green
+  # Service selector: version=blue (production traffic)
+  
+  kubectl patch service payments-svc -p '{"spec":{"selector":{"version":"green"}}}'
+  # Traffic instantly switches to green.
+  # Blue still running: Instant rollback available.
+  # Rollback: Patch selector back to blue.
+  
+  Best for: Zero-downtime deploys with instant rollback capability.
+  Cost: Runs 2x resources during deployment window.
+
+Canary:
+  Route small percentage to new version, monitor, then expand or rollback.
+  
+  # 90% old version (10 replicas), 10% new version (1 replica + Istio weight)
+  # Istio VirtualService for fine-grained percentage control:
+  
+  http:
+  - route:
+    - destination: {host: payments, subset: v1}
+      weight: 90
+    - destination: {host: payments, subset: v2}
+      weight: 10
+  
+  Monitor for 30 minutes. Error rate on v2 > baseline? Roll back.
+  Error rate normal? Shift to 50/50, then 0/100.
+
+RESOURCE MANAGEMENT (critical, often misconfigured):
+  resources:
+    requests:       # What scheduler uses to place pod on node
+      memory: "256Mi"
+      cpu: "250m"   # 250 millicores = 0.25 CPU core
+    limits:         # Hard cap — pod killed/throttled if exceeded
+      memory: "512Mi"
+      cpu: "500m"
+  
+  COMMON MISTAKES:
+  
+  No limits set: One misbehaving pod consumes entire node → all pods on node degraded.
+  
+  CPU limit too low: CPU throttling. Container runs but is artificially slowed.
+    Signs: High CPU but slow responses. Metrics show throttle_time.
+    Fix: Remove CPU limit or raise significantly. CPU is compressible — throttling is better than killing.
+  
+  Memory limit = memory request: If any spike → OOMKilled immediately.
+    Better: limit = 2x request for burstable services.
+  
+  Memory request too low: Pod placed on node with insufficient memory.
+    During actual load: Node memory pressure → pod evicted.
+    Signs: "Evicted" status, OOMKilled. Check: kubectl describe node
+  
+  VERTICAL POD AUTOSCALER (VPA) for right-sizing:
+    VPA analyzes actual usage over time, recommends/sets correct requests/limits.
+    Never guess at sizing: Deploy with VPA in recommendation mode for 1 week.
+    Then: Apply VPA recommendations.
+
+HEALTH CHECKS (critical for reliable deployments):
+  livenessProbe:    # Is the container alive? (If no: Kill and restart)
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 30  # Wait before first probe (startup time)
+    periodSeconds: 10
+    failureThreshold: 3      # 3 consecutive failures → restart
+  
+  readinessProbe:   # Is the container ready to serve traffic? (If no: Remove from load balancer)
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 2      # 2 failures → remove from service endpoints
+  
+  startupProbe:     # Is the container done starting? (If no: Delay liveness checks)
+    httpGet:
+      path: /startup
+      port: 8080
+    failureThreshold: 30     # 30 × 10s = 5 minutes for slow-starting apps
+    periodSeconds: 10
+  
+  WHAT /healthz SHOULD DO:
+    NOT: Check external dependencies (DB, Redis)
+         If DB is down, all pods fail liveness → all pods restart → DB gets flooded with reconnects.
+    YES: Check only internal state. Is the process responsive? Are goroutines/threads healthy?
+    
+  WHAT /ready SHOULD DO:
+    YES: Check required dependencies. DB connected? Cache warm? Config loaded?
+    If DB is down: /ready returns 503 → pod removed from service → no traffic → no errors.
+    When DB recovers: /ready returns 200 → pod added back.
+
+--- KUBERNETES SECURITY ---
+
+POD SECURITY STANDARDS:
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000          # Don't run as root
+    readOnlyRootFilesystem: true  # Filesystem read-only (prevents file-based persistence)
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]          # Drop all Linux capabilities
+      add: ["NET_BIND_SERVICE"]  # Only add what's needed
+
+NETWORK POLICIES (default deny, then allow):
+  # Default: Deny all ingress and egress
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: default-deny-all
+  spec:
+    podSelector: {}   # Applies to all pods in namespace
+    policyTypes: [Ingress, Egress]
+  
+  # Then explicitly allow:
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: payments-policy
+  spec:
+    podSelector:
+      matchLabels:
+        app: payments
+    policyTypes: [Ingress, Egress]
+    ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: api-gateway     # Only api-gateway can talk to payments
+      ports: [{protocol: TCP, port: 8080}]
+    egress:
+    - to:
+      - podSelector:
+          matchLabels:
+            app: postgres-payments  # Payments can only reach its own DB
+      ports: [{protocol: TCP, port: 5432}]
+
+SECRETS MANAGEMENT — NEVER use Kubernetes Secrets directly in YAML:
+  Why: Kubernetes Secrets are base64 encoded, not encrypted. Anyone with kubectl access reads them.
+  
+  CORRECT: External secrets operator + AWS Secrets Manager / HashiCorp Vault:
+  
+  apiVersion: external-secrets.io/v1beta1
+  kind: ExternalSecret
+  metadata:
+    name: payments-db-secret
+  spec:
+    refreshInterval: 1h
+    secretStoreRef:
+      name: aws-secrets-manager
+      kind: SecretStore
+    target:
+      name: payments-db-secret   # K8s secret created from this
+    data:
+    - secretKey: DB_PASSWORD     # Key in K8s secret
+      remoteRef:
+        key: production/payments/db   # Path in Secrets Manager
+        property: password            # JSON key within the secret
+
+================================================================================
+PART 3: INFRASTRUCTURE AS CODE — PRODUCTION PATTERNS
+================================================================================
+
+--- TERRAFORM PROFESSIONAL PATTERNS ---
+
+MODULE STRUCTURE FOR LARGE ORGANIZATIONS:
+  
+  infrastructure/
+  ├── modules/            # Reusable building blocks
+  │   ├── vpc/
+  │   │   ├── main.tf
+  │   │   ├── variables.tf
+  │   │   ├── outputs.tf
+  │   │   └── versions.tf
+  │   ├── eks-cluster/
+  │   └── rds-postgres/
+  ├── environments/       # Per-environment configurations
+  │   ├── dev/
+  │   │   ├── main.tf    # Uses modules with dev-specific vars
+  │   │   ├── terraform.tfvars
+  │   │   └── backend.tf  # S3 backend with dev state file
+  │   ├── staging/
+  │   └── production/
+  └── global/             # Resources shared across environments
+      └── route53-zones/
+
+TERRAFORM STATE — CRITICAL:
+  Never local state for team environments. Always remote.
+  
+  # backend.tf
+  terraform {
+    backend "s3" {
+      bucket         = "mycompany-terraform-state"
+      key            = "production/eks/terraform.tfstate"
+      region         = "us-east-1"
+      encrypt        = true
+      dynamodb_table = "terraform-locks"  # Prevents concurrent applies
+    }
+  }
+  
+  DynamoDB lock prevents two engineers from running terraform apply simultaneously.
+  Concurrent applies = state corruption.
+
+TERRAFORM WORKSPACE PATTERN — DO NOT USE for production environments:
+  Workspaces: terraform.workspace gives "prod" or "dev" identifier.
+  Problem: Same backend, same module, same codebase for all envs.
+  Config differences managed by string conditionals → becomes unmaintainable.
+  
+  CORRECT: Separate directories per environment. Different state files.
+  Explicit separation. Changes to production require changes in production directory.
+  Cannot accidentally apply dev config to prod.
+
+DRIFT DETECTION:
+  Manual changes to production (console click, emergency fix) = drift.
+  Drift = IaC no longer reflects reality = danger.
+  
+  # Detect drift:
+  terraform plan -detailed-exitcode
+  # Exit code 0: No changes (no drift)
+  # Exit code 2: Changes detected (drift)
+  
+  # Run in CI daily:
+  - name: Detect Drift
+    run: |
+      terraform plan -detailed-exitcode
+      if [ $? -eq 2 ]; then
+        echo "DRIFT DETECTED in production infrastructure"
+        # Send alert to Slack/PagerDuty
+      fi
+
+--- GITOPS WITH ARGOCD ---
+
+GITOPS PRINCIPLE:
+  Git is the single source of truth for deployed state.
+  Every change to production: A commit to git. No exceptions.
+  Deployment: A tool watching git, applying changes to cluster automatically.
+  
+  Benefits:
+  - Full audit trail (who changed what, when, what was the diff)
+  - Rollback = git revert (instant, tested, reversible)
+  - Disaster recovery = re-apply git repo to fresh cluster (full rebuild)
+  - No manual kubectl apply in production (eliminated human error)
+
+ARGOCD SETUP:
+  # Application definition (defines what to deploy where):
+  apiVersion: argoproj.io/v1alpha1
+  kind: Application
+  metadata:
+    name: payments-service
+    namespace: argocd
+  spec:
+    project: production
+    source:
+      repoURL: https://github.com/company/k8s-manifests
+      targetRevision: main
+      path: production/payments
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: payments
+    syncPolicy:
+      automated:
+        prune: true       # Delete resources removed from git
+        selfHeal: true    # Revert manual changes to cluster
+      syncOptions:
+      - CreateNamespace=true
+
+RELEASE PIPELINE WITH GITOPS:
+  1. Developer merges PR to application repo
+  2. CI pipeline: Build → Test → Push image → Tag as "sha-abc123"
+  3. CI pipeline: Updates k8s-manifests repo: image: payments:sha-abc123
+  4. ArgoCD detects change in k8s-manifests
+  5. ArgoCD applies to cluster: Rolling update begins
+  6. ArgoCD reports sync status: Healthy / Progressing / Degraded
+  
+  No human ever runs kubectl in production. Git commit = production change.
+
+================================================================================
+PART 4: SERVERLESS ARCHITECTURE AND INTEGRATION
+================================================================================
+
+--- WHEN TO USE SERVERLESS ---
+
+USE SERVERLESS WHEN:
+  - Sporadic, unpredictable workloads (scales to zero, no idle cost)
+  - Event-driven processing (S3 upload triggers transformation)
+  - Glue code between services (no need for dedicated service)
+  - Rapid prototyping (no infrastructure management)
+  - Small, focused functions (not complex business logic)
+
+DON'T USE SERVERLESS WHEN:
+  - Long-running processes (>15 minutes — Lambda max timeout)
+  - High-frequency consistent load (always-on container is cheaper)
+  - Low-latency requirements (cold start can be 500ms-2s)
+  - Complex deployment with many dependencies (packaging complexity)
+  - Need for stateful sessions (Lambda is stateless per-invocation)
+
+COLD START MITIGATION:
+  Cold start: First invocation after period of inactivity.
+  Lambda spins up: Execution environment + runtime + code load + initialization.
+  Time: 100ms (simple Node.js) to 2s+ (Java with Spring Boot).
+  
+  Mitigation strategies:
+  1. Provisioned Concurrency: Pre-warm N instances (eliminates cold start, adds cost)
+  2. Scheduled ping: CloudWatch rule pings Lambda every 5 minutes (keeps warm)
+  3. Choose runtime: Node.js/Python cold start ~50-100ms. Java ~1-3s. Avoid Java for latency-sensitive.
+  4. Minimize package size: Smaller deployment = faster cold start
+  5. Move initialization outside handler:
+  
+  # WRONG — re-initializes every invocation
+  def handler(event, context):
+      db = connect_to_database()  # New connection every call
+      result = db.query(...)
+      return result
+  
+  # RIGHT — initialize once per container lifecycle
+  db = connect_to_database()  # Runs once on cold start, reused after
+  
+  def handler(event, context):
+      result = db.query(...)
+      return result
+
+SERVERLESS INTEGRATION PATTERNS:
+
+Fan-out pattern (SNS → Lambda):
+  S3 upload → SNS notification → Multiple Lambda functions triggered simultaneously
+  Lambda 1: Generate thumbnail
+  Lambda 2: Extract metadata
+  Lambda 3: Virus scan
+  Lambda 4: Update database record
+  All run in parallel. Order doesn't matter.
+
+Fan-in pattern (SQS → Lambda aggregate):
+  100 individual events → SQS queue → Lambda processes in batches of 10
+  Lambda: Aggregate batch, write to database in single transaction
+  
+  # Lambda SQS batch processing:
+  def handler(event, context):
+      records = event['Records']  # Up to 10 records per invocation
+      successful = []
+      failed = []
+      
+      for record in records:
+          try:
+              process_event(json.loads(record['body']))
+              successful.append(record['messageId'])
+          except Exception as e:
+              failed.append({'itemIdentifier': record['messageId']})
+      
+      # Return failed items — SQS will retry only these, not entire batch
+      return {'batchItemFailures': failed}
+
+Step Functions for complex workflows:
+  Orchestrate multi-step workflows with state machine.
+  
+  # Order processing state machine (JSON definition):
+  {
+    "Comment": "Order fulfillment workflow",
+    "StartAt": "ValidatePayment",
+    "States": {
+      "ValidatePayment": {
+        "Type": "Task",
+        "Resource": "arn:aws:lambda:us-east-1:123:function:validate-payment",
+        "Next": "CheckInventory",
+        "Catch": [{
+          "ErrorEquals": ["PaymentFailed"],
+          "Next": "NotifyPaymentFailure"
+        }]
+      },
+      "CheckInventory": {
+        "Type": "Task",
+        "Resource": "arn:aws:lambda:us-east-1:123:function:check-inventory",
+        "Next": "ParallelFulfillment"
+      },
+      "ParallelFulfillment": {
+        "Type": "Parallel",
+        "Branches": [
+          {"StartAt": "CreateShipment", "States": {...}},
+          {"StartAt": "SendConfirmation", "States": {...}},
+          {"StartAt": "UpdateInventory", "States": {...}}
+        ],
+        "Next": "OrderComplete"
+      }
+    }
+  }
+
+================================================================================
+PART 5: MULTI-CLOUD AND HYBRID INTEGRATION
+================================================================================
+
+--- MULTI-CLOUD STRATEGY ---
+
+WHY MULTI-CLOUD:
+  - Avoid vendor lock-in (leverage negotiating power)
+  - Best-of-breed: AWS for compute, GCP for ML, Azure for enterprise identity
+  - Regulatory: Some data must stay in specific geographic/vendor environments
+  - Resilience: Outage of one cloud doesn't take down everything
+
+MULTI-CLOUD CONNECTIVITY OPTIONS:
+
+Option 1: Public internet + encryption
+  Services communicate over internet.
+  Cost: Low. Security: Encryption required. Latency: Variable.
+  Use when: Non-latency-sensitive, low-security data.
+
+Option 2: Dedicated interconnect (AWS Direct Connect / Azure ExpressRoute / GCP Interconnect)
+  Dedicated private circuit between your data center and cloud provider.
+  Cost: High ($$$). Latency: Low, predictable. Security: Private (not public internet).
+  Use when: High-throughput, latency-sensitive, or regulated data.
+
+Option 3: SD-WAN with cloud on-ramps
+  Software-defined WAN overlay connects all locations and clouds.
+  Single network management plane across all environments.
+  Vendors: Cisco Meraki, VMware VeloCloud, Palo Alto Prisma SD-WAN.
+
+CONSISTENT NETWORKING ACROSS CLOUDS — CILIUM + eBPF:
+  Cilium provides:
+  - Kubernetes network policy across multiple clusters
+  - Transparent encryption between services (WireGuard)
+  - Network-level visibility without application changes
+  - Service mesh functionality without sidecar overhead (eBPF-based)
+  
+  ClusterMesh: Connect two Kubernetes clusters (different clouds):
+  cilium clustermesh enable --context aws-cluster
+  cilium clustermesh enable --context gcp-cluster
+  cilium clustermesh connect --destination-context gcp-cluster
+  
+  After: Pods in AWS can reach pods in GCP by service name.
+  Network policies apply across clusters.
+  No external load balancer required for cross-cluster communication.
+
+ABSTRACTION LAYERS FOR MULTI-CLOUD:
+  Problem: Direct use of AWS SDK = AWS-specific code.
+  If you later move to GCP: Rewrite.
+  
+  Solution: Abstract behind interface:
+  
+  class StorageAdapter(ABC):
+      @abstractmethod
+      def upload(self, bucket, key, data): pass
+      
+      @abstractmethod
+      def download(self, bucket, key): pass
+  
+  class AWSS3Adapter(StorageAdapter):
+      def __init__(self): self.client = boto3.client('s3')
+      def upload(self, bucket, key, data):
+          self.client.put_object(Bucket=bucket, Key=key, Body=data)
+  
+  class GCSAdapter(StorageAdapter):
+      def __init__(self): self.client = storage.Client()
+      def upload(self, bucket, key, data):
+          self.client.bucket(bucket).blob(key).upload_from_string(data)
+  
+  # Factory: Choose at startup based on env var CLOUD_PROVIDER
+  def get_storage_adapter() -> StorageAdapter:
+      provider = os.environ.get('CLOUD_PROVIDER', 'aws')
+      if provider == 'aws': return AWSS3Adapter()
+      if provider == 'gcp': return GCSAdapter()
+      raise ValueError(f"Unknown provider: {provider}")
+
+================================================================================
+END OF PACK 014: CLOUD-NATIVE ARCHITECTURE
+Total: Full 12-factor (extended to 15) with examples, Kubernetes deployment strategies
+(rolling/blue-green/canary), resource management pitfalls, health check design,
+pod security, network policies, external secrets, Terraform state management,
+GitOps with ArgoCD, serverless patterns (cold start mitigation, fan-out/in, Step Functions),
+multi-cloud connectivity, abstraction layers for cloud portability.
+================================================================================

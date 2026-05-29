@@ -1,0 +1,100 @@
+# Why does .NET's ECB mode implementation append a constant block to my ciphertext?
+
+Consider the following code and output:
+
+    public static void Main() {
+DESCryptoServiceProvider symAlg = new DESCryptoServiceProvider();
+symAlg.BlockSize = 64;
+symAlg.GenerateKey();
+symAlg.Mode = CipherMode.ECB;
+
+testCipher(symAlg, new byte[] {
+0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+});
+testCipher(symAlg, new byte[] {
+0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8,
+0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8,
+0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0x8E,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+});
+
+Console.ReadKey();
+}
+
+public static void testCipher(SymmetricAlgorithm symAlg, byte[] plainText) {
+ICryptoTransform xfrm;
+
+xfrm = symAlg.CreateEncryptor();
+byte[] encrypted = xfrm.TransformFinalBlock(plainText, 0, plainText.Length);
+xfrm = symAlg.CreateDecryptor();
+byte[] decrypted = xfrm.TransformFinalBlock(encrypted, 0, encrypted.Length);
+
+Console.WriteLine(new string('=', 23));
+writeBlocks(plainText);
+writeBlocks(encrypted);
+writeBlocks(decrypted);
+}
+
+private static void writeBlocks(byte[] blocks){
+for (int i = 0; i < blocks.Length; i += 8) Console.WriteLine(BitConverter.ToString(blocks, i, 8));
+Console.WriteLine();
+}
+
+
+Output:
+
+=======================
+01-02-03-04-05-06-07-08
+01-02-03-04-05-06-07-08
+
+1E-0C-3E-59-93-5C-23-6E
+1E-0C-3E-59-93-5C-23-6E
+6F-AC-50-69-34-D0-B1-61 // NOTE THIS
+
+01-02-03-04-05-06-07-08
+01-02-03-04-05-06-07-08
+
+=======================
+C1-C2-C3-C4-C5-C6-C7-C8
+D1-D2-D3-D4-D5-D6-D7-D8
+E1-E2-E3-E4-E5-E6-E7-8E
+00-00-00-00-00-00-00-00
+
+F9-9A-77-30-3B-31-7F-D2
+D8-B5-B2-C6-E7-E7-0F-90
+0E-90-DF-AF-56-C0-DE-84
+65-5D-E0-7D-5A-7A-0F-D9
+6F-AC-50-69-34-D0-B1-61 // AND THIS
+
+C1-C2-C3-C4-C5-C6-C7-C8
+D1-D2-D3-D4-D5-D6-D7-D8
+E1-E2-E3-E4-E5-E6-E7-8E
+00-00-00-00-00-00-00-00
+
+
+I understand the weakness of ECB. What I don't understand, is why on earth would .NET force me to append a final block that is the length of the key and only varies with the key. No matter how weak the encryption was to start with, isn't this worse?
+
+I have a specific reason for using ECB: Encrypt array of int for individual retrieval
+
+However, decrypting just one block (without the constant final block) yields: System.Security.Cryptography.CryptographicException was unhandled Message=Bad Data.
+
+Now, knowing that it is constant by the key, I can perform a bogus encryption at application initialization and cache the final block, feeding it back in to my decryption operation rather than putting it in the data stream, but why in would .NET encourage me to store this with the data, and is it only .NET that does this?
+
+-
+Is .NET automatically adding padding? Sometimes these libraries will always add padding. Thus if your plaintext falls on a block boundary, they will add another complete block of padding. Perhaps you can change the padding to none? To test, send in an incomplete last block and see if it only pads to the block length instead of adding an entire extra block. –  mikeazo Jul 31 '12 at 13:29
+Note: DES is not secure. The key size is much too small. You want to use TripleDES. –  mikeazo Jul 31 '12 at 13:33
+@mikeazo: sure, make me fix my writeBlocks function! ;) just a moment... –  shannon Jul 31 '12 at 13:34
+You are correct, mike! Further, it was able to deduce the correct length of the final block. The last byte must be the length of the final block, so it requires an extra block to represent it. –  shannon Jul 31 '12 at 13:49
+And thanks for the DES reminder. –  shannon Jul 31 '12 at 13:49
+
+## 1 Answer
+
+I believe what you are seeing is that .NET automatically uses PKCS #7 padding. This will always add padding. Thus if your plaintext is a complete block length, one extra block of padding will be added.
+
+The reason the ciphertext ends up being the same in both of your test cases is that it is adding the same padding in both cases (see PaddingMode Enumeration for details on PKCS #7).
+
+You can have .NET use no padding by using the Padding Property.
+
+-
+You are absolutely correct. Thanks! With Padding mode set to None, I'm able to decrypt a single block. As a side note, it also now refuses to encrypt a partial block, which I don't require. –  shannon Jul 31 '12 at 13:55

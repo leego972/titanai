@@ -1,0 +1,105 @@
+# \Longrightarrow doesn't look good in 12pt
+
+I'm using the standard CM fonts in 12pt (and amsmath if this is relevant). My problem is that \Longrightarrow gives something like this output, which I find a bit annoying. I know that it's a composed symbol, but in 10pt and in 11pt it looks perfect, so why doesn't it also work in 12pt?
+
+By the way, I produced the image by typing \Huge\Longrightarrow on mathurl.com, so it's not an artefact of my TeX system (and it tells us that mathurl uses 12pt ...). Moreover, it's not just something on the screen, I also see it on a printout (where I don't know which LaTeX distribution was used for typesetting).
+
+I think I've first seen this when I was still using LaTeX 2.09 a long time ago!
+
+-
+See programming.itags.org/tex/124077 for a way to hack it. Basically you should re-define the \Longrightarrow command from scratch and build it from a rescaled cmr10 = and the \Rightarrow wihch is already scaled from cmsys10. –  Willie Wong Oct 29 '10 at 15:37
+@Willie: Hmm, interesting idea, and looks better than the solution that I just posted, but the TeX file provided there by Ulrike doesn't compile for me: It tells me ! LaTeX Error: Encoding scheme OT1 ' unknown. –  Hendrik Vogt Oct 29 '10 at 15:55
+I think they changed OT1 to ot1 not too long ago. Nice trick btw. –  Taco Hoekwater Oct 29 '10 at 16:01
+There is a to-be-released package on Github that implements this fix, see github.com/phst/longarrows (the documentation is outdated, but the package might already work). –  Philipp Oct 29 '10 at 16:03
+@Taco: No, that's not the reason. The reason was me being stupid: In Ulrike's post at Willie's link there's a linebreak where there shouldn't be any. And of course OT1  with a space at the end is not known. –  Hendrik Vogt Oct 29 '10 at 16:26
+
+(Posting as CW since I don't like to take credit for my good Google Fu)
+
+A hack was provided in http://programming.itags.org/tex/124077/ where you re-implement the construction of \Longrightarrow by using instead of the cmr12 version of the = sign, the cmr10 version suitably rescaled. So this way the \Longrightarrow will be just like the 10-pt version but bigger. The following is the example provided by Ulrike Fischer in that thread.
+
+\documentclass[12pt]{article}
+\DeclareFontFamily{OT1}{cmrx}{}
+\DeclareFontShape{OT1}{cmrx}{m}{n}{<->cmr10}{}
+\begin{document}\pagestyle{empty}
+$\Longrightarrow$
+
+%Redefine \Longrightarrow as the following to get the 'fixed' version
+$\mathrel{% \mbox{\fontfamily{cmrx}\fontencoding{OT1}\selectfont=}}% \joinrel\Rightarrow$
+
+\end{document}
+
+
+The disadvantage of the above solution is that it's dangerous to use it as a patch for existing files: The fixed \Longrightarrow is slightly longer than the original one, so this might affect linebreaks. Here's a version that doesn't have this drawback:
+
+\documentclass[12pt]{article}
+\DeclareFontFamily{OT1}{cmrx}{}
+\DeclareFontShape{OT1}{cmrx}{m}{n}{<->cmr10}{}
+\let\saveLongrightarrow\Longrightarrow
+\makeatletter
+\renewcommand*{\Longrightarrow}{%
+\mathrel{\rlap{\fontfamily{cmrx}\fontencoding{OT1}\selectfont=}%
+\hphantom{\saveLongrightarrow}%
+\llap{$\m@th\Rightarrow$}}}
+\makeatother
+\begin{document}
+$a\saveLongrightarrow b$
+
+$a\Longrightarrow b$
+\end{document}
+
+-
+I think I've taken some credit for Google Fu on two answers at least. But this way I might feel free to edit your answer later on. –  Hendrik Vogt Oct 29 '10 at 17:35
+
+There is a preliminary package on Github that implements the fix suggested in the comments, see http://github.com/phst/longarrows (the documentation is outdated, but the package might already work).
+
+-
+
+OK, I managed to produce some hack that works. The idea is to use \textcolor{white} from the xcolor package, similarly as in my not so great approach to lowering \widetilde. Here's the code:
+
+\makeatletter
+\newcommand{\myRelbar}{%
+{\Rightarrow}%
+\llap{\textcolor{white}{\rule[-0.2ex]{1.1ex}{2ex}}}%
+\kern-1.5ex}
+\let\saveLongrightarrow\Longrightarrow
+\renewcommand{\Longrightarrow}{%
+\mathrel{\rlap{$\m@th\myRelbar\myRelbar$}%
+\phantom{{\saveLongrightarrow}}%
+\llap{$\m@th\Rightarrow$}}}
+\makeatother
+
+
+The problem is the the LaTeX \Relbar is just =, and that there in 12pt the to horizontal bars are too close to each other. So I construct \myRelbar by taking \Rightarrow and chopping off the arrow head with a white box. This is not quite long enough, so I take two of those.
+
+I've tried a second version that uses \scalebox from the graphicx package. I strongly discourage the use of this version; it's just an attempt based on my short discussion with Taco Hoekwater, and it shows that Taco was right: Scaling makes it a bit better, but it's still not perfect.
+
+\Relbar\joinrel\mathrel{\raisebox{0.024ex}{\scalebox{0.956}{${\Rightarrow}$}}}
+
+-
+
+Another faux solution: use tikz to draw the arrow for you:
+
+\newcommand{\tikzLongrightarrow}{%
+\mathbin{\tikz{\draw[arrows={-latex},line width=1.2pt,double=white] (0,0) -- (3em,0);}}
+}
+\let\oldLongrightarrow=\Longrightarrow
+\def\Longrightarrow{\tikzLongrightarrow}
+
+
+One disadvantage is that tikz is a lot to include just for one symbol. Not a problem if you're already including tikz. Another disadvantage is that it will take more work to make it look like the regular \Longrightarrow.
+
+-
+Hmm, no, this just looks too different from the regular arrow, and I actually have no idea how to make it look as it should. And as you already wrote, TikZ is really a lot to include. But still a fun solution. –  Hendrik Vogt Oct 29 '10 at 14:26
+
+The problem is that while there exists a cmr12 font (which is used by pdflatex), there is no cmsy12, so cmsy10 is scaled to 12pt to make it match. Unfortunately, there are subtle differences between the 10pt and 12pt versions of the computer modern fonts (slightly different metafont parameter settings), and the result of the mismatch is the effect your are witnessing.
+
+Side note: when you zoom in a lot, you will see that the actual difference is quite small, but the effect is worsened by the different antialiasing|hinting used for the two separate fonts.
+
+The only 'solution' I can come up with is to patch the ot1cmr.fd file such that it will use cmr10 instead of cmr12, but perhaps a LaTeX expert will know a better approach.
+
+-
+Thanks for the explanations, Taco. I did zoom in a lot and saw that the actual difference is not too big, but in the printout in my hand it looks even worse than in the picure I included in the question. But the printout also looks as if bitmap fonts were used. –  Hendrik Vogt Oct 29 '10 at 13:53
+@Taco: So \Longrightarrow takes = from cmr12 and a scaled \Rightarrow from cmsy10, correct? Can't I affect this scaling? –  Hendrik Vogt Oct 29 '10 at 13:57
+Yes, you understand what LateX does correctly, but it is not so much the scaling itself that is causing the trouble but the fact that cmr10 is slightly different from cmr12. –  Taco Hoekwater Oct 29 '10 at 14:26
+@Taco: If the \Rightarrow was scaled just a little bit less, then the result ought to look a lot better, or am I mistaken? –  Hendrik Vogt Oct 29 '10 at 14:28
+Not per se. It is quite likely that the two metafont parameters for the stroke width and the gap width are not changed by the exact same ratio between cmr10 and cmr12. After all, that is what optical scaling is all about: it is what makes cmr5 at 17pt noticeably different from cmr17`. –  Taco Hoekwater Oct 29 '10 at 14:30

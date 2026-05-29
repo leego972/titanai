@@ -1,0 +1,191 @@
+Question: <p>Greetings, currently I am refactoring one of my programs, and I found an interesting problem.</p>
+
+<p>I have Transitions in an automata. Transitions always have a start-state and an end-state. Some Transitions have a label, which encodes a certain Action that must be performed upon traversal. No label means no action. Some transitions have a condition, which must be fulfilled in order to traverse this condition, if there is no condition, the transition is basically an epsilon-transition in an NFA and will be traversed without consuming an input symbol.</p>
+
+<p>I need the following operations:  </p>
+
+<ul>
+<li>check if the transition has a label</li>
+<li>get this label</li>
+<li>add a label to a transition</li>
+<li>check if the transition has a condition </li>
+<li>get this condition</li>
+<li>check for equality</li>
+</ul>
+
+<p>Judging from the first five points, this sounds like a clear decorator, with a base transition and two decorators: Labeled and Condition. However, this approach has a problem: two transitions are considered equal if their start-state and end-state are the same, the labels at both transitions are equal (or not-existing) and both conditions are the same (or not existing). With a decorator, I might have two transitions Labeled("foo", Conditional("bar", Transition("baz", "qux"))) and Conditional("bar", Labeled("foo", Transition("baz", "qux"))) which need a non-local equality, that is, the decorators would need to collect all the data and the Transition must compare this collected data on a set-base:</p>
+
+<pre><code>class Transition(object):
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+    def get_label(self):
+        return None
+    def has_label(self):
+        return False
+    def collect_decorations(self, decorations):
+        return decorations
+    def internal_equality(self, my_decorations, other):
+        try:
+            return (self.start == other.start
+                    and self.end == other.end
+                    and my_decorations = other.collect_decorations())
+    def __eq__(self, other):
+        return self.internal_equality(self.collect_decorations({}), other)
+
+class Labeled(object):
+    def __init__(self, label, base):
+        self.base = base
+        self.label = label
+    def has_label(self):
+        return True
+    def get_label(self):
+        return self.label
+    def collect_decorations(self, decorations):
+        assert 'label' not in decorations
+        decorations['label'] = self.label
+        return self.base.collect_decorations(decorations)
+    def __getattr__(self, attribute):
+        return self.base.__getattr(attribute)
+</code></pre>
+
+<p>Is this a clean approach? Am I missing something?</p>
+
+<p>I am mostly confused, because I can solve this - with longer class names - using cooperative multiple inheritance:</p>
+
+<pre><code>class Transition(object):
+    def __init__(self, **kwargs):
+        # init is pythons MI-madness ;-)
+        super(Transition, self).__init__(**kwargs)
+        self.start = kwargs['start']
+        self.end = kwargs['end']
+    def get_label(self):
+        return None
+    def get_condition(self):
+        return None
+    def __eq__(self, other):
+        try:
+            return self.start == other.start and self.end == other.end
+        except AttributeError:
+            return False
+
+class LabeledTransition(Transition):
+    def __init__(self, **kwargs):
+        super(LabeledTransition).__init__(**kwargs)
+        self.label = kwargs['label']
+    def get_label(self):
+        return self.label
+    def __eq__(self):
+        super_result = super(LabeledTransition, self).__eq__(other)
+        try:
+            return super_result and self.label == other.label
+        except AttributeError:
+            return False
+
+class ConditionalTransition(Transition):
+    def __init__(self, **kwargs):
+        super(ConditionalTransition, self).__init__(**kwargs)
+        self.condition = kwargs['condition']
+
+    def get_condition(self):
+        return self.condition
+
+    def __eq__(self, other):
+        super_result = super(ConditionalTransition, self).__eq__(other)
+        try:
+            return super_result and self.condition = other.condition
+        except AttributeError:
+            return False
+
+# ConditionalTransition about the same, with get_condition
+class LabeledConditionalTransition(LabeledTransition, ConditionalTransition):
+    pass
+</code></pre>
+
+<p>the class LabledConditionalTransition behaves exactly as expected - and having no code in there is appealing and I do not thing MI is confusing at this size.</p>
+
+<p>Of course, the third option would be to just hammer everything into a single transition class with a bunch of in has_label/has_transition.</p>
+
+<p>So... I am confused. Am I missing something? Which implementation looks better? How do you handle similar cases, that is, objects which look like a Decorator could handle them, but then, such a non-local method comes around?</p>
+
+<p><em>EDIT</em>:
+Added the ConditionalTransition-class. Basically, this kinda behaves like the decorator, minus the order created by the order of creating the decorators, the transition checks for start and end being correct, the LabeledTransition-class checks for label being correct and ConditionalTransition checks for condition being correct.</p>
+
+Answer: <p>I think its clear that nobody really understands your question. I would suggest putting it in context and making it shorter. As an example, here's one possible implementation of the state pattern in python, please study it to get an idea.</p>
+
+<pre><code>class State(object):
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+class Automaton(object):
+    def __init__(self, instance, start):
+        self._state = start
+        self.transitions = instance.transitions()
+
+    def get_state(self):
+        return self._state
+
+    def set_state(self, target):
+        transition = self.transitions.get((self.state, target))
+        if transition:
+            action, condition = transition
+            if condition:
+                if condition():
+                    if action:
+                        action()
+                    self._state = target
+            else:
+                self._state = target
+        else:
+            self._state = target
+
+    state = property(get_state, set_state)
+
+class Door(object):
+    open = State('open')
+    closed = State('closed')
+
+    def __init__(self, blocked=False):
+        self.blocked = blocked
+
+    def close(self):
+        print 'closing door'
+
+    def do_open(self):
+        print 'opening door'
+
+    def not_blocked(self):
+        return not self.blocked
+
+    def transitions(self):
+        return {
+            (self.open, self.closed):(self.close, self.not_blocked),
+            (self.closed, self.open):(self.do_open, self.not_blocked),
+        }
+
+if __name__ == '__main__':
+    door = Door()
+    automaton = Automaton(door, door.open)
+
+    print 'door is', automaton.state
+    automaton.state = door.closed
+    print 'door is', automaton.state
+    automaton.state = door.open
+    print 'door is', automaton.state
+    door.blocked = True
+    automaton.state = door.closed
+    print 'door is', automaton.state
+</code></pre>
+
+<p>the output of this programm would be:</p>
+
+<pre><code>door is open
+closing door
+door is closed
+opening door
+door is open
+door is open
+</code></pre>

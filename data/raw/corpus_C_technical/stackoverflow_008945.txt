@@ -1,0 +1,40 @@
+Question: <p>I would like to be able to submit a form in an <strong>HTML source (string)</strong>. In other words I need at least the ability to generate POST parameters <strong>from a string containing HTML source of the form</strong>. This is needed in unit tests for a Django project. I would like a solution that possibly;</p>
+
+<ul>
+<li>Uses only standard Python library and Django.</li>
+<li>Allows parameter generation from a specific form if there is more than one form present.</li>
+<li>Allows me to change the values before submission.</li>
+</ul>
+
+<p>A solution that returns a (Django) form instance from a given form class is best. Because it would allow me to use validation. Ideally it would consume the source (which is a string), a form class, and optionally a form name and return the instance as it was before rendering.</p>
+
+<p>NOTE: I am aware this is not an easy task, and probably the gains would hardly justify the effort needed. But I am just curious about how this can be done, in a practical and reliable way. If possible.</p>
+
+Answer: <p>You should re-read the <a href="http://docs.djangoproject.com/en/dev/topics/testing/" rel="nofollow">documentation about Django's testing framework</a>, specifically the part about testing views (and forms) with <a href="http://docs.djangoproject.com/en/dev/topics/testing/#module-django.test.client" rel="nofollow">the test client</a>.</p>
+
+<p>The test client acts as a simple web browser, and lets you make <code>GET</code> and <code>POST</code> requests to your Django views. You can read the response HTML or get the same <code>Context</code> object the template received. Your <code>Context</code> object should contain the actual <code>forms.Form</code> instance you're looking for.</p>
+
+<p>As an example, if your view at the URL <code>/form/</code> passes the context <code>{'myform': forms.Form()}</code> to the template, you could get to it this way:</p>
+
+<pre><code>from django.test.client import Client
+c = Client()
+
+# request the web page:
+response = c.get('/form/')
+
+# get the Form object:
+form = response.context['myform']
+
+form_data = form.cleaned_data
+my_form_data = {} # put your filled-out data in here...
+form_data.update(my_form_data)
+
+# submit the form back to the web page:
+new_form = forms.Form(form_data)
+if new_form.is_valid():
+    c.post('/form/', new_form.cleaned_data)
+</code></pre>
+
+<p>Hopefully that accomplishes what you want, without having to mess with parsing HTML.</p>
+
+<p><strong>Edit</strong>: After I re-read the Django docs about Forms, it turns out that forms are immutable. That's okay, though, just create a new <code>Form</code> instance and submit that; I've changed my code example to match this.</p>

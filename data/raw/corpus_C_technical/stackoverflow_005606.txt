@@ -1,0 +1,58 @@
+Question: <p>I am using cherrypy as a webserver. It gives good performance for my application but there is a very big problem with it. cherrypy crashes after couple of hours stating that it could not create a socket as there are too many files open:</p>
+
+<pre><code>[21/Oct/2008:12:44:25] ENGINE HTTP Server 
+cherrypy._cpwsgi_server.CPWSGIServer(('0.0.0.0', 8080)) shut down    
+[21/Oct/2008:12:44:25] ENGINE Stopped thread '_TimeoutMonitor'.    
+[21/Oct/2008:12:44:25] ENGINE Stopped thread 'Autoreloader'.    
+[21/Oct/2008:12:44:25] ENGINE Bus STOPPED    
+[21/Oct/2008:12:44:25] ENGINE Bus EXITING    
+[21/Oct/2008:12:44:25] ENGINE Bus EXITED    
+Exception in thread HTTPServer Thread-3:    
+Traceback (most recent call last):    
+  File "/usr/lib/python2.3/threading.py", line 436, in __bootstrap    
+    self.run()    
+  File "/usr/lib/python2.3/threading.py", line 416, in run   
+    self.__target(*self.__args, **self.__kwargs)    
+  File "/usr/lib/python2.3/site-packages/cherrypy/process/servers.py", line 73, in 
+_start_http_thread    
+    self.httpserver.start()    
+  File "/usr/lib/python2.3/site-packages/cherrypy/wsgiserver/__init__.py", line 1388, in start
+    self.tick()    
+  File "/usr/lib/python2.3/site-packages/cherrypy/wsgiserver/__init__.py", line 1417, in tick    
+    s, addr = self.socket.accept()    
+  File "/usr/lib/python2.3/socket.py", line 167, in accept    
+    sock, addr = self._sock.accept()    
+error: (24, 'Too many open files')    
+[21/Oct/2008:12:44:25] ENGINE Waiting for child threads to terminate..
+</code></pre>
+
+<p>I tried to figure out what was happening. My application does not open any file or any socket etc. My file only opens couple of berkeley dbs. I investigated this issue further. I saw the file descriptors used by my cherrypy process with id 4536  in /proc/4536/fd/
+Initially there were new sockets created and cleaned up properly but after an hour I found that it had about 509 sockets that were not cleaned. All the sockets were in CLOSE_WAIT state. I got this information using the following command:</p>
+
+<pre><code>netstat -ap | grep "4536" | grep CLOSE_WAIT | wc -l
+</code></pre>
+
+<p>CLOSE_WAIT state means that the remote client has closed the connection. Why is cherrypy then not closing the socket and free the file descriptors? What can I do to resolve the problem? </p>
+
+<p>I tried to play with the following:</p>
+
+<pre><code>cherrypy.config.update({'server.socketQueueSize': '10'})
+</code></pre>
+
+<p>I thought that this would restrict the number of sockets open at any time to 10 but it was not effective at all. This is the only config I have set, so , rest of the configs hold their default values.</p>
+
+<p>Could somebody throw light on this? Do you think its a bug in cherrypy? How can I resolve it? Is there a way I can close these sockets myself?</p>
+
+<p>Following is my systems info:</p>
+
+<p>CherryPy-3.1.0</p>
+
+<p>python 2.3.4 </p>
+
+<p>Red Hat Enterprise Linux ES release 4 (Nahant Update 7)</p>
+
+<p>Thanks in advance!</p>
+
+Answer: <p>I imagine you're storing (in-memory) some piece of data which has a reference to the socket; if you store the request objects anywhere, for instance, that would likely do it.</p>
+
+<p>The last-ditch chance for sockets to be closed is when they're garbage-collected; if you're doing anything that would prevent garbage collection from reaching them, there's your problem. I suggest that you try to reproduce with a Hello World program written in CherryPy; if you can't reproduce there, you know it's in your code -- look for places where you're persisting information which could (directly or otherwise) reference the socket.</p>

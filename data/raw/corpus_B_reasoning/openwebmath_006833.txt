@@ -1,0 +1,130 @@
+# Time series and Gaussian process
+
+Can you also post the code for the plots? This will help.
+
+Andre
+
+Thanks for your help.
+
+The code is below. This function draws the graph for each year. y_center=0, y_scale=1, la - posterior, PROBS=c(0.025, 0.5, 0.975), Ntree - # of trees for the year. As trees loose all canopy(leaves) they are declared dead and taken out of count.
+
+plotFit <- function(Ntree, PROBS, la, year, y_scale, y_center, Y)
+{
+q <- array(NA, dim = c(Ntree, length(PROBS)))
+for (tree in 1:Ntree)
+q[tree, ] <- quantile(la[, 1, paste0("YT", year, "[", tree, "]")],
+probs = PROBS)
+xlim <- range(1:Ntree)
+ylim <- range(q, Y) * y_scale + y_center
+idx <- order(Y)
+plot(0, 0, col = "white", xlim = xlim, ylim = ylim, main = paste("Year", year),
+xlab = "Observation", ylab = "Predicted thin (%)")
+for (i in 1:length(idx)) {
+colCov <- "blue"
+if (q[idx[i], 1] <= Y[idx[i]] & Y[idx[i]] <= q[idx[i], 3]) colCov <- "green"
+lines(rep(i, 2), c(q[idx[i], 1], q[idx[i], 3]) * y_scale + y_center,
+col = colCov)
+points(i, Y[idx[i]] * y_scale + y_center, pch = 'x', col = "red")
+}
+}
+1 Like
+
+Yeah, I wrote some stuff down, but this is really out of my domain. All I can say is that since you’ve generated the all the covariance matrices separately, I believe you’re modeling them time independent. You might want to consider modeling the time dependency explicity, For the mathematical formulation, I think you could find answers in the Spatial Stats literature.
+
+Also - I believe for plots you’ve produced, you’re using YT as the predicted values. You’re using the training samples predicted values. Obviously this performance will be good. One simple way to evaluate performance is to split up your data and test on values against true values, using generated predictions using the cross covariance from training and test data. I explain this is in a failed case study, you can find the equations and code there.
+
+Scratch the other model.
+
+Let’s try this. For simplicity, we first omit the time component. We can add this later. So our outcome of interests is canopy destroyed, or whatever be it. We should be able to handle this, omitting any time component with a plain-old, Gaussian Process Regression, with one covariance matrix. First, take a subset of your data and train the model on that. Forget MPI. The model was probably running slowly because it was ill specified anyway. Your observations are not so much that you need to use it any way (500x500 covariance matrix is fine, should be able to run in minutes).
+
+You should be able to handle this with the code I’m uploading below, with no modifications.
+
+After we get this working, we can figure out a way to include the time component, sound good? I really haven’t done this, but it’s a good learning experience.
+
+gp_regression_ard.stan (1.7 KB)
+
+And so we’re learning. What I think you’ve plotted, is the training error, which will generally be pretty high. The generated quantities block shows us how we can check to see how well our model works on, as you say, NEW untreated trees.
+
+Thanks a lot for your help. I will give it a whirl.
+
+Intuitively the canopy lost each year should depend on the covariates such as tree height, distance to treated and untreated trees (treated trees help to kill insects, untreated trees increase the probability of getting infected) which are constant year after year but also on initial conditions - how much canopy was left in previous year.
+
+BTW, if interested, GP.data.r (57.1 KB)
+
+I’m just happy to be useful. If the GP Stan code is too much I think BRMS has GP regression now.
+
+Yeah I think the the former is straightforward to model. The later part (time dependency of canopy) I have no idea, but I’m happy to look into it.
+
+Thanks, I was going to ask. Can you please just share the plain csv/txt file, not the R data file, with out all the “shard” stuff? I can’t promise anything immediately, because I have projects due, but I’m happy to help.
+
+I’ll post all the code/plots of everything I produce, so that way you have the resources to produce it on your own.
+
+Also might be useful is the document I wrote up in the first post here: Applied Gaussian Processes in Stan, Part 1. A Case Study
+
+2 Likes
+
+I am lurking here but we (as in me and work) are building out a similar model for canopy and cover. I hadn’t thought about using GP’s for this. So I am playing catch up. Hopefully I can contribute to this as well.
+
+Are you working on EAB or something else?
+
+data.csv (75.6 KB)
+Note: just ignore first column. The second column is a time component so hopefully I will be able to use your code without modifications. Still I would like to compare my model with your model. How would you suggest?
+
+Broadly we are working in riparian system with tanking groundwater and cm scale vegetation cover data. But we have a focused data set on saltcedar and tamarisk leaf beetle.
+
+I’m not an expert. I would suggestion checking out the GP regression in brms, so that you don’t have to deal with the Stan code, writing these models is confusing and can end up erroneous if you’re not very sure what you’re doing. I really don’t think your model is implemented correctly. I’ve written some C++ code for this project, and I’m familiar with the basics of GP models. I don’t know anything about model validation, just basics. So I can’t really advise.
+
+I think it’s best if I just show you.
+
+A few questions:
+Can you please describe in detail what all of the columns mean? relativeYear, desnU,… etc. Is this all in meters?
+
+How do you measure how canopy is left, thin? And is minDistance the distance to a treated tree?
+
+1 Like
+
+I haven’t read the entire thread, but saw a few points I can comment on.
+
+I guess you’re talking about the 1e-9 that is added to the diagonal of the covariance matrix. That is just to prevent numerical problems, it has nothing to do with the content or interpretation of the model. Therefore it should not be made estimable, but hard-coded.
+
+If the value at t=1 depends on the value at t=0 and so forth, this is called an autoregressive model (because the value is a predictor for itself at a later timestep). The manual has a section about this model type. This is an different way to incorporate temporal autocorrelation into a model. Whether this fits your use case better than using a gaussian process, I don’t know.
+
+3 Likes
+
+I found that it is hard-coded then sampling almost halts - I didn’t wait until sampling is complete to check convergence. I am using GP rather freely - it is just another model to predict true value of canopy. Thus I have 3 estimatable parameters: \alpha, \beta, \sigma. While first two are parameters of Kernel the last one is small nugget that is used in some R libraries for fitting with GP. I don’t remember which but I can find out. Then I add observation error to the true value of canopy. So strictly speaking it is GP on true value which I don’t know or perhaps GP with error in variables.
+
+If the value at t=1 depends on the value at t=0 and so forth, this is called an autoregressive model
+
+Yes, but I tried AR(1) but it didn’t go too far. Perhaps AR slopes should be GP.
+
+It’s because the model isn’t specified correctly. I was being nice earlier, but the model doesn’t make sense.
+
+I’ve defined how to use GP in time series data above, with time data being one of the X dimensions. I’m happy to show you how to fit an informative GP regression model, but it would be helpful to me if you’d describe your data for me, as I’d like to know more about it before I estimate a model.
+
+Thanks, this is why I wanted to get opinion from experts. And I appreciate your help. What is your opinion about GP with errors in variables?
+
+Relative year - is the year from when experiment starts: 0-5
+DBH - proxy for tree height in inches
+There are two types of treatment: T and X.
+DistU - distance to nearest untreated tree (in m)
+DistT - same to treated tree with T
+DensU - # of untreated trees in the 100m radius
+DensT - same with treated trees with T
+DistX and DensX is as above to trees treated with T.
+EBYear - relative year of treatment with X.
+
+I am really happy that with the progress.
+
+EDIT: I am trying to run the gp_regression_ard.stan and stuck with gp_exp_quad_cov. I don’t have it in rstan 2.19.2. It is not in cmdstan 2.21.0 either. Replaced with GP1.stan (944 Bytes) Will post results.
+
+Thanks I’ll get back with you in a week or so.
+
+If you have a separate term for the observation error, than it probably doesn’t make sense to have a GP with nugget, because the nugget does the same thing as the observation error. At least if you have a linear link function and gaussian error distribution. In models where this isn’t the case, such as a poisson model , the effects are still somewhat similar, but not identical. Therefore an error term and nugget together can make the model unidentifyable or very difficult to sample from depending on the model structure.
+
+Not sure what you mean.
+
+1 Like
+
+I meant that parameters in AR(1) may be modeled as GP. Just a thought…
+
+Why ?

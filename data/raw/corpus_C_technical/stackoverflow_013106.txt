@@ -1,0 +1,38 @@
+Question: <p>I want my Python script to copy files on Vista. When I run it from a normal <code>cmd.exe</code> window, no errors are generated, yet the files are NOT copied. If I run <code>cmd.exe</code> "as administator" and then run my script, it works fine.</p>
+
+<p>This makes sense since User Account Control (UAC) normally prevents many file system actions.</p>
+
+<p>Is there a way I can, from within a Python script, invoke a UAC elevation request (those dialogs that say something like "such and such app needs admin access, is this OK?")</p>
+
+<p>If that's not possible, is there a way my script can at least detect that it is not elevated so it can fail gracefully?</p>
+
+Answer: <p>A variation on Jorenko's work above allows the elevated process to use the same console (but see my comment below):</p>
+
+<pre><code>def spawn_as_administrator():
+    """ Spawn ourself with administrator rights and wait for new process to exit
+        Make the new process use the same console as the old one.
+          Raise Exception() if we could not get a handle for the new re-run the process
+          Raise pywintypes.error() if we could not re-spawn
+        Return the exit code of the new process,
+          or return None if already running the second admin process. """
+    #pylint: disable=no-name-in-module,import-error
+    import win32event, win32api, win32process
+    import win32com.shell.shell as shell
+    if '--admin' in sys.argv:
+        return None
+    script = os.path.abspath(sys.argv[0])
+    params = ' '.join([script] + sys.argv[1:] + ['--admin'])
+    SEE_MASK_NO_CONSOLE = 0x00008000
+    SEE_MASK_NOCLOSE_PROCESS = 0x00000040
+    process = shell.ShellExecuteEx(lpVerb='runas', lpFile=sys.executable, lpParameters=params, fMask=SEE_MASK_NO_CONSOLE|SEE_MASK_NOCLOSE_PROCESS)
+    hProcess = process['hProcess']
+    if not hProcess:
+        raise Exception("Could not identify administrator process to install drivers")
+    # It is necessary to wait for the elevated process or else
+    #  stdin lines are shared between 2 processes: they get one line each
+    INFINITE = -1
+    win32event.WaitForSingleObject(hProcess, INFINITE)
+    exitcode = win32process.GetExitCodeProcess(hProcess)
+    win32api.CloseHandle(hProcess)
+    return exitcode
+</code></pre>

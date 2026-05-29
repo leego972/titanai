@@ -1,0 +1,120 @@
+Question: <p>I've installed <a href="http://www.owfs.org/" rel="nofollow"><code>owfs</code></a> and am trying to read the data off a <a href="http://www.maxim-ic.com/quick_view2.cfm/qv_pk/4088" rel="nofollow">iButton temperature logger</a>.</p>
+
+<p><code>owfs</code> lets me mount the iButton as a fuse filesystem and I can see all the data.  I'm having trouble figuring out what is the best way to access the data though.  I can get individual readings by <code>cat</code>ting the files, e.g. <code>cat onewire/{deviceid}/log/temperature.1</code>, but the <code>onewire/{deviceid}/log/temperature.ALL</code> file is "broken" (possible too large, as <code>histogram/temperature.ALL</code> work fine).  </p>
+
+<p>A python script to read all files seems to work but takes a very long time.  Is there a better way to do it?  Does anyone have any examples?</p>
+
+<p>I'm using Ubuntu 8.04 and couldn't get the java "one wire viewer" app to run.</p>
+
+<p><strong>Update</strong>: Using <a href="http://owfs.sourceforge.net/owpython.html" rel="nofollow"><code>owpython</code></a> (installed with owfs), I can get the current temperature but can't figure out how to get access to the recorded logs:</p>
+
+<pre><code>&gt;&gt;&gt; import ow
+&gt;&gt;&gt; ow.init("u") # initialize USB
+&gt;&gt;&gt; ow.Sensor("/").sensorList()
+[Sensor("/81.7FD921000000"), Sensor("/21.C4B912000000")]
+&gt;&gt;&gt; x = ow.Sensor("/21.C4B912000000")
+&gt;&gt;&gt; print x.type, x.temperature
+DS1921           22
+</code></pre>
+
+<p><code>x.log</code> gives an <code>AttributeError</code>.</p>
+
+Answer: <p>I've also had problems with owfs.  I found it to be an overengineered solution to what is a simple problem.  Now I'm using the <a href="http://www.digitemp.com/" rel="nofollow">DigiTemp</a> code without a problem.  I found it to be flexible and reliable.  For instance, I store the room's temperature in a log file every minute by running</p>
+
+<pre><code>/usr/local/bin/digitemp_DS9097U -c /usr/local/etc/digitemp.conf \
+    -q -t0 -n0 -d60 -l/var/log/temperature
+</code></pre>
+
+<p>To reach that point I downloaded the source file, untarred it and then did the following.</p>
+
+<pre><code># Compile the hardware-specific command
+make ds9097u
+# Initialize the configuration file
+./digitemp_DS9097U -s/dev/ttyS0 -i
+# Run command to obtain temperature, and verify your setup
+./digitemp_DS9097U -a 
+# Copy the configuration file to an accessible place
+cp .digitemprc /usr/local/etc/digitemp.conf
+</code></pre>
+
+<p>I also hand-edited my configuration file to adjust it to my setup.  This is how it ended-up.</p>
+
+<pre><code>TTY /dev/ttyS0
+READ_TIME 1000
+LOG_TYPE 1
+LOG_FORMAT "%b %d %H:%M:%S Sensor %s C: %.2C F: %.2F"
+CNT_FORMAT "%b %d %H:%M:%S Sensor %s #%n %C"
+HUM_FORMAT "%b %d %H:%M:%S Sensor %s C: %.2C F: %.2F H: %h%%"
+SENSORS 1
+ROM 0 0x10 0xD3 0x5B 0x07 0x00 0x00 0x00 0x05
+</code></pre>
+
+<p>In my case I also created a /etc/init.d/digitemp file and enabled it to run at startup.</p>
+
+<pre><code>#! /bin/sh
+#
+# System startup script for the temperature monitoring daemon
+#
+### BEGIN INIT INFO
+# Provides: digitemp
+# Required-Start:
+# Should-Start:
+# Required-Stop:
+# Should-Stop:
+# Default-Start:  2 3 5
+# Default-Stop:   0 1 6
+# Description:    Start the temperature monitoring daemon
+### END INIT INFO
+
+DIGITEMP=/usr/local/bin/digitemp_DS9097U
+test -x $DIGITEMP || exit 5
+
+DIGITEMP_CONFIG=/root/digitemp.conf
+test -f $DIGITEMP_CONFIG || exit 6
+
+DIGITEMP_LOGFILE=/var/log/temperature
+
+# Source SuSE config
+. /etc/rc.status
+
+rc_reset
+case "$1" in
+    start)
+        echo -n "Starting temperature monitoring daemon"
+        startproc $DIGITEMP -c $DIGITEMP_CONFIG  -q -t0 -n0 -d60 -l$DIGITEMP_LOGFILE
+        rc_status -v
+        ;;
+    stop)
+        echo -n "Shutting down temperature monitoring daemon"
+        killproc -TERM $DIGITEMP
+        rc_status -v
+        ;;
+    try-restart)
+        $0 status &gt;/dev/null &amp;&amp; $0 restart
+        rc_status
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        rc_status
+        ;;
+    force-reload)
+        $0 try-restart
+        rc_status
+        ;;
+    reload)
+        $0 try-restart
+        rc_status
+        ;;
+    status)
+        echo -n "Checking for temperature monitoring service"
+        checkproc $DIGITEMP
+        rc_status -v
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|try-restart|restart|force-reload|reload}"
+        exit 1
+        ;;
+esac
+rc_exit
+</code></pre>

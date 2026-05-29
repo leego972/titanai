@@ -1,0 +1,94 @@
+Question: <p>Say I am declaring a class <code>C</code> and a few of the declarations are very similar. I'd like to use a function <code>f</code> to reduce code repetition for these declarations. It's possible to just declare and use <code>f</code> as usual:</p>
+
+<pre><code>&gt;&gt;&gt; class C(object):
+...     def f(num):
+...             return '&lt;' + str(num) + '&gt;'
+...     v = f(9)
+...     w = f(42)
+... 
+&gt;&gt;&gt; C.v
+'&lt;9&gt;'
+&gt;&gt;&gt; C.w
+'&lt;42&gt;'
+&gt;&gt;&gt; C.f(4)
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+TypeError: unbound method f() must be called with C instance as first argument (got int instance instead)
+</code></pre>
+
+<p>Oops! I've inadvertently exposed <code>f</code> to the outside world, but it doesn't take a <code>self</code> argument (and can't for obvious reasons). One possibility would be to <code>del</code> the function after I use it:</p>
+
+<pre><code>&gt;&gt;&gt; class C(object):
+...     def f(num):
+...             return '&lt;' + str(num) + '&gt;'
+...     v = f(9)
+...     del f
+... 
+&gt;&gt;&gt; C.v
+'&lt;9&gt;'
+&gt;&gt;&gt; C.f
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+AttributeError: type object 'C' has no attribute 'f'
+</code></pre>
+
+<p>But what if I want to use <code>f</code> again later, after the declaration? It won't do to delete the function. I could make it "private" (i.e., prefix its name with <code>__</code>) and give it the <code>@staticmethod</code> treatment, but invoking <code>staticmethod</code> objects through abnormal channels gets very funky:</p>
+
+<pre><code>&gt;&gt;&gt; class C(object):
+...     @staticmethod
+...     def __f(num):
+...             return '&lt;' + str(num) + '&gt;'
+...     v = __f.__get__(1)(9)   # argument to __get__ is ignored...
+... 
+&gt;&gt;&gt; C.v
+'&lt;9&gt;'
+</code></pre>
+
+<p>I have to use the above craziness because <code>staticmethod</code> objects, which are descriptors, are not themselves callable. I need to recover the function wrapped by the <code>staticmethod</code> object before I can call it.</p>
+
+<p>There has got to be a better way to do this. How can I cleanly declare a function in a class, use it during its declaration, and also use it later from within the class? Should I even be doing this?</p>
+
+Answer: <p>Let's begin from the beginning.</p>
+
+<p>"declare a function in a class, use it during its declaration, and also use it later from within the class"</p>
+
+<p>Sorry.  Can't be done.  "In a class" contradicts "used during declaration".</p>
+
+<ul>
+<li>In a class means created as part of the declaration.</li>
+<li>Used during declaration means it exists outside the class.  Often as a meta class.  However, there are other ways.</li>
+</ul>
+
+<p>It's not clear what C.w and C.v are supposed to be.  Are they just strings?  If so, an external function <code>f</code> is the best solution.  The "not clutter the namespace" is a bit specious.  After all, you want to use it again.</p>
+
+<p>It's in the same module as C.  That's why Python has modules.  It binds the function and class together.</p>
+
+<pre><code>import myCmod
+
+myCmod.C.w
+myCmod.C.v
+myCmod.f(42)
+</code></pre>
+
+<p>If w and v aren't simple strings, there's a really good solution that gives a lot of flexibility.</p>
+
+<p>Generally, for class-level ("static") variables like this, we can use other classes.  It's not possible to completely achieve the desired API, but this is close.</p>
+
+<pre><code>&gt;&gt;&gt; class F(object):
+    def __init__( self, num ):
+    	self.value= num
+    	self.format= "&lt;%d&gt;" % ( num, )
+
+&gt;&gt;&gt; class C(object):
+    w= F(42)
+    v= F(9)
+
+&gt;&gt;&gt; C.w
+&lt;__main__.F object at 0x00C58C30&gt;
+&gt;&gt;&gt; C.w.format
+'&lt;42&gt;'
+&gt;&gt;&gt; C.v.format
+'&lt;9&gt;'
+</code></pre>
+
+<p>The advantage of this is that F is a proper, first-class thing that can be extended.  Not a "hidden" thing that we're trying to avoid exposing.  It's a fact of life, so we might as well follow the Open/Closed principle and make it open to extension.</p>

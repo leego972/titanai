@@ -1,0 +1,28 @@
+Question: <p>I'm trying to develop an app using turbogears and sqlalchemy.
+There is already an existing app using kinterbasdb directly under mod_wsgi on the same server.
+When both apps are used, neither seems to recognize that kinterbasdb is already initialized
+Is there something non-obvious I am missing about using sqlalchemy and kinterbasdb in separate apps?  In order to make sure only one instance of kinterbasdb gets initialized and both apps use that instance, does anyone have suggestions?</p>
+
+Answer: <p>I thought I posted my solution already...</p>
+
+<p>Modifying both apps to run under WSGIApplicationGroup ${GLOBAL} in their httpd conf file
+and patching sqlalchemy.databases.firebird.py to check if self.dbapi.initialized is True
+before calling self.dbapi.init(... was the only way I could manage to get this scenario up and running.
+<br>The SQLAlchemy 0.4.7 patch:</p>
+
+<pre>
+diff -Naur SQLAlchemy-0.4.7/lib/sqlalchemy/databases/firebird.py SQLAlchemy-0.4.7.new/lib/sqlalchemy/databases/firebird.py
+--- SQLAlchemy-0.4.7/lib/sqlalchemy/databases/firebird.py       2008-07-26 12:43:52.000000000 -0400
++++ SQLAlchemy-0.4.7.new/lib/sqlalchemy/databases/firebird.py   2008-10-01 10:51:22.000000000 -0400
+@@ -291,7 +291,8 @@
+         global _initialized_kb
+         if not _initialized_kb and self.dbapi is not None:
+             _initialized_kb = True
+-            self.dbapi.init(type_conv=type_conv, concurrency_level=concurrency_level)
++            if not self.dbapi.initialized:
++                self.dbapi.init(type_conv=type_conv, concurrency_level=concurrency_level)
+         return ([], opts)
+
+     def create_execution_context(self, *args, **kwargs):
+
+</pre>

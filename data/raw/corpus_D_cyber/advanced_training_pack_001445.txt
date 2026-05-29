@@ -1,0 +1,419 @@
+================================================================================
+TITAN AI — TRAINING PACK 020: CRYPTOGRAPHY FOR SECURITY PROFESSIONALS
+SYMMETRIC, ASYMMETRIC, HASHING, PKI, TLS, ATTACKS, CORRECT IMPLEMENTATION
+================================================================================
+
+================================================================================
+PART 1: SYMMETRIC ENCRYPTION
+================================================================================
+
+--- AES — ADVANCED ENCRYPTION STANDARD ---
+
+AES INTERNALS:
+  Block cipher: Operates on fixed-size blocks (128 bits = 16 bytes).
+  Key sizes: 128, 192, or 256 bits. AES-256 recommended.
+  Rounds: 10 (128-bit), 12 (192-bit), 14 (256-bit).
+  
+  Each round applies four operations:
+  1. SubBytes: Non-linear substitution (S-box lookup). Provides confusion.
+  2. ShiftRows: Shift row N left by N positions. Provides diffusion.
+  3. MixColumns: Matrix multiplication in GF(2^8). More diffusion.
+  4. AddRoundKey: XOR with round key (key schedule).
+  
+  Security comes from: Confusion (non-linearity) + Diffusion (each bit affects many).
+  After 14 rounds: Changing 1 bit of input or key changes ~50% of output bits (avalanche effect).
+
+MODES OF OPERATION (this is where most implementations go wrong):
+
+AES-ECB (Electronic Codebook — NEVER USE):
+  Same plaintext block → Same ciphertext block.
+  Pattern-preserving: Encrypted image still shows the outline/shape of original.
+  No integrity protection.
+  The ECB Penguin: Encrypting the Linux Tux mascot with ECB preserves the penguin shape.
+  NEVER use ECB. Not for anything. Ever.
+
+AES-CBC (Cipher Block Chaining):
+  Each plaintext block XORed with previous ciphertext before encryption.
+  Requires: Random IV (Initialization Vector) per encryption.
+  Problem: Sequential. Cannot parallelize decryption.
+  Problem: Padding oracle attacks if padding validation leaks.
+  Padding Oracle: Given an oracle that tells you "valid padding" vs "invalid padding",
+  you can decrypt any ciphertext without the key.
+  BEAST attack on TLS 1.0 exploited CBC.
+  Use: Acceptable if padded correctly. Use GCM for new systems.
+
+AES-CTR (Counter Mode):
+  Turns block cipher into stream cipher. XOR keystream with plaintext.
+  Parallelizable. No padding required.
+  CRITICAL: Never reuse (key, nonce) pair. Nonce reuse → XOR of plaintexts leakable.
+  "Two-time pad" problem. Used against VENONA (Cold War Soviet ciphers).
+
+AES-GCM (Galois/Counter Mode — RECOMMENDED):
+  Authenticated Encryption with Associated Data (AEAD).
+  Provides: Confidentiality + Integrity + Authenticity.
+  Produces: Ciphertext + Authentication Tag.
+  
+  CRITICAL: Nonce (96-bit) must never repeat for same key.
+  Nonce reuse in GCM is catastrophic: Key recovery possible.
+  
+  Correct implementation:
+  from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+  import os
+  
+  key = AESGCM.generate_key(bit_length=256)
+  aesgcm = AESGCM(key)
+  
+  def encrypt(plaintext: bytes, associated_data: bytes = None) -> bytes:
+      nonce = os.urandom(12)   # 96 bits, random per encryption
+      ciphertext = aesgcm.encrypt(nonce, plaintext, associated_data)
+      return nonce + ciphertext  # Prepend nonce for decryption
+  
+  def decrypt(data: bytes, associated_data: bytes = None) -> bytes:
+      nonce = data[:12]
+      ciphertext = data[12:]
+      try:
+          return aesgcm.decrypt(nonce, ciphertext, associated_data)
+      except InvalidTag:
+          raise ValueError("Authentication failed — data tampered or wrong key")
+
+CHACHA20-POLY1305:
+  Alternative to AES-GCM. Equal security. Better performance without hardware AES.
+  Designed by D.J. Bernstein. Timing-attack resistant by construction.
+  Used in: TLS 1.3, WireGuard, Signal Protocol, SSH.
+  Prefer when: Running on devices without AES hardware acceleration (ARM IoT devices).
+
+================================================================================
+PART 2: ASYMMETRIC CRYPTOGRAPHY
+================================================================================
+
+--- RSA — HOW IT WORKS AND WHERE IT BREAKS ---
+
+MATHEMATICAL FOUNDATION:
+  Key generation:
+  1. Choose two large primes p and q (2048-bit modulus → p,q each ~1024 bits)
+  2. n = p × q  (public modulus)
+  3. φ(n) = (p-1)(q-1)  (Euler's totient)
+  4. Choose e: 1 < e < φ(n), gcd(e,φ(n)) = 1  (public exponent, commonly 65537)
+  5. d = e^(-1) mod φ(n)  (private exponent, modular inverse of e)
+  
+  Public key: (n, e)
+  Private key: (n, d)
+  
+  Encrypt: c = m^e mod n
+  Decrypt: m = c^d mod n
+  
+  Security: Factoring n (very hard for large n). Given n, cannot easily find p,q.
+  Break RSA = factor n. Best factoring algorithms: Sub-exponential but not polynomial.
+
+RSA COMMON MISTAKES:
+
+1. Textbook RSA (no padding) → Malleable, homomorphic, deterministic:
+   WRONG: ciphertext = pow(message, e, n)
+   Right: RSA-OAEP (PKCS#1 v2.1) for encryption
+          RSA-PSS for signatures
+   
+   Textbook RSA: Encrypt(m1) × Encrypt(m2) = Encrypt(m1×m2). Attacker can manipulate.
+   OAEP: Adds random padding + hash. Makes it non-deterministic and non-malleable.
+
+2. Small public exponent with multiple recipients:
+   Send same m to 3 people with same e=3.
+   Hastad's broadcast attack: CRT to recover m without factoring.
+   Defense: Padding (OAEP) prevents this. Different random padding per recipient.
+
+3. Low-entropy prime generation:
+   Debian OpenSSL bug (2008): PRNG seeded only with PID (32,768 possible values).
+   All keys generated on Debian: 32,768 unique keys. Enumerable.
+   Defense: Always use OS /dev/urandom. Never seed with predictable values.
+
+4. Side-channel attacks on RSA:
+   Timing attack: Naive modular exponentiation → squaring/multiplication timing leaks bits.
+   Defense: Montgomery multiplication (constant-time). Blinding: Randomize input before computation.
+
+--- ELLIPTIC CURVE CRYPTOGRAPHY (ECC) ---
+
+WHY ECC:
+  RSA-2048 ≈ ECC-224 in security level.
+  ECC keys are much smaller. ECC operations are much faster.
+  Preferred for: TLS certificates, SSH keys, JWT signing, mobile/IoT.
+
+CURVE25519 (D.J. Bernstein):
+  Current gold standard for ECDH key exchange.
+  Designed to avoid implementation pitfalls: No special cases, timing-safe by construction.
+  Used in: Signal Protocol, WireGuard, SSH (newer), TLS 1.3.
+  Key exchange: x25519
+  Signatures: Ed25519
+
+P-256 (NIST curve):
+  NIST-standardized. Required by many compliance frameworks (FIPS 140-2).
+  Some concern: NIST curves may have NSA influence in parameter selection.
+  For US government compliance: Use P-256. For personal security: Curve25519.
+
+ECDH KEY EXCHANGE:
+  from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+  
+  # Alice
+  alice_private = X25519PrivateKey.generate()
+  alice_public = alice_private.public_key()
+  
+  # Bob
+  bob_private = X25519PrivateKey.generate()
+  bob_public = bob_private.public_key()
+  
+  # Exchange public keys (over any channel, even insecure)
+  # Alice computes shared secret
+  alice_shared = alice_private.exchange(bob_public)
+  
+  # Bob computes shared secret
+  bob_shared = bob_private.exchange(alice_public)
+  
+  # alice_shared == bob_shared — same value, neither transmitted the secret
+  # Pass through HKDF to derive encryption keys
+  from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+  from cryptography.hazmat.primitives import hashes
+  
+  derived_key = HKDF(
+      algorithm=hashes.SHA256(),
+      length=32,
+      salt=None,
+      info=b'handshake data'
+  ).derive(alice_shared)
+
+================================================================================
+PART 3: HASH FUNCTIONS
+================================================================================
+
+--- CRYPTOGRAPHIC HASH REQUIREMENTS ---
+
+Properties a secure hash must have:
+  1. Preimage resistance: Given h, infeasible to find m where H(m)=h
+  2. Second preimage resistance: Given m1, infeasible to find m2≠m1 where H(m1)=H(m2)
+  3. Collision resistance: Infeasible to find any m1≠m2 where H(m1)=H(m2)
+  4. Avalanche effect: Changing 1 input bit changes ~50% output bits
+  5. Deterministic: Same input always same output
+  6. Fast to compute (for general hashing), slow to compute (for password hashing — different requirement)
+
+BROKEN HASHES (never use for security):
+  MD5: Collisions trivially found. Proven broken in 1996, practically broken by 2004.
+       Two different files with same MD5: Trivially generated.
+       Still used for: Checksums (non-security), file deduplication (acceptable non-security use).
+  
+  SHA-1: Theoretical attacks 2005. Google SHAttered attack 2017: First practical collision.
+         Generated two different PDF files with identical SHA-1.
+         Chrome: Marks SHA-1 certificates as invalid.
+         NEVER use for signatures, certificates, or security-critical applications.
+
+CURRENT RECOMMENDED HASHES:
+  SHA-256: Standard. 256-bit output. Used for digital signatures, TLS, HMAC.
+  SHA-384/SHA-512: Larger output. Better against length extension attacks.
+  SHA-3 (Keccak): Different design (sponge construction). Alternative if SHA-2 broken.
+  BLAKE2: Fast as MD5, secure as SHA-3. Use for checksums, non-cryptographic use.
+  BLAKE3: Faster than BLAKE2. Not yet in most compliance frameworks.
+
+LENGTH EXTENSION ATTACKS (SHA-256 vulnerability):
+  SHA-256 and SHA-512 have length extension vulnerability.
+  If you know H(secret||message), you can compute H(secret||message||attacker_data)
+  without knowing the secret.
+  
+  Example attack:
+  Server MAC: HMAC = SHA256(secret + "user=alice&admin=false")
+  Attacker receives HMAC, doesn't know secret.
+  Length extension: Can compute HMAC for "user=alice&admin=false&extra=&admin=true"
+  
+  DEFENSE: Always use HMAC (which is secure against length extension).
+  HMAC = H(key XOR opad || H(key XOR ipad || message))
+  The double-hashing prevents length extension.
+  
+  import hmac, hashlib
+  mac = hmac.new(secret_key, message, hashlib.sha256).hexdigest()
+  # Verify:
+  hmac.compare_digest(computed_mac, received_mac)  # Timing-safe comparison
+
+--- PASSWORD HASHING — COMPLETELY DIFFERENT REQUIREMENTS ---
+
+General hash (SHA-256): Must be FAST (performance requirement).
+Password hash: Must be SLOW (security requirement — prevents brute force).
+
+GPU can compute:
+  SHA-256: 15 billion hashes/second
+  MD5: 50 billion hashes/second
+  bcrypt (cost=12): 14,000 hashes/second
+  Argon2id: Configurable — as slow as you want
+  
+  Attacker with 8 GPU cluster:
+  SHA-256: 120 billion attempts/second → 8-char random password cracked in minutes
+  bcrypt (cost=12): 112,000 attempts/second → 8-char random password cracked in years
+
+BCRYPT:
+  import bcrypt
+  
+  # Hash (cost=12: takes ~250ms per hash — intentionally slow)
+  password = b"user_password_here"
+  salt = bcrypt.gensalt(rounds=12)
+  hashed = bcrypt.hashpw(password, salt)
+  # hashed includes: $2b$12$[22 chars salt][31 chars hash]
+  
+  # Verify (timing-safe by design)
+  bcrypt.checkpw(b"user_password_here", hashed)  # True
+  bcrypt.checkpw(b"wrong_password", hashed)       # False
+
+ARGON2ID (CURRENT RECOMMENDATION — winner of Password Hashing Competition):
+  Three variants: Argon2d (GPU resistant), Argon2i (side-channel resistant), Argon2id (both)
+  Parameters: time_cost (iterations), memory_cost (RAM required), parallelism (threads)
+  
+  from argon2 import PasswordHasher
+  
+  ph = PasswordHasher(
+      time_cost=3,        # 3 iterations
+      memory_cost=65536,  # 64 MB RAM (makes GPU attacks much harder — VRAM limited)
+      parallelism=4,      # 4 parallel threads
+      hash_len=32,
+      salt_len=16
+  )
+  
+  # Hash
+  hashed = ph.hash("user_password")
+  
+  # Verify
+  ph.verify(hashed, "user_password")  # Raises VerifyMismatchError if wrong
+  
+  # Check if rehash needed (if parameters upgraded)
+  if ph.check_needs_rehash(hashed):
+      hashed = ph.hash("user_password")  # Upgrade to new parameters
+
+================================================================================
+PART 4: PUBLIC KEY INFRASTRUCTURE (PKI)
+================================================================================
+
+--- TLS CERTIFICATE CHAIN OF TRUST ---
+
+CERTIFICATE TYPES:
+  DV (Domain Validation): Proves you control the domain. Automated. Minutes. Free (Let's Encrypt).
+  OV (Organization Validation): Proves organization identity. Days. Paid.
+  EV (Extended Validation): Maximum verification. Weeks. Expensive. Shows org name in browser.
+  Wildcard: *.example.com covers all subdomains. Cannot be further nested (*.*.example.com invalid).
+  SAN (Subject Alternative Names): Single cert for multiple domains. Preferred over wildcard for security.
+
+TRUST CHAIN:
+  Your server cert → Intermediate CA cert → Root CA cert
+  Browser: Trusts ~150 root CAs (pre-installed).
+  Root CA signs Intermediate CA cert.
+  Intermediate CA signs your server cert.
+  Browser: Verifies chain back to trusted root.
+  
+  Why intermediate CAs?
+  Root CA private key kept OFFLINE (hardware HSM, stored in vault, ceremony to use).
+  If root CA key were online, a compromise would trust all internet traffic.
+  Intermediate CA: Online for day-to-day signing. If compromised: Revoke and reissue.
+  Root CA remains untouched.
+
+CERTIFICATE TRANSPARENCY:
+  Every TLS cert issued must be logged in public, append-only CT logs.
+  Browsers (since 2018): Require CT log inclusion proof in certificate.
+  
+  Why: If a CA issues a fraudulent cert for google.com, it appears in CT logs.
+  Google monitors CT logs for unauthorized certs for their domains.
+  
+  Security value: You should monitor CT logs for unauthorized certs for your domain.
+  Tools: crt.sh, Facebook Certificate Transparency Monitor, certspotter.
+
+CERTIFICATE PINNING:
+  Instead of trusting any cert signed by trusted CA:
+  App expects THIS specific cert (or its public key hash).
+  If server presents different cert: Connection rejected.
+  
+  Protection against: Rogue CAs signing fraudulent certs for your domain.
+  Protection against: Government-level MitM with legitimate cert.
+  
+  HPKP (HTTP Public Key Pinning — deprecated, dangerous):
+  If you lose your private key while HPKP is active: Your site is inaccessible.
+  No rescue. Period.
+  
+  Current recommended approach: Certificate pinning in mobile apps only.
+  Web apps: Use Certificate Transparency monitoring instead.
+  
+  Android pinning:
+  // In network_security_config.xml:
+  <domain-config>
+    <domain includeSubdomains="true">api.yourapp.com</domain>
+    <pin-set expiration="2026-01-01">
+      <pin digest="SHA-256">base64_of_sha256_public_key_hash==</pin>
+      <pin digest="SHA-256">backup_pin_hash==</pin>  <!-- Always have backup pin -->
+    </pin-set>
+  </domain-config>
+
+LET'S ENCRYPT AUTOMATION (ACME protocol):
+  # Certbot: Automatic cert issuance and renewal
+  certbot certonly --nginx -d example.com -d www.example.com
+  # Auto-renewal cron:
+  0 2 * * 1 certbot renew --quiet
+  
+  # Or with cert-manager in Kubernetes:
+  apiVersion: cert-manager.io/v1
+  kind: Certificate
+  metadata:
+    name: api-tls
+  spec:
+    secretName: api-tls-secret
+    issuerRef:
+      name: letsencrypt-prod
+      kind: ClusterIssuer
+    dnsNames:
+    - api.example.com
+    # cert-manager auto-renews 30 days before expiry
+
+================================================================================
+PART 5: COMMON CRYPTOGRAPHIC FAILURES
+================================================================================
+
+FAILURE 1: Using encryption when you need authentication:
+  AES-CBC gives confidentiality. Not integrity. Not authentication.
+  Attacker can flip bits in ciphertext, causing predictable changes to plaintext.
+  Example: Bit-flipping attack in AES-CBC to change "admin=false" to "admin=true".
+  Fix: Use AES-GCM (authenticates and encrypts) or add HMAC-SHA256 over ciphertext.
+
+FAILURE 2: Not authenticating associated data:
+  AES-GCM encrypts payload. What about the header? (routing info, user ID, metadata)
+  If header not authenticated: Attacker can modify header while ciphertext is intact.
+  Fix: Pass metadata as associated_data to AES-GCM. It's authenticated, not encrypted.
+
+FAILURE 3: Timing attacks on comparison:
+  WRONG: if user_hmac == computed_hmac: (String comparison — short-circuit)
+  Timing: "abc" vs "xyz" fails faster than "abcdef" vs "abcxyz"
+  Attacker: Measure response time to determine correct bytes one at a time.
+  
+  Fix:
+  import hmac
+  hmac.compare_digest(user_hmac, computed_hmac)  # Constant time regardless of match point
+
+FAILURE 4: Weak random number generation:
+  WRONG: random.randint(0, 2**128)  # Python random module is NOT cryptographically secure
+  WRONG: time.time() as seed
+  WRONG: Math.random() in JavaScript for security tokens
+  
+  Right:
+  import secrets
+  token = secrets.token_hex(32)        # 256 bits of cryptographic randomness
+  otp = secrets.randbelow(1000000)     # Cryptographically secure OTP
+  
+  # JavaScript:
+  crypto.getRandomValues(new Uint8Array(32))  # Web Crypto API
+
+FAILURE 5: Deterministic ECDSA nonce:
+  ECDSA requires random nonce k for each signature.
+  If k repeats even once: Private key recoverable mathematically.
+  Famous: Sony PS3 used same k for all signatures. Private key extracted.
+  Also: Java Android SecureRandom bug (2013) — ECDSA nonce reuse on Bitcoin wallets.
+  Many wallets drained.
+  
+  Fix: Use deterministic ECDSA (RFC 6979) — k derived from message hash + private key.
+  Same inputs → same nonce (deterministic) but unique per message (safe).
+  Or: Use EdDSA (Ed25519) which is deterministic by design.
+
+================================================================================
+END OF PACK 020: CRYPTOGRAPHY
+Total: AES internals and all modes (ECB/CBC/CTR/GCM/ChaCha20), RSA math and
+common mistakes, ECC (Curve25519/Ed25519/ECDH), hash functions (broken MD5/SHA1,
+secure SHA-256/SHA-3, BLAKE), length extension attacks, password hashing
+(bcrypt/Argon2id with correct parameters), PKI (cert types, CT logs, cert pinning,
+Let's Encrypt automation), five common cryptographic failure patterns with fixes.
+================================================================================

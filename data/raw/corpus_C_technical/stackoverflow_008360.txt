@@ -1,0 +1,48 @@
+Question: <p>I am using python 2.6 on XP. I have just installed py2exe, and I can successfully create a simple hello.exe from a hello.py. However, when I try using py2exe on my real program, py2exe produces a few information messages but fails to generate anything in the dist folder.  </p>
+
+<p>My setup.py looks like this:</p>
+
+<pre><code>from distutils.core import setup
+import py2exe
+
+setup(console=['ServerManager.py'])
+</code></pre>
+
+<p>and the py2exe output looks like this:</p>
+
+<pre class="lang-none prettyprint-override"><code>python setup.py py2exe
+running py2exe
+creating C:\DevSource\Scripts\ServerManager\build
+creating C:\DevSource\Scripts\ServerManager\build\bdist.win32
+   ...
+   ...
+creating C:\DevSource\Scripts\ServerManager\dist
+*** searching for required modules ***
+*** parsing results ***
+creating python loader for extension 'wx._misc_' (C:\Python26\lib\site-packages\wx-2.8-msw-unicode\wx\_misc_.pyd -&gt; wx._misc_.pyd)
+creating python loader for extension 'lxml.etree' (C:\Python26\lib\site-packages\lxml\etree.pyd -&gt; lxml.etree.pyd)
+   ...
+   ...
+creating python loader for extension 'bz2' (C:\Python26\DLLs\bz2.pyd -&gt; bz2.pyd)
+*** finding dlls needed ***
+</code></pre>
+
+<p>py2exe seems to have found all my imports (though I was a bit surprised to see win32 mentioned, as I am not explicitly importing it). Also, my program starts up quite happily with this command:</p>
+
+<pre class="lang-none prettyprint-override"><code>python ServerManager.py
+</code></pre>
+
+<p>Clearly I am doing something fundamentally wrong, but in the absence of any error messages from py2exe I have no idea what.</p>
+
+Answer: <p>It looks like this is only a dependency for Python 2.6. I wasn't getting this error under 2.5, but after the upgrade I am.</p>
+
+<p>This email thread has some background for why the problem exists and how to fix it:<br>
+<a href="http://www.nabble.com/py2exe,-Py26,-wxPython-and-dll-td20556399.html" rel="nofollow">http://www.nabble.com/py2exe,-Py26,-wxPython-and-dll-td20556399.html</a></p>
+
+<p>I didn't want to have to install the vcredist. My application currently requires no installation and can be run by non-administrators, which is behavior I don't want to lose. So I followed the suggestions in the links and got the necessary Microsoft.VC90.CRT.manifest and msvcr90.dll by installing Python "for this user only". I also needed msvcp90.dll that I found in the WinSxS folder of an "all users" Python 2.6 install. Since I already had two of the three, I included msvcm90.dll to prevent future errors though I didn't get any immediate errors when I left it out. I put the manifest and the three DLLs in the libs folder used by my frozen application.</p>
+
+<p>The trick I had to perform was including an additional copy of the manifest and msvcr90.dll in the root of my application folder next to by py2exe generated executable. This copy of the DLL is used to bootstrap the application, but then it appears to only look in the libs folder.</p>
+
+<p>Hopefully that discovery helps someone else out.</p>
+
+<p>Also, I had the same problem with having py2exe log a real error message. Then I realized that stderr wasn't getting redirected into my log file. Add "> build.log 2>&amp;1" on the command line where you invoke py2exe.</p>

@@ -1,0 +1,50 @@
+Question: <p>While working on a C++ project, I was looking for a third party library for something that is not my core business. I found a really good library, doing exactly what's needed, but it is written in Python. I decided to experiment with embedding Python code in C++, using the Boost.Python library.</p>
+
+<p>The C++ code looks something like this:</p>
+
+<pre><code>#include &lt;string&gt;
+#include &lt;iostream&gt;
+#include &lt;boost/python.hpp&gt;
+
+using namespace boost::python;
+
+int main(int, char **) 
+{
+    Py_Initialize();
+
+    try 
+    {
+    	object module((handle&lt;&gt;(borrowed(PyImport_AddModule("__main__")))));
+
+    	object name_space = module.attr("__dict__");
+    	object ignored = exec("from myModule import MyFunc\n"
+    		              "MyFunc(\"some_arg\")\n",
+    		              name_space);
+
+    	std::string res = extract&lt;std::string&gt;(name_space["result"]);
+    } 
+    catch (error_already_set) 
+    {
+    	PyErr_Print();
+    }
+
+    Py_Finalize();
+    return 0;
+}
+</code></pre>
+
+<p>A (very) simplified version of the Python code looks like this:</p>
+
+<pre><code>import thirdparty
+
+def MyFunc(some_arg):
+    result = thirdparty.go()
+    print result
+</code></pre>
+
+<p>Now the problem is this: 
+'MyFunc' executes fine, i can see the print of 'result'.
+What i cannot do is read 'result' back from the C++ code. The extract command never finds 'result' in any namespace.
+I tried defining 'result' as a global, i even tried returning a tuple, but i cannot get it to work.</p>
+
+Answer: <p>I think what you need is either <code>PyObject_CallObject(&lt;py function&gt;, &lt;args&gt;)</code>, which returns the return value of the function you call as a PyObject, or <code>PyRun_String(&lt;expression&gt;, Py_eval_input, &lt;globals&gt;, &lt;locals&gt;)</code> which evaluates a single expression and returns its result.</p>

@@ -1,0 +1,376 @@
+================================================================================
+TITAN AI — TRAINING PACK 024: OSINT AND ADVANCED RECONNAISSANCE
+PASSIVE RECON, ACTIVE SCANNING, SOCIAL ENGINEERING INTELLIGENCE, ATTACK SURFACE
+================================================================================
+
+================================================================================
+PART 1: OSINT METHODOLOGY
+================================================================================
+
+--- THE OSINT CYCLE ---
+
+OSINT is not just searching Google. It's a systematic intelligence process.
+
+CYCLE:
+  1. Define requirements: What specific intelligence are we seeking? 
+     Goal: "Find all external services of target.com and their vulnerabilities"
+     Not: "Find anything about target.com"
+  
+  2. Collection: Gather raw data from open sources
+  3. Processing: Clean, structure, deduplicate
+  4. Analysis: Find patterns, connect dots, derive conclusions
+  5. Dissemination: Report findings with confidence levels
+  6. Feedback: Did findings answer requirements? If not, refine collection.
+
+OSINT DATA SOURCES — TAXONOMY:
+
+Web/Internet:
+  Company website, job postings, press releases, SEC filings, patents
+  
+Social media:
+  LinkedIn (employees, org structure, technologies used), Twitter, Instagram
+  
+Technical registries:
+  WHOIS, DNS, BGP routing tables, SSL certificate transparency logs, Shodan
+  
+Government/legal:
+  Court records, corporate filings, bankruptcy records, regulatory filings
+  
+Dark web (with caution):
+  Leaked credential databases, threat actor forums, paste sites
+
+================================================================================
+PART 2: DOMAIN AND IP RECONNAISSANCE
+================================================================================
+
+--- DNS ENUMERATION ---
+
+PASSIVE DNS (don't touch the target):
+  # Historical DNS records (Passive DNS databases)
+  curl "https://api.securitytrails.com/v1/domain/target.com/dns" -H "apikey: YOUR_KEY"
+  # Shows: All DNS records ever seen, when they changed
+  
+  # Certificate Transparency Logs — BEST source for subdomain discovery
+  # Every certificate ever issued for *.target.com is public
+  curl "https://crt.sh/?q=%.target.com&output=json" | jq '.[].name_value' | sort -u
+  # Returns: All subdomains that have ever had a TLS certificate issued
+  
+  # VirusTotal DNS data:
+  curl "https://www.virustotal.com/vtapi/v2/domain/report?domain=target.com&apikey=KEY"
+  
+  # DNSDumpster (free, web-based):
+  # dnsdumpster.com → Visual map of DNS structure + mail servers, subdomains
+
+ACTIVE DNS ENUMERATION:
+  # Subdomain brute-force (checks if subdomain exists via DNS query)
+  # Tool: dnsx, subfinder, amass
+  
+  # Subfinder (aggregates 40+ sources):
+  subfinder -d target.com -o subdomains.txt
+  
+  # Amass (most comprehensive):
+  amass enum -passive -d target.com -o amass_passive.txt
+  amass enum -active -d target.com -o amass_active.txt -brute -w wordlist.txt
+  
+  # Resolve discovered subdomains:
+  cat subdomains.txt | dnsx -a -cname -resp -o resolved.txt
+  # Output: subdomain → IP address + CNAME if any
+  
+  # Find live web servers:
+  cat resolved.txt | httpx -title -status-code -tech-detect -o live_hosts.txt
+  # Output: URL, HTTP status, page title, technologies detected
+
+ZONE TRANSFER ATTEMPT:
+  # If DNS server allows zone transfer: Get ALL records instantly
+  dig axfr @ns1.target.com target.com
+  
+  # Automated check:
+  for ns in $(dig +short NS target.com); do
+      echo "Trying zone transfer from: $ns"
+      dig axfr @$ns target.com
+  done
+  
+  Rare but still occurs: Misconfigured DNS servers in small/legacy organizations.
+  Result: Complete subdomain map in seconds.
+
+--- IP AND ASN RECONNAISSANCE ---
+
+ASN (AUTONOMOUS SYSTEM NUMBER) LOOKUP:
+  An ASN is a block of IP addresses owned by an organization.
+  Find all IPs belonging to target organization:
+  
+  # Find ASN from company name:
+  curl "https://api.bgpview.io/search?query_term=target_company"
+  
+  # Get all IP ranges in ASN:
+  curl "https://api.bgpview.io/asn/AS12345/prefixes"
+  # Returns: All CIDR blocks owned by ASN 12345
+  
+  # Manual: BGP looking glass
+  whois -h whois.radb.net "!gAS12345"
+
+SHODAN — INTERNET-WIDE SCANNING DATA:
+  Shodan continuously scans the entire internet. Stores banners, certificates, headers.
+  
+  # Shodan searches (no active scanning — all historical data):
+  
+  # All IPs belonging to organization:
+  org:"Target Company" port:443
+  
+  # Services with default credentials or known vulnerabilities:
+  org:"Target Company" http.title:"Kibana" -authentication
+  org:"Target Company" "MongoDB Server Information" -authentication
+  
+  # All exposed RDP:
+  org:"Target Company" port:3389
+  
+  # Specific product version:
+  org:"Target Company" http.server:"Apache/2.2"
+  # Apache 2.2 is EOL. Find vulnerable legacy servers.
+  
+  # SSL certs with internal hostnames (leaks internal naming):
+  ssl.cert.subject.cn:"internal.target.com"
+  
+  Python API:
+  import shodan
+  api = shodan.Shodan('YOUR_API_KEY')
+  results = api.search('org:"Target Company" port:22')
+  for result in results['matches']:
+      print(result['ip_str'], result.get('data', '')[:200])
+
+CERTIFICATE RECONNAISSANCE (Beyond CT logs):
+  TLS certificates contain rich information:
+  - Organization name, department
+  - Internal hostnames in SANs (Subject Alternative Names)
+  - Email addresses in fields
+  - Certificate authority (can reveal third-party managed infrastructure)
+  
+  # Enumerate all SANs for a certificate:
+  echo | openssl s_client -connect target.com:443 2>/dev/null | 
+    openssl x509 -noout -text | 
+    grep -A1 "Subject Alternative Name"
+  
+  # Multiple certificates on same IP (virtual hosting):
+  python3 -c "
+  import ssl, socket
+  ctx = ssl.create_default_context()
+  ctx.check_hostname = False
+  ctx.verify_mode = ssl.CERT_NONE
+  conn = ctx.wrap_socket(socket.socket(), server_hostname='target.com')
+  conn.connect(('1.2.3.4', 443))
+  cert = conn.getpeercert(True)
+  print(ssl.DER_cert_to_PEM_cert(cert))
+  "
+
+================================================================================
+PART 3: PEOPLE AND ORGANIZATION INTELLIGENCE
+================================================================================
+
+--- LINKEDIN OSINT ---
+
+LinkedIn is the richest organizational intelligence database publicly available.
+
+ORGANIZATIONAL MAPPING:
+  Find all employees → Map org structure → Identify targets for social engineering
+  Identify technologies → Engineer uses Python+AWS+Kubernetes → Target's tech stack
+  
+  # Tools:
+  # linkedin2username: Generate username patterns from LinkedIn names
+  python linkedin2username.py -c "Target Company" -n 100
+  # Output: john.doe, jdoe, john_doe, johndoe (all common formats)
+  
+  # Cross-reference with leaked credentials:
+  # Generated usernames → check against HaveIBeenPwned, credential lists
+
+TECHNOLOGY STACK FROM JOB POSTINGS:
+  Job postings are intelligence goldmines. They list what's used internally.
+  
+  "We use: Kubernetes, Terraform, AWS, Go, PostgreSQL, Redis, Kafka"
+  → Full tech stack without touching their systems
+  → Target your attacks to these specific technologies
+  → If CVE in PostgreSQL 14.x → ask: Do they run 14.x? Check Shodan.
+  
+  Look for:
+  - Tech stack (languages, frameworks, databases, cloud)
+  - Tools (security tools → know what you're up against; DevOps tools → tech stack)
+  - Internal product names (gives attack surface vocabulary)
+  - Org structure (titles → understand hierarchy, find security team)
+  - Office locations (VPN endpoints, datacenter locations)
+
+EMAIL FORMAT DISCOVERY:
+  Once you know one employee's email: Know all employees' emails.
+  
+  # Tools:
+  hunter.io → "email finder" for any domain → reveals pattern and found emails
+  phonebook.cz → email search
+  
+  # Manual: 
+  # If you find john.doe@company.com on LinkedIn → pattern is firstname.lastname
+  # James Smith → james.smith@company.com
+  
+  # Verify email exists without sending:
+  # SMTP VRFY command (often disabled but worth trying):
+  nc -C mail.company.com 25
+  HELO test.com
+  VRFY john.doe@company.com
+  # Response 250 = exists, 550 = doesn't exist
+
+================================================================================
+PART 4: ATTACK SURFACE MAPPING
+================================================================================
+
+--- COMPLETE EXTERNAL ATTACK SURFACE ASSESSMENT ---
+
+PHASE 1: SEED DOMAINS
+  Start with known primary domain.
+  Find all related domains:
+  - Reverse WHOIS: Same registrant contact → more domains
+  - SSL cert SANs: Often include related domains
+  - Google: "site:*.company.com"
+  
+  # Reverse WHOIS (find all domains registered by same org):
+  viewdns.info/reversewhois/?q=company.com
+  domainsbyregistrant.com
+
+PHASE 2: IP RANGE DISCOVERY
+  ASN lookup → All CIDR ranges owned by organization
+  Reverse DNS on known IPs → More hostnames, patterns
+  Cloud IP identification → Is it AWS/Azure/GCP? Which region?
+  
+  # Identify cloud provider from IP:
+  curl https://ip-api.com/json/1.2.3.4
+  # Check against AWS IP range lists:
+  curl https://ip-ranges.amazonaws.com/ip-ranges.json | jq '.prefixes[] | select(.ip_prefix | contains("1.2.3.0/"))'
+
+PHASE 3: SERVICE ENUMERATION
+  For each discovered IP/hostname: What's running?
+  
+  # Masscan (fast, scans internet-scale quickly):
+  masscan -p 1-65535 --rate 10000 192.168.1.0/24 -oX scan.xml
+  
+  # Nmap (detailed service fingerprinting on masscan results):
+  nmap -sV -sC -O -p $(masscan_open_ports) --open -oA nmap_results $(masscan_targets)
+  
+  # Common high-value ports to check:
+  21: FTP (anonymous login? Default creds?)
+  22: SSH (version? Password auth enabled? Default creds?)
+  23: Telnet (plaintext, often default credentials)
+  25: SMTP (open relay? VRFY enabled?)
+  80/443: HTTP/HTTPS (web app vulnerabilities)
+  389/636: LDAP (anonymous bind? Credential exposure?)
+  445: SMB (EternalBlue? Default creds? Null sessions?)
+  3306: MySQL (exposed to internet? Default creds?)
+  5432: PostgreSQL (exposed to internet? Default creds?)
+  6379: Redis (no auth? Exposed to internet?)
+  27017: MongoDB (no auth? Exposed to internet?)
+  9200: Elasticsearch (no auth? Exposed to internet? Very common finding)
+  9090: Prometheus (metrics exposure, no auth often)
+  8080/8443: Alternative HTTP (admin panels, developer servers)
+  5000/3000: Common dev server ports (not meant to be public)
+
+PHASE 4: WEB APPLICATION DISCOVERY
+  For each web service: What is it?
+  
+  # Technology detection:
+  whatweb https://target.com
+  wappalyzer (browser extension for manual recon)
+  httpx -l urls.txt -tech-detect -title -status-code
+  
+  # Directory/endpoint discovery:
+  ffuf -u https://target.com/FUZZ -w /opt/SecLists/Discovery/Web-Content/raft-large-directories.txt \
+    -fc 404 -mc all -c -v
+  
+  # API endpoint discovery:
+  ffuf -u https://api.target.com/api/FUZZ -w /opt/SecLists/Discovery/Web-Content/api/api-endpoints.txt
+  
+  # JavaScript file analysis (often reveals hidden endpoints):
+  # LinkFinder:
+  python linkfinder.py -i https://target.com -d -o cli | grep "api\|admin\|v[0-9]"
+
+PHASE 5: CREDENTIAL AND LEAKED DATA
+  # Check for leaked credentials in breach data:
+  dehashed.com (search by domain → all leaked creds for that domain)
+  haveibeenpwned.com/API → Check discovered email list against breach data
+  
+  # Pastebin/GitHub for leaked secrets:
+  github-dorks:
+  "target.com" "password"
+  "target.com" "secret" 
+  "target.com" "api_key"
+  "target.com" "private_key"
+  org:target-org filename:.env
+  org:target-org AWS_SECRET_ACCESS_KEY
+  
+  # GitLeaks for historical scanning of their public repos:
+  gitleaks detect --source https://github.com/target-org/repo
+
+--- GOOGLE DORKS FOR ATTACK SURFACE ---
+
+FINDING EXPOSED INFRASTRUCTURE:
+  site:target.com filetype:pdf
+  site:target.com filetype:xlsx OR filetype:docx  # Document exposure
+  site:target.com inurl:admin
+  site:target.com inurl:login
+  site:target.com "index of /"                    # Directory listing
+  site:target.com intitle:"Dashboard"             # Admin dashboards
+  site:target.com "wp-admin"                      # WordPress admin
+  site:target.com "powered by"                    # Technology reveals
+  
+  # Error messages revealing tech stack:
+  site:target.com "stack trace"
+  site:target.com "SQLException"
+  site:target.com "Warning: mysql_"
+  
+  # Sensitive files accidentally indexed:
+  site:target.com filetype:env
+  site:target.com filetype:log
+  site:target.com "DB_PASSWORD"
+  
+  # Subdomains not meant to be public:
+  site:*.target.com -www
+
+================================================================================
+PART 5: THREAT MODELING FROM OSINT
+================================================================================
+
+--- BUILDING ATTACK NARRATIVES FROM INTEL ---
+
+EXAMPLE: OSINT findings → Attack path
+
+Findings from OSINT:
+  1. Job posting: "We use Fortinet VPN for remote access"
+  2. Shodan: SSL cert on 1.2.3.4 shows fortinet.com in SAN, port 443 open
+  3. Version banner: FortiOS 7.0.3 (via HTTP headers)
+  4. CVE lookup: FortiOS 7.0.x vulnerable to CVE-2022-40684 (authentication bypass)
+  5. LinkedIn: 3 sysadmins identified, emails discovered via hunter.io
+  6. HaveIBeenPwned: Two sysadmin emails found in breach databases with password hashes
+
+Attack narrative:
+  Path A: CVE-2022-40684 → Unauthenticated admin access to FortiGate → VPN full access → Internal network
+  Path B: Crack breached password hashes → Password spray on VPN → Successful auth → Internal network
+  Path C: Phish sysadmin with Fortinet-themed lure → Credential harvest → VPN login
+  
+  This is a complete attack surface assessment:
+  - Specific vulnerability with CVE number
+  - Specific targets (sysadmin names/emails)
+  - Three distinct attack paths
+  - No touching the target yet (fully passive)
+
+OSINT REPORT STRUCTURE:
+  1. Executive Summary: What's the most critical finding? Business impact.
+  2. Scope: What was investigated, what data sources.
+  3. Technical Findings (by severity):
+     Critical: Exposed admin panels, direct vulnerability matches, active credential exposure
+     High: Outdated software, weak configurations, technology disclosures
+     Medium: Information disclosure, third-party services, shadow IT
+     Low: Metadata in documents, minor information exposure
+  4. Attack Paths: Narrative of how findings connect to real attacks.
+  5. Remediation Priority Matrix: Fix order with estimated effort.
+
+================================================================================
+END OF PACK 024: OSINT AND RECONNAISSANCE
+Total: OSINT methodology cycle, passive DNS (CT logs, SecurityTrails), ASN/IP recon,
+Shodan searches and API, certificate recon, LinkedIn OSINT, email format discovery,
+complete 5-phase attack surface assessment workflow, technology detection tools,
+credential leak checking, Google Dorks catalog, OSINT-to-attack-path translation.
+================================================================================

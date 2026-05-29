@@ -1,0 +1,71 @@
+Question: <p>I have a list of arbitrary length, and I need to split it up into equal size chunks and operate on it. There are some obvious ways to do this, like keeping a counter and two lists, and when the second list fills up, add it to the first list and empty the second list for the next round of data, but this is potentially extremely expensive.</p>
+
+<p>I was wondering if anyone had a good solution to this for lists of any length, e.g. using generators.</p>
+
+<p>This should work:</p>
+
+<pre><code>l = range(1, 1000)
+print chunks(l, 10) -&gt; [ [ 1..10 ], [ 11..20 ], .., [ 991..999 ] ]
+</code></pre>
+
+<p>I was looking for something useful in <code>itertools</code> but I couldn't find anything obviously useful. Might've missed it, though.</p>
+
+<p>Related question: <a href="http://stackoverflow.com/questions/434287/what-is-the-most-pythonic-way-to-iterate-over-a-list-in-chunks">What is the most âpythonicâ way to iterate over a list in chunks?</a></p>
+
+Answer: <p>I'm surprised nobody has thought of using <code>iter</code>'s <a href="http://docs.python.org/2/library/functions.html#iter">two-argument form</a>:</p>
+
+<pre><code>from itertools import islice
+
+def chunk(it, size):
+    it = iter(it)
+    return iter(lambda: tuple(islice(it, size)), ())
+</code></pre>
+
+<p>Demo:</p>
+
+<pre><code>&gt;&gt;&gt; list(chunk(range(14), 3))
+[(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13)]
+</code></pre>
+
+<p>This works with any iterable and produces output lazily. It returns tuples rather than iterators, but I think it has a certain elegance nonetheless. It also doesn't pad; if you want padding, a simple variation on the above will suffice:</p>
+
+<pre><code>from itertools import islice, chain, repeat
+
+def chunk_pad(it, size, padval=None):
+    it = chain(iter(it), repeat(padval))
+    return iter(lambda: tuple(islice(it, size)), (padval,) * size)
+</code></pre>
+
+<p>Demo:</p>
+
+<pre><code>&gt;&gt;&gt; list(chunk_pad(range(14), 3))
+[(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13, None)]
+&gt;&gt;&gt; list(chunk_pad(range(14), 3, 'a'))
+[(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13, 'a')]
+</code></pre>
+
+<p>Like the <code>izip_longest</code>-based solutions, the above <em>always</em> pads. As far as I know, there's no one- or two-line itertools recipe for a function that <em>optionally</em> pads. By combining the above two approaches, this one comes pretty close:</p>
+
+<pre><code>_no_padding = object()
+
+def chunk(it, size, padval=_no_padding):
+    if padval == _no_padding:
+        it = iter(it)
+        sentinel = ()
+    else:
+        it = chain(iter(it), repeat(padval))
+        sentinel = (padval,) * size
+    return iter(lambda: tuple(islice(it, size)), sentinel)
+</code></pre>
+
+<p>Demo:</p>
+
+<pre><code>&gt;&gt;&gt; list(chunk(range(14), 3))
+[(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13)]
+&gt;&gt;&gt; list(chunk(range(14), 3, None))
+[(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13, None)]
+&gt;&gt;&gt; list(chunk(range(14), 3, 'a'))
+[(0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11), (12, 13, 'a')]
+</code></pre>
+
+<p>I believe this is the shortest chunker proposed that offers optional padding. </p>

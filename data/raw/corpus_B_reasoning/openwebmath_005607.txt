@@ -1,0 +1,108 @@
+# Address book app to learn bash
+
+I'm fairly proficient in C and Python, but want to learn some skills for administrating my new Linux machine. I wrote this simple address book app to teach myself shell scripting. This is the first script I've written longer than a couple of lines.
+
+The address book is a plain text file stored in $HOME/.sab-db. Entries are separated by newlines and the three fields (first name, surname, email) are separated by colons, like the fields in /etc/passwd. The application is divided into four scripts that have a single task each. This is inspired by how Git is organized. Is this a good way to isolate independent code in bash? How should I handle shared code between scripts? I've use two different approaches below: I created a standalone script that the others call for determining the database name, and I copy-pasted the die function. I've heard of script sourcing, but I've never seen that used for creating bash "libraries". sab-find-db #!/bin/bash DB_NAME=".sab-db" if [ -n "$SAB_DB_DIR" ]; then
+echo "$SAB_DB_DIR/$DB_NAME"
+else
+echo "$HOME/$DB_NAME"
+fi
+
+
+sab-search
+
+#!/bin/bash
+
+function die {
+echo "$1" >&2 exit 1 } if [$# -eq 1 ]; then
+# Fields can't include : since it's the delimiter
+if [ $(echo "$1" | grep ":" | wc -l) -gt 0 ]; then
+exit 0
+else
+file=$(mktemp) grep -i "$1" $(./sab-find-db) >"$file" 2>/dev/null
+fi
+elif [ $# -eq 0 ]; then file=$(./sab-find-db)
+else
+die "usage: $0 [<first name> | <surname> | <email>]" fi cat "$file"
+
+echo "First name: $(echo "$line" | cut -d: -f1 -)"
+echo "Surname:    $(echo "$line" | cut -d: -f2 -)"
+echo "Email:      $(echo "$line" | cut -d: -f3 -)"
+echo
+done <"$file" if [$# -eq 1 ]; then
+rm "$file" fi  sab-add #!/bin/bash function die { echo "$1" >&2
+exit 1
+}
+
+if [ $# -eq 3 ]; then entry="$1:$2:$3"
+elif [ $# -eq 0 ]; then echo -n "First name: " read first_name echo -n "Surname: " read surname echo -n "Email: " read email entry="$first_name:$surname:$email"
+else
+die "usage: $0\n [<first name> <surname> <email>]" fi if [$(echo "$entry" | grep -o ":" | wc -l) -gt 2 ]; then die "Fields can't include colon" # Check if any : is next to another : or start or end of line elif [$(echo "$entry" | grep "$$^:$$\|$$::$$\|$$:$$" | wc -l) -gt 0 ]; then die "No fields can be left empty" elif [$(grep -i "^$entry\$" $(./sab-find-db) 2>/dev/null | wc -l) -gt 0 ]; then die "This entry already exists. It was not added again." else echo "$entry" >>$(./sab-find-db) fi  sab-remove #!/bin/bash function die { echo "$1" >&2
+exit 1
+}
+
+if [ $(grep -i "\<$1\>" $(./sab-find-db) 2>/dev/null | wc -l) -eq 0 ]; then die "No match found" fi file=$(mktemp)
+
+if [ ! $(grep -vi "\<$1\>" $(./sab-find-db) >"$file" 2>/dev/null) ]; then
+mv "$file"$(./sab-find-db)
+else
+rm "$file" fi  ## 2 Answers ### Your main questions The application is divided into four scripts that have a single task each. This is inspired by how Git is organized. Is this a good way to isolate independent code in bash? If the scripts are short, it's simpler to have all the code in one script, with each main functionality in its own function. If the scripts are longer, and you suspect that they will get longer and longer, then it makes sense to keep them as separate scripts in a dedicated directory. However, in this case, if the scripts need to call each other, then you need a way so that they can find each other. A simple way is to add the directory of the scripts to PATH. Another simple way is to require that users must cd into the directory of the scripts of they want to use them. Since you launch another script using the ./ prefix, that will only work if the other script is in the current directory. How should I handle shared code between scripts? I've use two different approaches below: I created a standalone script that the others call for determining the database name, and I copy-pasted the die function. I've heard of script sourcing, but I've never seen that used for creating bash "libraries". Yes, script sourcing is more common. Another benefit of that will be that you can define your common functions in one place, no need to copy-paste die into every script that needs it. Something I often do is cd to the directory of the script, and then source the common configuration and function definitions, like this: cd$(dirname "$0") . ./config.sh . ./functions.sh  ### Function definitions The convention is to put parentheses in function definitions, and to omit the " function " keyword, like this: die() { echo "$1" >&2
+exit 1
+}
+
+
+### Benefit from program exit codes
+
+You can benefit from the exit codes of programs more aggressively. For example instead of this:
+
+if [ $(echo "$1" | grep ":" | wc -l) -gt 0 ]; then
+
+
+It's better to write this way:
+
+if echo $1 | grep -q :; then  There are several things going on here: • I omitted the quoting of $1, because for the purpose here, it doesn't matter
+• grep exits with success if a pattern is found
+• The -q flag makes grep output nothing, but that of course doesn't change the fact of success or not, it's just too avoid garbage output
+• The statement has been radically changed. Instead of comparing the output of the wc command, we are operating based on exit codes. There is no more [ ... ]
+
+We can do even better. Instead of echo, we can use "here strings" to cut out one more process:
+
+if grep -q : <<< "$1"; then  But the best is to use pattern matching with [[: if [[$1 = *:* ]]; then
+
+
+Use the principle about exit codes to rewrite the rest of your code and the other scripts.
+
+### Exit with non zero on error
+
+In many places you exit with code 1 to signal an error but not here:
+
+if [ $(echo "$1" | grep ":" | wc -l) -gt 0 ]; then
+exit 0
+
+
+It would be better to echo a friendly message, and then exit with 1.
+
+### Safety
+
+This part is a bit scary:
+
+if [ $# -eq 1 ]; then rm "$file"
+fi
+
+
+Within the same script, file is sometimes a temporary file, sometimes it's the actual database. This can be confusing. It's easy to make mistakes in shell scripting, and with one simple mistake, your database might go up in smoke. I suggest to reorganize your code: move this dangerous operation closer to the code that creates the temp file. In addition, refer to the temp file by a different name, and use that name in the rm command. In other words, make it really hard to mistakenly delete the wrong file.
+
+• Thank you for a great review! I've not seen pattern matching before. Does *: actually match a colon anywhere in the string like the regex : or just as the last character? – jacwah Jul 8 '15 at 16:24
+• I was also wondering about quoting. I've read that I should always quote variable references. Is there a rule of thumb when I have to, and when I don't have to do this? – jacwah Jul 8 '15 at 16:38
+• As you and I both suspected, I was wrong. It needs to be *:* to match a : anywhere, see the updated version. I also made other corrections here and there. The rule of thumb about quoting is better safe than sorry. Most of the time quoting does no harm, and not quoting can cause disasters. When in doubt, and you know it causes no harm, then it's a good policy to quote. – janos Jul 8 '15 at 16:45
+• ./sab-find-db assumes that sab-find-db exists in your working directory. Why should it?
+• In the usage-output you should display the program name without path , so die "usage: $(basename$0) ....
+• Maybe it is more useful if you use different error codes and not only '1'.
+• A short comment at the beginning of the file about its purpose is useful.
+• sab-remove does not contain a usage message.
+• Most users assume that the option '-?' produces a usage message.
+• It is a good idea to use named variables in the code and not positional parameters. At the top of the function you assign the positional parameters to the named variables. If you change your parameter order or insert/delete new positional parameters you only have to change the first lines of your code.
+• mvas in mv "$file" target in sab-remove is not a good idea. "$file" replaces target, but not only the content is replaced but also the ownership and the permissions. Do cp "\$file" target instead of mv.
+• I do not understand the second if-then-else statement in sab-remove. Does this mean you do not want to remove the last entry in the file?
+• sab-find-db is a name that irritates me. I would prefer something like sab-dbpath.
+• I think the second if statement in sab-remove was meant to prevent a move if no match was found, but I forgot to remove it after refactoring the code and putting a guard clause at the to. I didn't know about mv vs cp, I'll look into it. – jacwah Jul 8 '15 at 18:36

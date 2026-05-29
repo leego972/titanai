@@ -1,0 +1,70 @@
+You can think of a neural network embedding is another form of dimensionality reduction. You’re taking a bunch of tokens (words, movies, games, etc) and instead of one-hot encoding them you want to map them down to a lower dimensional space.
+
+For example, suppose you have a collection of 1,000 tokens. To one-hot encode them means having a very sparse vectors of length 1,000 for each word (where a 1 exists at the index that represents the token, 0 otherwise).
+
+So basically you’re taking very high dimensional vectors and mapping them down to a low dimensional space. Preferably you don’t want the low dimensional space to be random. You want it to have some structure. For example, vectors that represent similar tokens are close to one another, adding vectors together gets you close to a vector that represents a good mix of the two tokens, etc).
+
+I like using generated (synthetic) data. It gives you a good understanding of how the data you’re modeling was generated. Below I show how to discover an embedding space from some generated data and and simple predictive visualization.
+
+# Generating Data
+
+Using numpy we generate some data that we can create embeddings with. Suppose we have 5 tokens that have associated effects (i.e. parameters that we can use to generate the data from). Using the tokens and the token effects we generate 10,000 observations from the normal distribution.
+
+N = 10_000
+n_tokens = 5
+token_effect = np.linspace(start=-20, stop=20, num=5)
+# reorder the tokens (not necessary but more realistic)
+token_effect = np.random.choice(token_effect, n_tokens, replace=False)
+# generate tokens for each observation
+x = np.random.choice(n_tokens, N)
+# simulate an outcome for each observation's token
+y = np.random.normal(token_effect[x], scale=2, size=N)
+
+
+The tokens x[:5] might look something like array([4, 4, 3, 2, 2, 0]) and the outcome y[:5] might look something like array([ 18.64902242, 19.22041727, -20.25015504, 11.30246504, 11.15165945, -10.05891201]).
+
+# Creating Embeddings
+
+Knowing how many tokens we have and what we want our embedding space to look like we can create our embedding model with keras. We define the dimensionality of the embedding layer with the number of unique tokens and the output dimension (which should be substantially less than the number of tokens).
+
+model = keras.models.Sequential()
+model.add(layers.Embedding(input_dim = n_tokens, output_dim = 4, input_length=1))
+model.add(layers.Dense(units=10, activation='relu'))
+model.add(layers.Dense(units=8, activation='linear'))
+model.add(layers.Dense(units=6, activation='linear'))
+model.add(layers.Dense(units=4, activation='linear'))
+model.add(layers.Dense(units=1, activation='linear'))
+model.summary()
+
+
+Now we compile/train the model and plot the loss to confirm that our model configuration (choice of layers, activation functions, loss function, etc) is appropriate.
+
+model.compile(optimizer='rmsprop', loss='mse')
+history = model.fit(x=x, y=y, epochs=100, batch_size=1_000, validation_split=0, verbose=0)
+
+
+# Embedding Similarity
+
+Our token effect might look something like array([-10., 0., 10., 20., -20.]). In this case we would expect token 3 (which maps to a token effect of 20) to be closest to token 2 (which maps to a token effect of 10) and farthest from token 4 (which maps to a token effect of -20).
+
+The function below computes the similarity (Euclidean distance) for an indexed embedding vector against all the other embedding vectors. np.argmax(token_effect) gives us the token value that maps to the largest token effect.
+
+def similarities(target_index, embedding_matrix):
+result = []
+for i in range(0,embedding_matrix.shape[0]):
+s = np.linalg.norm(embedding_matrix[target_index,] - embedding_matrix[i,])
+result.append(s)
+return(np.array(result))
+
+similarities(np.argmax(token_effect), embedding)
+
+
+The above might return similarity values like array([0.7304573 , 0.5255725 , 0.32273838, 0. , 1.0848211 ] which confirm that the embedding corresponding to token 3 is closest to token 2 and farthest from token 4.
+
+This is a convenient result. For illustrative purposes we used a small number of tokens. But you can see how calculating similarities between vectors of an embedding matrix would be preferred to the one-hot encoded counterpart in situations where you might have thousands of tokens.
+
+# Visualizing Predictions
+
+Here’s what the outcome variables looks like, color coded by token.
+
+And here are the predictions using the model along with the outcome variable. This plot doesn’t really provide any new information. It just reiterates the fact that the loss from training is sufficiently low.

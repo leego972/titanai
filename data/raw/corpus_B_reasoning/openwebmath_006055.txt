@@ -1,0 +1,212 @@
+# Assembly code not running - debug help
+
+## Homework Statement
+
+Hello all,
+I need to implement iterative (non-recursive) binary search in assembly. The array has 10 elements, starting from 0x10000100, in address 0x10000004 there's the element to search for, and the answer should be put in address 0x10000008
+
+It should be for MIPS and I ran it in QTSpim
+
+## Homework Equations
+
+Here's my code:
+Code:
+	# this program implements binary search
+
+# the equivalent pseudo code is the following:
+
+#	first = 0
+#	last = size -1
+#	while (last - first > 1) {
+#		mid = (last-first)/2 + first
+#		if A[mid] == val
+#			break;
+#		if A[mid] > val
+#			last = mid;
+#			continue
+#		else
+#			first = mid;
+#			continue;
+#	}
+
+#-----------------------------------------------------
+
+.data  	0x10000000
+
+size:		.word	0x0000000a	# array size
+
+.data	0x10000004
+
+search: 	.word	0x0000000d	# search term
+
+.data	0x10000008
+
+result: 	.word	0xblackff	# result = -1
+
+.data 	0x10000100
+
+array:		.word	0x00000001	# the array
+.word	0x00000005
+.word	0x00000007
+.word	0x00000009
+.word	0x0000000b
+.word	0x0000000d
+.word	0x00000010
+.word	0x00004000
+.word	0x00050000
+.word	0x00700000
+
+.text	0x0400000
+
+program:
+sw $t0, 0 #$t0 = 0, that's our "first" pointer
+sw $t1, size #$t1 - size
+addi $t1,$t1, -1	# $t1 = size - 1, our "last" pointer j condition # goto condition nop condition: sub$t2, $t1,$t0	# $t2 = last - first bgt$t2, 1, while	# if ($t2 > 1) goto while nop j exit # if not, goto exit nop while: div$t3, $t2, 2 #$t3 = (last - first) / 2
+add $t3,$t3, $t0 #$t3 = t3 + first
+lw $t5, 0($t3)				# $t5 = array($t3)
+lw $t6, result #$t6 = result
+beq $t6,$t5, found			# if value found, goto found
+nop
+bgt $t5,$t6, isGreater			# if array[$t3] > result, goto isGreater nop addi$t0, $t3, 0 # else, first = mid j condition # check the condition and start over the loop found: sw$t3, result		# result = $t3 j exit # goto exit nop isGreater: addi$t1, $t3, 0 # else, last = mid j condition # check the condition and start over the loop exit: sw$t4, 0($t6) # result =$t4
+nop
+
+end:	j end			# internal loop to end the program
+
+## The Attempt at a Solution
+
+I get those errors in the run:
+> Exception occurred at PC=0x00400000
+> Exception occurred at PC=0x0040007c
+
+Any ideas what could go wrong?
+
+Last edited:
+
+Related Engineering and Comp Sci Homework Help News on Phys.org
+NascentOxygen
+Staff Emeritus
+I haven't looked closely at your code. You should break your program down into manageable blocks and debug it that way.
+
+So make the very first statement in the program an exit, to make sure something that straightforward that will run without error messages.
+program:
+j end
+
+If this works,
+modify to
+
+program:
+sw $t0, 0 #$t0 = 0, that's our "first" pointer
+sw $t1, size #$t1 - size
+addi $t1,$t1, -1 # $t1 = size - 1, our "last" pointer j end and confirm that that is going to run without errors, and so on, cautiously building up in steps to the final code. In essence, building up your program by verifying each part works before adding more. This is the method of program construction you should be following, in any case. Otherwise, you type it all in, find it doesn't run, then have no idea where to start searching for the error. Good luck. And welcome to the trials and tribulations of programming! I like Serena Homework Helper Welcome to PF, ydan87! Looks like an access violation, meaning you access data from a location in a memory location where you're not allowed to. Skimming through your code I found: Code:  lw$t5, 0($t3) #$t5 = array($t3) However, no reference has been made yet to the memory location of "array". Thanks guys for the help and the warm welcome :) Welcome to PF, ydan87! Looks like an access violation, meaning you access data from a location in a memory location where you're not allowed to. Skimming through your code I found: Code:  lw$t5, 0($t3) #$t5 = array($t3) However, no reference has been made yet to the memory location of "array". Ilike - I guess I should first save the address of the array somewhere, and advance through it in each iteration. Can you give me an example on how to do that exactly? Thanks in advnace I like Serena Homework Helper Ilike - I guess I should first save the address of the array somewhere, and advance through it in each iteration. Can you give me an example on how to do that exactly? I would try: Code:  lw$t5, array($t3) #$t5 = array($t3) I would try: Code:  lw$t5, array($t3) #$t5 = array($t3) Thanks for the quick reply After fixing that, I get these in the run: > Exception occurred at PC=0x00400000 > Bad address in data/stack read: 0x00000000 > Exception occurred at PC=0x00400088 > Bad address in data/stack read: 0x00000000 I guess we have a progress here...the previous third exection was for pc 0x0040007c and now to 0x00400088 which means that the programs advanced without reciveing error for some time. Any ideas now? I like Serena Homework Helper Well, are there any other places where you index "array" without specifying that it is "array" you are indexing? And perhaps you can relate the address 0x00400088 to a specific line your code? Well, are there any other places where you index "array" without specifying that it is "array" you are indexing? And perhaps you can relate the address 0x00400088 to a specific line your code? Well...not for the array. Because after I've loaded it to$t5 I just used $t5. However, if I may address you to the part of the code where "result" is defined. In the exit label I have this line of code: Code: sw$t4, 0($t6) # result =$t4
+Is there something wrong with that one?
+
+I like Serena
+Homework Helper
+Well, I'm not going to do your work for you...
+What do you think?
+
+Btw, do you have a method to inspect intermediate results?
+Perhaps you can output values so you can inspect them?
+That way you can see how far your program got before crashing, and you can see if the program was on the right track.
+
+Well, I'm not going to do your work for you...
+What do you think?
+
+Btw, do you have a method to inspect intermediate results?
+Perhaps you can output values so you can inspect them?
+That way you can see how far your program got before crashing, and you can see if the program was on the right track.
+Well, you've really helped me alot thanks :), I really shouldn't have asked you do more than what you've already done.
+Can you just offer me a program of a simulator that I can do inspection of the kind you've mentioned?
+
+I like Serena
+Homework Helper
+Well, you've really helped me alot thanks :), I really shouldn't have asked you do more than what you've already done.
+Can you just offer me a program of a simulator that I can do inspection of the kind you've mentioned?
+You should already have something like that at hand.
+How would you know the result?
+
+Mark44
+Mentor
+Well, you've really helped me alot thanks :), I really shouldn't have asked you do more than what you've already done.
+Can you just offer me a program of a simulator that I can do inspection of the kind you've mentioned?
+You said you were using QtSPIM. Besides the console window, there is a window that you can view the registers, and you can single-step through your code to watch the registers change.
+
+Guys, I appriciate your help very much. The thing is that I've asked for help because all the things you offer me either with the code or the program QTSpin didn't work for me, so I wanted extra pairs of eyes to take a look at this.
+I know you shouldn't do the work for me, but I really tried my best on this and that's the reason I've posted here.
+
+I'll appriciate any extra help in finding the bug in the code.
+
+For your question, Mark - I haven't seen any change in the registers while running, because the first error I get is in the first step of the code
+
+Mark44
+Mentor
+The reason for the first error is that you are not doing what you think you're doing. In your pseudocode, the first thing you do is store 0 in first.
+
+Your first line of MIPS code stores the value in $t0 in location 0, and you can't do that. It is not storing the value 0 in the$t0 register.
+
+I don't understand your code well enough to know how the first and last variables relate to the array. Is first supposed to be the first location in the array? If not, you should have a declaration in your text section to define this variable, something like this:
+Code:
+first: 	.word	0	# comment that describes what first is supposed to be
+Also, I don't believe you need to have all of those .data statements after the first one. The assembler will put your variables where they need to go. I could be wrong, but if not, you're doing work figuring out addresses that the computer can do much fast and more accurately.
+
+The reason for the first error is that you are not doing what you think you're doing. In your pseudocode, the first thing you do is store 0 in first.
+
+Your first line of MIPS code stores the value in $t0 in location 0, and you can't do that. It is not storing the value 0 in the$t0 register.
+
+I don't understand your code well enough to know how the first and last variables relate to the array. Is first supposed to be the first location in the array? If not, you should have a declaration in your text section to define this variable, something like this:
+Code:
+first: 	.word	0	# comment that describes what first is supposed to be
+Also, I don't believe you need to have all of those .data statements after the first one. The assembler will put your variables where they need to go. I could be wrong, but if not, you're doing work figuring out addresses that the computer can do much fast and more accurately.
+The first variable should be, at the beginning, the value 0 and then it changes according to the binary search. First is also an index I use to look in the array in that index.
+I needto have the .data statements because I am asked to put certain variables in certain addresses and also the result in a certain address and that's the reason for the statements.
+
+So how should the first line appear? Just switching between t0 and 0?
+
+Mark44
+Mentor
+The first variable should be, at the beginning, the value 0 and then it changes according to the binary search. First is also an index I use to look in the array in that index.
+
+I needto have the .data statements because I am asked to put certain variables in certain addresses and also the result in a certain address and that's the reason for the statements.
+
+So how should the first line appear? Just switching between t0 and 0?
+Something like this:
+Code:
+	.data  	0x10000000
+
+size:		.word	0x0000000a	# array size
+
+.data	0x10000004
+
+search: 	.word	0x0000000d	# search term
+
+.data	0x10000008
+
+result: 	.word	0xblackff	# result = -1
+
+.data 	0x10000100
+first:		.word	0  # index of start of array section to be searched
+last:		.word	0  # index of end of array section to be searched
+
+mid:		.word	0  # index of middle element in array section to be searched
+
+array:		.word	0x00000001	# the array
+.word	0x00000005
+.word	0x00000007
+.word	0x00000009
+.word	0x0000000b
+.word	0x0000000d
+.word	0x00000010
+.word	0x00004000
+.word	0x00050000
+.word	0x00700000
+
+.text	0x0400000
+
+program:
+lw $t1, size # load size value into$t1
+addi $t1,$t1, -1	# \$t1 = size - 1, our "last" pointer
+j condition		# goto condition
+You should have variables defined in your data section for each variable in your pseudocode. I have added some of the variables that you omitted. Since first is initialized to 0, I don't need to have code to do this, so I can start right in with storing size - 1 in the appropriate register.
+
+Okkk i understand it now for the future :)
+Thanks alot mark

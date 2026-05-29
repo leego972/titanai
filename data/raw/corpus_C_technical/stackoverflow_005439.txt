@@ -1,0 +1,72 @@
+Question: <p>Can you add new statements (like <code>print</code>, <code>raise</code>, <code>with</code>) to Python's syntax?</p>
+
+<p>Say, to allow..</p>
+
+<pre><code>mystatement "Something"
+</code></pre>
+
+<p>Or,</p>
+
+<pre><code>new_if True:
+    print "example"
+</code></pre>
+
+<p>Not so much if you <em>should</em>, but rather if it's possible (short of modifying the python interpreters code)</p>
+
+Answer: <p>General answer: you need to preprocess your source files. </p>
+
+<p>More specific answer: install <a href="http://pypi.python.org/pypi/EasyExtend">EasyExtend</a>, and go through following steps</p>
+
+<p>i) Create a new langlet ( extension language )</p>
+
+<pre><code>import EasyExtend
+EasyExtend.new_langlet("mystmts", prompt = "my&gt; ", source_ext = "mypy")
+</code></pre>
+
+<p>Without additional specification a bunch of files shall be created under EasyExtend/langlets/mystmts/ .</p>
+
+<p>ii) Open mystmts/parsedef/Grammar.ext and add following lines</p>
+
+<pre><code>small_stmt: (expr_stmt | print_stmt  | del_stmt | pass_stmt | flow_stmt |
+             import_stmt | global_stmt | exec_stmt | assert_stmt | my_stmt )
+
+my_stmt: 'mystatement' expr
+</code></pre>
+
+<p>This is sufficient to define the syntax of your new statement. The small_stmt non-terminal is part of the Python grammar and it's the place where the new statement is hooked in. The parser will now recognize the new statement i.e. a source file containing it will be parsed. The compiler will reject it though because it still has to be transformed into valid Python.</p>
+
+<p>iii) Now one has to add semantics of the statement. For this one has to edit
+ msytmts/langlet.py and add a my_stmt node visitor.</p>
+
+<pre><code> def call_my_stmt(expression):
+     "defines behaviour for my_stmt"
+     print "my stmt called with", expression
+
+ class LangletTransformer(Transformer):
+       @transform
+       def my_stmt(self, node):
+           _expr = find_node(node, symbol.expr)
+           return any_stmt(CST_CallFunc("call_my_stmt", [_expr]))
+
+ __publish__ = ["call_my_stmt"]
+</code></pre>
+
+<p>iv) cd to langlets/mystmts and type</p>
+
+<pre><code>python run_mystmts.py
+</code></pre>
+
+<p>Now a session shall be started and the newly defined statement can be used:</p>
+
+<pre><code>__________________________________________________________________________________
+
+ mystmts
+
+ On Python 2.5.1 (r251:54863, Apr 18 2007, 08:51:08) [MSC v.1310 32 bit (Intel)]
+ __________________________________________________________________________________
+
+ my&gt; mystatement 40+2
+ my stmt called with 42
+</code></pre>
+
+<p>Quite a few steps to come to a trivial statement, right? There isn't an API yet that lets one define simple things without having to care about grammars. But EE is very reliable modulo some bugs. So it's just a matter of time that an API emerges that lets programmers define convenient stuff like infix operators or small statements using just convenient OO programming. For more complex things like embedding whole languages in Python by means of building a langlet there is no way of going around a full grammar approach.</p>

@@ -1,0 +1,58 @@
+# scp to remote Windows hosts with spaces in path: ambiguous target
+
+I'm trying to scp a file from my local linux machine to a remote Windows machine, and I'm coming up with some inconsistencies in how scp handles Windows file paths with spaces...
+
+This works, note that spaces are properly escaped in the path to the local file:
+
+scp /home/will/file\ with\ spaces.txt remote@host:D:/Users/will/Downloads/
+
+
+However, this does not work, despite the space in the "Google Drive" folder being properly escaped:
+
+scp /home/will/file\ with\ spaces.txt remote@host:D:/Users/will/Google\\ Drive/Documents/Computer_Stuff/Home_Lab/folder
+
+
+I've gone through a ton of resources online where people have similar problems, and all their solutions didn't work for me.
+
+I tried putting the Windows file path in double quotes, single quotes, both with and without escaping spaces; I've tried using double \\ and triple \\\ to escape spaces; I even tried escaping the colon (D\:); and I tried explicitly stating a target filename and not. Nothing worked.
+
+Then I found this answer, and only method #2 works! Why? What is the difference between surrounding the Windows file path in '", and "'? Why can I simply escape spaces without using any quotes at all in the local Linux file path, but not in the remote Windows path?
+
+• Why don't you just single quote the paths? 'remote@host:D:/Users/will/Google Drive/Documents/...' May 11 '18 at 15:02
+• since the remote host is a Windows Maschine i would try to use a Windows Style formatted/escaped Path like this D:\Users\will\Google^ Drive\Documents\Computer_Stuff\Home_Lab\folder May 11 '18 at 15:15
+• Windows has long been agnostic as to whether to use forward slashes or backslashes to delimit directories within paths. May 11 '18 at 15:18
+
+I was going crazy on Windows 10 -- this worked for me
+
+scp -r user@hostname:"/Library/Application' 'Support/Adobe/Common/Plug-ins/7.0/" ./Adobe
+
+• THANK YOU 🙌🙌🙌 Jul 18 at 20:36
+
+As mentioned in the question and answered here, method 2 was the solution that worked in my case. Adding as an answer for convenience of later readers.
+
+• Windows 10
+• Git bash scp
+
+Single / Double Quotes:
+scp ./myfile.txt user@host:'"/c:/AppName/a poorly named dir/sub_dir/myfile.txt"'
+
+• OMFG!!!! Single-double-quote!!!! This magic just saved my sanity! Nov 23 at 13:45
+
+Use the -T option:
+
+scp -T user@remote.host:'"c:\path with\spaces in\it\foo.txt"' .
+
+
+Your shell is seeing Google\\ Drive, and parsing it as Google, followed by a literal backslash, a space (which separates the arguments to scp, followed by Drive, and then passing that on to SCP which doesn't know what to do now that you're sending it too many arguments.
+
+To make this more clear, compare how the shell parses Google\ Drive and Google\\ Drive:
+
+$cat 443236.sh #!/bin/bash foo=(Google\ Drive) echo "Unrolling \$foo[@]:"
+for f in "${foo[@]}"; do echo "'$f'"
+done
+echo "Unrolling \$foo[@]:" for f in "${foo[@]}"; do
+echo "'$f'" done$ ./443236.sh
+Unrolling $foo[@]: 'Google Drive' Unrolling$foo[@]:
+
+• The two required arguments for an scp invocation are the source and destination for the file to be copied, e. g. scp /path/to/some/file user@host:/location/for/the/file or scp user@host:relative/path/to/file ./directory/. Oct 22 '18 at 15:39
+• An easier illustration of unrolling is printf '<%s>\n' whatever, e.g. printf '<%s>\n' Google\ Drive; printf '<%s>\n' Google\\ Drive Jul 9 '19 at 23:25

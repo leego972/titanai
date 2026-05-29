@@ -1,0 +1,171 @@
+# Generic sliding average in C++
+
+I tried hard to come up with a function template computing a sliding average. A sliding average over data $x_1, x_2, \dots, x_n$ with window length $k \leq n$ is a sequence $y_1, y_2, \dots, y_{n - k + 1}$, where $$y_i = \frac{1}{k}\sum_{j = 0}^{k - 1} x_{i + j}.$$
+
+Here is my attempt:
+
+mymath.h
+
+#ifndef MYMATH_H
+#define MYMATH_H
+
+#include <iterator>
+#include <sstream>
+#include <stdexcept>
+
+template<typename ForwardIterator, typename OutputIterator>
+void sliding_average(ForwardIterator begin,
+ForwardIterator end,
+OutputIterator output,
+size_t window_length)
+{
+if (window_length == 0)
+{
+std::stringstream ss;
+ss << window_length;
+throw std::runtime_error{ss.str()};
+}
+
+using T = typename std::iterator_traits<ForwardIterator>::value_type;
+
+ForwardIterator finger = begin;
+T sum {};
+size_t count = 0;
+
+while (finger != end and count < window_length)
+{
+sum += *finger++;
+count++;
+}
+
+if (count < window_length)
+{
+std::stringstream ss;
+ss << "The length of the range (";
+ss << count;
+ss << ") is too short. Must be at least ";
+ss << window_length;
+throw std::runtime_error{ss.str()};
+}
+
+*output++ = sum / window_length;
+ForwardIterator window_tail = begin;
+
+while (finger != end)
+{
+sum -= *window_tail++;
+sum += *finger++;
+*output++ = sum / window_length;
+}
+}
+
+#endif // MYMATH_H
+
+
+main.cpp
+
+#include "mymath.h"
+#include <iostream>
+#include <iterator>
+
+using std::cout;
+using std::endl;
+using std::begin;
+using std::end;
+
+int main(int argc, const char * argv[]) {
+float input[15];
+
+for (size_t i = 0; i < 15; ++i)
+{
+input[i] = i + 1;
+}
+
+float output[11];
+
+sliding_average(begin(input), end(input), begin(output), 5);
+
+for (auto& a : output)
+{
+cout << a << " ";
+}
+
+cout << endl;
+return 0;
+}
+
+
+Critique request
+
+I would like to receive comments regarding how to make my implementation more generic, and how to make it more idiomatic. Other comments are welcome as well.
+
+Very good. There are small things that could be improved.
+
+It is possible to give window_length type std::iterator_traits<ForwardIterator>::difference_type. I think std::size_t is fine for most cases.
+
+ForwardIterator begin,
+ForwardIterator end
+
+
+Usually those are called first and last.
+
+if (window_length == 0)
+{
+std::stringstream ss;
+ss << window_length;
+throw std::runtime_error{ss.str()};
+}
+
+
+Well, the result of ss.str() is obvious :) It is possible to write constexpr there, or throw the string right into the constructor. Also, runtime_error is a good fit, but it has child called invalid_argument, which perfectly matches the case.
+
+if (count < window_length)
+{
+std::stringstream ss;
+ss << "The length of the range (";
+ss << count;
+ss << ") is too short. Must be at least ";
+ss << window_length;
+throw std::runtime_error{ss.str()};
+}
+
+
+I think that using std::stringstream is an overkill here. Throwing just "The length of the range is too short. It must be at least of length window_length" is pretty good by itself, since most IDEs will probably stop execution, so that programmers could have a look. Even if they had a catch for this, they would need to parse a string to be actually able to do something. I don't think it worth the troubles it brings.
+
+Some caveats:
+
+Currently if T = int the algorithm is going to produce somewhat incorrect results. May be you could write something like warning mechanism that will warn when integer type is used. I would consider #pragma message("your warning message here"). It might get portability problems but the code will still compile since unrecognized #pragmas are ignored.
+
+• I would define two types
+
+using input_type = typename std::iterator_traits<ForwardIterator>::value_type;
+using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+
+
+You then perform the summation with input_type and cast to output_type before division.
+
+input_type sum {};
+...
+*output++ = static_cast<output_type>(sum) / window_length;
+
+
+This way you get floating-point division if you want floating-point output and integer division if you want integer output.
+
+• Your exceptions are too verbose for my liking. I would change them to the following:
+
+throw std::runtime_error{"window_length must be greater than 0"};
+
+
+and
+
+throw std::runtime_error{"Input size must be greater than or equal to window_length"};
+
+• Naming
+
+I would change finger to window_end and window_tail to window_begin. Also possibly change window_length to window_size.
+
+• I believe that overload resolution of operator/ should make it work without explicit cast, if there is no 2 step casting (one explicit + one implicit) being implied. – Incomputable Dec 14 '16 at 0:53
+• @Incomputable Do not let the template fool you. If input is an array of int and output is an array of double then sum is of type int. Therefore, the expression sum / window_length is computed in integer arithmetic even though output holds double. My suggestion is that if the output holds double or float then use floating-point division. On the other hand, if output holds an integral type then use integer division irrespective of what input holds. – twohundredping Dec 14 '16 at 7:33
+• If you keep output as float, change input to int, and put in a more interesting sequence like say the Fibonacci numbers then you will see the difference between the two approaches. My approach boils down to using as much precision as is available to you. – twohundredping Dec 14 '16 at 7:36
+• Thanks, didn't consider that. Though I believe there should be some way to opt in for that cast, because otherwise I think it might be hiding something dangerous. – Incomputable Dec 14 '16 at 16:05
+• @Incomputable I wouldn't muddy up the interface with such details. In my opinion the user is implicitly asking for floating-precision if they pass a floating-precision type in as output. This may not always be true, but you cannot please everyone. The user can post-process to remove decimal precision if they want. Regardless, I will edit the answer to address this cast in more detail. – twohundredping Dec 14 '16 at 18:36

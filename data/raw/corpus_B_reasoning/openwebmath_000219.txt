@@ -1,0 +1,60 @@
+# Method of moments and MLE estimates for Lomax (Pareto Type 2)
+
+I have this dataset, on which I am supposed to fit Lomax distribution with MM and MLE. Lomax pdf is: $$f(x|\alpha, \lambda) = \frac{\alpha\lambda^\alpha}{\left(\lambda+x\right)^{\alpha+1}}$$ For MM, it is possible to show that: $$\hat{\alpha}=\frac{2\hat{\sigma}^2}{\hat{\sigma}^2-\bar{X}^2}$$ $$\hat{\lambda}= \bar{X}\frac{\hat{\sigma}^2+\bar{X}^2}{\hat{\sigma}^2-\bar{X}^2}$$ Where $$\hat{\sigma}^2$$ is the sample variance and $$\bar{X}$$ is sample mean. The estimates are:
+
+df <- df$V1 s <- var(df) m <- mean(df) alpha <- (2*s)/(s-m^2) lambda <- m*((s+m^2)/(s-m^2)) > alpha [1] 2.70862 > lambda [1] 3451.911 For MLE, I have log-likelihood function: $$\ell(\alpha, \lambda|x) = n\log(\alpha)+\alpha n\log(\lambda) - (\alpha+1)\sum_{i=1}^{n}\log(\lambda+x_i)$$ and the implementation: llik <- function(alpha, lambda,x){ n<-length(x) res <- n*log(alpha)+n*alpha*log(lambda)-(alpha+1)*sum(log(x+lambda)) return(-res) } mle1 <- mle(minuslogl = llik, start = list(alpha=alpha,lambda=lambda), fixed = list(x=df), method = 'BFGS') > mle1@coef alpha lambda 2.860708 3451.907162 I used as starting values the MM estimates. The resulting coefficients are quite similar to MM, however after using flomax() function from Renext package, I am getting completely different estimates, with higher likelihood: > flomax(df)$estimate
+shape       scale
+1.880468 1872.132104
+
+I have also done some simulations, in which both MM and MLE are really bad at estimating the 'real' parameters of Lomax. Why are these estimates this bad? Why is in my case MM so different from MLE? Why is mle() so sensitive to starting values?
+
+Thank you for help!
+
+• Have you tried calculating the values of the log likelihood function for the different parameter estimates? That might give you some insight into what is happening. – jbowman Apr 12 at 15:09
+• yes, for the mle function the log-likelihood is -1013, for flomax it is -1012, so flomax does better. – PK1998 Apr 12 at 15:14
+• My guess is that the LF is very flat for a large region around the optimum, so it's easy for optimization functions to find no significant improvement from a step and just stop. You might want to try to plot a 3D wireframe or some such for the log LF as a function of shape and scale just to see. – jbowman Apr 12 at 15:18
+• Also note that $\lambda$ is a scale parameter; if you divide all your data by $1000$, it'll put the resultant scale parameter at about the same magnitude as the shape parameter, which difference may also be causing problems. – jbowman Apr 12 at 15:19
+• The rescaling did the trick for me, BTW. – jbowman Apr 12 at 15:39
+
+The issue appears to be the greatly different scales of the two parameters and how that interacts with BFGS. When I try optim using BFGS on the raw data, I get similar results to mle above (not surprisingly):
+
+x <- df / 1000
+
+llik <- function(theta, x){
+alpha <- theta[1]
+lambda <- theta[2]
+n<-length(x)
+res <- n*log(alpha)+n*alpha*log(lambda)-(alpha+1)*sum(log(x+lambda))
+return(-res)
+}
+
+alpha <- 2.7
+lambda <- 3450
+mle1 <- optim(c(alpha, lambda), llik, method="BFGS", x = 1000*x)
+
+mle1$par [1] 2.859574 3449.996428 But working with the rescaled data: alpha <- 2.7 lambda <- 3.450 mle1 <- optim(c(alpha, lambda), llik, method="BFGS", x = x) mle1$par
+[1] 1.880470 1.872135
+
+llik(c(mle1$$par[1], 1000*mle1$$par[2]), 1000*x)
+[1] 1012.211
+
+Using a different technique (Nelder-Mead) on the original data gives good results, although we really ought to rewrite the log likelihood function so as to not fail when negative values of the two parameters are passed:
+
+alpha <- 2.7
+lambda <- 3450
+
+mle1 <- optim(c(alpha, lambda), llik, method="Nelder-Mead", x = 1000*x)
+Warning messages:
+1: In log(alpha) : NaNs produced
+2: In log(alpha) : NaNs produced
+3: In log(alpha) : NaNs produced
+4: In log(alpha) : NaNs produced
+5: In log(alpha) : NaNs produced
+6: In log(alpha) : NaNs produced
+7: In log(alpha) : NaNs produced
+
+mle1\$par
+[1]    1.879401 1870.984994
+• Thanks, that's nice! Do you know why are the Lomax estimates so far from each other? Even when you do a simulation, the bootstrapped standard errors are huge both for MLE and MM – PK1998 Apr 12 at 17:24
+• Those are two different, but related, questions. The first has to do with the internals of the BFGS algorithm, the different scales of the parameters, and the fact that the likelihood function is quite flat over a large range of parameter values, the second is due just to the flatness of the LF. I may expand on my answer later... – jbowman Apr 12 at 19:08
+• Through its argument control the stats::optim function allows to give a parscale vector (as an element of the list passed) which scales the parameters. So using c(1, 1000) in parscale does the job for your example. This can be used in MLE as soon as a parameter is a scale parameter and the scaling of the data is avoided. This is a very nice feature which lacks in many other optimisation functions. – Yves May 19 at 15:03

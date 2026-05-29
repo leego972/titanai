@@ -1,0 +1,55 @@
+Question: <p>I run a subprocess using:</p>
+
+<pre><code>  p = subprocess.Popen("subprocess", 
+                       stdout=subprocess.PIPE, 
+                       stderr=subprocess.PIPE, 
+                       stdin=subprocess.PIPE)
+</code></pre>
+
+<p>This subprocess could either exit immediately with an error on stderr, or keep running. I want to detect either of these conditions - the latter by waiting for several seconds.</p>
+
+<p>I tried this:</p>
+
+<pre><code>  SECONDS_TO_WAIT = 10
+  select.select([], 
+                [p.stdout, p.stderr], 
+                [p.stdout, p.stderr],
+                SECONDS_TO_WAIT)
+</code></pre>
+
+<p>but it just returns:</p>
+
+<pre><code>  ([],[],[])
+</code></pre>
+
+<p>on either condition. What can I do?</p>
+
+Answer: <p>If, as you said in the comments above, you're just tweaking the output each time and re-running the command, would something like the following work?</p>
+
+<pre><code>from threading import Timer
+import subprocess
+
+WAIT_TIME = 10.0
+
+def check_cmd(cmd):
+    p = subprocess.Popen(cmd,
+    	stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE)
+    def _check():
+    	if p.poll()!=0:
+    		print cmd+" did not quit within the given time period."
+
+    # check whether the given process has exited WAIT_TIME
+    # seconds from now
+    Timer(WAIT_TIME, _check).start()
+
+check_cmd('echo')
+check_cmd('python')
+</code></pre>
+
+<p>The code above, when run, outputs:</p>
+
+<pre><code>python did not quit within the given time period.
+</code></pre>
+
+<p>The only downside of the above code that I can think of is the potentially overlapping processes as you keep running check_cmd.</p>

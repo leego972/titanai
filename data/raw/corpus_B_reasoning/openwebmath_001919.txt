@@ -1,0 +1,65 @@
+# Tree based method are robust against low probability feature space zones when using ML general interpretability methods?
+
+I have this intuition but I'm not able to verify it.
+
+There are a lot of techniques to understand the effect of single features in ML models. Some take inspiration from counterfactual frameworks, like ceteris paribus, and evaluate the unconditional contribution of feature $$X$$ by observing the change in prediction when varying $$X$$ values leaving all other variables fixed. The most common of such techniques are PDPs https://christophm.github.io/interpretable-ml-book/pdp.html.
+
+The problem is that this methodology are not robust for impossible combinations of the predictors. For example in a model to predict bike-sharing count given weather conditions and period of the year, it's possible to make predictions for a temperature of 40°C in wintertime, even if there's no such data point in the training set.
+
+There are various techniques to accommodate for this bias, like accumulated local estimation plots (ALE). I was wondering though if tree-based methods (simple or ensemble) are naturally more robust than regression-based ones to such bias; I expect this, because tree-based predictions vary only among partitions of the feature space that are present in the data, while regressions allow prediction variation for never observed predictors combinations.
+
+For example, this is the output of a conditional tree trained on the bikes problem:
+
+[1] root
+|   [2] temp <= 12.2
+|   |   [3] season in SPRING, SUMMER
+|   |   |   [4] temp <= 4: 1663 (n = 64, err = 30258081)
+|   |   |   [5] temp > 4: 2852 (n = 133, err = 216353574)
+|   |   [6] season in WINTER
+|   |   |   [7] hum <= 82.3: 4315 (n = 90, err = 117371810)
+|   |   |   [8] hum > 82.3: 2781 (n = 9, err = 26537744)
+|   [9] temp > 12.2
+|   |   [10] hum <= 84.8
+|   |   |   [11] windspeed <= 13.2: 5877 (n = 256, err = 454812206)
+|   |   |   [12] windspeed > 13.2: 5285 (n = 149, err = 326330122)
+|   |   [13] hum > 84.8: 3382 (n = 30, err = 47251364)
+
+
+as expected, the temperature and the seasons are correlated, therefore we won't find rules regarding winter for higher (>12.2) temperatures.
+
+So I expect that forcing Winter with a temperature of 14 won't produce a different prediction than Summer. I expect also that this robustness would replicate also for more complex blackbox models like random forests and boosted trees.
+
+Instead, regression-based methods will allow impossible predictions as shown by the following linear model, where the effect of temperature is unbounded.
+
+   (Intercept)           temp   seasonWINTER            hum      windspeed   seasonSUMMER holidayHOLIDAY
+4888.4          152.1         1307.1          -37.6          -64.0          673.2         -621.4
+
+
+Can someone confirm/dispute this, preferably with a theory-based explanation?
+
+• Could you elaborate a little bit on what you mean with bias in this case? Sep 23 '19 at 12:53
+• bias in the unconditional estimation of the effect of a predictor. Check the link in the post regarding the disadvantages of PDP. Sep 23 '19 at 13:04
+• Ok clear! So in effect you are asking about the effect of the (in this case partial) independence assumption ? More particularly the effect on sparsely populated (sub)spaces? Sep 23 '19 at 15:26
+• Yep, I believe that tree methods protect you from producing unlikely predictions for impossible combinations of the predictors. The predictions for these areas of the feature space would just "percolate" from plausible neighbor areas (ie. possible combinations of the features) Sep 24 '19 at 12:30
+
+I would say trees are "differently" robust in this sense.
+
+A tree model will never predict a target value outside the range of those in the training set; so never a negative value for a count, or more infections than the population, etc. (Some tree-based models might, e.g. gradient boosting, but not a single tree or a random forest.)
+
+But sometimes that's detrimental, too. In your bikes example, maybe city population is another variable; your model will quickly become useless as the city grows, while a linear model may cope with the concept drift better.
+
+Finally, again in your bike example: because the tree has no reason to make rules about winter when temp>12, as @SvanBalen says, it will essentially be making up an answer if you ask it about a hot winter. In your tree's case, hot winters are treated as summers; another tree might split first on season, never considering temperature in the winter branch, so that this alternative tree will treat hot winters as winters.
+
+It seems better to try to track the independent variables' concept drift and interdependencies to recognize when the model hasn't seen enough useful training data to make accurate predictions.
+
+Well, are you content with a system that doesn't work on that one day in winter when the temperature actually reaches 40 degrees? And would you care, since you probably now got other things to worry about
+
+An assumption of independence is usually made to deal with sparse situations. Naive Bayes for instance works pretty well for document classification tasks: Each word (token) in a document is taken as an individual observation governed by a probability distribution belonging to the document class
+
+Tree-based classifiers, on the other hand, generate composited rules and are thus geared toward exploiting conditional probabilities. Eg: If it is 12.2 degrees or below, and it is Winter, then the humidity is the discerning factor in bike use.
+
+NOTE: That even though your rule sample is small, it is still quite complex Suppose we eyeball it and make a naive rule: If humidity < 83 roughly add around 55% That would emulate your rules quite well, and make it less complex, unless it happens to be a cold spring or summer day. Is that really a rule? Would that cause faulty predictions? Or did we just see little or no cold days that varied in humidity in that sample (200 data points)? I wouldn't start betting my bottom dollar that people react differently to humidity given the date on the calendar
+
+You pose that the tree rules protect against probability mass leaking to impossible situations. Conversely you could pose that naive probability would help you make predictions about situations that were sparse in the dataset. Whether you'd want that is up to your reasonable judgement. It is machine learning, not machine wisdom
+
+• My task is explanation and understanding, not prediction. But nevertheless of this specific goal, in general, I don't like models leaking functional forms in unknown regions, because things could go terribly wrong (eg. negative predictions from linear models for bounded outcomes). So the question is if tree methods are robust to these situations and therefore I can trust predictors' explanations based on PDP, ALE, ICE, etc Sep 25 '19 at 16:49

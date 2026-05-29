@@ -1,0 +1,84 @@
+Question: <p>I have a Google App Engine app - <a href="http://mylovelyapp.appspot.com/">http://mylovelyapp.appspot.com/</a>
+It has a page - mylovelypage</p>
+
+<p>For the moment, the page just does <code>self.response.out.write('OK')</code></p>
+
+<p>If I run the following Python at my computer:</p>
+
+<pre><code>import urllib2
+f = urllib2.urlopen("http://mylovelyapp.appspot.com/mylovelypage")
+s = f.read()
+print s
+f.close()
+</code></pre>
+
+<p>it prints "OK"</p>
+
+<p>the problem is if I add <code>login:required</code> to this page in the app's yaml</p>
+
+<p>then this prints out the HTML of the Google Accounts login page</p>
+
+<p>I've tried "normal" authentication approaches. e.g.</p>
+
+<pre><code>passman = urllib2.HTTPPasswordMgrWithDefaultRealm()
+
+auth_handler = urllib2.HTTPBasicAuthHandler()
+auth_handler.add_password(None,
+                          uri='http://mylovelyapp.appspot.com/mylovelypage',
+                          user='billy.bob@gmail.com',
+                          passwd='billybobspasswd')
+opener = urllib2.build_opener(auth_handler)
+urllib2.install_opener(opener)
+</code></pre>
+
+<p>But it makes no difference - I still get the login page's HTML back.</p>
+
+<p>I've tried <a href="http://code.google.com/apis/accounts/docs/AuthForInstalledApps.html">Google's ClientLogin auth API</a>, but I can't get it to work.</p>
+
+<pre><code>h = httplib2.Http()
+
+auth_uri = 'https://www.google.com/accounts/ClientLogin'
+headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+myrequest = "Email=%s&amp;Passwd=%s&amp;service=ah&amp;source=DALELANE-0.0" % ("billy.bob@gmail.com", "billybobspassword")
+response, content = h.request(auth_uri, 'POST', body=myrequest, headers=headers)
+
+if response['status'] == '200':
+    authtok = re.search('Auth=(\S*)', content).group(1)
+
+    headers = {}
+    headers['Authorization'] = 'GoogleLogin auth=%s' % authtok.strip()
+    headers['Content-Length'] = '0'
+
+    response, content = h.request("http://mylovelyapp.appspot.com/mylovelypage", 
+                                  'POST', 
+                                  body="", 
+                                  headers=headers)
+
+    while response['status'] == "302":        
+        response, content = h.request(response['location'], 'POST', body="", headers=headers) 
+
+    print content
+</code></pre>
+
+<p>I do seem to be able to get some token correctly, but attempts to use it in the header when I call 'mylovelypage' still just return me the login page's HTML. :-( </p>
+
+<p>Can anyone help, please?</p>
+
+<p>Could I use the <a href="http://code.google.com/p/gdata-python-client/">GData client library</a> to do this sort of thing? From
+what I've read, I think it should be able to access App Engine apps,
+but I haven't been any more successful at getting the authentication working for App Engine stuff there either </p>
+
+<p>Any pointers to samples, articles, or even just keywords I should be
+searching for to get me started, would be very much appreciated.</p>
+
+<p>Thanks!</p>
+
+Answer: <p>appcfg.py, the tool that uploads data to App Engine has to do exactly this to authenticate itself with the App Engine server. The relevant functionality is abstracted into appengine_rpc.py. In a nutshell, the solution is:</p>
+
+<ol>
+<li>Use the <a href="http://code.google.com/apis/accounts/docs/AuthForInstalledApps.html">Google ClientLogin API</a> to obtain an authentication token. appengine_rpc.py does this in <a href="http://code.google.com/p/googleappengine/source/browse/trunk/python/google/appengine/tools/appengine%5Frpc.py#180">_GetAuthToken</a></li>
+<li>Send the auth token to a special URL on your App Engine app. That page then returns a cookie and a 302 redirect. Ignore the redirect and store the cookie. appcfg.py does this in <a href="http://code.google.com/p/googleappengine/source/browse/trunk/python/google/appengine/tools/appengine%5Frpc.py#228">_GetAuthCookie</a></li>
+<li>Use the returned cookie in all future requests.</li>
+</ol>
+
+<p>You may also want to look at <a href="http://code.google.com/p/googleappengine/source/browse/trunk/python/google/appengine/tools/appengine%5Frpc.py#253">_Authenticate</a>, to see how appcfg handles the various return codes from ClientLogin, and <a href="http://code.google.com/p/googleappengine/source/browse/trunk/python/google/appengine/tools/appengine%5Frpc.py#397">_GetOpener</a>, to see how appcfg creates a urllib2 OpenerDirector that doesn't follow HTTP redirects. Or you could, in fact, just use the AbstractRpcServer and HttpRpcServer classes wholesale, since they do pretty much everything you need.</p>

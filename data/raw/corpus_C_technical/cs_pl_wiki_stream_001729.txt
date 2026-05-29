@@ -1,0 +1,83 @@
+# Verilog Procedural Interface
+
+The Verilog Procedural Interface (VPI), originally known as PLI 2.0, is an interface primarily intended for the C programming language. It allows behavioral Verilog code to invoke C functions, and C functions to invoke standard Verilog system tasks. The Verilog Procedural Interface is part of the IEEE 1364 Programming Language Interface standard; the most recent edition of the standard is from 2005. VPI is sometimes also referred to as PLI 2, since it replaces the deprecated Program Language Interface (PLI).
+
+While PLI 1 was deprecated in favor of VPI (aka. PLI 2),  PLI 1 is still commonly used over VPI due to its much more widely documented tf_put, tf_get function interface that is described in many verilog reference books.
+
+Use of C++
+C++ is integrable with VPI (PLI 2.0) and PLI 1.0, by using the "extern C/C++" keyword built into C++ compilers.
+
+Example
+As an example, consider the following Verilog code fragment:
+
+val = 41;
+$increment(val);
+$display("After $increment, val=%d", val);
+
+Suppose the increment system task increments its first parameter by one. Using C and the VPI mechanism, the increment task can be implemented as follows:
+
+// Implements the increment system task
+static int increment(char *userdata) {
+  vpiHandle systfref, args_iter, argh;
+  struct t_vpi_value argval;
+  int value;
+
+  // Obtain a handle to the argument list
+  systfref = vpi_handle(vpiSysTfCall, NULL);
+  args_iter = vpi_iterate(vpiArgument, systfref);
+
+  // Grab the value of the first argument
+  argh = vpi_scan(args_iter);
+  argval.format = vpiIntVal;
+  vpi_get_value(argh, &argval);
+  value = argval.value.integer;
+  vpi_printf("VPI routine received %d\n", value);
+
+  // Increment the value and put it back as first argument
+  argval.value.integer = value + 1;
+  vpi_put_value(argh, &argval, NULL, vpiNoDelay);
+
+  // Cleanup and return
+  vpi_free_object(args_iter);
+  return 0;
+}
+
+Also, a function that registers this system task is necessary. This function is invoked prior to elaboration or resolution of references when it is placed in the externally visible vlog_startup_routines[] array.
+
+// Registers the increment system task
+void register_increment() {
+  s_vpi_systf_data data = {vpiSysTask, 0, "$increment", increment, 0, 0, 0};
+  vpi_register_systf(&data);
+}
+
+// Contains a zero-terminated list of functions that have to be called at startup
+void (*vlog_startup_routines[])() = {
+  register_increment,
+  0
+};
+
+The C code is compiled into a shared object that will be used by the Verilog simulator. A simulation of the earlier mentioned Verilog fragment will now result in the following output:
+
+VPI routine received 41
+After $increment, val=42
+
+See also
+SystemVerilog DPI
+
+Sources
+
+IEEE Xplore
+
+Sources for Verilog VPI interface
+Teal, for C++
+JOVE, for Java
+Ruby-VPI, for Ruby
+ScriptEDA, for Perl, Python, Tcl
+Cocotb , for Python
+OrigenSim, for Ruby
+
+External links
+Verilog PLI primer
+Verilog VPI tutorial
+
+IEEE standards

@@ -1,0 +1,41 @@
+Question: <p>Given the following code (that doesn't work):</p>
+
+<pre><code>while True:
+    #snip: print out current state
+    while True:
+        ok = get_input("Is this ok? (y/n)")
+        if ok == "y" or ok == "Y": break 2 #this doesn't work :(
+        if ok == "n" or ok == "N": break
+    #do more processing with menus and stuff
+</code></pre>
+
+<p>Is there a way to make this work? Or do I have do one check to break out of the input loop, then another, more limited, check in the outside loop to break out all together if the user is satisfied?</p>
+
+<p><strong>Edit-FYI:</strong> get_input is a short function I wrote that supports showing a prompt and default values and all that fanciness and returns <code>stdin.readline().strip()</code></p>
+
+Answer: <p>I tend to agree that refactoring into a function is usually the best approach for this sort of situation, but for when you <em>really</em> need to break out of nested loops, here's an interesting variant of the exception-raising approach that @S.Lott described.  It uses Python's <code>with</code> statement to make the exception raising look a bit nicer.  Define a new context manager (you only have to do this once) with:</p>
+
+<pre><code>from contextlib import contextmanager
+@contextmanager
+def nested_break():
+    class NestedBreakException(Exception):
+        pass
+    try:
+        yield NestedBreakException
+    except NestedBreakException:
+        pass
+</code></pre>
+
+<p>Now you can use this context manager as follows:</p>
+
+<pre><code>with nested_break() as mylabel:
+    while True:
+        print "current state"
+        while True:
+            ok = raw_input("Is this ok? (y/n)")
+            if ok == "y" or ok == "Y": raise mylabel
+            if ok == "n" or ok == "N": break
+        print "more processing"
+</code></pre>
+
+<p>Advantages: (1) it's slightly cleaner (no explicit try-except block), and (2) you get a custom-built <code>Exception</code> subclass for each use of <code>nested_break</code>;  no need to declare your own <code>Exception</code> subclass each time.</p>

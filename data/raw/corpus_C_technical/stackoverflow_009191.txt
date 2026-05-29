@@ -1,0 +1,32 @@
+Question: <p>Recently I needed to do weighted random selection of elements from a list, both with and without replacement. While there are well known and good algorithms for unweighted selection, and some for weighted selection without replacement (such as modifications of the resevoir algorithm), I couldn't find any good algorithms for weighted selection with replacement. I also wanted to avoid the resevoir method, as I was selecting a significant fraction of the list, which is small enough to hold in memory.</p>
+
+<p>Does anyone have any suggestions on the best approach in this situation? I have my own solutions, but I'm hoping to find something more efficient, simpler, or both.</p>
+
+Answer: <p>One of the fastest ways to make many with replacement samples from an unchanging list is the alias method.  The core intuition is that we can create a set of equal-sized bins for the weighted list that can be indexed very efficiently through bit operations, to avoid a binary search.  It will turn out that, done correctly, we will need to only store two items from the original list per bin, and thus can represent the split with a single percentage.</p>
+
+<p>Let's us take the example of five equally weighted choices, <code>(a:1, b:1, c:1, d:1, e:1)</code></p>
+
+<p>To create the alias lookup:</p>
+
+<ol>
+<li><p>Normalize the weights such that they sum to <code>1.0</code>.  <code>(a:0.2 b:0.2 c:0.2 d:0.2 e:0.2)</code>  This is the probability of choosing each weight.</p></li>
+<li><p>Find the smallest power of 2 greater than or equal to the number of variables, and create this number of partitions, <code>|p|</code>.  Each partition represents a probability mass of <code>1/|p|</code>.  In this case, we create <code>8</code> partitions, each able to contain <code>0.125</code>.</p></li>
+<li><p>Take the variable with the least remaining weight, and place as much of it's mass as possible in an empty partition.  In this example, we see that <code>a</code> fills the first partition.  <code>(p1{a|null,1.0},p2,p3,p4,p5,p6,p7,p8)</code> with <code>(a:0.075, b:0.2 c:0.2 d:0.2 e:0.2)</code></p></li>
+<li><p>If the partition is not filled, take the variable with the most weight, and fill the partition with that variable.  </p></li>
+</ol>
+
+<p>Repeat steps 3 and 4, until none of the weight from the original partition need be assigned to the list.</p>
+
+<p>For example, if we run another iteration of 3 and 4, we see </p>
+
+<p><code>(p1{a|null,1.0},p2{a|b,0.6},p3,p4,p5,p6,p7,p8)</code> with <code>(a:0, b:0.15 c:0.2 d:0.2 e:0.2)</code> left to be assigned</p>
+
+<p>At runtime:</p>
+
+<ol>
+<li><p>Get a <code>U(0,1)</code> random number, say binary <code>0.001100000</code></p></li>
+<li><p>bitshift it <code>lg2(p)</code>, finding the index partition.  Thus, we shift it by <code>3</code>, yielding <code>001.1</code>, or position 1, and thus partition 2.</p></li>
+<li><p>If the partition is split, use the decimal portion of the shifted random number to decide the split. In this case, the value is <code>0.5</code>, and <code>0.5 &lt; 0.6</code>, so return <code>a</code>.</p></li>
+</ol>
+
+<p><a href="http://prxq.wordpress.com/2006/04/17/the-alias-method/">Here is some code and another explanation</a>, but unfortunately it doesn't use the bitshifting technique, nor have I actually verified it.</p>

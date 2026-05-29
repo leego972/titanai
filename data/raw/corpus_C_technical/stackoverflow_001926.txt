@@ -1,0 +1,135 @@
+Question: <p>How do I check whether a file exists, without using the <a href="https://docs.python.org/3.6/reference/compound_stmts.html#try"><code>try</code></a> statement?</p>
+
+Answer: <blockquote>
+  <h1>How do I check whether a file exists, using Python, without using a try statement?</h1>
+</blockquote>
+
+<h2>Recommendations:</h2>
+
+<p><strong>suppress</strong></p>
+
+<p>Python 3.4 gives us the <a href="https://docs.python.org/3/library/contextlib.html#contextlib.suppress"><code>suppress</code></a> context manager (previously the <a href="https://bugs.python.org/issue19266"><code>ignore</code></a> context manager), which does semantically exactly the same thing in fewer lines, while also (at least superficially) meeting the original ask to avoid a <code>try</code> statement:</p>
+
+<pre><code>from contextlib import suppress
+
+with suppress(OSError), open(path) as f:
+    f.read()
+</code></pre>
+
+<p>Usage:</p>
+
+<pre><code>&gt;&gt;&gt; with suppress(OSError), open('doesnotexist') as f:
+...     f.read()
+... 
+&gt;&gt;&gt;
+</code></pre>
+
+<p>For earlier Pythons, you could roll your own <code>suppress</code>, but without a <code>try</code> will be much more verbose than with. I do believe <strong>this actually is the only answer that doesn't use <code>try</code> at any level</strong> that can be applied to prior to Python 3.4 because it uses a context manager instead:</p>
+
+<pre><code>class suppress(object):
+    def __init__(self, *exceptions):
+        self.exceptions = exceptions
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is not None:
+            return issubclass(exc_type, self.exceptions)
+</code></pre>
+
+<p>Easier with a try:</p>
+
+<pre><code>from contextlib import contextmanager
+
+@contextmanager
+def suppress(*exceptions):
+    try:
+        yield
+    except exceptions:
+        pass
+</code></pre>
+
+<h2>Other, possibly problematic, options:</h2>
+
+<p><strong>isfile</strong></p>
+
+<pre><code>import os
+os.path.isfile(path)
+</code></pre>
+
+<p>from the <a href="https://docs.python.org/library/os.path.html#os.path.isfile">docs</a>:</p>
+
+<blockquote>
+  <p><code>os.path.isfile(path)</code></p>
+  
+  <p>Return True if path is an existing regular file. This follows symbolic
+  links, so both <code>islink()</code> and <code>isfile()</code> can be true for the same path.</p>
+</blockquote>
+
+<p>But if you examine the <a href="https://hg.python.org/cpython/file/tip/Lib/genericpath.py#l25">source</a> of this function, you'll see it actually does use a try statement:</p>
+
+<blockquote>
+<pre><code># This follows symbolic links, so both islink() and isdir() can be true
+# for the same path on systems that support symlinks
+def isfile(path):
+    """Test whether a path is a regular file"""
+    try:
+        st = os.stat(path)
+    except os.error:
+        return False
+    return stat.S_ISREG(st.st_mode)
+</code></pre>
+</blockquote>
+
+<pre><code>&gt;&gt;&gt; OSError is os.error
+True
+</code></pre>
+
+<p>All it's doing is using the given path to see if it can get stats on it,  catching <code>OSError</code> and then checking if it's a file if it didn't raise the exception.</p>
+
+<p>If you intend to do something with the file, I would suggest directly attempting it with a try-except to avoid a race condition:</p>
+
+<pre><code>try:
+    with open(path) as f:
+        f.read()
+except OSError:
+    pass
+</code></pre>
+
+<p><strong>os.access</strong></p>
+
+<p>Available for Unix and Windows is <code>os.access</code>, but to use you must pass flags, and it does not differentiate between files and directories. This is more used to test if the real invoking user has access in an elevated privilege environment:</p>
+
+<pre><code>import os
+os.access(path, os.F_OK)
+</code></pre>
+
+<p>It also suffers from the same race condition problems as <code>isfile</code>. From the <a href="https://docs.python.org/2/library/os.html#os.access">docs</a>:</p>
+
+<blockquote>
+  <p>Note:
+  Using access() to check if a user is authorized to e.g. open a file
+  before actually doing so using open() creates a security hole, because
+  the user might exploit the short time interval between checking and
+  opening the file to manipulate it. Itâs preferable to use EAFP
+  techniques. For example:</p>
+
+<pre><code>if os.access("myfile", os.R_OK):
+    with open("myfile") as fp:
+        return fp.read()
+return "some default data"
+</code></pre>
+  
+  <p>is better written as:</p>
+
+<pre><code>try:
+    fp = open("myfile")
+except IOError as e:
+    if e.errno == errno.EACCES:
+        return "some default data"
+    # Not a permission error.
+    raise
+else:
+    with fp:
+        return fp.read()
+</code></pre>
+</blockquote>

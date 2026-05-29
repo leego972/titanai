@@ -1,0 +1,17 @@
+# Backslash handling not POSIX-compliant
+
+4 messages
+Open this post in threaded view
+|
+
+## Backslash handling not POSIX-compliant
+
+ Doubling the backslash suppresses special newline handling in GNU make. I don’t see anything in the standard that allows this. It defines an escaped newline as one preceded by a backslash and doesn’t say anything about backslashes being treated specially otherwise. Test case: >.POSIX: >test: > echo \\ > true Expected result: the command line >echo \\ >true being run. >\ >true being written to the standard output. Actual result: two command lines >echo \\ and >true being run. >\ being written to the standard output.
+Open this post in threaded view
+|
+
+## Re: Backslash handling not POSIX-compliant
+
+ On Tue, 2020-07-28 at 08:07 +0300, Ivan Kozlov wrote: > Doubling the backslash suppresses special newline handling in GNU > make. I don’t see anything in the standard that allows this. It > defines an escaped newline as one preceded by a backslash and doesn’t > say anything about backslashes being treated specially otherwise. It is documented behavior in the GNU make manual so I'm not going to change this for standard makefiles. However, we could consider making it work differently for makefiles where .POSIX: is set.  I am not really excited about doing that but we can consider it.
+ My test case is actually wrong. The standard output would be the same in both cases. Here is a proper test case: >.POSIX: >test: > A=\\ > echo A The expected result is >\ being written to the standard output. The actual result is an empty line being written. Another example is: >.POSIX: >test: > echo "a \\ > b" Which fails instead of printing >a \ >b The expected behaviour is useful because it allows portably quoting macros with here-documents, for example: > sed '$s:\\$::' <<\end; : \\ > $V\ > end should print the literal value of the macro$V that can contain single quotes and special characters. I believe there is no other way to achieve this with POSIX make.
+ Ivan Kozlov (28 July 2020 16:18) wrote > The expected behaviour is useful because it allows portably quoting > macros with here-documents, for example: > > sed '$s:\\$::' <<\end; : \\ > > $V\ > > end > should print the literal value of the macro$V that can contain single > quotes and special characters. I believe there is no other way to > achieve this with POSIX make. Putting quotes round the here-tag has the same effect as escaping it: $V=argle$ cat < some text $V > EOF some text argle$ cat <<"EOF" > some text $V > EOF some text$V $cat <<'EOF' > some text$V > EOF some text $V$ cat <<\EOF > some text $V > EOF some text$V I find this works in both dash and bash. Not sure how that maps out for the use within make, though.         Eddy.

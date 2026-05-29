@@ -1,0 +1,71 @@
+Question: <p>I am planning to create a web app that allows users to downgrade their visual studio project files. However, It seems Google App Engine accepts files uploading and flat file storing on the Google Server through <code>db.TextProperty</code> and <code>db.BlobProperty</code>.</p>
+
+<p>I'll be glad anyone can provide code sample (both the client and the server side) on how this can be done.</p>
+
+Answer: <p>Here is a complete, working file.  I pulled the original from the Google site and modified it to make it slightly more real world.</p>
+
+<p>A few things to notice:</p>
+
+<ol>
+<li>This code uses the <a href="http://code.google.com/appengine/docs/python/blobstore/">BlobStore API</a></li>
+<li><p>The purpose of this line in the
+ServeHandler class is to "fix" the
+key so that it gets rid of any name
+mangling that may have occurred in
+the browser (I didn't observe any in
+Chrome)</p>
+
+<pre><code>blob_key = str(urllib.unquote(blob_key))
+</code></pre></li>
+<li><p>The "save_as" clause at the end of this is important.  It will make sure that the file name does not get mangled when it is sent to your browser.  Get rid of it to observe what happens.</p>
+
+<pre><code>self.send_blob(blobstore.BlobInfo.get(blob_key), save_as=True)
+</code></pre></li>
+</ol>
+
+<p>Good Luck!</p>
+
+<pre><code>import os
+import urllib
+
+from google.appengine.ext import blobstore
+from google.appengine.ext import webapp
+from google.appengine.ext.webapp import blobstore_handlers
+from google.appengine.ext.webapp import template
+from google.appengine.ext.webapp.util import run_wsgi_app
+
+class MainHandler(webapp.RequestHandler):
+    def get(self):
+        upload_url = blobstore.create_upload_url('/upload')
+        self.response.out.write('&lt;html&gt;&lt;body&gt;')
+        self.response.out.write('&lt;form action="%s" method="POST" enctype="multipart/form-data"&gt;' % upload_url)
+        self.response.out.write("""Upload File: &lt;input type="file" name="file"&gt;&lt;br&gt; &lt;input type="submit" name="submit" value="Submit"&gt; &lt;/form&gt;&lt;/body&gt;&lt;/html&gt;""")
+
+        for b in blobstore.BlobInfo.all():
+            self.response.out.write('&lt;li&gt;&lt;a href="/serve/%s' % str(b.key()) + '"&gt;' + str(b.filename) + '&lt;/a&gt;')
+
+class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
+    def post(self):
+        upload_files = self.get_uploads('file')
+        blob_info = upload_files[0]
+        self.redirect('/')
+
+class ServeHandler(blobstore_handlers.BlobstoreDownloadHandler):
+    def get(self, blob_key):
+        blob_key = str(urllib.unquote(blob_key))
+        if not blobstore.get(blob_key):
+            self.error(404)
+        else:
+            self.send_blob(blobstore.BlobInfo.get(blob_key), save_as=True)
+
+def main():
+    application = webapp.WSGIApplication(
+          [('/', MainHandler),
+           ('/upload', UploadHandler),
+           ('/serve/([^/]+)?', ServeHandler),
+          ], debug=True)
+    run_wsgi_app(application)
+
+if __name__ == '__main__':
+  main()
+</code></pre>

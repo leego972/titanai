@@ -1,0 +1,132 @@
+Question: <p>I have been playing with the Ruby library "shoes". Basically you can write a GUI application in the following way:</p>
+
+<pre><code>Shoes.app do
+  t = para "Not clicked!"
+  button "The Label" do
+    alert "You clicked the button!" # when clicked, make an alert
+    t.replace "Clicked!" # ..and replace the label's text
+  end
+end
+</code></pre>
+
+<p>This made me think - how would I design a similarly nice-to-use GUI framework in Python? One that doesn't have the usual tyings of basically being wrappers to a C* library (In the case of GTK, Tk, wx, QT etc etc)</p>
+
+<p>Shoes takes things from web devlopment (like <code>#f0c2f0</code> style colour notation, CSS layout techniques, like <code>:margin =&gt; 10</code>), and from ruby (extensively using blocks in sensible ways)</p>
+
+<p>Python's lack of "rubyish blocks" makes a (metaphorically)-direct port impossible:</p>
+
+<pre><code>def Shoeless(Shoes.app):
+    self.t = para("Not clicked!")
+
+    def on_click_func(self):
+        alert("You clicked the button!")
+        self.t.replace("clicked!")
+
+    b = button("The label", click=self.on_click_func)
+</code></pre>
+
+<p>No where near as clean, and wouldn't be <em>nearly</em> as flexible, and I'm not even sure if it would be implementable.</p>
+
+<p>Using decorators seems like an interesting way to map blocks of code to a specific action:</p>
+
+<pre><code>class BaseControl:
+    def __init__(self):
+        self.func = None
+
+    def clicked(self, func):
+        self.func = func
+
+    def __call__(self):
+        if self.func is not None:
+            self.func()
+
+class Button(BaseControl):
+    pass
+
+class Label(BaseControl):
+    pass
+
+# The actual applications code (that the end-user would write)
+class MyApp:
+    ok = Button()
+    la = Label()
+
+    @ok.clicked
+    def clickeryHappened():
+        print "OK Clicked!"
+
+if __name__ == '__main__':
+    a = MyApp()
+    a.ok() # trigger the clicked action
+</code></pre>
+
+<p>Basically the decorator function stores the function, then when the action occurred (say, a click) the appropriate function would be executed.</p>
+
+<p>The scope of various stuff (say, the <code>la</code> label in the above example) could be rather complicated, but it seems doable in a fairly neat manner..</p>
+
+Answer: <p>This is extremely contrived and not pythonic at all, but here's my attempt at a semi-literal translation using the new "with" statement.</p>
+
+<pre><code>with Shoes():
+  t = Para("Not clicked!")
+  with Button("The Label"):
+    Alert("You clicked the button!")
+    t.replace("Clicked!")
+</code></pre>
+
+<p>The hardest part is dealing with the fact that python will not give us anonymous functions with more than one statement in them.  To get around that, we could create a list of commands and run through those...</p>
+
+<p>Anyway, here's the backend code I ran this with:</p>
+
+<pre><code>context = None
+
+class Nestable(object):
+  def __init__(self,caption=None):
+    self.caption = caption
+    self.things = []
+
+    global context
+    if context:
+      context.add(self)
+
+  def __enter__(self):
+    global context
+    self.parent = context
+    context = self
+
+  def __exit__(self, type, value, traceback):
+    global context
+    context = self.parent
+
+  def add(self,thing):
+    self.things.append(thing)
+    print "Adding a %s to %s" % (thing,self)
+
+  def __str__(self):
+    return "%s(%s)" % (self.__class__.__name__, self.caption)
+
+
+class Shoes(Nestable):
+  pass
+
+class Button(Nestable):
+  pass
+
+class Alert(Nestable):
+  pass
+
+class Para(Nestable):
+  def replace(self,caption):
+    Command(self,"replace",caption)
+
+class Command(Nestable):
+  def __init__(self, target, command, caption):
+    self.command = command
+    self.target  = target
+    Nestable.__init__(self,caption)
+
+  def __str__(self):
+    return "Command(%s text of %s with \"%s\")" % (self.command, self.target, self.caption)
+
+  def execute(self):
+    self.target.caption = self.caption
+</code></pre>

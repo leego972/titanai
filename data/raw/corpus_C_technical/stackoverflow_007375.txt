@@ -1,0 +1,60 @@
+Question: <p>I read the part of <a href="http://docs.python.org/library/configparser.html">the docs</a> and saw that the <code>ConfigParser</code> returns a list of key/value pairs for the options within a section. I figured that keys did not need to be unique within a section, otherwise the parser would just return a mapping. I designed my config file schema around this assumption, then sadly realized that this is not the case:</p>
+
+<pre><code>&gt;&gt;&gt; from ConfigParser import ConfigParser
+&gt;&gt;&gt; from StringIO import StringIO
+&gt;&gt;&gt; fh = StringIO("""
+... [Some Section]
+... spam: eggs
+... spam: ham
+... """)
+&gt;&gt;&gt; parser = ConfigParser()
+&gt;&gt;&gt; parser.readfp(fh)
+&gt;&gt;&gt; print parser.items('Some Section')
+[('spam', 'ham')]
+</code></pre>
+
+<p>Then I went back and found the part of the docs that I <em>should</em> have read:</p>
+
+<blockquote>
+  <p>Sections are normally stored in a
+  builtin dictionary. An alternative
+  dictionary type can be passed to the
+  ConfigParser constructor. For example,
+  if a dictionary type is passed that
+  sorts its keys, the sections will be
+  sorted on write-back, as will be the
+  keys within each section.</p>
+</blockquote>
+
+<p>To keep my existing configuration file scheme (which I really like now ;) I'm thinking of passing a mapping-like object as mentioned above that accumulates values instead of clobbering them. Is there a simpler way to prevent key/value collapse that I'm missing? Instead of making a crazy adapter (that could break if <code>ConfigParser</code>'s implementation changes) should I just write a variant of the <code>ConfigParser</code> itself?</p>
+
+<p>I feel like this may be one of those 'duh' moments where I'm only seeing the difficult solutions.</p>
+
+<p><strong>[Edit:]</strong> Here's a more precise example of how I'd like to use the same key multiple times:</p>
+
+<pre><code>[Ignored Paths]
+ignore-extension: .swp
+ignore-filename: tags
+ignore-directory: bin
+</code></pre>
+
+<p>I dislike the comma-delimited-list syntax because it's hard on the eyes when you scale it to many values; for example, a comma delimited list of fifty extensions would not be particularly readable.</p>
+
+Answer: <p>This deficiency of ConfigParser is the reason why pyglet used <a href="http://code.google.com/p/pyglet/source/diff?spec=svnffc4fe58bc2179a75d3338aa821eb04649609871&amp;old=95d2cfa3167ddd5ca7eb0cd25c277902370fd7f1&amp;r=ffc4fe58bc2179a75d3338aa821eb04649609871&amp;format=unidiff&amp;path=%2Ftools%2Fepydoc%2Fepydoc%2Fcli.py" rel="nofollow">patched version of epydoc</a> to replace ConfigParser ini with this <a href="http://code.google.com/p/pyglet/source/diff?format=unidiff&amp;path=/tools/epydoc.config&amp;r=ffc4fe58bc2179a75d3338aa821eb04649609871&amp;spec=svnffc4fe58bc2179a75d3338aa821eb04649609871" rel="nofollow">simple format</a>:</p>
+
+<pre><code>name: pyglet
+url: http://www.pyglet.org/
+
+output: html
+target: doc/api/
+...    
+module: pyglet
+
+exclude: pyglet.gl.gl
+exclude: pyglet.gl.agl
+exclude: pyglet.gl.lib_agl
+exclude: pyglet.gl.wgl
+...
+</code></pre>
+
+<p>If you don't need sections - this approach can be useful.</p>

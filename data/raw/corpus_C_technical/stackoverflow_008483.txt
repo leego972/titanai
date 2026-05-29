@@ -1,0 +1,55 @@
+Question: <p>I've been wondering this for some time. As the title say, which is faster, the actual function or simply raising to the half power?</p>
+
+<p><b>UPDATE</b></p>
+
+<p>This is not a matter of premature optimization. This is simply a question of how the underlying code actually works. What is the theory of how Python code works?</p>
+
+<p>I sent Guido van Rossum an email cause I really wanted to know the differences in these methods.</p>
+
+<h3>My email:</h3>
+
+<blockquote>
+  <p>There are at least 3 ways to do a square root in Python: math.sqrt, the
+  '**' operator and pow(x,.5).  I'm just curious as to the differences in
+  the implementation of each of these.  When it comes to efficiency which
+  is better?</p>
+</blockquote>
+
+<h3>His response:</h3>
+
+<blockquote>
+  <p>pow and ** are equivalent; math.sqrt doesn't work for complex numbers,
+  and links to the C  sqrt() function. As to which one is
+  faster, I have no idea...</p>
+</blockquote>
+
+Answer: <p>Someone commented about the "fast Newton-Raphson square root" from Quake 3... I implemented it with ctypes, but it's super slow in comparison to the native versions. I'm going to try a few optimizations and alternate implementations.</p>
+
+<pre><code>from ctypes import c_float, c_long, byref, POINTER, cast
+
+def sqrt(num):
+ xhalf = 0.5*num
+ x = c_float(num)
+ i = cast(byref(x), POINTER(c_long)).contents.value
+ i = c_long(0x5f375a86 - (i&gt;&gt;1))
+ x = cast(byref(i), POINTER(c_float)).contents.value
+
+ x = x*(1.5-xhalf*x*x)
+ x = x*(1.5-xhalf*x*x)
+ return x * num
+</code></pre>
+
+<p>Here's another method using struct, comes out about 3.6x faster than the ctypes version, but still 1/10 the speed of C.</p>
+
+<pre><code>from struct import pack, unpack
+
+def sqrt_struct(num):
+ xhalf = 0.5*num
+ i = unpack('L', pack('f', 28.0))[0]
+ i = 0x5f375a86 - (i&gt;&gt;1)
+ x = unpack('f', pack('L', i))[0]
+
+ x = x*(1.5-xhalf*x*x)
+ x = x*(1.5-xhalf*x*x)
+ return x * num
+</code></pre>

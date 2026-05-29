@@ -1,0 +1,50 @@
+# How to resolve collisions when using ray-casting to predict the location of future collisions?
+
+I ran into a question I can't seem to solve, while implementing the movement/ collision checking code for my game. The game is in 2D and all objects in my game use either AABBs or circles as collision masks. My current procedure for moving a game object uses the following steps:
+
+1. [Motion definition] Set the motion vector for the game object as vec2(xSpeed, ySpeed)
+3. [Collision detection] Raycast the AABB along the motion vector, against all objects found in step 2, and find the first collision
+4. [Collision resolution] Move the game object to this position where the first collision occurs
+
+Below is a screenshot of the collision detection. It casts the object's AABB (bottom-left blue rectangle) along the motion vector (red line) and finds the points where the AABB would enter and exit the other object's AABB (big blue rectangle). It returns me the position, normal and lambda (progression [0.0, 1.0] along the motion vector when entering/ exiting the other object).
+
+Practically, the ray casting of AABBs is performed as a line-raycast on the configuration space obstacle of the two AABBs. I've implemented this for line-circle, line-aabb, circle-circle, and aabb-aabb cases and they work correctly.
+
+My problem is the collision resolution step. The problem is that my objects get stuck in eachother using the current procedure. The reason being that the raycast procedure returns the position where the object "just collides" with the other object. Because of this, on the next update of my game world, the object is already colliding before it even moves. When I perform my collision detection step, the results is that the "first collision" occurs at the starting position of the object.
+
+I've been reading related questions here, but haven't found a definitive answer yet. Here are some of the things I've read and problems I found with them (from "bad" to "better"):
+
+1. [Don't move if a collision is encountered on the way] This could cause jittery and weird behavior when moving towards an object. As, e.g. if the object is moving at 5 pixels per frame towards a wall, it will end up somewhere between 5 and 0 pixels away from the wall, depending on it's position. I suspect jittery behavior to happen when this solution is extended to collision checking between moving objects.
+
+2. [Implement IsTouching() methods to check whether an object is colliding but not penetrating another object] I have no idea how to elegantly use this information in the raycasting algorithms to allow "sliding behavior" of shapes, without sacrificing performance (as the algorithms are very optimized right now). Also, I imagine objects "touching" is defined as having a penetration depth of 0.0. Checking for this could cause errors in case of float rounding errors.
+
+3. [Push away both the object and the colliding object upon colliding] Some of my objects (such as walls and terrain) are static and I'd rather not move them even slightly to resolve collision problems.
+
+4. [Push the object out of the colliding object along the collision normal] Using this solution, the object can get stuck in another object, as it gets "blindly" pushed out of a colliding object.
+
+5. [Push the object out of the colliding object backwards along the motion vector] This sounds good as the object won't get stuck in other objects. However, I'm not sure how to choose "how much" to push the object out of the other object. The best thing I can think of is to move it using "a very small float number" such as 0.00001f. But this sounds very ad-hoc.
+
+In short: Where do I move my object, if I know exactly where the first collision would occur, without getting it stuck in other object?
+
+There are two steps to solving this problem.
+
+First you need some extra data on collision. When two objects collide you want to know how far they've collided into each other.
+
+After that you want to move the two objects backwards. Depending on how accurate you want it you could just take the amount that they overlap, divide it in half and then just move each object back by that amount (not good if only one object is moving obviously). If you want to be more accurate you can try to determine how fast each object was going on impact and move them apart depending on which one was going faster.
+
+After you've separated the two objects from colliding you can apply your resultant forces. Again if you don't need to be SUPER accurate you can end here and just let further collisions sort themselves out.
+
+A way to increase the accuracy of your collision response here is to iterate this process. Each object will detect and react to collisions multiple times per frame so that if one collision results in another immediate collision you can account for it. You want to put a limit on this so that you don't end up with an infinite loop of collision detection. Objects that are more important will have higher iteration limits.
+
+There are a few different algorithms to determine object overlapping that can be done as apart of the collision detection step. If you use the Separating Axis Theorem (SAT) you can do this pretty easily but that's more for 3D. It's even easier to do it with circles and AABBs in 2D.
+
+Here's a quick example to get the overlap for two circles colliding:
+
+float IsColliding(Circle c1, Circle c2)
+{
+float distanceBetweenCircles = (c2.center - c1.center).magnitude;
+
+{
+//Return the amount of overlap
+
+• One thing you could do is use a value that's relatively small to your overlap. 1/100th would be good. So if you have an overlap of 1.0f then you'd move back 1.0f + (1.0f * .01f). This way even if you have a really large or small overlap that you'll never be moving back too much but enough to get out of the collision. Either that or notice that I've used radiiSum > If you move the object back so that radiiSum == distanceBetweenCircles there will be no collision detection. Jul 10, 2015 at 16:38

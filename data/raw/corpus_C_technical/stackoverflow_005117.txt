@@ -1,0 +1,57 @@
+Question: <p>Markdown is a great tool for formatting plain text into pretty html, but it doesn't turn plain-text links into URLs automatically. Like this one:</p>
+
+<p><a href="http://www.google.com/" rel="nofollow">http://www.google.com/</a></p>
+
+<p>How do I get markdown to add  tags to URLs when I format a block of text?</p>
+
+Answer: <p>You could write an extension to markdown. Save this code as mdx_autolink.py</p>
+
+<pre><code>import markdown
+from markdown.inlinepatterns import Pattern
+
+EXTRA_AUTOLINK_RE = r'(?&lt;!"|&gt;)((https?://|www)[-\w./#?%=&amp;]+)'
+
+class AutoLinkPattern(Pattern):
+
+    def handleMatch(self, m):
+        el = markdown.etree.Element('a')
+        if m.group(2).startswith('http'):
+            href = m.group(2)
+        else:
+            href = 'http://%s' % m.group(2)
+        el.set('href', href)
+        el.text = m.group(2)
+        return el
+
+class AutoLinkExtension(markdown.Extension):
+    """
+    There's already an inline pattern called autolink which handles 
+    &lt;http://www.google.com&gt; type links. So lets call this extra_autolink 
+    """
+
+    def extendMarkdown(self, md, md_globals):
+        md.inlinePatterns.add('extra_autolink', 
+            AutoLinkPattern(EXTRA_AUTOLINK_RE, self), '&lt;automail')
+
+def makeExtension(configs=[]):
+    return AutoLinkExtension(configs=configs)
+</code></pre>
+
+<p>Then use it in your template like this:</p>
+
+<pre><code>{% load markdown %}
+
+(( content|markdown:'autolink'))
+</code></pre>
+
+<p>Update:</p>
+
+<p>I've found an issue with this solution: When markdown's standard link syntax is used and the displayed portion matches the regular expression, eg:</p>
+
+<pre><code>[www.google.com](http://www.yahoo.co.uk)
+</code></pre>
+
+<p>strangely becomes:
+    <a href="http://www.google.com">www.google.com</a></p>
+
+<p>But who'd want to do that anyway?!</p>

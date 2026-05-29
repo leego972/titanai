@@ -1,0 +1,115 @@
+Compressed Series (Part II)
+
+Last week we looked at an alternative series to compute $e$, and this week we will have a look at the computation of $e^x$. The usual series we learn in calculus textbook is given by
+
+$\displaystyle e^x=\sum_{n=0}^\infty \frac{x^n}{n!}$
+
+We can factorize the expression as
+
+$\displaystyle e^x=\sum_{n=0}^\infty \frac{x^n}{n!}=1+x+\frac{x^2}{2!}+\frac{x^3}{3!}+\frac{x^4}{4!}+\cdots$
+
+We can make the factorials and power disappear. Indeed, we can rewrite the above as
+
+$\displaystyle =1+x+\frac{x^2}{2!}+\frac{x^3}{3!}+\frac{x^4}{4!}+\cdots$
+
+$\displaystyle =1+x+\frac{x^2}{2!}+\frac{x^3}{3!}\big(1+\frac{x}{4}\big(+\cdots$
+
+$\displaystyle =1+x+\frac{x^2}{2!}\big(1+\frac{x}{3}\big(1+\frac{x}{4}\big(+\cdots$
+
+$\displaystyle =1+x\big(1+\frac{x}{2}\big(1+\frac{x}{3}\big(1+\frac{x}{4}\big(+\cdots$
+
+This series already seems much easier to compute. A straightforward C implementation leads to something like
+
+float_x naive_exp(float_x x, int nb_terms)
+{
+float_x s=1;
+float_x n=1;
+float_x xx=1;
+for (int i=1;i<=nb_terms;i++)
+{
+n*=i;
+xx*=x;
+s+=xx/n;
+}
+
+return s;
+}
+
+
+Let us now look at series compression in this case. It’s a bit more laborious than for the series for $e$. Indeed, if we group terms two by two, we find, somewhere in the series, the successive terms
+
+$\displaystyle \cdots+\left(\frac{x^n}{n!}+\frac{x^{n+1}}{(n+1)!}\right)+\cdots$
+
+which we rewrite as
+
+$\displaystyle \cdots+\left(\frac{x^{2k}}{(2k)!}+\frac{x^{2k+1}}{(2k+1)!}\right)+\cdots$
+
+which we simplify to find
+
+$\displaystyle \cdots+\left(\frac{x^{2k}(2k+1+x)}{(2k+1)!}\right)+\cdots$
+
+which yields, again, a series with a convergence rate roughly double of the original.
+
+This yield the following code:
+
+float_x compressed_exp(float_x x, int nb_terms)
+{
+float_x s=0;
+float_x k_bang=1;
+float_x xx=1;
+for (int k=0,t=0;k<=nb_terms;k++,t+=2,k_bang*=(t+1)*t)
+{
+s+=( xx*(t+1+x) )/ k_bang;
+xx*=(x*x); // x^(2k)
+}
+
+return s;
+}
+
+
+Let us now compare the convergence for, say, $n=3$. We get
+
+it. Naive              Compressed
+1  1                  4
+2  4                  13
+3  8.5                18.4
+4 13                  19.84642857142857
+5 16.375              20.06339285714286
+6 18.4                20.08410308441558
+7 19.4125             20.08546859390609
+8 19.84642857142857   20.08553443097081
+9 20.00915178571428   20.08553685145113
+10 20.06339285714285   20.08553692151767
+11 20.07966517857142   20.08553692315559
+12 20.08410308441558   20.08553692318715
+13 20.08521256087662   20.08553692318766
+14 20.08546859390609   20.08553692318767
+15 20.08552345812669   20.08553692318767
+16 20.08553443097081   20.08553692318767
+17 20.08553648837908   20.08553692318767
+18 20.08553685145113   20.08553692318767
+19 20.08553691196314   20.08553692318767
+20 20.08553692151767   20.08553692318767
+21 20.08553692295084   20.08553692318767
+22 20.08553692315558   20.08553692318767
+23 20.08553692318350   20.08553692318767
+24 20.08553692318715   20.08553692318767
+25 20.08553692318760   20.08553692318767
+26 20.08553692318765   20.08553692318767
+27 20.08553692318766   20.08553692318767
+28 20.08553692318766   20.08553692318767
+29 20.08553692318766   20.08553692318767
+30 20.08553692318766   20.08553692318767
+
+
+
+Again, we see that the compressed series converges more rapidly. It reaches the “exact” value $20.08553692318767$ (as computed by the C stdlib exp function, the reference in this case) at iteration 14, while the naive series undershoots a bit, even after 30 iterations.
+
+*
+* *
+
+Of course, if one looks at the series
+
+$\displaystyle \sum_{k=0}^\infty \frac{x^{2k}(2k+1+x)}{(2k+1)!}$,
+
+he could be hard-pressed to figure out where it comes from. If you’re going to use it in code, you should leave an explanatory comment, something that explains how to derive this series and why you’re using it. This also holds if you’re writing a mathematical text. The reader may not be stupid, but he is, I suppose, unlikely to figure out all the tricks you use by himself—and that’s why he’s reading you in the first place.

@@ -1,0 +1,152 @@
+## NIRS Cookbook
+
+PANDA tutorial, for students and coworkers: a recipe to analyze NIRS data
+
+UNDER CONSTRUCTION
+
+# Cookbook
+
+In principle, you need to:
+
+2. preprocess the data (remove motion artefacts, bandpass-filter, detrend, downsample)
+3. determine important parameters to analyze (maximum response, time to max, GLM amplitude)
+4. analyze (determine differences between conditions)
+
+The data is stored in an oxy3-file and/or in an xls-file. These files contain mostly the same information. The oxy3-file contains the raw, unprocessed data, while the xls-file usually contains the oxy- and deoxy-hemoglobin concentrations.
+
+The following MATLAB routines can be used to load the data:
+
+signal). This sound is most often used for sound localization experiments. See below for example.
+
+For now, we will stick with using the excel files and pa_nirs_read.m:
+
+
+fname = 'nirs-subject1-0001.xls'; % filename
+nirs = pa_nirs_read(fname); % read the data
+
+The data nirs-subject1-0001.xls can be found on the Biophysics website, here. This data is from a NIRS experiment in whicha children's story is told in a video. The video is broken down in several 20-s blocks, and the subject is randomly shown the video, audio or audiovideo components in each block. Six optodes (2 receivers, 4 transmitters) were placed, three over left and three over right temporal cortex (T3 and T4 in the EEG 10/20 system) to allow for bilateral measurements over human auditory cortex.
+
+Loading this data into Matlab will yield a structure, that above we termed nirs, with the fields:
+
+
+fsample % sample frequency (Hz)
+label % label of recorded channels, e.g. 'Rx1a - Tx1 OHb'
+event % contains fields with details on stimulus events
+hdr % some header information in a structure
+trial % the data in a matrix (number of channels x number of samples + 1 row with sample number)
+time % a time vector
+cfg % a structure with some configuration information, not used
+
+For example, let's plot the oxyhemoglobin (O2Hb) channel on the right side (Rx1b) with the transmitter (Tx) optode 35 mm (Tx2) away from the receiver (Rx).
+
+
+sel   = strncmp(nirs.label,'Rx1b - Tx2 O2Hb',15);  % first find the correct row of the data matrix
+chan   = nirs.trial(sel,:); % and select it, storing it in the chan variable
+% then plot this
+plot(chan,'k-');
+% some pretty modifications
+axis square;
+box off;
+set(gca,'TickDir','out');
+xlim([1 numel(chan)]);
+% and some necessary labels
+xlabel('Time (samples)'); %
+ylabel('Oxy-hemoglobin concentration');
+
+This will yield figure 1.
+
+This is clearly a raw, oversampled, unfiltered signal, that can be improved by preprocessing (in the next step).
+
+# 2. Filter
+
+After the generation of a signal, you generally want to filter your signal, either to bandpass your signal:
+
+• pa_lowpass - low-pass filter the signal (remove high-frequency frequencies that are not heard, to prevent aliasing, or for specific research questions)
+• pa_highpass - high-pass filter the signal (important to remove low-frequency signals that usually end up distorted when played by the speaker)
+
+or to equalize the signal:
+
+# 3. Ramp
+
+To prevent onset distortions, you need to ramp the data
+
+• pa_ramp - add a squared-sine onset and squared-cosine offset
+
+# 4. Level Ramp
+
+Because of an idiosyncrasy in our set-up, we need to pre- and append 20 milliseconds of zeros to the signal. This is because the second TDT RP2.1 DA-channel is used to control the sound level. Switching this on will also create a sudden onset peak, that needs to be prevented. This is solved by a level-ramp within the RCO. We need to consider this level-ramp by applying:
+
+All steps (generation, filtering, equalizing, and ramping) can be done by TDT, but at present this takes precious time.
+
+# 5. Save wav-file
+
+And when this is done, we need to save the data, so that it can be used by the TDT system:
+
+• pa_ writewav - saves the stimulus as a wav file for the DA converter (this also applies a normalization)
+
+You can check whether the stimulus generation has succeeded, with:
+
+• wavread - MATLAB routine to read an existing wav-file in MATLAB format
+• audioplayer - Matlab routine to play sounds (wavplay)
+• psd - Matlab routine, to determine power spectral density
+• pa_getpower - get power spectrum
+
+# Some examples
+
+Let‟s generate a GWN stimulus. Stimulus 3.0 sec, bandwidth from 0.5 to 20 kHz, with on- and offset envelopes.
+In Matlab:
+
+
+
+Noise  = pa_gengwn(3); % Default envelope (250 pnts) and filter
+
+% noise is lp-filtered at 20 kHz
+
+% and hp-filtered at 500 Hz
+
+psd(Noise);
+Frequencies below 500 Hz are never useful, and produce distortions on speakers, so they should be filtered out with a highpass-filter. This is already done by default in gengwn.
+The GWN stimulus is a well-localizable sound eliciting all binaural difference (ITD and ILD) cues and spectral cues. Sometimes, it is desirable to use lowpass- or highpass-filtered noise, to separate the effects of ITD and ILD. These sounds are created by generating a GWN as above, and filtering it with the functions lowpassnoise and highpassnoise:
+
+HP = pa_highpass(Noise); % noise is hp-filtered at 3 kHz
+
+psd(HP);
+
+LP = pa_lowpass(Noise); % noise is lp-filtered at 3 kHz
+
+psd(LP);
+
+
+
+You might want to equalize the signal:
+
+
+Noise = pa_equalizer(Noise);
+HP = pa_equalizer(HP);
+LP = pa_equalizer(LP);
+
+Then apply a ramp:
+
+
+Noise = pa_ramp(Noise);
+HP = pa_ramp(HP);
+LP = pa_ramp(LP);
+
+
+
+In the FART1-setup, speakers will have on onset ramp produced by the TDT-system to ramp to a voltage on the speakers. You will have to take this into account, by putting zeros in front of the stimuli (of about 20 ms worth 20*48.8828125 978 samples):
+
+
+Noise = pa_levelramp(Noise); %This "prepends" the zerovector to the Noise
+
+HP = pa_levelramp(HP);
+
+LP =  pa_levelramp(LP); 
+
+After this, you should save the matrix to a wav-file, that can be played with the TDT-system:
+
+writewav(Noise,"snd001.wav);
+
+writewav(HP,"snd002.wav");
+
+writewav(LP,"snd003.wav");

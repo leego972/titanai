@@ -1,0 +1,24 @@
+Question: <p>We're using a third-party middleware product that allows us to write code in an embedded Python interpreter, and which exposes an API that we can call into. Some of these API calls allow us to load various kinds of file, and the loading code is implemented in C. File loading happens in a separate thread, and calls back into Python when the data is available. So far, all well and dandy.</p>
+
+<p>We've been i14ing (heh) our product, and one thing we'd like to do is format user-facing numerical output according to the user's locale settings. So, from Python, we do this:</p>
+
+<pre><code>import locale
+locale.setLocale( locale.LC_ALL, '' )
+</code></pre>
+
+<p>Now, this works (in that the user-facing numbers are formatted correctly for their locale). However, if the user's locale differs from the default C locale, any files that are subsequently loaded will return incorrect data, presumably because all string-to-float conversion has been affected, right down to the metal.</p>
+
+<p>We can't work around this by implementing locale aware file loading, so our current workaround is to only set the locale when formatting output for the user, and then set it back again afterwards. That is, something like:</p>
+
+<pre><code>import locale
+currentLocale = locale.getLocale( locale.LC_ALL )
+locale.setLocale( locale.LC_ALL, '' )
+displayNumbersToTheUser()
+locale.setlocale( locale.LC_ALL, currentLocale )
+</code></pre>
+
+<p>This seems a bit clunky, and I was wondering whether this is a common approach to formatting locale-aware output for the user? My other concern is that this is obviously not thread safe, so we'll presumably still get problems if any file parsing occurs in a separate thread when the locale is changed.</p>
+
+<p>Any information on best practice is appreciated - I don't have much experience with this sort of thing.</p>
+
+Answer: <p>Setting the locale after multiple threads have started operating may have unexpected results. Unless I could figure out a more subtle approach, I'd probably just split file loading and the user interface into separate processes, communicating through a pipe or a file socket.</p>

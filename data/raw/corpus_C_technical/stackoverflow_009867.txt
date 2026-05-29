@@ -1,0 +1,102 @@
+Question: <p>I'm using the <a href="http://docs.python.org/library/subprocess.html">subprocess module</a> to start a subprocess and connect to it's output stream (stdout). I want to be able to execute non-blocking reads on its stdout. Is there a way to make .readline non-blocking or to check if there is data on the stream before I invoke <code>.readline</code>? I'd like this to be portable or at least work under Windows and Linux.</p>
+
+<p>here is how I do it for now (It's blocking on the <code>.readline</code> if no data is avaible):</p>
+
+<pre><code>p = subprocess.Popen('myprogram.exe', stdout = subprocess.PIPE)
+output_str = p.stdout.readline()
+</code></pre>
+
+Answer: <p>In my case I needed a logging module that catches the output from the background applications and augments it(adding time-stamps, colors, etc.).</p>
+
+<p>I ended up with a background thread that does the actual I/O. Following code is only for POSIX platforms. I stripped non-essential parts. </p>
+
+<p>If someone is going to use this beast for long runs consider managing open descriptors. In my case it was not a big problem.</p>
+
+<pre><code># -*- python -*-
+import fcntl
+import threading
+import sys, os, errno
+import subprocess
+
+class Logger(threading.Thread):
+    def __init__(self, *modules):
+        threading.Thread.__init__(self)
+        try:
+            from select import epoll, EPOLLIN
+            self.__poll = epoll()
+            self.__evt = EPOLLIN
+            self.__to = -1
+        except:
+            from select import poll, POLLIN
+            print 'epoll is not available'
+            self.__poll = poll()
+            self.__evt = POLLIN
+            self.__to = 100
+        self.__fds = {}
+        self.daemon = True
+        self.start()
+
+    def run(self):
+        while True:
+            events = self.__poll.poll(self.__to)
+            for fd, ev in events:
+                if (ev&amp;self.__evt) != self.__evt:
+                    continue
+                try:
+                    self.__fds[fd].run()
+                except Exception, e:
+                    print e
+
+    def add(self, fd, log):
+        assert not self.__fds.has_key(fd)
+        self.__fds[fd] = log
+        self.__poll.register(fd, self.__evt)
+
+class log:
+    logger = Logger()
+
+    def __init__(self, name):
+        self.__name = name
+        self.__piped = False
+
+    def fileno(self):
+        if self.__piped:
+            return self.write
+        self.read, self.write = os.pipe()
+        fl = fcntl.fcntl(self.read, fcntl.F_GETFL)
+        fcntl.fcntl(self.read, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+        self.fdRead = os.fdopen(self.read)
+        self.logger.add(self.read, self)
+        self.__piped = True
+        return self.write
+
+    def __run(self, line):
+        self.chat(line, nl=False)
+
+    def run(self):
+        while True:
+            try: line = self.fdRead.readline()
+            except IOError, exc:
+                if exc.errno == errno.EAGAIN:
+                    return
+                raise
+            self.__run(line)
+
+    def chat(self, line, nl=True):
+        if nl: nl = '\n'
+        else: nl = ''
+        sys.stdout.write('[%s] %s%s' % (self.__name, line, nl))
+
+def system(command, param=[], cwd=None, env=None, input=None, output=None):
+    args = [command] + param
+    p = subprocess.Popen(args, cwd=cwd, stdout=output, stderr=output, stdin=input, env=env, bufsize=0)
+    p.wait()
+
+ls = log('ls')
+ls.chat('go')
+system("ls", ['-l', '/'], output=ls)
+
+date = log('date')
+date.chat('go')
+system("date", output=date)
+</code></pre>

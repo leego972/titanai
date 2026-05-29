@@ -1,0 +1,278 @@
+Question: <p>Is it possible to have static class variables or methods in python? What syntax is required to do this?</p>
+
+Answer: <h2>Static and Class Methods</h2>
+
+<p>As the other answers have noted, static and class methods are easily accomplished using the built-in decorators:</p>
+
+<pre><code>class Test(object):
+    #regular instance method:
+    def MyMethod(self):
+        pass
+    #class method:
+    @classmethod
+    def MyClassMethod(klass):
+        pass
+    #static method:
+    @staticmethod:
+    def MyStaticMethod():
+        pass
+</code></pre>
+
+<p>As usual, the first argument to <code>MyMethod()</code> is bound to the class instance object. In contrast, the first argument to <code>MyClassMethod()</code> is <em>bound to the class object itself</em> (e.g., in this case, <code>Test</code>). For <code>MyStaticMethod()</code>, none of the arguments are bound, and having arguments at all is optional. </p>
+
+<h2>"Static Variables"</h2>
+
+<p>However, implementing "static variables" (well, <em>mutable</em> static variables, anyway, if that's not a contradiction in terms...) is not as straight forward. As millerdev <a href="http://stackoverflow.com/a/69067/2437514">pointed out in his answer</a>, the problem is that Python's class attributes are not truly "static variables". Consider: </p>
+
+<pre><code>class Test(object):
+    i = 3 #This is a class attribute
+
+x = Test()
+x.i = 12 #Attempt to change the value of the class attribute using x instance
+assert x.i == Test.i #ERROR
+assert Test.i == 3 #Test.i was not affected
+assert x.i == 12 #x.i is a different object than Test.i
+</code></pre>
+
+<p>This is because the line <code>x.i = 12</code> has added a new instance attribute <code>i</code> to <code>x</code> instead of changing the value of the <code>Test</code> class <code>i</code> attribute. </p>
+
+<p><em>Partial</em> expected static variable behavior, i.e., syncing of the attribute between multiple instances (but <strong>not</strong> with the class itself; see "gotcha" below), can be achieved by turning the class attribute into a property:</p>
+
+<pre><code>class Test(object):
+    _i = 3
+    @property
+    def i(self):
+        return self._i
+    @i.setter
+    def i(self,val):
+        self._i = val
+
+## ALTERNATIVE IMPLEMENTATION - FUNCTIONALLY EQUIVALENT TO ABOVE ##
+## (except with separate methods for getting and setting i) ##
+
+class Test(object):
+    _i = 3
+    def get_i(self):
+        return self._i
+    def set_i(self,val):
+        self._i = val
+    i = property(get_i, set_i)
+</code></pre>
+
+<p>Now you can do:</p>
+
+<pre><code>x1 = Test()
+x2 = Test()
+x1.i = 50
+assert x2.i == x1.i # no error
+assert x2.i == 50 # the property is synced
+</code></pre>
+
+<p>The static variable will now remain in sync <em>between all class instances</em>. </p>
+
+<p>(NOTE: That is, unless a class instance decides to define its own version of <code>_i</code>! But if someone decides to do THAT, they deserve what they get, don't they???)</p>
+
+<p>Note that technically speaking, <code>i</code> is still not a 'static variable' at all; it is a <code>property</code>, which is a special type of descriptor. However, the <code>property</code> behavior is now equivalent to a (mutable) static variable synced across all class instances. </p>
+
+<h2>Immutable "Static Variables"</h2>
+
+<p>For immutable static variable behavior, simply omit the <code>property</code> setter:</p>
+
+<pre><code>class Test(object):
+    _i = 3
+    @property
+    def i(self):
+        return type(self)._i
+
+## ALTERNATIVE IMPLEMENTATION - FUNCTIONALLY EQUIVALENT TO ABOVE ##
+## (except with separate methods for getting i) ##
+
+class Test(object):
+    _i = 3
+    def get_i(self):
+        return type(self)._i
+    i = property(get_i)
+</code></pre>
+
+<p>Now attempting to set the instance <code>i</code> attribute will return an <code>AttributeError</code>: </p>
+
+<pre><code>x = Test()
+assert x.i == 3 #success
+x.i = 12 #ERROR
+</code></pre>
+
+<h2>One Gotcha to be Aware of</h2>
+
+<p>Note that the above methods only work with <em>instances</em> of your class - they will <strong>not</strong> work <em>when using the class itself</em>. So for example: </p>
+
+<pre><code>x = Test()
+assert x.i == Test.i # ERROR
+
+# x.i and Test.i are two different objects:
+type(Test.i) # class 'property'
+type(x.i) # class 'int'
+</code></pre>
+
+<p>The line <code>assert Test.i == x.i</code> produces an error, because the <code>i</code> attribute of <code>Test</code> and <code>x</code> are two different objects. </p>
+
+<p>Many people will find this surprising. However, it should not be. If we go back and inspect our <code>Test</code> class definition (the second version), we take note of this line: </p>
+
+<pre><code>    i = property(get_i) 
+</code></pre>
+
+<p>Clearly, the member <code>i</code> of <code>Test</code> must be a <code>property</code> object, which is the type of object returned from the <code>property</code> function. </p>
+
+<p>If you find the above confusing, you are most likely still thinking about it from the perspective of other languages (e.g. Java or c++). You should go study the <code>property</code> object, about the order in which Python attributes are returned, the descriptor protocol, and the method resolution order (MRO). </p>
+
+<p>I present a solution to the above 'gotcha' below; however I would suggest - strenuously - that you do not try to do something like the following until - at minimum - you thoroughly understand why <code>assert Test.i = x.i</code> causes an error. </p>
+
+<h2><em>REAL, ACTUAL</em> Static Variables - <code>Test.i == x.i</code></h2>
+
+<p>I present the (Python 3) solution below for informational purposes only. I am not endorsing it as a "good solution". I have my doubts as to whether emulating the static variable behavior of other languages in Python is ever actually necessary. However, regardless as to whether it is actually useful, the below should help further understanding of how Python works. </p>
+
+<p><strong>Emulating static variable behavior of other languages using a metaclass</strong></p>
+
+<p>A metaclass is the class of a class. The default metaclass for all classes in Python (i.e., the "new style" classes post Python 2.3 I believe) is <code>type</code>. For example: </p>
+
+<pre><code>type(int) # class 'type'
+type(str) # class 'type'
+class Test(): pass
+type(Test) # class 'type'
+</code></pre>
+
+<p>However, you can define your own metaclass like this: </p>
+
+<pre><code>class MyMeta(type): pass
+</code></pre>
+
+<p>And apply it to your own class like this (Python 3 only):</p>
+
+<pre><code>class MyClass(metaclass = MyMeta):
+    pass
+type(MyClass) # class MyMeta
+</code></pre>
+
+<p>Below is a metaclass I have created which attempts to emulate "static variable" behavior of other languages. It basically works by replacing the default getter, setter, and deleter with versions which check to see if the attribute being requested is a "static variable". </p>
+
+<p>A catalog of the "static variables" is stored in the <code>StaticVarMeta.statics</code> attribute. All attribute requests are initially attempted to be resolved using a substitute resolution order. I have dubbed this the "static resolution order", or "SRO". This is done by looking for the requested attribute in the set of "static variables" for a given class (or its parent classes). If the attribute does not appear in the "SRO", the class will fall back on the default attribute get/set/delete behavior (i.e., "MRO"). </p>
+
+<pre><code>from functools import wraps
+
+class StaticVarsMeta(type):
+    '''A metaclass for creating classes that emulate the "static variable" behavior
+    of other languages. I do not advise actually using this for anything!!!
+
+    Behavior is intended to be similar to classes that use __slots__. However, "normal"
+    attributes and __statics___ can coexist (unlike with __slots__). 
+
+    Example usage: 
+
+        class MyBaseClass(metaclass = StaticVarsMeta):
+            __statics__ = {'a','b','c'}
+            i = 0 # regular attribute
+            a = 1 # static var defined (optional)
+
+        class MyParentClass(MyBaseClass):
+            __statics__ = {'d','e','f'}
+            j = 2 # regular attribute
+            d, e, f = 3, 4, 5 # Static vars
+            a, b, c = 6, 7, 8 # Static vars (inherited from MyBaseClass, defined/re-defined here)
+
+        class MyChildClass(MyParentClass):
+            __statics__ = {'a','b','c'}
+            j = 2 # regular attribute (redefines j from MyParentClass)
+            d, e, f = 9, 10, 11 # Static vars (inherited from MyParentClass, redefined here)
+            a, b, c = 12, 13, 14 # Static vars (overriding previous definition in MyParentClass here)'''
+    statics = {}
+    def __new__(mcls, name, bases, namespace):
+        # Get the class object
+        cls = super().__new__(mcls, name, bases, namespace)
+        # Establish the "statics resolution order"
+        cls.__sro__ = tuple(c for c in cls.__mro__ if isinstance(c,mcls))
+
+        # Replace class getter, setter, and deleter for instance attributes
+        cls.__getattribute__ = StaticVarsMeta.__inst_getattribute__(cls, cls.__getattribute__)
+        cls.__setattr__ = StaticVarsMeta.__inst_setattr__(cls, cls.__setattr__)
+        cls.__delattr__ = StaticVarsMeta.__inst_delattr__(cls, cls.__delattr__)
+        # Store the list of static variables for the class object
+        # This list is permanent and cannot be changed, similar to __slots__
+        try:
+            mcls.statics[cls] = getattr(cls,'__statics__')
+        except AttributeError:
+            mcls.statics[cls] = namespace['__statics__'] = set() # No static vars provided
+        # Check and make sure the statics var names are strings
+        if any(not isinstance(static,str) for static in mcls.statics[cls]):
+            typ = dict(zip((not isinstance(static,str) for static in mcls.statics[cls]), map(type,mcls.statics[cls])))[True].__name__
+            raise TypeError('__statics__ items must be strings, not {0}'.format(typ))
+        # Move any previously existing, not overridden statics to the static var parent class(es)
+        if len(cls.__sro__) &gt; 1:
+            for attr,value in namespace.items():
+                if attr not in StaticVarsMeta.statics[cls] and attr != ['__statics__']:
+                    for c in cls.__sro__[1:]:
+                        if attr in StaticVarsMeta.statics[c]:
+                            setattr(c,attr,value)
+                            delattr(cls,attr)
+        return cls
+    def __inst_getattribute__(self, orig_getattribute):
+        '''Replaces the class __getattribute__'''
+        @wraps(orig_getattribute)
+        def wrapper(self, attr):
+            if StaticVarsMeta.is_static(type(self),attr):
+                return StaticVarsMeta.__getstatic__(type(self),attr)
+            else:
+                return orig_getattribute(self, attr)
+        return wrapper
+    def __inst_setattr__(self, orig_setattribute):
+        '''Replaces the class __setattr__'''
+        @wraps(orig_setattribute)
+        def wrapper(self, attr, value):
+            if StaticVarsMeta.is_static(type(self),attr):
+                StaticVarsMeta.__setstatic__(type(self),attr, value)
+            else:
+                orig_setattribute(self, attr, value)
+        return wrapper
+    def __inst_delattr__(self, orig_delattribute):
+        '''Replaces the class __delattr__'''
+        @wraps(orig_delattribute)
+        def wrapper(self, attr):
+            if StaticVarsMeta.is_static(type(self),attr):
+                StaticVarsMeta.__delstatic__(type(self),attr)
+            else:
+                orig_delattribute(self, attr)
+        return wrapper
+    def __getstatic__(cls,attr):
+        '''Static variable getter'''
+        for c in cls.__sro__:
+            if attr in StaticVarsMeta.statics[c]:
+                try:
+                    return getattr(c,attr)
+                except AttributeError:
+                    pass
+        raise AttributeError(cls.__name__ + " object has no attribute '{0}'".format(attr))
+    def __setstatic__(cls,attr,value):
+        '''Static variable setter'''
+        for c in cls.__sro__:
+            if attr in StaticVarsMeta.statics[c]:
+                setattr(c,attr,value)
+                break
+    def __delstatic__(cls,attr):
+        '''Static variable deleter'''
+        for c in cls.__sro__:
+            if attr in StaticVarsMeta.statics[c]:
+                try:
+                    delattr(c,attr)
+                    break
+                except AttributeError:
+                    pass
+        raise AttributeError(cls.__name__ + " object has no attribute '{0}'".format(attr))
+    def __delattr__(cls,attr):
+        '''Prevent __sro__ attribute from deletion'''
+        if attr == '__sro__':
+            raise AttributeError('readonly attribute')
+        super().__delattr__(attr)
+    def is_static(cls,attr):
+        '''Returns True if an attribute is a static variable of any class in the __sro__'''
+        if any(attr in StaticVarsMeta.statics[c] for c in cls.__sro__):
+            return True
+        return False
+</code></pre>

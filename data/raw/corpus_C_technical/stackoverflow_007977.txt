@@ -1,0 +1,41 @@
+Question: <p>Given a class:</p>
+
+<pre><code>from django.db import models
+
+class Person(models.Model):
+    name = models.CharField(max_length=20)
+</code></pre>
+
+<p>Is it possible, and if so how, to have a QuerySet that filters based on dynamic arguments?  For example:</p>
+
+<pre><code> # Instead of:
+ Person.objects.filter(name__startswith='B')
+ # ... and:
+ Person.objects.filter(name__endswith='B')
+
+ # ... is there some way, given:
+ filter_by = '{0}__{1}'.format('name', 'startswith')
+ filter_value = 'B'
+
+ # ... that you can run the equivalent of this?
+ Person.objects.filter(filter_by=filter_value)
+ # ... which will throw an exception, since `filter_by` is not
+ # an attribute of `Person`.
+</code></pre>
+
+<p>Help is much appreciated &amp; thank you in advance.</p>
+
+Answer: <p>A simplified example: </p>
+
+<p>In a Django survey app, I wanted an HTML select list showing registered users. But because we have 5000 registered users, I needed a way to filter that list based on query criteria (such as just people who completed a certain workshop). In order for the survey element to be re-usable, I needed for the person creating the survey question to be able to attach those criteria to that question (don't want to hard-code the query into the app). </p>
+
+<p>The solution I came up with isn't 100% user friendly (requires help from a tech person to create the query) but it does solve the problem. When creating the question, the editor can enter a dictionary into a custom field, e.g.:</p>
+
+<pre><code>{'is_staff':True,'last_name__startswith':'A',}
+</code></pre>
+
+<p>That string is stored in the database. In the view code, it comes back in as <code>self.question.custom_query</code> . The value of that is a string that <em>looks</em> like a dictionary. We turn it back into a <em>real</em> dictionary with eval() and then stuff it into the queryset with **kwargs:</p>
+
+<pre><code>kwargs = eval(self.question.custom_query)
+user_list = User.objects.filter(**kwargs).order_by("last_name")
+</code></pre>
