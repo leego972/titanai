@@ -6,20 +6,25 @@ FastAPI wrapper for the finished Titan 1B checkpoint.
 Purpose:
 - Serve TitanAI to Virelle Studios as Assistant Director.
 - Serve TitanAI to Archibald Titan as Builder.
-- Keep Railway/front-end builds safe by exposing an OpenAI-compatible endpoint.
-- Fail closed on obviously incoherent/gibberish outputs so caller apps can fall back
-  to their existing Venice/OpenAI/Forge provider chain.
+- Expose an OpenAI-compatible endpoint for existing website integrations.
+- Auto-download the finished checkpoint from Hugging Face if missing locally.
+- Fail closed on incoherent outputs so caller apps can fall back cleanly.
 
 Environment variables:
   TITAN_CONFIG_PATH      default: configs/titan_config.yaml
   TITAN_CHECKPOINT_PATH  default: checkpoints/final.pt
+  TITAN_HF_REPO_ID       default: leego982/titanai
+  TITAN_HF_FILENAME      default: final.pt
+  TITAN_HF_REVISION      optional branch/tag/commit
+  TITAN_HF_TOKEN         optional, for private Hugging Face repos
+  HF_TOKEN               optional fallback token
   TITAN_BASE_DIR         default: .
   TITAN_DEVICE           optional: cuda, cpu, mps
-  TITAN_API_KEY          required for production requests
+  TITAN_API_KEY          optional API key for callers
   TITAN_CORS_ORIGINS     comma-separated origins, default: *
   TITAN_MIN_OUTPUT_CHARS default: 24
 
-Run locally:
+Run:
   uvicorn api.server:app --host 0.0.0.0 --port 8000
 """
 
@@ -27,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -42,6 +48,9 @@ from inference.infer import TitanInference
 
 CONFIG_PATH = os.getenv("TITAN_CONFIG_PATH", "configs/titan_config.yaml")
 CHECKPOINT_PATH = os.getenv("TITAN_CHECKPOINT_PATH", "checkpoints/final.pt")
+HF_REPO_ID = os.getenv("TITAN_HF_REPO_ID", "leego982/titanai")
+HF_FILENAME = os.getenv("TITAN_HF_FILENAME", "final.pt")
+HF_REVISION = os.getenv("TITAN_HF_REVISION") or None
 BASE_DIR = os.getenv("TITAN_BASE_DIR", ".")
 DEVICE = os.getenv("TITAN_DEVICE")
 API_KEY = os.getenv("TITAN_API_KEY")
@@ -85,8 +94,7 @@ class GenerateResponse(BaseModel):
     latency_ms: int
 
 
-app = FastAPI(title="TitanAI Inference API", version="1.1.0")
-
+app = FastAPI(title="TitanAI Inference API", version="1.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -96,7 +104,6 @@ app.add_middleware(
 )
 
 _titan: Optional[TitanInference] = None
-
 
 DIRECTOR_SYSTEM = """You are TitanAI serving as Assistant Director inside Virelle Studios.
 Give coherent, cinematic, production-aware answers. Help with story, scenes, shots,
@@ -123,18 +130,55 @@ def require_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid Titan API key")
 
 
+def ensure_checkpoint() -> Path:
+    checkpoint_file = Path(CHECKPOINT_PATH)
+    if checkpoint_file.exists() and checkpoint_file.stat().st_size > 0:
+        return checkpoint_file
+
+    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[TitanAI] Local checkpoint missing: {checkpoint_file}")
+    print(f"[TitanAI] Downloading from Hugging Face: {HF_REPO_ID}/{HF_FILENAME}")
+
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as exc:
+        raise RuntimeError("huggingface_hub is required. Run: pip install huggingface_hub") from exc
+
+    token = os.getenv("TITAN_HF_TOKEN") or os.getenv("HF_TOKEN") or None
+    try:
+        downloaded = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_FILENAME,
+            revision=HF_REVISION,
+            token=token,
+            local_files_only=False,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not download TitanAI checkpoint from Hugging Face repo '{HF_REPO_ID}' "
+            f"file '{HF_FILENAME}'. If the repo is private, set TITAN_HF_TOKEN."
+        ) from exc
+
+    downloaded_path = Path(downloaded)
+    if downloaded_path.resolve() != checkpoint_file.resolve():
+        shutil.copyfile(downloaded_path, checkpoint_file)
+
+    if not checkpoint_file.exists() or checkpoint_file.stat().st_size == 0:
+        raise RuntimeError(f"Downloaded checkpoint is missing or empty: {checkpoint_file}")
+
+    print(f"[TitanAI] Checkpoint ready: {checkpoint_file}")
+    return checkpoint_file
+
+
 def load_titan() -> TitanInference:
     global _titan
     if _titan is not None:
         return _titan
 
     config_file = Path(CONFIG_PATH)
-    checkpoint_file = Path(CHECKPOINT_PATH)
-
+    checkpoint_file = ensure_checkpoint()
     if not config_file.exists():
         raise RuntimeError(f"Titan config not found: {CONFIG_PATH}")
-    if not checkpoint_file.exists():
-        raise RuntimeError(f"Titan checkpoint not found: {CHECKPOINT_PATH}")
 
     with config_file.open("r", encoding="utf-8") as handle:
         config: dict[str, Any] = yaml.safe_load(handle)
@@ -207,8 +251,7 @@ def _is_coherent(output: str) -> bool:
     unique_ratio = len(set(words)) / max(len(words), 1)
     if len(words) >= 20 and unique_ratio < 0.18:
         return False
-    repeated = re.search(r"\b(\w{2,})\b(?:\s+\1\b){5,}", text, re.I)
-    if repeated:
+    if re.search(r"\b(\w{2,})\b(?:\s+\1\b){5,}", text, re.I):
         return False
     return True
 
@@ -239,10 +282,14 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    checkpoint_exists = Path(CHECKPOINT_PATH).exists()
     return {
         "ok": True,
         "model": "TitanAI",
         "checkpoint_path": CHECKPOINT_PATH,
+        "checkpoint_exists": checkpoint_exists,
+        "hf_repo_id": HF_REPO_ID,
+        "hf_filename": HF_FILENAME,
         "config_path": CONFIG_PATH,
         "api_key_required": bool(API_KEY),
         "openai_compatible": True,
@@ -298,6 +345,7 @@ def chat_completions(payload: ChatCompletionRequest, request: Request) -> dict[s
         },
         "titan": {
             "checkpoint": CHECKPOINT_PATH,
+            "hf_repo_id": HF_REPO_ID,
             "latency_ms": latency_ms,
             "coherence_guard": "passed",
         },
