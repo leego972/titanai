@@ -1,0 +1,103 @@
+# TitanAI 1B Fine-Tune Configuration
+# ==================================
+# Purpose:
+#   Fine-tune the finished TitanAI 1B checkpoint for two production roles:
+#   1) Virelle Studios Assistant Director
+#   2) Archibald Titan Builder
+#
+# Safety/build note:
+#   This config is training-only. It does not affect Railway builds for Virelle or Archibald.
+#
+# Expected input checkpoint:
+#   checkpoints/final.pt
+#
+# Output checkpoint:
+#   checkpoints/titan_1b_assistant_director_builder/final.pt
+
+project:
+  name: "titan-1b-assistant-director-builder"
+  version: "1.0.0"
+
+tokenizer:
+  type: "bpe"
+  vocab_size: 32000
+  min_frequency: 2
+  special_tokens:
+    - "<pad>"
+    - "<unk>"
+    - "<bos>"
+    - "<eos>"
+    - "<sep>"
+    - "<mask>"
+  save_dir: "tokenizer/artifacts"
+  corpus_file: "data/raw/corpus_F_instruct/titan_role_finetune_seed.txt"
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  processed_version: "titan_1b_assistant_director_builder_v1"
+  corpus_buckets:
+    - "corpus_E_cinema"
+    - "corpus_F_instruct"
+  train_split: 0.98
+  val_split: 0.02
+  max_seq_len: 2048
+  stride: 1024
+  shard_size: 10000
+
+# IMPORTANT:
+# These values must match the finished 1B checkpoint architecture.
+# If your final 1B checkpoint used a different architecture, update ONLY this section
+# to match the checkpoint before running fine-tune.
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 2048
+  n_heads: 16
+  n_layers: 24
+  d_ff: 8192
+  max_seq_len: 2048
+  dropout: 0.05
+  tie_embeddings: true
+  gradient_checkpointing: true
+
+training:
+  # Conservative fine-tune settings to avoid wrecking the finished 1B model.
+  batch_size: 1
+  gradient_accumulation_steps: 32
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  max_steps: 3000
+  warmup_steps: 150
+  lr_scheduler: "cosine"
+  lr_min_ratio: 0.10
+  clip_grad_norm: 1.0
+  eval_interval: 250
+  save_interval: 250
+  log_interval: 25
+  checkpoint_dir: "checkpoints/titan_1b_assistant_director_builder"
+  resume_from: "checkpoints/final.pt"
+  bf16: true
+  use_8bit_adam: true
+  use_compile: false
+
+evaluation:
+  val_batch_size: 1
+  num_eval_batches: 20
+  generate_samples: 3
+  sample_max_new_tokens: 300
+  sample_temperature: 0.65
+  sample_top_k: 40
+
+inference:
+  default_max_new_tokens: 512
+  default_temperature: 0.65
+  default_top_k: 40
+  default_top_p: 0.92
+
+logging:
+  log_dir: "logs"
+  experiment_name: "titan-1b-assistant-director-builder-finetune"
+  wandb:
+    enabled: false
+    project: "titanai"
