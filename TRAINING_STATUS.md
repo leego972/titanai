@@ -1,7 +1,7 @@
 # TitanAI Training Monitor
 
-Updated: 2026-06-08 09:57:19 UTC
+Updated: 2026-06-08 10:22:18 UTC
 
-## ✅ Instance rented & training launching
+## ❌ Instance vanished
 
-Instance 19602471 on RTX 5090 @ $0.2129/hr. Training script will run on first boot.
+Instance null no longer found. Switching to GPU hunt mode — will re-rent in 5 min.
