@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from model.titan_model import build_model
 from data.dataset import create_dataloaders
 from training.checkpoint import save_checkpoint, load_checkpoint
-from evaluation.evaluator import evaluate
+from evaluation.evaluator import evaluate_loss as evaluate
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
