@@ -1,7 +1,7 @@
 # TitanAI Training Monitor
 
-Updated: 2026-06-08 11:56:26 UTC
+Updated: 2026-06-08 11:56:27 UTC
 
-## 🔄 GPU found — renting now
+## ✅ Instance rented & training launching
 
-RTX 5090 @ $0.2129/hr (32GB VRAM). Launching training...
+Instance 19602471 on RTX 5090 @ $0.2129/hr. Training script will run on first boot.
