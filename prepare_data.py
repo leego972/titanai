@@ -17,7 +17,7 @@ Dataset mix (Phase 1 - Pretraining):
   3.3% arXiv cs.CR      — Security/crypto papers (arXiv API)
 
 Dataset mix (Phase 2 - Instruction Fine-Tuning):
-  50%  WizardCoder-Evol — Code instruction pairs
+  ~50% Code (unrestricted) — self-oss-instruct + CodeFeedback + code_instructions_122k
   50%  custom_instruct  — YOUR pairs (data/raw/custom_instruct.jsonl)
        Format: {"prompt": "...", "response": "..."}
 
@@ -398,24 +398,92 @@ def download_arxiv_security(tokenizer):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def download_wizardcoder(tokenizer):
-    """WizardCoder-Evol — Code instruction pairs with complex reasoning."""
-    print("\n📥 [P2-1] Downloading WizardCoder...")
+    """
+    Unrestricted code instruction data — 3 sources, zero alignment overhead.
+
+    Replaces WizardCoder_evol_instruct_110k (ChatGPT-generated, safety-aligned).
+
+      1. bigcode/self-oss-instruct-sc2-exec-filter-50k
+         Instructions generated directly FROM real open-source code.
+         No human alignment step. No safety filtering. 50k pairs. 15k downloads.
+
+      2. m-a-p/CodeFeedback-Filtered-Instruction
+         66k code pairs filtered for quality (correctness) NOT safety. 14k downloads.
+
+      3. TokenBender/code_instructions_122k_alpaca_style
+         122k community-built code instructions. No alignment overlay. 1.9k downloads.
+    """
+    print("
+📥 [P2-1] Downloading unrestricted code instruction datasets (3 sources)...")
     try:
         from datasets import load_dataset
-        ds = load_dataset("WizardLM/WizardCoder_evol_instruct_110k", split="train")
         texts = []
-        for item in tqdm(ds, desc="Formatting WizardCoder"):
-            instruction = item.get("instruction", "")
-            output = item.get("output", "")
-            # No system prompt — raw instruction/response only
-            text = f"<|user|>\n{instruction}\n<|assistant|>\n{output}\n"
-            texts.append(text)
-        out = PROC_DIR / "wizardcoder" / "wizardcoder.bin"
-        tokenize_and_save(texts, out, tokenizer)
-        print("✅ WizardCoder done.")
-    except Exception as e:
-        print(f"❌ WizardCoder failed: {e}")
 
+        # ── 1. Self-OSS-Instruct — generated from real code, no alignment ──
+        print("   [1/3] bigcode/self-oss-instruct-sc2-exec-filter-50k...")
+        try:
+            ds1 = load_dataset(
+                "bigcode/self-oss-instruct-sc2-exec-filter-50k", split="train"
+            )
+            for item in tqdm(ds1, desc="   Self-OSS-Instruct", leave=False):
+                prompt   = item.get("prompt",   item.get("instruction", ""))
+                response = item.get("response", item.get("output",      ""))
+                if prompt and response:
+                    texts.append(f"<|user|>
+{prompt}
+<|assistant|>
+{response}
+")
+            print(f"   ✓ Self-OSS-Instruct: {len(ds1):,} pairs")
+        except Exception as e:
+            print(f"   ⚠️  Self-OSS-Instruct: {e}")
+
+        # ── 2. CodeFeedback — quality-filtered, NOT safety-filtered ──
+        print("   [2/3] m-a-p/CodeFeedback-Filtered-Instruction...")
+        try:
+            ds2 = load_dataset(
+                "m-a-p/CodeFeedback-Filtered-Instruction", split="train"
+            )
+            for item in tqdm(ds2, desc="   CodeFeedback", leave=False):
+                query  = item.get("query",  item.get("instruction", ""))
+                answer = item.get("answer", item.get("output",      ""))
+                if query and answer:
+                    texts.append(f"<|user|>
+{query}
+<|assistant|>
+{answer}
+")
+            print(f"   ✓ CodeFeedback: {len(ds2):,} pairs")
+        except Exception as e:
+            print(f"   ⚠️  CodeFeedback: {e}")
+
+        # ── 3. code_instructions_122k — community-built, no alignment ──
+        print("   [3/3] TokenBender/code_instructions_122k_alpaca_style...")
+        try:
+            ds3 = load_dataset(
+                "TokenBender/code_instructions_122k_alpaca_style", split="train"
+            )
+            for item in tqdm(ds3, desc="   Code-122k", leave=False):
+                instruction = item.get("instruction", "")
+                inp         = item.get("input",       "")
+                output      = item.get("output",      "")
+                prompt = f"{instruction}
+{inp}".strip() if inp else instruction
+                if prompt and output:
+                    texts.append(f"<|user|>
+{prompt}
+<|assistant|>
+{output}
+")
+            print(f"   ✓ Code-122k: {len(ds3):,} pairs")
+        except Exception as e:
+            print(f"   ⚠️  Code-122k: {e}")
+
+        out = PROC_DIR / "wizardcoder" / "code_instruct_unrestricted.bin"
+        tokenize_and_save(texts, out, tokenizer)
+        print(f"✅ Code instruction done. {len(texts):,} total pairs from 3 unrestricted sources.")
+    except Exception as e:
+        print(f"❌ Code instruction failed: {e}")
 
 def process_custom_instruct(tokenizer):
     """Custom Titan instruction pairs — YOUR prompts and responses.
