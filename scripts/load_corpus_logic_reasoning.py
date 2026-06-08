@@ -218,25 +218,52 @@ def dl_philosophy(tok):
         except Exception:
             pass
 
-    # Philosophy Stack Exchange (high quality philosophical reasoning)
+    # Wikipedia Philosophy articles — raw factual, zero alignment overhead
+    # 212k downloads, covers every school of thought without editorial restrictions
     try:
         from datasets import load_dataset
-        ds = load_dataset("HuggingFaceH4/stack-exchange-preferences",
-                          split="train", streaming=True)
+        ds_wiki = load_dataset("wikimedia/wikipedia", "20231101.en",
+                               split="train", streaming=True, trust_remote_code=True)
+        phil_keywords = [
+            "philosophy", "philosopher", "epistemology", "metaphysics",
+            "ethics", "ontology", "phenomenology", "existentialism",
+            "rationalism", "empiricism", "stoicism", "nihilism",
+            "machiavelli", "nietzsche", "plato", "aristotle", "kant",
+            "hegel", "schopenhauer", "hume", "locke", "spinoza",
+            "logic", "dialectic", "rhetoric", "aesthetics", "sophist",
+            "utilitarianism", "pragmatism", "determinism", "free will",
+        ]
         count = 0
-        for item in ds:
-            tags = item.get("tags", [])
-            if any(t in str(tags).lower() for t in
-                   ["philosophy","logic","ethics","epistemology","metaphysics","reasoning"]):
-                if item.get("score", 0) >= 5:
-                    texts.append(
-                        f"Philosophy Q&A:\nQ: {item.get('question','')}\n"
-                        f"A: {item.get('chosen','')}\n"
-                    )
-                    count += 1
-                    if count >= 20000: break
-    except Exception:
-        pass
+        for item in ds_wiki:
+            title = item.get("title", "").lower()
+            if any(k in title for k in phil_keywords):
+                texts.append(
+                    f"Philosophy — {item.get('title','')}:\n{item.get('text','')[:4000]}\n"
+                )
+                count += 1
+                if count >= 15000:
+                    break
+        print(f"  ✓ Wikipedia philosophy: {count:,} articles loaded")
+    except Exception as e:
+        print(f"  ⚠️  Wikipedia philosophy: {e}")
+
+    # LAION OIG — community-built open instruction, minimal alignment overhead
+    # 11k downloads, diverse topics including philosophy and reasoning
+    try:
+        from datasets import load_dataset
+        ds_oig = load_dataset("laion/OIG", data_files="unified_chip2.jsonl",
+                              split="train", streaming=True)
+        count = 0
+        for item in ds_oig:
+            text_val = item.get("text", "")
+            if len(text_val) > 200:
+                texts.append(text_val)
+                count += 1
+                if count >= 30000:
+                    break
+        print(f"  ✓ LAION OIG: {count:,} examples loaded")
+    except Exception as e:
+        print(f"  ⚠️  LAION OIG: {e}")
 
     tok_save(texts, PROC_DIR/"philosophy.bin", tok)
     print(f"  {len(texts):,} philosophy documents.")
@@ -600,13 +627,9 @@ def dl_chain_of_thought(tok):
         except Exception as e:
             print(f"  ⚠️  Airoboros: {e}")
 
-        # WizardLM complex reasoning
-        ds2 = load_dataset("WizardLM/WizardLM_evol_instruct_70k", split="train")
-        for item in tqdm(ds2, leave=False):
-            texts.append(
-                f"<|user|>\n{item.get('instruction','')}\n"
-                f"<|assistant|>\n{item.get('output','')}\n"
-            )
+        # (WizardLM_evol_instruct_70k removed — ChatGPT-generated with safety alignment.
+        #  General instruction coverage provided by Dolphin, ShareGPT unfiltered,
+        #  and Airoboros above — all explicitly unrestricted.)
 
         # TheoremQA
         ds3 = load_dataset("TIGER-Lab/TheoremQA", split="test")
