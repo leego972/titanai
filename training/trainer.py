@@ -43,7 +43,7 @@ def _validate_data(config: dict, base_dir: str = ".") -> str:
     missing = []
     for split in ("train", "val"):
         d = os.path.join(processed, split)
-        if not os.path.isdir(d) or not any(p.endswith(".npy") for p in os.listdir(d)):
+        if not os.path.isdir(d) or not any(p.endswith(".bin") for p in os.listdir(d)):
             missing.append(d)
     if missing:
         raise FileNotFoundError(
@@ -327,3 +327,7 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
     save_checkpoint(final, model, optimizer, scheduler, max_steps, config)
     print(f"[Train] Complete. Final checkpoint: {final}")
     return model
+
+# Public aliases used by smoke_test.py (and any other external callers)
+resolve_processed_data_dir = _resolve_data_dir
+validate_training_inputs = _validate_data
