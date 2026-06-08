@@ -1,7 +1,7 @@
 # TitanAI Training Monitor
 
-Updated: 2026-06-08 12:29:17 UTC
+Updated: 2026-06-08 12:56:16 UTC
 
-## ✅ Instance rented & training launching
+## 🔄 Monitor restarted — watching existing instance
 
-Instance 40073094 on RTX 5090 @ $0.2956/hr. Training script will run on first boot.
+Found running instance 40075840 (RTX 4090). Monitoring resumed.
