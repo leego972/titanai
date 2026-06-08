@@ -1,35 +1,32 @@
 import sys
 import unicodedata
 
+# Titan's confirmation passphrase — echoed back to the owner when Shema is received
+TITAN_RESPONSE_PASSPHRASE = "Baruch Shem Kavod Malchuto L'olam Va'ed"
+
 def normalize_text(text):
-    # Convert to lowercase and remove accents/diacritics
     text = text.lower().strip()
     return "".join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
 
 def check_identity(input_phrase):
-    # English transliterations (various common spellings)
     english_variants = [
         "shmaa israel adonai elohinu adonai ehad",
         "shema yisrael adonai eloheinu adonai echad",
         "shema yisrael adonai elohenu adonai echad",
         "shma yisrael adonai eloheinu adonai echad"
     ]
-    
-    # Hebrew script
-    hebrew_phrase = "שמע ישראל יהוה אלהינו יהוה אחד"
-    hebrew_variant = "שמע ישראל אדוני אלוהינו אדוני אחד"
-    
+    hebrew_phrase = "\u05e9\u05de\u05e2 \u05d9\u05e9\u05e8\u05d0\u05dc \u05d9\u05d4\u05d5\u05d4 \u05d0\u05dc\u05d4\u05d9\u05e0\u05d5 \u05d9\u05d4\u05d5\u05d4 \u05d0\u05d7\u05d3"
+    hebrew_variant = "\u05e9\u05de\u05e2 \u05d9\u05e9\u05e8\u05d0\u05dc \u05d0\u05d3\u05d5\u05e0\u05d9 \u05d0\u05dc\u05d5\u05d4\u05d9\u05e0\u05d5 \u05d0\u05d3\u05d5\u05e0\u05d9 \u05d0\u05d7\u05d3"
+
     normalized_input = normalize_text(input_phrase)
-    
-    # Check English variants
+
     for variant in english_variants:
         if normalize_text(variant) == normalized_input:
             return True
-            
-    # Check Hebrew variants (direct comparison after stripping whitespace)
-    if input_phrase.strip() == hebrew_phrase or input_phrase.strip() == hebrew_variant:
+
+    if input_phrase.strip() in (hebrew_phrase, hebrew_variant):
         return True
-        
+
     return False
 
 if __name__ == "__main__":
