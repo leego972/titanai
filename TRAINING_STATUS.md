@@ -1,7 +1,7 @@
 # TitanAI Training Monitor
 
-Updated: 2026-06-08 11:41:25 UTC
+Updated: 2026-06-08 11:56:26 UTC
 
-## ❌ Instance vanished
+## 🔄 GPU found — renting now
 
-Instance null no longer found. Switching to GPU hunt mode — will re-rent in 5 min.
+RTX 5090 @ $0.2129/hr (32GB VRAM). Launching training...
