@@ -1,24 +1,18 @@
 #!/bin/bash
-# TitanAI bootstrap — runs on Vast.ai cold boot
+# TitanAI bootstrap — Vast.ai cold boot (repo is PUBLIC)
 set -e
-export DEBIAN_FRONTEND=noninteractive
-
 LOG=/workspace/logs/titanai_full
 mkdir -p "$LOG"
+echo "[boot] $(date) starting" | tee "$LOG/bootstrap.log"
 
-echo "[bootstrap] $(date) Starting TitanAI bootstrap" | tee -a "$LOG/bootstrap.log"
-
-# Clone or update repo
-REPO_DIR=/workspace/titanai
-if [ -d "$REPO_DIR/.git" ]; then
-  echo "[bootstrap] Updating repo..." | tee -a "$LOG/bootstrap.log"
-  cd "$REPO_DIR" && git pull origin main 2>&1 | tee -a "$LOG/bootstrap.log"
+# Clone public repo (no token needed)
+if [ -d /workspace/titanai/.git ]; then
+  git -C /workspace/titanai pull origin main 2>&1 | tee -a "$LOG/bootstrap.log"
 else
-  echo "[bootstrap] Cloning repo..." | tee -a "$LOG/bootstrap.log"
-  cd /workspace && git clone "https://${TITAN_GITHUB_TOKEN}@github.com/leego972/titanai.git" titanai 2>&1 | tee -a "$LOG/bootstrap.log"
-  cd "$REPO_DIR"
+  git clone https://github.com/leego972/titanai.git /workspace/titanai 2>&1 | tee -a "$LOG/bootstrap.log"
 fi
 
-echo "[bootstrap] Launching train_all.sh..." | tee -a "$LOG/bootstrap.log"
-nohup bash /workspace/titanai/train_all.sh > "$LOG/master.log" 2>&1 &
-echo "[bootstrap] train_all.sh PID=$! launched" | tee -a "$LOG/bootstrap.log"
+echo "[boot] Launching training" | tee -a "$LOG/bootstrap.log"
+cd /workspace/titanai
+nohup bash train_all.sh >> "$LOG/master.log" 2>&1 &
+echo "[boot] train_all.sh PID=$! launched" | tee -a "$LOG/bootstrap.log"
