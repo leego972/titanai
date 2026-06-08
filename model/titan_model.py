@@ -156,12 +156,11 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(d_model))
+        self._norm_shape = (d_model,)  # stored for F.rms_norm
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Upcast to float32 for numerical stability, then cast back
-        x_f32 = x.float()
-        rms = x_f32.pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
-        return (self.weight * (x_f32 * rms)).to(x.dtype)
+        # F.rms_norm: fused CUDA kernel (PyTorch 2.4+), numerically stable, bf16-safe
+        return F.rms_norm(x, self._norm_shape, self.weight, self.eps)
 
 
 # ─── Rotary Positional Embeddings (RoPE) ──────────────────────────────────────
