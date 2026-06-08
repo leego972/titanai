@@ -206,9 +206,12 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
     use_compile = train_cfg.get("use_compile", False)
     if use_compile:
         try:
+            # backend="eager": captures graph via TorchDynamo, eliminates Python loop overhead
+            # WITHOUT inductor/Triton — safe on Blackwell (sm_120) where Triton static binaries
+            # don't yet include sm_120 kernels. matmul/SDPA still go through cuBLAS/cuDNN.
             torch._dynamo.config.suppress_errors = True
-            model = torch.compile(model)
-            print("[Train] torch.compile: ACTIVE")
+            model = torch.compile(model, backend="eager")
+            print("[Train] torch.compile: ACTIVE (backend=eager, Dynamo graph capture)")
         except Exception as e:
             print(f"[Train] torch.compile: FAILED ({e}) — continuing without")
 
