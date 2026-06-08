@@ -171,6 +171,11 @@ def train(config: dict, resume_from: str = None, base_dir: str = "."):
     eval_cfg  = config["evaluation"]
     log_cfg   = config["logging"]
 
+    # ── Speed optimizations (TF32, matmul precision) ─────────────────────────
+    torch.set_float32_matmul_precision("high")  # TF32 on Ampere/Blackwell — free ~10% speedup
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32       = True
+
     # ── Device + dtype ───────────────────────────────────────────────────────
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_bf16 = train_cfg.get("bf16", True) and device.type == "cuda"
