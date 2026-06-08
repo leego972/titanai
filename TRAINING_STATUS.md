@@ -1,7 +1,7 @@
 # TitanAI Training Monitor
 
-Updated: 2026-06-08 10:57:19 UTC
+Updated: 2026-06-08 11:11:22 UTC
 
-## ✅ Instance rented & training launching
+## 🔄 GPU hunt started
 
-Instance 19602471 on RTX 5090 @ $0.2129/hr. Training script will run on first boot.
+No active training instance found. Scanning Vast.ai every 5 min for RTX 4080S / 5090 / 4090 under $0.40/hr.
