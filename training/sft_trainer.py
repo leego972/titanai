@@ -92,6 +92,7 @@ def evaluate_sft(model, val_loader, device, num_batches=20):
     total_loss = 0.0
     total_tokens = 0
     batches_run = 0
+    _use_bf16 = device.type == "cuda"
 
     for batch in val_loader:
         if batches_run >= num_batches:
@@ -100,7 +101,7 @@ def evaluate_sft(model, val_loader, device, num_batches=20):
         labels = batch["labels"].to(device)
 
         # Shift for causal LM: predict token[i+1] from token[i] (bf16 autocast for flash-attn)
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=_use_bf16):
             logits, _ = model(input_ids[:, :-1])
             shift_labels = labels[:, 1:]
 
@@ -259,8 +260,9 @@ def main():
     best_val_loss = float("inf")
     patience_counter = 0
     early_stop_patience = train_cfg.get("early_stop_patience", 8)
+    _stop_training = False
 
-    while step < max_steps:
+    while step < max_steps and not _stop_training:
         for batch in train_loader:
             if step >= max_steps:
                 break
@@ -269,7 +271,7 @@ def main():
             labels = batch["labels"].to(device)
 
             # Forward pass — shift inputs for causal LM (bf16 autocast for flash-attn)
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=(device.type == "cuda")):
                 logits, _ = model(input_ids[:, :-1])
                 shift_labels = labels[:, 1:]
 
@@ -316,6 +318,7 @@ def main():
                         patience_counter += 1
                         if patience_counter >= early_stop_patience:
                             print(f"[SFT] Early stopping at step {step} (patience={early_stop_patience})")
+                            _stop_training = True
                             break
 
                 if step % save_interval == 0:
@@ -423,7 +426,7 @@ def train_sft(cfg, model, train_dataset, val_dataset, device, resume=None):
             input_ids = batch["input_ids"].to(device)
             labels    = batch["labels"].to(device)
 
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=(device.type == "cuda")):
                 logits, _ = model(input_ids[:, :-1])
                 shift_labels = labels[:, 1:]
                 loss = nn.functional.cross_entropy(
