@@ -1,7 +1,7 @@
 # TitanAI Training Monitor
 
-Updated: 2026-06-08 07:52:16 UTC
+Updated: 2026-06-08 08:22:18 UTC
 
-## 🔄 Monitor restarted — watching existing instance
+## ❌ Instance vanished
 
-Found running instance 40037546 (RTX 4000Ada). Monitoring resumed.
+Instance null no longer found. Switching to GPU hunt mode — will re-rent in 5 min.
