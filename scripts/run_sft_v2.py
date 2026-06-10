@@ -5,14 +5,14 @@ TitanAI — SFT v2 Training Entry Point
 Improved instruction fine-tuning using Alpaca Cleaned + Dolly 15K.
 
 Usage:
-  python scripts/run_sft_v2.py \\
-      --config configs/titan_sft_v02.yaml \\
+  python scripts/run_sft_v2.py \
+      --config configs/titan_sft_v02.yaml \
       --checkpoint checkpoints/crucible_v02/final.pt
 
   # Resume interrupted run:
-  python scripts/run_sft_v2.py \\
-      --config configs/titan_sft_v02.yaml \\
-      --checkpoint checkpoints/crucible_v02/final.pt \\
+  python scripts/run_sft_v2.py \
+      --config configs/titan_sft_v02.yaml \
+      --checkpoint checkpoints/crucible_v02/final.pt \
       --resume checkpoints/sft_v02/step_2000.pt
 """
 
@@ -29,9 +29,9 @@ from tokenizers import Tokenizer
 BASE = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE))
 
-from model.titan_model import TitanLM, TitanConfig
+from model.titan_model import TitanLM, TitanConfig, build_model
 from training.sft_trainer import train_sft
-from training.checkpoint import build_model
+from training.checkpoint import load_checkpoint
 from data.sft_dataset import TitanSFTDataset
 
 
@@ -61,9 +61,8 @@ def main():
     tokenizer = Tokenizer.from_file(cfg["data"]["tokenizer_path"])
     print(f"[SFT v2] Tokenizer: {tokenizer.get_vocab_size()} tokens")
 
-    # Build and load model
-    model_config = TitanConfig.from_dict(cfg)
-    model = build_model(model_config).to(device)
+    # Build model from config dict (build_model handles TitanConfig internally)
+    model = build_model(cfg).to(device)
 
     print(f"[SFT v2] Loading base checkpoint: {args.checkpoint}")
     if not Path(args.checkpoint).exists():
@@ -78,7 +77,7 @@ def main():
         print(f"[SFT v2] WARNING: {len(missing_keys)} missing keys")
     print(f"[SFT v2] Model: {sum(p.numel() for p in model.parameters()):,} parameters")
 
-    # Load dataset
+    # Load dataset — prepend BASE so paths work from any working directory
     full_dataset = TitanSFTDataset(
         jsonl_paths=[str(BASE / p) for p in sft_files],
         tokenizer=tokenizer,
@@ -97,7 +96,6 @@ def main():
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     print(f"[SFT v2] Train: {train_size} | Val: {val_size}")
 
-    # Run training (reuse existing sft_trainer)
     train_sft(cfg, model, train_dataset, val_dataset, device, args.resume)
 
     print(f"\n[SFT v2] Done. Checkpoint: checkpoints/sft_v02/final.pt")
