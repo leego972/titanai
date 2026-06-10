@@ -32,17 +32,17 @@ import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
 
-  # 8-bit Adam — halves optimizer VRAM at 1B+ scale (graceful fallback to AdamW)
-  try:
-      import bitsandbytes as bnb
-      _BNB_AVAILABLE = True
-  except ImportError:
-      _BNB_AVAILABLE = False
+# 8-bit Adam — halves optimizer VRAM at 1B+ scale (graceful fallback to AdamW)
+try:
+    import bitsandbytes as bnb
+    _BNB_AVAILABLE = True
+except ImportError:
+    _BNB_AVAILABLE = False
 from torch.optim.lr_scheduler import LambdaLR
 
 # Dynamic repo root — works regardless of where the repo is cloned
-  _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
-  sys.path.insert(0, _REPO_ROOT)
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _REPO_ROOT)
 from model.titan_model import build_model
 from tokenizers import Tokenizer
 from datasets import load_dataset
