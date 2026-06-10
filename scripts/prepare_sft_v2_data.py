@@ -3,7 +3,7 @@
 TitanAI — SFT v2 Data Preparation
 ====================================
 Downloads and formats two open-source instruction datasets into TitanAI's
-JSONL format ({"instruction": ..., "input": ..., "response": ...}).
+chat format ({"messages": [system, user, assistant]}) required by TitanSFTDataset.
 
 Datasets:
   1. Alpaca Cleaned  — ~52K instruction-response pairs (cleaned version of
@@ -11,17 +11,21 @@ Datasets:
   2. Dolly 15K       — 15K human-written instruction pairs by Databricks
 
 Output:
-  data/sft/alpaca_cleaned.jsonl
-  data/sft/dolly_15k.jsonl
+  data/sft/alpaca_cleaned.jsonl   (chat format — ready for TitanSFTDataset)
+  data/sft/dolly_15k.jsonl        (chat format — ready for TitanSFTDataset)
+
+NOTE: The previous version of this script wrote Alpaca format
+({"instruction", "input", "response"}) which TitanSFTDataset silently ignores
+(it requires the "messages" key). This version writes the correct chat format.
 
 Usage:
   python scripts/prepare_sft_v2_data.py
   python scripts/prepare_sft_v2_data.py --validate-only
+  python scripts/prepare_sft_v2_data.py --force
 """
 
 import argparse
 import json
-import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -29,48 +33,60 @@ from pathlib import Path
 BASE = Path(__file__).parent.parent
 SFT_DIR = BASE / "data" / "sft"
 
-# ── Dataset sources ───────────────────────────────────────────────────────────
-
 ALPACA_CLEANED_URL = (
     "https://raw.githubusercontent.com/gururise/AlpacaDataCleaned/"
     "main/alpaca_data_cleaned.json"
 )
-
 DOLLY_15K_URL = (
     "https://huggingface.co/datasets/databricks/databricks-dolly-15k/"
     "resolve/main/databricks-dolly-15k.jsonl"
 )
 
+# Generic Titan system prompt for all public-dataset examples.
+# Domain-specific prompts (cybersecurity, cinema) live in their own SFT files.
+TITAN_SYSTEM_PROMPT = (
+    "You are Titan, a language model built from scratch by your user. "
+    "Answer accurately, think step by step, and be genuinely helpful."
+)
 
-# ── Download helpers ──────────────────────────────────────────────────────────
+
+# ── Download helper ────────────────────────────────────────────────────────
 
 def download(url: str, dest: Path) -> None:
-    """Download a file with progress reporting."""
     print(f"  Downloading: {url}")
     print(f"  Destination: {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-
     req = urllib.request.Request(url, headers={"User-Agent": "TitanAI/1.0"})
     with urllib.request.urlopen(req) as response, open(dest, "wb") as out:
         total = int(response.headers.get("Content-Length", 0))
         downloaded = 0
-        chunk = 65536
         while True:
-            data = response.read(chunk)
-            if not data:
+            chunk = response.read(65536)
+            if not chunk:
                 break
-            out.write(data)
-            downloaded += len(data)
+            out.write(chunk)
+            downloaded += len(chunk)
             if total:
-                pct = downloaded / total * 100
-                print(f"\r  Progress: {downloaded:,} / {total:,} bytes ({pct:.1f}%)", end="", flush=True)
+                print(f"\r  {downloaded:,} / {total:,} bytes ({downloaded/total*100:.1f}%)", end="", flush=True)
     print()
 
 
-# ── Alpaca Cleaned ────────────────────────────────────────────────────────────
+# ── Chat format builder ────────────────────────────────────────────────────
+
+def to_chat(user_content: str, assistant_content: str) -> dict:
+    """Return a TitanSFTDataset-compatible chat record."""
+    return {
+        "messages": [
+            {"role": "system",    "content": TITAN_SYSTEM_PROMPT},
+            {"role": "user",      "content": user_content.strip()},
+            {"role": "assistant", "content": assistant_content.strip()},
+        ]
+    }
+
+
+# ── Alpaca Cleaned ─────────────────────────────────────────────────────────
 
 def prepare_alpaca_cleaned(force: bool = False) -> int:
-    """Download and convert Alpaca Cleaned to TitanAI JSONL format."""
     out_path = SFT_DIR / "alpaca_cleaned.jsonl"
     if out_path.exists() and not force:
         count = sum(1 for _ in open(out_path))
@@ -89,10 +105,9 @@ def prepare_alpaca_cleaned(force: bool = False) -> int:
     with open(out_path, "w") as out:
         for item in data:
             instruction = item.get("instruction", "").strip()
-            inp = item.get("input", "").strip()
-            output = item.get("output", "").strip()
+            inp         = item.get("input",       "").strip()
+            output      = item.get("output",      "").strip()
 
-            # Quality filters
             if not instruction or not output:
                 skipped += 1
                 continue
@@ -103,28 +118,17 @@ def prepare_alpaca_cleaned(force: bool = False) -> int:
                 skipped += 1
                 continue
 
-            record = {
-                "instruction": instruction,
-                "input": inp,
-                "response": output,
-                "source": "alpaca_cleaned",
-            }
-            out.write(json.dumps(record) + "\n")
+            user_content = f"{instruction}\n\n{inp}" if inp else instruction
+            out.write(json.dumps(to_chat(user_content, output)) + "\n")
             count += 1
 
     print(f"  [OK] alpaca_cleaned.jsonl: {count} examples written, {skipped} skipped")
     return count
 
 
-# ── Dolly 15K ─────────────────────────────────────────────────────────────────
-
-DOLLY_CATEGORIES = {
-    "open_qa", "closed_qa", "general_qa", "summarization",
-    "information_extraction", "brainstorming", "classification",
-}
+# ── Dolly 15K ──────────────────────────────────────────────────────────────
 
 def prepare_dolly_15k(force: bool = False) -> int:
-    """Download and convert Dolly 15K to TitanAI JSONL format."""
     out_path = SFT_DIR / "dolly_15k.jsonl"
     if out_path.exists() and not force:
         count = sum(1 for _ in open(out_path))
@@ -149,9 +153,8 @@ def prepare_dolly_15k(force: bool = False) -> int:
                 continue
 
             instruction = item.get("instruction", "").strip()
-            context = item.get("context", "").strip()
-            response = item.get("response", "").strip()
-            category = item.get("category", "")
+            context     = item.get("context",     "").strip()
+            response    = item.get("response",    "").strip()
 
             if not instruction or not response:
                 skipped += 1
@@ -160,31 +163,31 @@ def prepare_dolly_15k(force: bool = False) -> int:
                 skipped += 1
                 continue
 
-            record = {
-                "instruction": instruction,
-                "input": context,
-                "response": response,
-                "source": f"dolly_{category}",
-            }
-            out.write(json.dumps(record) + "\n")
+            user_content = f"{instruction}\n\nContext: {context}" if context else instruction
+            out.write(json.dumps(to_chat(user_content, response)) + "\n")
             count += 1
 
     print(f"  [OK] dolly_15k.jsonl: {count} examples written, {skipped} skipped")
     return count
 
 
-# ── Validation ────────────────────────────────────────────────────────────────
+# ── Validation ─────────────────────────────────────────────────────────────
 
 def validate_file(path: Path) -> bool:
-    """Spot-check a JSONL file for required fields."""
+    """Spot-check a JSONL file for the messages format required by TitanSFTDataset."""
     errors = 0
     count = 0
     with open(path) as f:
         for i, line in enumerate(f):
             try:
                 record = json.loads(line.strip())
-                assert "instruction" in record, "missing 'instruction'"
-                assert "response" in record, "missing 'response'"
+                msgs = record.get("messages", [])
+                assert isinstance(msgs, list) and len(msgs) >= 2, "messages must be list with >= 2 entries"
+                roles = {m["role"] for m in msgs}
+                assert "user"      in roles, "missing 'user' role"
+                assert "assistant" in roles, "missing 'assistant' role"
+                for m in msgs:
+                    assert m.get("content", "").strip(), f"empty content in role '{m.get('role')}'"
                 count += 1
             except Exception as e:
                 print(f"  ERROR line {i+1}: {e}")
@@ -196,18 +199,18 @@ def validate_file(path: Path) -> bool:
     return errors == 0
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Prepare SFT v2 instruction datasets")
-    parser.add_argument("--force", action="store_true", help="Re-download even if files exist")
+    parser = argparse.ArgumentParser(description="Prepare SFT v2 datasets in chat format")
+    parser.add_argument("--force",         action="store_true", help="Re-download even if files exist")
     parser.add_argument("--validate-only", action="store_true", help="Only validate existing files")
     args = parser.parse_args()
 
     SFT_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.validate_only:
-        print("\n[Validate] Checking existing SFT v2 data files...\n")
+        print("\n[Validate] Checking SFT v2 data files (chat format)...\n")
         ok = True
         for name in ["alpaca_cleaned.jsonl", "dolly_15k.jsonl"]:
             path = SFT_DIR / name
@@ -218,7 +221,7 @@ def main():
                 ok = validate_file(path) and ok
         sys.exit(0 if ok else 1)
 
-    print("\n[SFT v2 Data Prep] Downloading and formatting instruction datasets...\n")
+    print("\n[SFT v2 Data Prep] Downloading and converting to chat format...\n")
 
     print("── Alpaca Cleaned ─────────────────────────────────────────────")
     alpaca_count = prepare_alpaca_cleaned(force=args.force)
@@ -231,6 +234,7 @@ def main():
     print(f"  Total SFT v2 examples : {total:,}")
     print(f"  Alpaca Cleaned        : {alpaca_count:,}")
     print(f"  Dolly 15K             : {dolly_count:,}")
+    print(f"  Format                : chat (TitanSFTDataset-compatible)")
     print(f"  Output directory      : {SFT_DIR}")
     print(f"{'='*60}")
     print("\n  Next: run SFT v2 training:")
