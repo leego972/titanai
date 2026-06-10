@@ -5,19 +5,18 @@ TitanAI — DPO Training Entry Point
 Runs the Direct Preference Optimization alignment pass.
 
 Usage:
-  python scripts/run_dpo.py \\
-      --config configs/titan_dpo_v01.yaml \\
+  python scripts/run_dpo.py \
+      --config configs/titan_dpo_v01.yaml \
       --checkpoint checkpoints/sft_v02/final.pt
 
   # Resume interrupted DPO run:
-  python scripts/run_dpo.py \\
-      --config configs/titan_dpo_v01.yaml \\
-      --checkpoint checkpoints/sft_v02/final.pt \\
+  python scripts/run_dpo.py \
+      --config configs/titan_dpo_v01.yaml \
+      --checkpoint checkpoints/sft_v02/final.pt \
       --resume checkpoints/dpo_v01/step_1500.pt
 """
 
 import argparse
-import copy
 import sys
 from pathlib import Path
 
@@ -29,8 +28,8 @@ from tokenizers import Tokenizer
 BASE = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE))
 
-from model.titan_model import TitanLM, TitanConfig
-from training.checkpoint import build_model
+from model.titan_model import TitanLM, TitanConfig, build_model
+from training.checkpoint import load_checkpoint
 from training.dpo_trainer import train_dpo
 from data.dpo_dataset import TitanDPODataset
 
@@ -64,17 +63,15 @@ def main():
         print(f"[ERROR] Checkpoint not found: {args.checkpoint}")
         sys.exit(1)
 
-    # Build policy model
-    model_config = TitanConfig.from_dict(cfg)
-    policy = build_model(model_config).to(device)
-
+    # Build policy model from config dict
+    policy = build_model(cfg).to(device)
     state = torch.load(args.checkpoint, map_location=device, weights_only=True)
     model_state = state.get("model_state_dict", state)
     policy.load_state_dict(model_state, strict=False)
     print(f"[DPO] Policy model loaded: {sum(p.numel() for p in policy.parameters()):,} params")
 
-    # Build frozen reference model (identical weights, no grad)
-    reference = build_model(model_config).to(device)
+    # Build frozen reference model (same arch + weights, no grad)
+    reference = build_model(cfg).to(device)
     reference.load_state_dict(model_state, strict=False)
     reference.eval()
     for param in reference.parameters():
@@ -87,7 +84,7 @@ def main():
         ckpt = torch.load(args.resume, map_location=device, weights_only=True)
         policy.load_state_dict(ckpt["model_state_dict"], strict=False)
 
-    # Load DPO dataset
+    # Load DPO dataset — prepend BASE so paths work from any cwd
     full_dataset = TitanDPODataset(
         jsonl_paths=[str(BASE / p) for p in dpo_files],
         tokenizer=tokenizer,
@@ -106,7 +103,6 @@ def main():
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     print(f"[DPO] Train pairs: {train_size} | Val pairs: {val_size}")
 
-    # Train
     train_dpo(cfg, policy, reference, train_dataset, val_dataset, device)
 
     print(f"\n[DPO] Done. Final checkpoint: checkpoints/dpo_v01/final.pt")
