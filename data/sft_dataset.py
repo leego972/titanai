@@ -79,7 +79,7 @@ def build_labels_with_prompt_mask(
     if prompt_text.endswith(EOS):
         prompt_text = prompt_text[: -len(EOS)] + SEP
 
-    prompt_ids = tokenizer.encode(prompt_text)
+    prompt_ids = tokenizer.encode(prompt_text).ids
     prompt_len = len(prompt_ids)
 
     # Mask prompt tokens
@@ -160,7 +160,7 @@ class TitanSFTDataset(Dataset):
         text = format_chat_as_text(messages)
 
         # Tokenize
-        token_ids = self.tokenizer.encode(text)
+        token_ids = self.tokenizer.encode(text).ids
 
         # Truncate to max_seq_len
         if len(token_ids) > self.max_seq_len:
