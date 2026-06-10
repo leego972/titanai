@@ -7,10 +7,8 @@ Optimization (DPO) training.
 
 Sources:
   1. Anthropic HH-RLHF  — Human preference data (helpful/harmless)
-     ~170K pairs of (chosen, rejected) responses
-     We use a filtered subset: 20K highest-quality pairs.
-  2. Synthetic pairs from existing SFT data — automatically generates
-     "bad" responses by sampling at high temperature as rejected examples.
+     ~170K pairs of (chosen, rejected) responses via HuggingFace datasets lib.
+  2. Synthetic pairs from existing SFT data — fallback when HH-RLHF is unavailable.
 
 Output:
   data/dpo/preference_pairs.jsonl
@@ -25,7 +23,7 @@ Each record:
 Usage:
   python scripts/prepare_dpo_data.py
   python scripts/prepare_dpo_data.py --source hh_rlhf --limit 20000
-  python scripts/prepare_dpo_data.py --source synthetic --checkpoint checkpoints/sft_v02/final.pt
+  python scripts/prepare_dpo_data.py --source synthetic
 """
 
 import argparse
@@ -33,30 +31,18 @@ import json
 import os
 import random
 import sys
-import urllib.request
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
 DPO_DIR = BASE / "data" / "dpo"
 
-HH_RLHF_TRAIN_URL = (
-    "https://huggingface.co/datasets/Anthropic/hh-rlhf/resolve/main/"
-    "helpful-base/train.jsonl.zst"
-)
-# Use the non-compressed version via datasets API alternative
-HH_RLHF_HELPFUL_URL = (
-    "https://huggingface.co/datasets/Anthropic/hh-rlhf/resolve/main/"
-    "helpful-base/train.jsonl"
-)
-
 
 # ── HH-RLHF Parser ───────────────────────────────────────────────────────────
 
-def parse_hh_conversation(text: str) -> tuple:
+def parse_hh_conversation(text: str):
     """
-    Parse Anthropic HH-RLHF format into (prompt, response) tuple.
+    Parse Anthropic HH-RLHF format into (prompt, response).
     Format: '\n\nHuman: ...\n\nAssistant: ...\n\nHuman: ...\n\nAssistant: ...'
-    We extract the last Human turn as prompt and last Assistant turn as response.
     """
     parts = text.strip().split("\n\nAssistant:")
     if len(parts) < 2:
@@ -77,50 +63,41 @@ def parse_hh_conversation(text: str) -> tuple:
 
 
 def prepare_hh_rlhf(limit: int = 20000, force: bool = False) -> int:
-    """Download and convert HH-RLHF to DPO preference pairs."""
+    """Download and convert HH-RLHF via HuggingFace datasets library."""
     out_path = DPO_DIR / "preference_pairs.jsonl"
     if out_path.exists() and not force:
         count = sum(1 for _ in open(out_path))
-        print(f"  [SKIP] preference_pairs.jsonl already exists ({count} pairs)")
-        return count
+        if count > 0:
+            print(f"  [SKIP] preference_pairs.jsonl already exists ({count} pairs)")
+            return count
 
-    raw_path = BASE / "data" / "raw_downloads" / "hh_rlhf_helpful_train.jsonl"
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        print("  [ERROR] 'datasets' library not installed. pip install datasets")
+        return 0
 
-    if not raw_path.exists() or force:
-        print(f"  Downloading HH-RLHF helpful subset...")
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            req = urllib.request.Request(
-                HH_RLHF_HELPFUL_URL,
-                headers={"User-Agent": "TitanAI/1.0"}
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp, open(raw_path, "wb") as f:
-                total = int(resp.headers.get("Content-Length", 0))
-                downloaded = 0
-                while chunk := resp.read(65536):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total:
-                        print(f"\r  {downloaded:,}/{total:,} bytes ({downloaded/total*100:.1f}%)", end="", flush=True)
-            print()
-        except Exception as e:
-            print(f"  [ERROR] Download failed: {e}")
-            print("  Falling back to synthetic data generation.")
-            return prepare_synthetic_pairs(limit=min(limit, 5000))
+    print("  Loading HH-RLHF helpful-base split via HuggingFace datasets...")
+    try:
+        ds = load_dataset(
+            "Anthropic/hh-rlhf",
+            data_dir="helpful-base",
+            split="train",
+
+        )
+    except Exception as e:
+        print(f"  [ERROR] Failed to load dataset: {e}")
+        return 0
 
     DPO_DIR.mkdir(parents=True, exist_ok=True)
     count = 0
     skipped = 0
 
-    with open(raw_path) as inp, open(out_path, "w") as out:
-        for line in inp:
+    with open(out_path, "w") as out:
+        for item in ds:
             if count >= limit:
                 break
-            line = line.strip()
-            if not line:
-                continue
             try:
-                item = json.loads(line)
                 chosen_text = item.get("chosen", "")
                 rejected_text = item.get("rejected", "")
 
@@ -133,7 +110,6 @@ def prepare_hh_rlhf(limit: int = 20000, force: bool = False) -> int:
                 if len(chosen.split()) < 10 or len(rejected.split()) < 5:
                     skipped += 1
                     continue
-                # Skip if chosen and rejected are too similar
                 if chosen.strip()[:100] == rejected.strip()[:100]:
                     skipped += 1
                     continue
@@ -147,6 +123,9 @@ def prepare_hh_rlhf(limit: int = 20000, force: bool = False) -> int:
                 out.write(json.dumps(record) + "\n")
                 count += 1
 
+                if count % 1000 == 0:
+                    print(f"  {count:,} pairs written...", flush=True)
+
             except Exception:
                 skipped += 1
                 continue
@@ -159,29 +138,45 @@ def prepare_hh_rlhf(limit: int = 20000, force: bool = False) -> int:
 
 def prepare_synthetic_pairs(limit: int = 5000, force: bool = False) -> int:
     """
-    Generate synthetic DPO pairs from existing SFT data.
-    Uses SFT responses as 'chosen' and creates 'rejected' variants by
-    truncating, shuffling sentences, or using lower-quality templates.
-    This is a fallback when HH-RLHF is unavailable.
+    Generate synthetic DPO pairs from existing SFT chat-format data.
+    Uses assistant turns as 'chosen' and creates degraded 'rejected' variants.
     """
     out_path = DPO_DIR / "preference_pairs.jsonl"
     if out_path.exists() and not force:
         count = sum(1 for _ in open(out_path))
-        print(f"  [SKIP] preference_pairs.jsonl exists ({count} pairs)")
-        return count
+        if count > 0:
+            print(f"  [SKIP] preference_pairs.jsonl exists ({count} pairs)")
+            return count
 
     sft_dir = BASE / "data" / "sft"
     sft_files = list(sft_dir.glob("*.jsonl"))
     if not sft_files:
         print("  [ERROR] No SFT data files found. Run prepare_sft_v2_data.py first.")
-        sys.exit(1)
+        return 0
 
     examples = []
     for path in sft_files:
         with open(path) as f:
             for line in f:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    examples.append(json.loads(line.strip()))
+                    item = json.loads(line)
+                    # Support both chat format and legacy alpaca format
+                    if "messages" in item:
+                        messages = item["messages"]
+                        user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
+                        asst_msg = next((m["content"] for m in messages if m["role"] == "assistant"), "")
+                        if user_msg and asst_msg:
+                            examples.append({"prompt": user_msg, "chosen": asst_msg})
+                    else:
+                        instruction = item.get("instruction", "")
+                        inp = item.get("input", "")
+                        chosen = item.get("response", item.get("output", ""))
+                        if instruction and chosen:
+                            prompt = f"{instruction}\n\n{inp}" if inp else instruction
+                            examples.append({"prompt": prompt, "chosen": chosen})
                 except Exception:
                     pass
 
@@ -193,28 +188,21 @@ def prepare_synthetic_pairs(limit: int = 5000, force: bool = False) -> int:
 
     with open(out_path, "w") as out:
         for item in examples:
-            instruction = item.get("instruction", "")
-            inp = item.get("input", "")
-            chosen = item.get("response", "")
+            prompt = item["prompt"]
+            chosen = item["chosen"]
 
-            if not instruction or not chosen or len(chosen.split()) < 15:
+            if len(chosen.split()) < 15:
                 continue
 
-            prompt = instruction
-            if inp:
-                prompt = f"{instruction}\n\n{inp}"
-
-            # Create a clearly worse "rejected" response
+            # Create a degraded "rejected" response
             sentences = chosen.split(". ")
             if len(sentences) > 2:
-                # Shuffle sentences to create incoherent response
                 shuffled = sentences[:]
                 random.shuffle(shuffled)
-                rejected = ". ".join(shuffled[:max(1, len(shuffled)//2)])
+                rejected = ". ".join(shuffled[:max(1, len(shuffled) // 2)])
             else:
-                # Truncate and add vague filler
                 words = chosen.split()
-                rejected = " ".join(words[:max(5, len(words)//3)]) + " I'm not sure about the rest."
+                rejected = " ".join(words[:max(5, len(words) // 3)]) + " I'm not entirely sure."
 
             record = {
                 "prompt": prompt,
@@ -258,11 +246,11 @@ def main():
     parser = argparse.ArgumentParser(description="Prepare DPO preference dataset")
     parser.add_argument(
         "--source", choices=["hh_rlhf", "synthetic", "auto"], default="auto",
-        help="Data source: hh_rlhf (download), synthetic (from SFT data), auto (try hh_rlhf, fall back)"
+        help="Data source: hh_rlhf, synthetic, auto (try hh_rlhf then fallback)"
     )
-    parser.add_argument("--limit", type=int, default=20000, help="Max pairs to generate")
-    parser.add_argument("--force", action="store_true", help="Re-generate even if file exists")
-    parser.add_argument("--validate-only", action="store_true", help="Only validate existing file")
+    parser.add_argument("--limit", type=int, default=20000)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
 
     DPO_DIR.mkdir(parents=True, exist_ok=True)
@@ -285,7 +273,7 @@ def main():
         count = prepare_hh_rlhf(limit=args.limit, force=args.force)
         if count == 0:
             print("  HH-RLHF unavailable, falling back to synthetic pairs...")
-            count = prepare_synthetic_pairs(limit=min(args.limit, 5000), force=args.force)
+            count = prepare_synthetic_pairs(limit=min(args.limit, 5000), force=True)
 
     out_path = DPO_DIR / "preference_pairs.jsonl"
     print(f"\n{'='*60}")
