@@ -268,6 +268,7 @@ def train_dpo(cfg: Dict, model, reference_model, train_dataset, val_dataset, dev
 
     model.train()
     step = 0
+    micro_step = 0
     start_time = time.time()
     accum_loss = 0.0
     accum_margin = 0.0
@@ -299,9 +300,10 @@ def train_dpo(cfg: Dict, model, reference_model, train_dataset, val_dataset, dev
             accum_margin += (chosen_rew - rejected_rew).mean().item()
             accum_chosen_r += chosen_rew.mean().item()
             accum_rejected_r += rejected_rew.mean().item()
+            micro_step += 1
 
-            # Optimizer step after accumulation
-            if ((step * grad_accum_steps + 1) % grad_accum_steps == 0) or True:
+            # Optimizer step every grad_accum_steps micro-batches
+            if micro_step % grad_accum_steps == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                 optimizer.step()
                 scheduler.step()
