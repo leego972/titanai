@@ -64,14 +64,18 @@ def main():
         sys.exit(1)
 
     # Build policy model from config dict
-    policy = build_model(cfg).to(device)
     state = torch.load(args.checkpoint, map_location=device, weights_only=True)
     model_state = state.get("model_state_dict", state)
+    # Detect dtype from checkpoint so model matches (bfloat16 vs float32)
+    ckpt_dtype = next(iter(model_state.values())).dtype
+    print(f"[DPO] Checkpoint dtype: {ckpt_dtype}")
+
+    policy = build_model(cfg).to(device).to(ckpt_dtype)
     policy.load_state_dict(model_state, strict=False)
     print(f"[DPO] Policy model loaded: {sum(p.numel() for p in policy.parameters()):,} params")
 
     # Build frozen reference model (same arch + weights, no grad)
-    reference = build_model(cfg).to(device)
+    reference = build_model(cfg).to(device).to(ckpt_dtype)
     reference.load_state_dict(model_state, strict=False)
     reference.eval()
     for param in reference.parameters():
