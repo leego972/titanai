@@ -287,3 +287,96 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── TitanInference class (required by api/core/model_manager.py) ──────────────
+
+class TitanInference:
+    """
+    Class wrapper around the module-level load_model / generate functions.
+    model_manager.py imports and instantiates this class.
+    """
+
+    def __init__(self):
+        self._loaded = False
+        self._checkpoint: str = ""
+        self._config_path: str = ""
+        self._device: str = DEVICE
+        self._param_count: float = 0.0
+
+    def load(self, checkpoint_path: str, config_path: str) -> None:
+        load_model(checkpoint_path, config_path)
+        self._loaded = not isinstance(_model, StubModel)
+        self._checkpoint = checkpoint_path
+        self._config_path = config_path
+        self._device = DEVICE
+        if self._loaded:
+            self._param_count = sum(p.numel() for p in _model.parameters()) / 1e9
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._loaded
+
+    @property
+    def device(self) -> str:
+        return self._device
+
+    @property
+    def checkpoint(self) -> str:
+        return self._checkpoint
+
+    @property
+    def param_count(self) -> float:
+        return self._param_count
+
+    def generate(
+        self,
+        messages: list,
+        max_new_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        top_k: int = 50,
+        **kwargs,
+    ) -> str:
+        return generate(messages, max_tokens=max_new_tokens,
+                        temperature=temperature, top_p=top_p)
+
+    def stream_generate(
+        self,
+        messages: list,
+        max_new_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        top_k: int = 50,
+        **kwargs,
+    ):
+        """Token-by-token streaming generator."""
+        global _model, _tokenizer
+        if isinstance(_model, StubModel):
+            yield "Titan model is still training. Check back after training completes!"
+            return
+
+        prompt = format_prompt(messages)
+        ids    = _tokenizer.encode(prompt).ids
+        tokens = torch.tensor([ids], dtype=torch.long, device=self._device)
+        eos_id = _tokenizer.token_to_id("<|eos|>") or 2
+
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                logits = _model(tokens)[:, -1, :]
+                if temperature > 0:
+                    logits = logits / temperature
+                probs = torch.softmax(logits, dim=-1)
+                sorted_probs, sorted_idx = torch.sort(probs, descending=True)
+                cumulative = torch.cumsum(sorted_probs, dim=-1)
+                sorted_probs[cumulative - sorted_probs > top_p] = 0
+                sorted_probs /= sorted_probs.sum()
+                next_id = sorted_idx[0, torch.multinomial(sorted_probs[0], 1)].item()
+                if next_id == eos_id:
+                    break
+                token_str = _tokenizer.decode([next_id])
+                yield token_str
+                tokens = torch.cat(
+                    [tokens, torch.tensor([[next_id]], device=self._device)], dim=1)
+                if tokens.shape[1] > 2048:
+                    tokens = tokens[:, -2048:]
