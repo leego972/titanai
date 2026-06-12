@@ -40,6 +40,8 @@ from typing import Any, Literal, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -350,3 +352,18 @@ def chat_completions(payload: ChatCompletionRequest, request: Request) -> dict[s
             "coherence_guard": "passed",
         },
     }
+
+
+# ── Frontend static serving (virelle.life) ────────────────────────────────────
+_UI_DIST = Path("ui/dist/public")
+
+if (_UI_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="ui_assets")
+
+@app.get("/", include_in_schema=False)
+def serve_index() -> FileResponse:
+    return FileResponse(str(_UI_DIST / "index.html"))
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_spa(full_path: str) -> FileResponse:
+    return FileResponse(str(_UI_DIST / "index.html"))
