@@ -16,6 +16,7 @@ from ..core.schemas import (
 from ..middleware.auth import verify_api_key
 from ..core.persona import get_system_prompt, is_request_private
 from ..core.identity import check_identity, TITAN_RESPONSE_PASSPHRASE
+from ..core.rag_manager import rag
 
 log = logging.getLogger("titan.chat")
 router = APIRouter(prefix="/v1/chat/completions", tags=["Chat"])
@@ -27,9 +28,14 @@ ASSISTANT_PREFIX = "Assistant"
 
 def messages_to_prompt(messages: List[ChatMessage]) -> str:
     lines = []
-    for msg in messages:
+    # Inject RAG context after system prompt if available
+    last_user = next((m.content for m in reversed(messages) if m.role == "user"), None)
+    rag_block = rag.build_context_block(last_user) if last_user and rag.is_ready else ""
+    for i, msg in enumerate(messages):
         if msg.role == "system":
             lines.append(f"{SYSTEM_PREFIX}: {msg.content}")
+            if rag_block:
+                lines.append(rag_block)
         elif msg.role == "user":
             lines.append(f"{USER_PREFIX}: {msg.content}")
         elif msg.role == "assistant":
