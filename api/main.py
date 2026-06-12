@@ -44,6 +44,8 @@ from api.routes.generate import router as generate_router
 from api.routes.models import router as models_router
 from api.routes.health import router as health_router
 from api.routes.audio import router as audio_router
+from api.routes.feedback import router as feedback_router
+from api.core.rag_manager import rag
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +83,13 @@ async def lifespan(app: FastAPI):
 
     if not config.REQUIRE_AUTH and not config.API_KEY:
         log.warning("  Auth:       No API key set — all requests allowed (dev mode)")
+
+    # Build RAG index from training data
+    log.info("  RAG:        Building BM25 index over training corpus...")
+    import asyncio
+    loop = asyncio.get_event_loop()
+    n_docs = await loop.run_in_executor(None, rag.build_index)
+    log.info(f"  RAG:        {n_docs:,} documents indexed — context retrieval active")
 
     log.info("=" * 60)
     log.info("  TitanAI API Server — Ready")
@@ -145,6 +154,7 @@ app.include_router(completions_router)
 app.include_router(generate_router)
 app.include_router(models_router)
 app.include_router(audio_router)
+app.include_router(feedback_router)
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
