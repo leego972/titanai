@@ -114,7 +114,7 @@ def compute_logprobs(
     ).squeeze(-1)                                       # (B, T-1)
 
     # Mask out prompt positions (IGNORE_INDEX)
-    mask = (shift_labels != IGNORE_INDEX).float()
+    mask = (shift_labels != IGNORE_INDEX).to(token_logprobs.dtype)
     return (token_logprobs * mask).sum(dim=-1)          # (B,)
 
 
