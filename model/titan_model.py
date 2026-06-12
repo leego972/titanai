@@ -262,8 +262,12 @@ class CausalSelfAttention(nn.Module):
             q_fa = q.transpose(1, 2)   # (B, T, Hq, d_head)
             k_fa = k.transpose(1, 2)   # (B, T, Hk, d_head)
             v_fa = v.transpose(1, 2)   # (B, T, Hk, d_head)
+            # Explicit bf16 cast — required when torch.compile/inductor is active
+            q_fa = q_fa.to(torch.bfloat16)
+            k_fa = k_fa.to(torch.bfloat16)
+            v_fa = v_fa.to(torch.bfloat16)
             out  = flash_attn_func(q_fa, k_fa, v_fa, causal=True)  # (B, T, Hq, d_head)
-            out  = out.reshape(B, T, C)
+            out  = out.reshape(B, T, C).to(x.dtype)  # cast back: flash_attn always returns bf16
 
         elif self._use_sdpa:
             # Expand K/V from n_kv_heads to n_heads for SDPA
