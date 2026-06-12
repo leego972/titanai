@@ -445,3 +445,47 @@ def build_model(config: dict) -> TitanLM:
     """Build a TitanLM from a raw YAML config dict."""
     cfg = TitanConfig.from_dict(config)
     return TitanLM(cfg)
+
+
+# ── Compatibility helper ───────────────────────────────────────────────────────
+
+def load_state_dict_compat(model: "TitanLM", state_dict: dict, strict: bool = False) -> None:
+    """
+    Load a checkpoint state_dict into model, handling common shape mismatches:
+      - 'module.' prefix from DDP / DataParallel wrapping
+      - GQA head-count changes (k_proj / v_proj weight reshaping)
+    """
+    import torch
+    # Strip DDP prefix
+    clean: dict = {}
+    for k, v in state_dict.items():
+        clean[k[7:] if k.startswith("module.") else k] = v
+
+    model_state = model.state_dict()
+    compatible: dict = {}
+    for k, v in clean.items():
+        if k not in model_state:
+            continue  # skip unknown keys
+        target_shape = model_state[k].shape
+        if v.shape == target_shape:
+            compatible[k] = v
+        elif "attn.k_proj.weight" in k or "attn.v_proj.weight" in k:
+            # Reshape GQA key/value projections when head counts differ
+            if v.numel() == target_shape.numel():
+                compatible[k] = v.view(target_shape)
+            else:
+                # Repeat or slice heads to fit
+                if target_shape[0] > v.shape[0]:
+                    repeat = (target_shape[0] + v.shape[0] - 1) // v.shape[0]
+                    compatible[k] = v.repeat(repeat, 1)[:target_shape[0]]
+                else:
+                    compatible[k] = v[:target_shape[0]]
+        else:
+            # Best-effort: skip mismatched non-attention weights
+            pass
+
+    missing, unexpected = model.load_state_dict(compatible, strict=strict)
+    loaded = len(compatible)
+    print(f"[load_state_dict_compat] Loaded {loaded}/{len(model_state)} keys"
+          + (f" | missing {len(missing)}" if missing else "")
+          + (f" | unexpected {len(unexpected)}" if unexpected else ""))
