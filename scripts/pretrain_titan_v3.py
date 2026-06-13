@@ -153,7 +153,7 @@ print(f"[pretrain] vocab={VOCAB} eos={EOS}", flush=True)
 init_path = args.resume or args.init_from
 print(f"[pretrain] loading init {init_path}", flush=True)
 ck = torch.load(init_path, map_location="cpu", weights_only=False)
-raw_cfg = ck["config"]
+raw_cfg = ck.get("config") or ck.get("cfg") or {}
 mcfg = raw_cfg.get("model", raw_cfg)
 model_cfg = {
     "architecture": mcfg.get("architecture", "decoder_transformer"),
@@ -168,7 +168,8 @@ model_cfg = {
     "n_kv_heads": mcfg.get("n_kv_heads", mcfg["n_heads"]),  # GQA — essential for v0.3
 }
 model = build_model({"model": model_cfg})
-missing, unexpected = model.load_state_dict(ck["model_state_dict"], strict=False)
+_sd_key = "model_state_dict" if "model_state_dict" in ck else "model"
+missing, unexpected = model.load_state_dict(ck[_sd_key], strict=False)
 print(f"[pretrain] loaded weights — missing={len(missing)} unexpected={len(unexpected)}", flush=True)
 model = model.to(device)
 # torch.compile — ~20% throughput boost (PyTorch 2.0+)
