@@ -87,7 +87,39 @@ if m:
             echo "[watchdog] $(date -u) Restarting training" >> "$LOG/watchdog.log"
             LATEST=$(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null | head -1)
             [ -n "$LATEST" ] && export TITAN_RESUME="$LATEST"
-            cd "$REPO" && bash train_all.sh >> "$LOG/master.log" 2>&1 &
+            cd "$REPO" && 
+# ─── Disk watchdog ────────────────────────────────────────────────────────────
+# Runs in background; deletes old checkpoints when disk < 15GB free
+disk_watchdog() {
+    while true; do
+        AVAIL=$(df /workspace --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ')
+        AVAIL=${AVAIL:-99}
+        if [ "$AVAIL" -lt 15 ] 2>/dev/null; then
+            echo "[disk-watchdog] $(date -u) WARNING: ${AVAIL}GB free — purging old checkpoints..."
+            for CKDIR in \
+                "$REPO/checkpoints/titan_1b_pretrain" \
+                "$REPO/checkpoints/titan_1b" \
+                "$REPO/checkpoints/titan_1b_instruct" \
+                "$REPO/checkpoints/titan_1b_dpo"; do
+                [ -d "$CKDIR" ] || continue
+                mapfile -t CKPTS < <(ls -t "$CKDIR"/*.pt 2>/dev/null)
+                for old in "${CKPTS[@]:1}"; do
+                    echo "[disk-watchdog] Removing $old"
+                    rm -f "$old"
+                done
+            done
+            pip cache purge 2>/dev/null || true
+            rm -rf /root/.cache/huggingface 2>/dev/null || true
+            AFTER=$(df /workspace --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ')
+            echo "[disk-watchdog] After cleanup: ${AFTER}GB free"
+        fi
+        sleep 120
+    done
+}
+disk_watchdog >> "$LOG_DIR/disk_watchdog.log" 2>&1 &
+echo "[$(date -u +%T)] Disk watchdog started (PID $!)"
+
+bash train_all.sh >> "$LOG/master.log" 2>&1 &
             sleep 60
         fi
     fi
