@@ -1,6 +1,6 @@
 #!/bin/bash
-# TitanAI — Vast.ai bootstrap (clean, no embedded credentials)
-# Credentials must be set as env vars on the instance: TITAN_GITHUB_TOKEN, NOTIFY_TO
+# TitanAI — Vast.ai bootstrap
+# Credentials: TITAN_GITHUB_TOKEN, NOTIFY_TO
 
 LOG=/workspace/logs/titanai_full
 REPO=/workspace/titanai
@@ -14,14 +14,14 @@ pip cache purge 2>/dev/null || true
 rm -rf /root/.cache/huggingface 2>/dev/null || true
 echo "[onstart] Disk: $(df -h / | awk 'NR==2{print $3"/"$2" ("$5" used)"}')"
 
-# Clone if not present (train_all.sh will pull latest)
+# Clone if not present
 GH_URL="https://github.com/leego972/titanai.git"
 [ -n "${TITAN_GITHUB_TOKEN:-}" ] && GH_URL="https://${TITAN_GITHUB_TOKEN}@github.com/leego972/titanai.git"
 if [ ! -d "$REPO/.git" ]; then
     git clone "$GH_URL" "$REPO" 2>&1 | tail -3
 fi
 
-# Checkpoint rotation — keep only 2 newest per phase (runs every 5 min)
+# ── Checkpoint rotation daemon (every 5 min, keep 2 newest per phase) ─────────
 (while true; do
     sleep 300
     for CKDIR in checkpoints/titan_1b_pretrain checkpoints/titan_1b checkpoints/titan_1b_instruct checkpoints/titan_1b_dpo; do
@@ -36,7 +36,7 @@ fi
 done) &
 echo "[onstart] Checkpoint rotation: PID=$!"
 
-# GPU monitor + status push to GitHub (every 30 min)
+# ── Status / GPU monitor daemon (every 30 min) ────────────────────────────────
 (sleep 120 && while true; do
     cd "$REPO" 2>/dev/null || break
     git config user.email "titanai-bot@vast.ai" 2>/dev/null
@@ -47,7 +47,37 @@ echo "[onstart] Checkpoint rotation: PID=$!"
 done) &
 echo "[onstart] Status/GPU daemon: PID=$!"
 
-# Smart watchdog — reads crash log, fixes root cause, then restarts
+# ── Disk watchdog (runs in background, purges checkpoints when <15GB free) ────
+disk_watchdog() {
+    while true; do
+        AVAIL=$(df /workspace --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ')
+        AVAIL=${AVAIL:-99}
+        if [ "$AVAIL" -lt 15 ] 2>/dev/null; then
+            echo "[disk-watchdog] $(date -u) WARNING: ${AVAIL}GB free — purging old checkpoints..."
+            for CKDIR in \
+                "$REPO/checkpoints/titan_1b_pretrain" \
+                "$REPO/checkpoints/titan_1b" \
+                "$REPO/checkpoints/titan_1b_instruct" \
+                "$REPO/checkpoints/titan_1b_dpo"; do
+                [ -d "$CKDIR" ] || continue
+                mapfile -t CKPTS < <(ls -t "$CKDIR"/*.pt 2>/dev/null)
+                for old in "${CKPTS[@]:1}"; do
+                    echo "[disk-watchdog] Removing $old"
+                    rm -f "$old"
+                done
+            done
+            pip cache purge 2>/dev/null || true
+            rm -rf /root/.cache/huggingface 2>/dev/null || true
+            AFTER=$(df /workspace --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ')
+            echo "[disk-watchdog] After cleanup: ${AFTER}GB free"
+        fi
+        sleep 120
+    done
+}
+disk_watchdog >> "$LOG/disk_watchdog.log" 2>&1 &
+echo "[onstart] Disk watchdog: PID=$!"
+
+# ── Smart watchdog — diagnoses crash and restarts training ────────────────────
 diagnose_and_fix() {
     local tail60; tail60=$(tail -60 "$LOG/master.log" 2>/dev/null || echo "")
     echo "[watchdog] $(date -u) Diagnosing crash:" >> "$LOG/watchdog.log"
@@ -87,46 +117,14 @@ if m:
             echo "[watchdog] $(date -u) Restarting training" >> "$LOG/watchdog.log"
             LATEST=$(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null | head -1)
             [ -n "$LATEST" ] && export TITAN_RESUME="$LATEST"
-            cd "$REPO" && 
-# ─── Disk watchdog ────────────────────────────────────────────────────────────
-# Runs in background; deletes old checkpoints when disk < 15GB free
-disk_watchdog() {
-    while true; do
-        AVAIL=$(df /workspace --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ')
-        AVAIL=${AVAIL:-99}
-        if [ "$AVAIL" -lt 15 ] 2>/dev/null; then
-            echo "[disk-watchdog] $(date -u) WARNING: ${AVAIL}GB free — purging old checkpoints..."
-            for CKDIR in \
-                "$REPO/checkpoints/titan_1b_pretrain" \
-                "$REPO/checkpoints/titan_1b" \
-                "$REPO/checkpoints/titan_1b_instruct" \
-                "$REPO/checkpoints/titan_1b_dpo"; do
-                [ -d "$CKDIR" ] || continue
-                mapfile -t CKPTS < <(ls -t "$CKDIR"/*.pt 2>/dev/null)
-                for old in "${CKPTS[@]:1}"; do
-                    echo "[disk-watchdog] Removing $old"
-                    rm -f "$old"
-                done
-            done
-            pip cache purge 2>/dev/null || true
-            rm -rf /root/.cache/huggingface 2>/dev/null || true
-            AFTER=$(df /workspace --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ')
-            echo "[disk-watchdog] After cleanup: ${AFTER}GB free"
-        fi
-        sleep 120
-    done
-}
-disk_watchdog >> "$LOG_DIR/disk_watchdog.log" 2>&1 &
-echo "[$(date -u +%T)] Disk watchdog started (PID $!)"
-
-bash train_all.sh >> "$LOG/master.log" 2>&1 &
+            cd "$REPO" && bash train_all.sh >> "$LOG/master.log" 2>&1 &
             sleep 60
         fi
     fi
 done) &
 echo "[onstart] Smart watchdog: PID=$!"
 
-# Launch training
+# ── Launch training ────────────────────────────────────────────────────────────
 cd "$REPO"
 LATEST=$(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null | head -1)
 [ -n "$LATEST" ] && export TITAN_RESUME="$LATEST" && echo "[onstart] Resuming from: $(basename "$LATEST")"
