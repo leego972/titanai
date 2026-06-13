@@ -1,139 +1,103 @@
 #!/bin/bash
-# TitanAI — Vast.ai smart launcher
-# Watchdog reads crash logs, fixes the root cause, THEN restarts.
+# TitanAI — Vast.ai bootstrap (clean, no embedded credentials)
+# Credentials must be set as env vars on the instance: TITAN_GITHUB_TOKEN, NOTIFY_TO
 
 LOG=/workspace/logs/titanai_full
 REPO=/workspace/titanai
-MASTER_LOG="$LOG/master.log"
-WATCHDOG_LOG="$LOG/watchdog.log"
 
 mkdir -p "$LOG"
-exec >> "$LOG/bootstrap.log" 2>&1
-echo "[boot] $(date -u) — TitanAI bootstrap started"
+exec >> "$LOG/onstart.log" 2>&1
+echo "[onstart] $(date -u) — starting"
 
-# ── 1. Free disk first ────────────────────────────────────────────────────
+# Free disk
 pip cache purge 2>/dev/null || true
-find /workspace -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 rm -rf /root/.cache/huggingface 2>/dev/null || true
-echo "[boot] Disk: $(df -h / | awk 'NR==2{print $3"/"$2" used ("$5")"}')"
+echo "[onstart] Disk: $(df -h / | awk 'NR==2{print $3"/"$2" ("$5" used)"}')"
 
-# ── 2. Clone or update repo ───────────────────────────────────────────────
-if [ -d "$REPO/.git" ]; then
-    git -C "$REPO" pull origin main 2>&1 || true
-else
-    git clone https://github.com/leego972/titanai.git "$REPO" 2>&1
-fi
-cd "$REPO"
-echo "[boot] Repo: $(git rev-parse --short HEAD)"
-
-# ── 3. Install ALL dependencies ───────────────────────────────────────────
-pip install -q -r requirements.txt 2>&1 | tail -3
-pip install flash-attn --no-build-isolation -q 2>&1 | tail -2 || echo "[WARN] FA2 unavailable — SDPA fallback"
-pip cache purge 2>/dev/null || true
-
-# ── 4. Prepare data if missing ────────────────────────────────────────────
-if [ ! -d "$REPO/data/processed" ] || [ -z "$(ls -A $REPO/data/processed 2>/dev/null)" ]; then
-    echo "[boot] Preparing training data..."
-    python3 prepare_data.py 2>&1 | tee "$LOG/data_prep.log"
+# Clone if not present (train_all.sh will pull latest)
+GH_URL="https://github.com/leego972/titanai.git"
+[ -n "${TITAN_GITHUB_TOKEN:-}" ] && GH_URL="https://${TITAN_GITHUB_TOKEN}@github.com/leego972/titanai.git"
+if [ ! -d "$REPO/.git" ]; then
+    git clone "$GH_URL" "$REPO" 2>&1 | tail -3
 fi
 
-# ── 5. Checkpoint rotation — keep 2 newest only ───────────────────────────
+# Checkpoint rotation — keep only 2 newest per phase (runs every 5 min)
 (while true; do
     sleep 300
     for CKDIR in checkpoints/titan_1b_pretrain checkpoints/titan_1b checkpoints/titan_1b_instruct checkpoints/titan_1b_dpo; do
         mapfile -t CKPTS < <(ls -t "$REPO/$CKDIR/"*.pt 2>/dev/null)
         if [ "${#CKPTS[@]}" -gt 2 ]; then
             for old in "${CKPTS[@]:2}"; do
-                echo "[cleanup] $(date -u) Removed: $(basename $old)"
+                echo "[cleanup] $(date -u) Removed $(basename "$old")"
                 rm -f "$old"
             done
         fi
     done
 done) &
+echo "[onstart] Checkpoint rotation: PID=$!"
 
-# ── 6. Smart crash handler ────────────────────────────────────────────────
+# GPU monitor + status push to GitHub (every 30 min)
+(sleep 120 && while true; do
+    cd "$REPO" 2>/dev/null || break
+    git config user.email "titanai-bot@vast.ai" 2>/dev/null
+    git config user.name  "TitanAI Status Bot" 2>/dev/null
+    bash scripts/push_status_to_github.sh >> "$LOG/status_push.log" 2>&1 || true
+    bash scripts/gpu_monitor.sh           >> "$LOG/gpu_monitor.log"  2>&1 || true
+    sleep 1800
+done) &
+echo "[onstart] Status/GPU daemon: PID=$!"
+
+# Smart watchdog — reads crash log, fixes root cause, then restarts
 diagnose_and_fix() {
-    local last_lines
-    last_lines=$(tail -60 "$MASTER_LOG" 2>/dev/null || true)
-    echo "[watchdog] $(date -u) Diagnosing crash..." >> "$WATCHDOG_LOG"
-    echo "$last_lines" | tail -10 >> "$WATCHDOG_LOG"
-
-    # CUDA out-of-memory — reduce batch size in config
-    if echo "$last_lines" | grep -qi "out of memory\|CUDA out of memory\|CUBLAS_STATUS"; then
-        echo "[watchdog] OOM detected — reducing gradient_accumulation_steps by half" >> "$WATCHDOG_LOG"
-        python3 - << 'PY'
-import yaml, re
-cfg = 'configs/titan_1b.yaml'
-with open(cfg) as f: txt = f.read()
-m = re.search(r'gradient_accumulation_steps:\s*(\d+)', txt)
+    local tail60; tail60=$(tail -60 "$LOG/master.log" 2>/dev/null || echo "")
+    echo "[watchdog] $(date -u) Diagnosing crash:" >> "$LOG/watchdog.log"
+    echo "$tail60" | tail -5 >> "$LOG/watchdog.log"
+    if echo "$tail60" | grep -qi "out of memory\|CUDA out of memory\|CUBLAS"; then
+        echo "[watchdog] OOM — halving gradient_accumulation_steps" >> "$LOG/watchdog.log"
+        python3 -c "
+import re; cfg='$REPO/configs/titan_1b.yaml'
+txt=open(cfg).read(); m=re.search(r'gradient_accumulation_steps:\s*(\d+)',txt)
 if m:
-    old = int(m.group(1))
-    new = max(old // 2, 4)
-    txt = txt.replace(f'gradient_accumulation_steps: {old}', f'gradient_accumulation_steps: {new}')
-    with open(cfg,'w') as f: f.write(txt)
-    print(f'[fix] grad_accum {old} -> {new}')
-PY
-        return 0
-
-    # Disk full — run emergency cleanup
-    if echo "$last_lines" | grep -qi "no space left\|disk full\|OSError.*28"; then
-        echo "[watchdog] Disk full — running emergency cleanup" >> "$WATCHDOG_LOG"
-        find "$REPO/checkpoints" -name "*.pt" | sort -t_ -k2 -n | head -n -2 | xargs rm -f 2>/dev/null || true
+    old,new=int(m.group(1)),max(int(m.group(1))//2,4)
+    open(cfg,'w').write(txt.replace(f'gradient_accumulation_steps: {old}',f'gradient_accumulation_steps: {new}'))
+    print(f'[fix] grad_accum {old}->{new}')
+" >> "$LOG/watchdog.log" 2>&1
+    elif echo "$tail60" | grep -qi "no space left\|OSError.*28"; then
+        echo "[watchdog] Disk full — emergency cleanup" >> "$LOG/watchdog.log"
+        find "$REPO/checkpoints" -name "*.pt" | sort | head -n -2 | xargs rm -f 2>/dev/null || true
         pip cache purge 2>/dev/null || true
-        find /workspace -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-        df -h / >> "$WATCHDOG_LOG"
-        return 0
-
-    # Missing data — re-prepare
-    if echo "$last_lines" | grep -qi "no such file.*processed\|data.*not found\|FileNotFoundError.*data"; then
-        echo "[watchdog] Missing training data — re-running prepare_data.py" >> "$WATCHDOG_LOG"
-        python3 "$REPO/prepare_data.py" >> "$LOG/data_prep.log" 2>&1
-        return 0
-
-    # Missing packages — reinstall
-    if echo "$last_lines" | grep -qi "ModuleNotFoundError\|ImportError\|No module named"; then
-        echo "[watchdog] Missing module — reinstalling requirements" >> "$WATCHDOG_LOG"
+    elif echo "$tail60" | grep -qi "ModuleNotFoundError\|ImportError\|No module named"; then
+        echo "[watchdog] Missing module — reinstalling" >> "$LOG/watchdog.log"
         pip install -q -r "$REPO/requirements.txt" 2>&1 | tail -3
-        return 0
-
-    # NaN loss / training diverged — revert to 2nd newest checkpoint
-    if echo "$last_lines" | grep -qi "nan\|loss.*inf\|diverged"; then
-        echo "[watchdog] NaN/diverged — rolling back to previous checkpoint" >> "$WATCHDOG_LOG"
+    elif echo "$tail60" | grep -qi "nan\|loss.*inf\|diverged"; then
+        echo "[watchdog] NaN — rolling back checkpoint" >> "$LOG/watchdog.log"
         mapfile -t CKPTS < <(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null)
-        [ "${#CKPTS[@]}" -ge 2 ] && rm -f "${CKPTS[0]}" && echo "[watchdog] Removed bad checkpoint, using ${CKPTS[1]}" >> "$WATCHDOG_LOG"
-        return 0
-
-    # Unknown error — log it and wait 2 min before retry
+        [ "${#CKPTS[@]}" -ge 2 ] && rm -f "${CKPTS[0]}"
     else
-        echo "[watchdog] Unknown crash — waiting 2 min before retry" >> "$WATCHDOG_LOG"
-        sleep 120
-        return 0
+        echo "[watchdog] Unknown — waiting 3 min" >> "$LOG/watchdog.log"
+        sleep 180
     fi
 }
 
-# ── 7. Training launcher with resume ──────────────────────────────────────
-start_training() {
-    local LATEST
-    LATEST=$(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null | head -1)
-    [ -n "$LATEST" ] && export TITAN_RESUME="$LATEST" && echo "[train] Resuming: $(basename $LATEST)"
-    echo "[train] $(date -u) Launching train_all.sh"
-    bash "$REPO/train_all.sh" >> "$MASTER_LOG" 2>&1
-    echo "[train] $(date -u) Exited: $?"
-}
-
-# ── 8. Smart watchdog loop ────────────────────────────────────────────────
 (while true; do
     sleep 90
-    if ! pgrep -f "train\.py|trainer\.py|train_all" > /dev/null 2>&1; then
-        echo "[watchdog] $(date -u) Training stopped" >> "$WATCHDOG_LOG"
-        diagnose_and_fix
-        echo "[watchdog] $(date -u) Restarting training after fix" >> "$WATCHDOG_LOG"
-        start_training &
-        sleep 60
+    if ! pgrep -f "train_1b\.py\|pretrain_titan\|trainer\.py\|train_all" > /dev/null 2>&1; then
+        if [ -f "$LOG/master.log" ]; then
+            diagnose_and_fix
+            echo "[watchdog] $(date -u) Restarting training" >> "$LOG/watchdog.log"
+            LATEST=$(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null | head -1)
+            [ -n "$LATEST" ] && export TITAN_RESUME="$LATEST"
+            cd "$REPO" && bash train_all.sh >> "$LOG/master.log" 2>&1 &
+            sleep 60
+        fi
     fi
 done) &
-echo "[boot] Smart watchdog running — diagnoses crash before restart"
+echo "[onstart] Smart watchdog: PID=$!"
 
-# ── 9. Start training ─────────────────────────────────────────────────────
-start_training &
-echo "[boot] Training PID=$! — monitor: tail -f $MASTER_LOG"
+# Launch training
+cd "$REPO"
+LATEST=$(ls -t "$REPO/checkpoints/titan_1b_pretrain/"*.pt 2>/dev/null | head -1)
+[ -n "$LATEST" ] && export TITAN_RESUME="$LATEST" && echo "[onstart] Resuming from: $(basename "$LATEST")"
+echo "[onstart] Launching train_all.sh..."
+nohup bash train_all.sh >> "$LOG/master.log" 2>&1 &
+echo "[onstart] Training PID=$! — $(date -u)"
