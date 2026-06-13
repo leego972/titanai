@@ -135,12 +135,7 @@ device = torch.device("cuda")
 
 # ─── Source spec ────────────────────────────────────────────────────────────
 # (name, repo, config_or_None, text_field, weight)
-SOURCES_DEFAULT = [
-    ("fineweb", "HuggingFaceFW/fineweb-edu", "sample-10BT",            "text",    0.50),
-    ("code",    "codeparrot/codeparrot-clean",None,                     "content", 0.25),
-    ("math",    "open-web-math/open-web-math",None,                     "text",    0.15),
-    ("web",     "allenai/c4",                 "en",                     "text",    0.10),
-]
+SOURCES_DEFAULT = []  # HF streaming disabled — uses local corpus only
 
 # ─── Load tokenizer ─────────────────────────────────────────────────────────
 print(f"[pretrain] loading tokenizer {args.tokenizer}", flush=True)
