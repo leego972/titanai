@@ -79,6 +79,17 @@ fi
 cd "${REPO}" || { echo "[FATAL] Cannot cd to ${REPO}"; exit 1; }
 log "Repo: $(git rev-parse --short HEAD)"
 
+# ── MULTI-GPU DETECTION ──────────────────────────────────────────────────────
+NUM_GPUS=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo 1)
+log "Detected ${NUM_GPUS} GPU(s)"
+if [ "${NUM_GPUS}" -gt 1 ]; then
+    TRAIN_CMD="torchrun --nproc_per_node=${NUM_GPUS}"
+else
+    TRAIN_CMD="python3"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 # Set notification email target
 export NOTIFY_TO="${NOTIFY_TO:-leego972@gmail.com}"
 
