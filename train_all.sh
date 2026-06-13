@@ -4,7 +4,8 @@
 # RTX 4080S optimised | ~$0.25/hr
 # Email notifications: set SMTP_USER + SMTP_PASS env vars (Gmail App Password)
 
-set -euo pipefail
+set -e
+# pipefail disabled — individual errors handled with || true to prevent silent crash
 
 REPO="/workspace/titanai"
 GH_TOKEN="${TITAN_GITHUB_TOKEN:-}"
@@ -28,11 +29,11 @@ notify() {
 REPO_URL="https://github.com/leego972/titanai.git"
 [ -n "${GH_TOKEN}" ] && REPO_URL="https://${GH_TOKEN}@github.com/leego972/titanai.git"
 if [ ! -d "${REPO}/.git" ]; then
-    git clone "${REPO_URL}" "${REPO}"
+    git clone "${REPO_URL}" "${REPO}" || { echo "[ERROR] git clone failed"; mkdir -p "${REPO}"; cd "${REPO}"; git init; } 
 else
     cd "${REPO}" && git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
 fi
-cd "${REPO}"
+cd "${REPO}" || { echo "[FATAL] Cannot cd to ${REPO}"; exit 1; }
 log "Repo: $(git rev-parse --short HEAD)"
 
 # Set notification email target
