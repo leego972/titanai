@@ -170,8 +170,8 @@ export default function LeegoLogo({ idleClassName = "h-20 w-20" }: LeegoLogoProp
           transition: `width ${transitionDuration} ${transitionEasing}, height ${transitionDuration} ${transitionEasing}, filter ${transitionDuration} ${transitionEasing}`,
           // Glow
           filter: isExpanded
-            ? "drop-shadow(0 0 20px rgba(0,255,50,1)) drop-shadow(0 0 50px rgba(0,255,50,0.85)) drop-shadow(0 0 100px rgba(0,255,50,0.5))"
-            : "drop-shadow(0 0 8px rgba(0,255,50,0.6)) drop-shadow(0 0 18px rgba(0,255,50,0.3))",
+            ? "drop-shadow(0 0 20px rgba(255,195,0,1)) drop-shadow(0 0 50px rgba(255,165,0,0.9)) drop-shadow(0 0 100px rgba(255,140,0,0.6))"
+            : "drop-shadow(0 0 10px rgba(255,195,0,0.9)) drop-shadow(0 0 22px rgba(255,165,0,0.6)) drop-shadow(0 0 40px rgba(255,140,0,0.3))",
           // When idle/shrinking-back: grow upward from the logo's bottom edge
           transformOrigin: (isExpanded || phase === "shrinking") ? undefined : "bottom center",
           // Keep it centred on screen when fully expanded
