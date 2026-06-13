@@ -16,6 +16,49 @@ CKPT_SFT="${REPO}/checkpoints/titan_1b_instruct"
 CKPT_DPO="${REPO}/checkpoints/titan_1b_dpo"
 
 mkdir -p "${LOG_DIR}" "${CKPT_PRETRAIN}" "${CKPT_SFT}" "${CKPT_DPO}"
+# ── DISK WATCHDOG ────────────────────────────────────────────────────────────
+# Runs every 3 min in background. Keeps disk under 80% by pruning old ckpts.
+disk_watchdog() {
+    while true; do
+        sleep 180
+        USED=$(df /workspace --output=pcent 2>/dev/null | tail -1 | tr -d ' %' || echo 0)
+        [ -z "$USED" ] || [ "$USED" -lt 65 ] && continue
+
+        log "[DISK] ${USED}% used — pruning old checkpoints..."
+
+        # Delete pip cache first (safe, always reclaimable)
+        pip cache purge 2>/dev/null || true
+        rm -rf /root/.cache/pip /tmp/pip-* 2>/dev/null || true
+
+        # Prune step_*.pt files — keep only the 2 most recent per dir
+        for CKPT_DIR in "${CKPT_PRETRAIN}" "${CKPT_UPGRADES}" "${CKPT_SFT}" "${CKPT_DPO}"; do
+            STEPS=$(ls -t "${CKPT_DIR}"/step_*.pt 2>/dev/null)
+            COUNT=$(echo "$STEPS" | grep -c '.pt' 2>/dev/null || echo 0)
+            if [ "$COUNT" -gt 2 ]; then
+                echo "$STEPS" | tail -n +3 | xargs rm -f 2>/dev/null || true
+                log "[DISK] Pruned $(( COUNT - 2 )) old step ckpts in ${CKPT_DIR}"
+            fi
+        done
+
+        # Emergency: >88% — keep only 1 per dir
+        USED2=$(df /workspace --output=pcent 2>/dev/null | tail -1 | tr -d ' %' || echo 0)
+        if [ "${USED2:-0}" -gt 88 ]; then
+            log "[DISK][EMERGENCY] ${USED2}% — keeping only latest checkpoint per phase"
+            for CKPT_DIR in "${CKPT_PRETRAIN}" "${CKPT_UPGRADES}" "${CKPT_SFT}" "${CKPT_DPO}"; do
+                STEPS=$(ls -t "${CKPT_DIR}"/step_*.pt 2>/dev/null)
+                echo "$STEPS" | tail -n +2 | xargs rm -f 2>/dev/null || true
+            done
+            # Truncate old log files > 100MB
+            find "${LOG_DIR}" -name "*.log" -size +100M -exec truncate -s 50M {} \; 2>/dev/null || true
+        fi
+
+        USED3=$(df /workspace --output=pcent 2>/dev/null | tail -1 | tr -d ' %' || echo 0)
+        log "[DISK] After cleanup: ${USED3}% used"
+    done
+}
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 
 log() { echo "[$(date -u '+%H:%M:%S')] $*" | tee -a "${LOG_DIR}/master.log"; }
 
@@ -44,6 +87,9 @@ log "Installing Python packages..."
 pip install -q torch --index-url https://download.pytorch.org/whl/cu121 2>&1 | tail -1 || true
 pip install -q -r requirements.txt 2>&1 | tail -1
 pip install -q triton 2>&1 | tail -1 || true
+pip cache purge 2>/dev/null || true
+rm -rf /root/.cache/pip /tmp/pip-* 2>/dev/null || true
+log "Disk after pip cleanup: $(df -h /workspace | tail -1)"
 log "Building FlashAttention-2 (one-time, ~10 min)..."
 pip install flash-attn --no-build-isolation -q 2>&1 | tail -3 || log "[WARN] FA2 failed — SDPA fallback active"
 
@@ -78,6 +124,11 @@ echo "║  ───────────────────────
 echo "║  TOTAL     ≈ 76–94 hrs              TOTAL COST ≈ \$19–24      ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 echo ""
+
+# Launch disk watchdog
+disk_watchdog &
+DISK_WATCHDOG_PID=$!
+log "Disk watchdog started (PID ${DISK_WATCHDOG_PID})"
 
 # 5. Launch GPU monitor in background (checks every 30 min)
 nohup bash "${REPO}/scripts/gpu_monitor.sh" >> "${LOG_DIR}/gpu_monitor.log" 2>&1 &
@@ -184,4 +235,5 @@ notify "ALL TRAINING COMPLETE" "ok" \
     "Total time: ${ELAPSED_H}h ${ELAPSED_M}m. Actual cost: ~\$${COST}. Final model: ${CKPT_DPO}/"
 
 kill ${GPU_MONITOR_PID} 2>/dev/null || true
+kill ${DISK_WATCHDOG_PID} 2>/dev/null || true
 log "ALL DONE. Time: ${ELAPSED_H}h ${ELAPSED_M}m | Cost: ~\$${COST}"
