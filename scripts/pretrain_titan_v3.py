@@ -253,8 +253,31 @@ class SourceStream:
     def __iter__(self):
         if not self.ok:
             return
+        import time as _time
         i = 0
-        for example in self.ds:
+        err_count = 0
+        ds_iter = iter(self.ds)
+        while True:
+            try:
+                example = next(ds_iter)
+                err_count = 0
+            except StopIteration:
+                ds_iter = iter(self.ds)
+                continue
+            except Exception as _e:
+                err_count += 1
+                wait = min(err_count * 3, 60)
+                print(f"[pretrain] source '{self.name}' error #{err_count}: {_e} — retry in {wait}s", flush=True)
+                if err_count > 30:
+                    print(f"[pretrain] source '{self.name}' giving up after 30 errors", flush=True)
+                    self.ok = False
+                    return
+                _time.sleep(wait)
+                try:
+                    ds_iter = iter(self.ds)
+                except Exception:
+                    pass
+                continue
             i += 1
             text = example.get(self.text_field) or example.get("text") or example.get("content") or ""
             if not text:
@@ -263,6 +286,53 @@ class SourceStream:
             if _is_val(ex_id) != self.want_val:
                 continue
             yield (self.name, text)
+
+
+class LocalFileSource:
+    """Reads .txt/.jsonl files from a local directory — no network needed."""
+    def __init__(self, name, directory, want_val, shard_seed):
+        import glob as _glob, os as _os
+        self.name = name
+        self.directory = directory
+        self.want_val = want_val
+        self.shard_seed = shard_seed
+        self.files = (sorted(_glob.glob(_os.path.join(directory, "**", "*.txt"),  recursive=True)) +
+                      sorted(_glob.glob(_os.path.join(directory, "**", "*.jsonl"), recursive=True)))
+        self.ok = len(self.files) > 0
+        print(f"[pretrain] LocalFileSource '{name}': {len(self.files)} files @ {directory}", flush=True)
+    def __iter__(self):
+        if not self.ok:
+            return
+        import random as _rnd, json as _json
+        rng = _rnd.Random(self.shard_seed)
+        files = self.files[:]
+        i = 0
+        while True:
+            rng.shuffle(files)
+            for f in files:
+                try:
+                    with open(f, "r", errors="replace") as fp:
+                        if f.endswith(".jsonl"):
+                            for line in fp:
+                                try:
+                                    obj = _json.loads(line)
+                                    text = (obj.get("text") or obj.get("content") or
+                                            " ".join(filter(None, [obj.get("instruction",""), obj.get("output","")])))
+                                except Exception:
+                                    text = line.strip()
+                                if not text:
+                                    continue
+                                i += 1
+                                if _is_val(f"{self.name}-{i}") == self.want_val:
+                                    yield (self.name, text)
+                        else:
+                            text = fp.read().strip()
+                            if text:
+                                i += 1
+                                if _is_val(f"{self.name}-{i}") == self.want_val:
+                                    yield (self.name, text)
+                except Exception:
+                    continue
 
 def build_packed_iter(want_val, sources, weights):
     """Weighted-interleaved infinite stream of (source_name, packed_seq) tensors,
@@ -303,6 +373,23 @@ for i, (name, repo, cfg, fld, w) in enumerate(SOURCES_DEFAULT):
     train_sources.append(SourceStream(name, repo, cfg, fld, want_val=False, shard_seed=i))
     val_sources.append(  SourceStream(name, repo, cfg, fld, want_val=True,  shard_seed=i+100))
     weights.append(w)
+# Add local corpus sources (always available, no network needed)
+LOCAL_CORPUS = [
+    ("local_general",  "/workspace/titanai/data/raw/corpus_A_general",   0.25),
+    ("local_reason",   "/workspace/titanai/data/raw/corpus_B_reasoning",  0.15),
+    ("local_tech",     "/workspace/titanai/data/raw/corpus_C_technical",  0.30),
+    ("local_cyber",    "/workspace/titanai/data/raw/corpus_D_cyber",      0.15),
+    ("local_cinema",   "/workspace/titanai/data/raw/corpus_E_cinema",     0.15),
+]
+local_ok = []
+for j, (lname, ldir, lw) in enumerate(LOCAL_CORPUS):
+    import os as _os
+    if _os.path.isdir(ldir):
+        ts = LocalFileSource(lname, ldir, want_val=False, shard_seed=200+j)
+        vs = LocalFileSource(lname, ldir, want_val=True,  shard_seed=300+j)
+        if ts.ok:
+            train_sources.append(ts); val_sources.append(vs); weights.append(lw); local_ok.append(lname)
+print(f"[pretrain] local sources added: {local_ok}", flush=True)
 ok_names = [s.name for s in train_sources if s.ok]
 print(f"[pretrain] active sources: {ok_names}", flush=True)
 if not ok_names:
