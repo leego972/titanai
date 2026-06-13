@@ -3148,7 +3148,7 @@ export default function ChatPage() {
             </p>
           )}
           <div className={`flex justify-center ${isMobile ? 'mt-1' : 'mt-2'}`}>
-            <LeegoLogo idleClassName={isMobile ? 'h-14 w-14' : 'h-24 w-24'} />
+            <LeegoLogo idleClassName={isMobile ? 'h-20 w-20' : 'h-32 w-32'} />
           </div>
         </div>
       </div>
