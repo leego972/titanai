@@ -21,8 +21,10 @@ Usage:
     # or
     uvicorn api.main:app --host 0.0.0.0 --port 8000
 """
+import asyncio
 import logging
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -57,11 +59,31 @@ logging.basicConfig(
 log = logging.getLogger("titan.api")
 
 
+def _background_startup():
+    """Load model + RAG index in a background thread so healthcheck passes immediately."""
+    # Model load
+    try:
+        loaded = manager.load()
+        if loaded:
+            log.info(f"[bg] Model loaded ({manager.model_info.get('parameters', 0):,} params)")
+        else:
+            log.warning("[bg] Model NOT loaded — checkpoint not found. API returns 503 on inference.")
+            log.warning(f"[bg] Expected: {config.CHECKPOINT_PATH}")
+    except Exception as e:
+        log.error(f"[bg] Model load error: {e}")
+
+    # RAG index
+    try:
+        n_docs = rag.build_index()
+        log.info(f"[bg] RAG index built — {n_docs:,} documents")
+    except Exception as e:
+        log.error(f"[bg] RAG index error: {e}")
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load model on startup, clean up on shutdown."""
     log.info("=" * 60)
     log.info("  TitanAI API Server — Starting Up")
     log.info("=" * 60)
@@ -70,30 +92,12 @@ async def lifespan(app: FastAPI):
     log.info(f"  Device:     {config.DEVICE}")
     log.info(f"  Auth:       {'enabled' if config.REQUIRE_AUTH else 'disabled (dev mode)'}")
     log.info(f"  Port:       {config.PORT}")
-
-    # Attempt to load model at startup
-    loaded = manager.load()
-    if loaded:
-        log.info(f"  Model:      Loaded ({manager.model_info.get('parameters', 0):,} params)")
-    else:
-        log.warning("  Model:      NOT LOADED — checkpoint not found")
-        log.warning("  The API will start but return 503 on inference requests.")
-        log.warning(f"  Expected checkpoint: {config.CHECKPOINT_PATH}")
-        log.warning("  POST /v1/models/load once training completes.")
-
-    if not config.REQUIRE_AUTH and not config.API_KEY:
-        log.warning("  Auth:       No API key set — all requests allowed (dev mode)")
-
-    # Build RAG index from training data
-    log.info("  RAG:        Building BM25 index over training corpus...")
-    import asyncio
-    loop = asyncio.get_event_loop()
-    n_docs = await loop.run_in_executor(None, rag.build_index)
-    log.info(f"  RAG:        {n_docs:,} documents indexed — context retrieval active")
-
+    log.info("  Model/RAG:  Loading in background — healthcheck will pass immediately")
     log.info("=" * 60)
-    log.info("  TitanAI API Server — Ready")
-    log.info("=" * 60)
+
+    # Fire model + RAG loading in background so uvicorn is ready for healthcheck instantly
+    t = threading.Thread(target=_background_startup, daemon=True)
+    t.start()
 
     yield
 
@@ -108,7 +112,7 @@ app = FastAPI(
         "OpenAI-compatible REST API for the TitanAI base language model. "
         "Built from scratch — no third-party model wrappers."
     ),
-    version="0.1.5",
+    version="0.1.6",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -117,7 +121,7 @@ app = FastAPI(
 # CORS — allow Archibald and any local dev origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -163,7 +167,7 @@ app.include_router(feedback_router)
 async def root():
     return {
         "name": "TitanAI API",
-        "version": "0.1.5",
+        "version": "0.1.6",
         "status": "ready" if manager.is_loaded else "model_not_loaded",
         "docs": "/docs",
         "health": "/health",
