@@ -101,8 +101,14 @@ pip install -q triton 2>&1 | tail -1 || true
 pip cache purge 2>/dev/null || true
 rm -rf /root/.cache/pip /tmp/pip-* 2>/dev/null || true
 log "Disk after pip cleanup: $(df -h /workspace | tail -1)"
-log "Building FlashAttention-2 (one-time, ~10 min)..."
-pip install flash-attn --no-build-isolation -q 2>&1 | tail -3 || log "[WARN] FA2 failed — SDPA fallback active"
+# FlashAttention-2 requires Ampere+ (sm_80+). Skip on Turing/Volta.
+CC=$(python3 -c "import torch; cc=torch.cuda.get_device_capability(0); print(cc[0]*10+cc[1])" 2>/dev/null || echo 0)
+if [ "${CC}" -ge 80 ]; then
+    log "Building FlashAttention-2 (sm_${CC}, one-time ~10 min)..."
+    pip install flash-attn --no-build-isolation -q 2>&1 | tail -3 || log "[WARN] FA2 failed — SDPA fallback active"
+else
+    log "[SKIP] FlashAttention-2 requires sm_80+, this GPU is sm_${CC} — using PyTorch SDPA instead"
+fi
 
 # 3. Speed env
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
