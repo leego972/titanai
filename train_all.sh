@@ -186,7 +186,6 @@ ${TRAIN_CMD} "${REPO}/scripts/pretrain_titan_v3.py" \
     ${RESUME_FLAG} \
     --out-dir "${CKPT_PRETRAIN}" \
     --use-8bit-adam \
-    --compile \
     2>&1 | tee "${LOG_DIR}/phase1_pretrain.log"
 
 P1_CKPT_COUNT=$(ls "${CKPT_PRETRAIN}"/*.pt 2>/dev/null | wc -l || echo 0)
