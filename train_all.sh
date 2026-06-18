@@ -174,7 +174,7 @@ START_CKPT="${RESUME_CKPT:-${INIT_PT}}"
 RESUME_FLAG=""
 [[ "${START_CKPT}" == *"step_"* ]] && RESUME_FLAG="--resume ${START_CKPT}"
 
-python3 "${REPO}/scripts/pretrain_titan_v3.py" \
+${TRAIN_CMD} "${REPO}/scripts/pretrain_titan_v3.py" \
     --config "${REPO}/titan_1b.yaml" \
     --init-from "${START_CKPT}" \
     ${RESUME_FLAG} \
