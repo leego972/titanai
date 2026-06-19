@@ -147,6 +147,52 @@ disk_watchdog &
 DISK_WATCHDOG_PID=$!
 log "Disk watchdog started (PID ${DISK_WATCHDOG_PID})"
 
+  # ── BALANCE WATCHDOG — emergency checkpoint at $5 remaining ──────────────────
+  balance_watchdog() {
+      local ALERTED=0
+      [ -z "${VAST_API_KEY:-}" ] && { log "[balance] No VAST_API_KEY set — watchdog disabled"; return; }
+      while true; do
+          sleep 120
+          BALANCE=$(curl -sf "https://console.vast.ai/api/v0/users/me/" \
+              -H "Authorization: Bearer ${VAST_API_KEY}" 2>/dev/null | \
+              python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('credit', d.get('balance', 999)))" \
+              2>/dev/null || echo 999)
+          log "[balance] Credit: ${BALANCE}"
+          if python3 -c "import sys; sys.exit(0 if float('${BALANCE}') <= 5.0 else 1)" 2>/dev/null; then
+              [ "$ALERTED" -eq 1 ] && continue
+              log "[balance] ⚠️  BELOW $5 — forcing checkpoint save NOW"
+              # Signal training process to checkpoint (SIGUSR1 = checkpoint in most frameworks)
+              TRAIN_PID=$(pgrep -f "train_1b\.py|pretrain_titan|trainer\.py|run_sft|run_dpo" | head -1 || echo "")
+              if [ -n "$TRAIN_PID" ]; then
+                  kill -SIGUSR1 "$TRAIN_PID" 2>/dev/null || true
+                  log "[balance] Sent SIGUSR1 to PID $TRAIN_PID — waiting 45s for save..."
+                  sleep 45
+              fi
+              # Copy the freshest .pt we can find to a dated emergency file
+              LATEST=$(ls -t "${CKPT_UPGRADES}"/upgrade_*/*.pt "${CKPT_UPGRADES}"/upgrade_*/step_*.pt \
+                            "${CKPT_PRETRAIN}"/step_*.pt "${CKPT_SFT}"/step_*.pt 2>/dev/null | head -1 || echo "")
+              if [ -n "$LATEST" ]; then
+                  EMERG="$(dirname $LATEST)/EMERGENCY_$(date +%Y%m%d_%H%M%S).pt"
+                  cp "$LATEST" "$EMERG" 2>/dev/null && \
+                      log "[balance] Emergency checkpoint saved: $(basename $EMERG)" || \
+                      log "[balance] WARNING: checkpoint copy failed"
+              else
+                  log "[balance] WARNING: no checkpoint found to save"
+              fi
+              notify "LOW CREDIT \${BALANCE} — checkpoint saved" "warn" \
+                  "Emergency checkpoint: ${EMERG:-none}. Top up to continue training."
+              ALERTED=1
+          else
+              ALERTED=0
+          fi
+      done
+  }
+  balance_watchdog &
+  BALANCE_WATCHDOG_PID=$!
+  log "Balance watchdog started (PID ${BALANCE_WATCHDOG_PID})"
+  # ─────────────────────────────────────────────────────────────────────────────
+  
+
 # 5. Launch GPU monitor in background (checks every 30 min)
 nohup bash "${REPO}/scripts/gpu_monitor.sh" >> "${LOG_DIR}/gpu_monitor.log" 2>&1 &
 GPU_MONITOR_PID=$!
@@ -252,4 +298,5 @@ notify "ALL TRAINING COMPLETE" "ok" \
 
 kill ${GPU_MONITOR_PID} 2>/dev/null || true
 kill ${DISK_WATCHDOG_PID} 2>/dev/null || true
+kill ${BALANCE_WATCHDOG_PID} 2>/dev/null || true
 log "ALL DONE. Time: ${ELAPSED_H}h ${ELAPSED_M}m | Cost: ~\$${COST}"
