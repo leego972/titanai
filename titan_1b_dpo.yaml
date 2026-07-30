@@ -1,41 +1,59 @@
-# TitanAI 1B — Phase 3 Preference Fine-tuning Config
-# Run AFTER instruction fine-tuning:
-#   pip install trl
-#   python train_dpo.py --config titan_1b_dpo.yaml
-#
-# DATASET: Add your own preference pairs.
-# Format (JSONL, one pair per line):
-#   {"prompt": "...", "chosen": "...", "rejected": "..."}
-# Place the file at: data/raw/custom_prefs.jsonl
-#
-# "chosen"  = the response you want the model to prefer
-# "rejected" = the response you want the model to move away from
-# No third-party alignment data is used here.
+# TitanAI 1B — Direct Preference Optimization Config
+project:
+  name: "titan-1b-dpo"
+  version: "1.0.0"
 
-base_model: "checkpoints/titan_1b_instruct/latest"
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 2048
+  n_heads: 16
+  n_kv_heads: 4
+  n_layers: 24
+  d_ff: 8192
+  max_seq_len: 2048
+  rope_base: 500000.0
+  dropout: 0.0
+  tie_embeddings: true
+  gradient_checkpointing: true
 
 training:
+  batch_size: 1
+  gradient_accumulation_steps: 16
   learning_rate: 1.0e-6
+  weight_decay: 0.0
   max_steps: 1000
-  beta: 0.1                  # DPO temperature — lower = closer to base model
-  bf16: true
+  warmup_steps: 50
+  lr_scheduler: "cosine"
+  lr_min_ratio: 0.1
+  beta: 0.1
+  clip_grad_norm: 1.0
   checkpoint_dir: "checkpoints/titan_1b_dpo"
   log_interval: 25
+  eval_interval: 100
   save_interval: 250
+  bf16: true
 
 data:
-  dataset: "custom"
-  dataset_path: "data/raw/custom_prefs.jsonl"
-  split: "train"
+  dpo_files:
+    - "data/dpo/preference_pairs.jsonl"
+  tokenizer_path: "tokenizer/artifacts_v32k/tokenizer.json"
   max_seq_len: 2048
+  val_split: 0.05
+  split_seed: 1337
+  num_workers: 2
 
 evaluation:
-  val_split: "test"
+  val_batch_size: 1
   num_eval_batches: 10
 
 logging:
   log_dir: "logs/titan_1b_dpo"
-  experiment_name: "titan-1b-dpo-v01"
+  experiment_name: "titan-1b-dpo-v1"
   wandb:
-    enabled: true
+    enabled: false
     project: "titanai-dpo"
+
+inference:
+  default_max_new_tokens: 700
+  default_temperature: 0.6
