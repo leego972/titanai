@@ -5,6 +5,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   health-check:
@@ -13,12 +14,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Confirm repository checkout
+      - name: Confirm repository structure
         run: |
-          echo "TitanAI repository checked out successfully."
-          echo "CI is intentionally minimal while the training pipeline is under active development."
-          test -f configs/titan_config.yaml
           test -f model/titan_model.py
-          test -f training/trainer.py
-          test -f tokenizer/train_tokenizer.py
-          echo "Required core files are present."
+          test -f training/sft_trainer.py
+          test -f training/dpo_trainer.py
+          test -f scripts/upscale_to_3b.py
+          test -f scripts/validate_training_pipeline.py
+          test -f scripts/smoke_training_pipeline.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install smoke-test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install tokenizers pyyaml numpy
+
+      - name: Compile critical Python modules
+        run: |
+          python -m py_compile \
+            model/titan_model.py \
+            training/sft_trainer.py \
+            training/dpo_trainer.py \
+            data/sft_dataset.py \
+            data/dpo_dataset.py \
+            scripts/upscale_to_3b.py \
+            scripts/run_sft_v2.py \
+            scripts/run_dpo.py \
+            scripts/validate_training_pipeline.py \
+            scripts/smoke_training_pipeline.py
+
+      - name: Run miniature end-to-end training pipeline
+        run: python scripts/smoke_training_pipeline.py
+
+      - name: Verify smoke-test manifest
+        run: |
+          test -f artifacts/smoke_training_pipeline/result.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('artifacts/smoke_training_pipeline/result.json').read_text())
+          assert result['status'] == 'passed', result
+          print(json.dumps(result, indent=2))
+          PY
+
+      - name: Upload smoke-test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: titan-training-smoke-results
+          path: artifacts/smoke_training_pipeline/
+          if-no-files-found: warn
+          retention-days: 7
