@@ -1,97 +1,66 @@
-# TitanAI 3B — Full-Scale Pretraining Config
-  # ============================================================
-  # Architecture: d_model=2560, n_heads=20, n_kv_heads=4 (GQA), n_layers=36
-  # Activation  : SwiGLU (hidden=6848)
-  # Norm        : RMSNorm
-  # Positional  : RoPE (base=10000)
-  # Parameters  : ~2.9 billion (computed below)
-  #
-  # Param count breakdown:
-  #   Embedding (tied): 32000 × 2560 = 81.9M
-  #   Per block:
-  #     Attention — Q: 2560×2560, K: 2560×512, V: 2560×512, O: 2560×2560
-  #                = 6.5M + 1.3M + 1.3M + 6.5M = 15.6M
-  #     MLP SwiGLU — gate: 2560×6848, up: 2560×6848, down: 6848×2560
-  #                = 17.5M + 17.5M + 17.5M = 52.5M
-  #     2× RMSNorm: 2 × 2560 = 5.1K (negligible)
-  #   36 blocks × 68.1M = 2,451.6M
-  #   Total: ~2.53B (unique) / ~2.45B (with tied embeddings)
-  #
-  # Requirements: A100 80GB (single, comfortable) | 2× A100 40GB DDP | 2× RTX 4090 DDP
-  #
-  # Run AFTER:
-  #   1. titan_1b final checkpoint passes perplexity_threshold: 12.0
-  #   2. python scripts/upscale_to_3b.py produces checkpoints/titan_3b_pretrain/init.pt
-  #
-  # Token budget:
-  #   effective_batch = 1 × 32 × 2048 = 65,536 tokens/step
-  #   150,000 steps = ~9.8B tokens (recommended)
-  #   Minimum floor: 91,500 steps (~6B tokens)
-  #
-  # Cost estimate on Vast.ai (spot):
-  #   A100 80GB PCIe : ~30 hrs → ~$15   (single GPU, batch=1)
-  #   2× RTX 4090 DDP: ~28 hrs → ~$13   (spot interruptible)
+# Compatibility copy of the canonical root titan_3b.yaml.
+# Architecture: depth-scaled Titan 1B, 2048 width and 66 transformer layers.
+project:
+  name: "titan-3b"
+  version: "1.0.0"
 
-  project:
-    name: "titan-3b"
-    version: "1.0.0"
+model:
+  architecture: "decoder_transformer"
+  vocab_size: 32000
+  d_model: 2048
+  n_heads: 16
+  n_kv_heads: 4
+  n_layers: 66
+  d_ff: 8192
+  max_seq_len: 2048
+  rope_base: 500000.0
+  dropout: 0.05
+  tie_embeddings: true
+  gradient_checkpointing: false
+  use_flash_attention: true
 
-  model:
-    architecture: "decoder_transformer"
-    vocab_size: 32000
-    d_model: 2560
-    n_heads: 20
-    n_kv_heads: 4                # GQA: 4 KV heads shared across 20 Q heads (5× KV cache savings)
-    n_layers: 36
-    d_ff: 10240                  # SwiGLU hidden = (2/3 × 10240) → 6848 (auto-computed)
-    max_seq_len: 2048
-    rope_base: 10000.0
-    dropout: 0.05
-    tie_embeddings: true
-    gradient_checkpointing: true
+training:
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  target_tokens: 40000000000
+  max_steps: 152588
+  warmup_steps: 500
+  lr_scheduler: "cosine"
+  lr_min_ratio: 0.1
+  clip_grad_norm: 1.0
+  log_interval: 100
+  eval_interval: 2000
+  save_interval: 5000
+  checkpoint_dir: "checkpoints/titan_3b_pretrain"
+  use_8bit_adam: true
+  use_compile: true
+  bf16: true
+  resume_from: null
 
-  training:
-    batch_size: 1
-    gradient_accumulation_steps: 32
-    learning_rate: 3.0e-5         # Conservative — larger model, avoid overshooting
-    weight_decay: 0.01
-    max_steps: 150000
-    warmup_steps: 1000
-    lr_scheduler: "cosine"
-    lr_min_ratio: 0.1
-    clip_grad_norm: 1.0
-    log_interval: 100
-    eval_interval: 2000
-    save_interval: 5000
-    checkpoint_dir: "checkpoints/titan_3b_pretrain"
-    use_8bit_adam: true
-    use_compile: true
-    bf16: true
-    resume_from: null
+tokenizer:
+  path: "tokenizer/artifacts_v32k/tokenizer.json"
+  vocab_size: 32000
 
-  tokenizer:
-    path: "tokenizer/artifacts_v32k/tokenizer.json"
-    vocab_size: 32000
+data:
+  processed_dir: "data/processed"
+  max_seq_len: 2048
 
-  data:
-    processed_dir: "data/processed"
-    max_seq_len: 2048
+evaluation:
+  val_batch_size: 4
+  num_eval_batches: 50
+  perplexity_threshold: 10.0
 
-  evaluation:
-    val_batch_size: 1
-    num_eval_batches: 50
-    perplexity_threshold: 10.0    # Gate threshold before fine-tuning pipeline
+logging:
+  log_dir: "logs/titan_3b"
+  experiment_name: "titan-3b-pretrain-v1-depth-scaled"
+  wandb:
+    enabled: false
+    project: "titanai"
 
-  logging:
-    log_dir: "logs/titan_3b"
-    experiment_name: "titan-3b-pretrain-v1"
-    wandb:
-      enabled: false
-      project: "titanai"
-
-  inference:
-    default_max_new_tokens: 512
-    default_temperature: 0.7
-    default_top_k: 50
-    default_top_p: 0.95
-  
+inference:
+  default_max_new_tokens: 512
+  default_temperature: 0.7
+  default_top_k: 50
+  default_top_p: 0.95
