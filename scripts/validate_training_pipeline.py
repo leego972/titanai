@@ -6,13 +6,13 @@ import inspect
 import sys
 from pathlib import Path
 
+import torch
 import yaml
 
 BASE = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE))
 
 from model.titan_model import TitanConfig, TitanLM
-
 
 ARCH_KEYS = (
     "vocab_size", "d_model", "n_heads", "n_kv_heads", "n_layers",
@@ -38,9 +38,10 @@ def validate_config(path: Path, cfg: dict):
         if section not in cfg:
             raise ValueError(f"{path}: missing section {section}")
     model_cfg = TitanConfig.from_dict(cfg)
-    model = TitanLM(model_cfg)
+    # Meta-device construction verifies tensor shapes without allocating model RAM.
+    with torch.device("meta"):
+        model = TitanLM(model_cfg)
     count = sum(p.numel() for p in model.parameters())
-    del model
     tokenizer = cfg["data"].get("tokenizer_path") or cfg.get("tokenizer", {}).get("path")
     if not tokenizer:
         raise ValueError(f"{path}: tokenizer path missing")
@@ -84,11 +85,9 @@ def main():
         if counts:
             print(f"[OK] {label}: architecture consistent; {counts[0]:,} parameters")
 
-    # Verify launcher functions still accept the arguments used by train_3b.sh.
     from scripts import run_sft_v2, run_dpo
     for module, name in ((run_sft_v2, "run_sft_v2"), (run_dpo, "run_dpo")):
-        source = inspect.getsource(module.main)
-        if "--out-dir" not in source:
+        if "--out-dir" not in inspect.getsource(module.main):
             failures.append(f"{name}: --out-dir support missing")
 
     if failures:
