@@ -1,0 +1,54 @@
+name: Generate Titan Inference SFT v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/generate_titan_inference_sft_v2.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate dataset
+        run: python scripts/generate_titan_inference_sft_v2.py
+
+      - name: Validate generated corpus
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('data/sft/titan_inference_v2')
+          manifest = json.loads((root/'manifest.json').read_text())
+          assert manifest['total_examples'] == 51500
+          assert manifest['splits'] == {'train': 46350, 'validation': 2575, 'test': 2575}
+          files = list(root.glob('train-*.jsonl'))
+          assert len(files) == 10
+          print('Titan Inference SFT v2 validation passed')
+          PY
+
+      - name: Commit generated dataset
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/sft/titan_inference_v2
+          if git diff --cached --quiet; then
+            echo 'Dataset already up to date.'
+          else
+            git commit -m 'data: add Titan Inference SFT v2 51.5K corpus'
+            git push origin HEAD:main
+          fi
