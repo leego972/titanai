@@ -4,6 +4,10 @@ TitanAI — SFT v2 Training Entry Point
 =======================================
 Instruction fine-tuning for any Titan architecture described by the supplied
 config. Supports explicit output-directory overrides for 1B and 3B pipelines.
+
+If data.val_files is provided, validation is loaded from those files and is
+never sampled from training data. If data.val_files is absent, the legacy
+random train/validation split remains available for backward compatibility.
 """
 
 import argparse
@@ -35,6 +39,17 @@ def _load_model_state(checkpoint: Path, device: torch.device):
     return state.get("model_state_dict", state)
 
 
+def _resolve_required_files(paths, label):
+    resolved = [str(_resolve(p)) for p in paths]
+    missing = [p for p in resolved if not Path(p).exists()]
+    if missing:
+        print(f"\n[ERROR] Missing {label} data files:")
+        for item in missing:
+            print(f"  - {item}")
+        sys.exit(1)
+    return resolved
+
+
 def main():
     parser = argparse.ArgumentParser(description="TitanAI SFT v2 Training")
     parser.add_argument("--config", required=True, help="Path to SFT YAML config")
@@ -63,14 +78,13 @@ def main():
     tokenizer_path = _resolve(tokenizer_path)
     cfg["data"]["tokenizer_path"] = str(tokenizer_path)
 
-    sft_files = [str(_resolve(p)) for p in cfg["data"]["sft_files"]]
-    missing = [p for p in sft_files if not Path(p).exists()]
-    if missing:
-        print("\n[ERROR] Missing SFT data files:")
-        for item in missing:
-            print(f"  - {item}")
-        sys.exit(1)
+    sft_files = _resolve_required_files(cfg["data"]["sft_files"], "SFT training")
     cfg["data"]["sft_files"] = sft_files
+
+    val_files_cfg = cfg["data"].get("val_files") or []
+    val_files = _resolve_required_files(val_files_cfg, "SFT validation") if val_files_cfg else []
+    if val_files:
+        cfg["data"]["val_files"] = val_files
 
     checkpoint = _resolve(args.checkpoint)
     if not checkpoint.exists():
@@ -99,25 +113,40 @@ def main():
 
     print(f"[SFT v2] Model: {sum(p.numel() for p in model.parameters()):,} parameters")
 
-    full_dataset = TitanSFTDataset(
+    train_source = TitanSFTDataset(
         jsonl_paths=sft_files,
         tokenizer=tokenizer,
         max_seq_len=cfg["model"]["max_seq_len"],
         verbose=True,
     )
-    stats = full_dataset.get_stats()
-    print(f"[SFT v2] Dataset: {json.dumps(stats)}")
-    if len(full_dataset) < 2:
-        raise ValueError("SFT dataset must contain at least two usable examples")
+    train_stats = train_source.get_stats()
+    print(f"[SFT v2] Training dataset: {json.dumps(train_stats)}")
+    if len(train_source) < 2:
+        raise ValueError("SFT training dataset must contain at least two usable examples")
 
-    val_fraction = float(cfg["data"].get("val_split", 0.05))
-    val_size = min(len(full_dataset) - 1, max(1, int(len(full_dataset) * val_fraction)))
-    train_size = len(full_dataset) - val_size
-    generator = torch.Generator().manual_seed(int(cfg["data"].get("split_seed", 1337)))
-    train_dataset, val_dataset = random_split(
-        full_dataset, [train_size, val_size], generator=generator
-    )
-    print(f"[SFT v2] Train: {train_size} | Val: {val_size}")
+    if val_files:
+        train_dataset = train_source
+        val_dataset = TitanSFTDataset(
+            jsonl_paths=val_files,
+            tokenizer=tokenizer,
+            max_seq_len=cfg["model"]["max_seq_len"],
+            verbose=True,
+        )
+        if len(val_dataset) == 0:
+            raise ValueError("Explicit validation dataset contains no usable examples")
+        print(
+            f"[SFT v2] Explicit split — Train: {len(train_dataset)} | "
+            f"Val: {len(val_dataset)}"
+        )
+    else:
+        val_fraction = float(cfg["data"].get("val_split", 0.05))
+        val_size = min(len(train_source) - 1, max(1, int(len(train_source) * val_fraction)))
+        train_size = len(train_source) - val_size
+        generator = torch.Generator().manual_seed(int(cfg["data"].get("split_seed", 1337)))
+        train_dataset, val_dataset = random_split(
+            train_source, [train_size, val_size], generator=generator
+        )
+        print(f"[SFT v2] Random split — Train: {train_size} | Val: {val_size}")
 
     resume = str(_resolve(args.resume)) if args.resume else None
     train_sft(cfg, model, train_dataset, val_dataset, device, resume)
