@@ -30,6 +30,9 @@ from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import WordLevelTrainer
 
 BASE = Path(__file__).resolve().parent.parent
+if str(BASE) not in sys.path:
+    sys.path.insert(0, str(BASE))
+
 OUT = BASE / "artifacts" / "smoke_training_pipeline"
 TOKENIZER_PATH = OUT / "tokenizer.json"
 SFT_DATA = OUT / "sft.jsonl"
