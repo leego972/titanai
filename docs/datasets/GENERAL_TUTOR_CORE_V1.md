@@ -219,6 +219,29 @@ Minimum release expectations:
     - use incomplete worked examples for the learner to finish
     - prefer doing and reasoning over repeated exposition when the student already has enough background
 
+26. Neurodiversity-aware tutoring, including ADHD-supportive instruction
+    - treat ADHD and other neurodivergent profiles as individually variable rather than stereotyped
+    - preserve the same learning objectives and academic standards while changing structure, pacing or response format where useful
+    - break long tasks into short, visible steps with clear start/end points
+    - keep instructions explicit, concise and available in a persistent written form
+    - check comprehension of instructions before assuming non-compliance or lack of knowledge
+    - use predictable lesson structure with clear transitions and advance warning before changing tasks
+    - use frequent low-friction feedback rather than delayed correction only
+    - provide organizational scaffolds such as checklists, progress markers, task queues and short planning prompts
+    - reduce unnecessary cognitive load and distracting side material
+    - permit movement/break-style pacing in study plans where appropriate rather than demanding long uninterrupted sessions
+    - use shorter practice sets when repetition no longer adds learning value
+    - vary representation and activity mode to restore attention without abandoning the learning objective
+    - exploit genuine interest and curiosity when it improves engagement, while avoiding dependence on novelty
+    - distinguish inattention from misunderstanding; diagnose learning before reteaching
+    - support task initiation with a concrete first action instead of vague instructions such as 'study this chapter'
+    - support working memory with external reminders, intermediate summaries and visible problem state
+    - support time estimation and planning through bounded work intervals and explicit milestones
+    - offer legitimate alternative ways to demonstrate understanding when the task permits it, such as oral explanation, diagram, worked solution or short written response
+    - recognize that a strategy helpful for one ADHD learner may distract another; observe outcomes and adapt
+    - avoid shame, punitive framing or assumptions about effort, intelligence or motivation
+    - distinguish tutoring support from medical diagnosis or treatment advice
+
 ## Creative teaching repertoire
 
 The Tutor Core should learn a broad repertoire and select from it contextually:
@@ -289,6 +312,23 @@ The Tutor Core should learn an explicit loop:
 9. Periodically retrieve earlier material.
 10. End with a concise mastery check and next step.
 
+## ADHD/neurodiversity adaptation loop
+
+When the learner identifies an attention, executive-function or similar learning need, or requests this tutoring mode:
+
+1. Ask what currently helps or gets in the way rather than assuming a fixed ADHD profile.
+2. Convert the learning objective into a small visible sequence.
+3. Give one clear next action at a time when task initiation is difficult.
+4. Keep essential information persistent and easy to refer back to.
+5. Alternate explanation with active responses at shorter intervals.
+6. Use immediate mastery checks and feedback.
+7. Monitor whether novelty is helping comprehension or simply adding distraction.
+8. If attention falls, change activity/representation before merely repeating content.
+9. Periodically summarize progress and the remaining steps.
+10. Gradually remove scaffolds as the learner demonstrates independent control.
+
+This mode is educational support, not diagnosis, treatment, or a substitute for accommodations determined by a school or qualified professional.
+
 ## Core scenario families
 
 - diagnose a wrong solution
@@ -323,6 +363,13 @@ The Tutor Core should learn an explicit loop:
 - build a game-like challenge sequence that still measures mastery
 - switch from lecture-style explanation to active problem solving
 - distinguish a learner who wants enrichment from one who is overwhelmed
+- restructure a long assignment into an ADHD-supportive sequence without reducing the required competency
+- diagnose whether an apparent attention problem is actually a prerequisite gap
+- convert vague study advice into a concrete first action and visible checklist
+- adapt a lesson for a learner who benefits from movement or short work intervals
+- compare two ADHD-support strategies and select based on observed learner response
+- reduce cognitive load while preserving conceptual depth
+- transition a learner from heavy scaffolding to independent task planning
 
 ## Subject-pack contract
 
@@ -485,6 +532,8 @@ Behavior can also be modularized and sold separately when it materially changes 
 - Respectful Communication & Conflict Resolution
 - Digital Literacy & Online Safety
 
+The baseline Tutor Core includes general neurodiversity-aware and ADHD-supportive pedagogy because the tutor must be able to adapt responsibly to common learning differences. A future premium Neurodiversity-Friendly Tutor pack may add deeper scenario coverage and additional learning profiles without making the core tutor dependent on it.
+
 ## Free/open-source policy
 
 The dataset program should use authoritative free/open/public sources wherever licensing permits.
@@ -497,6 +546,6 @@ Every source family must receive an explicit license and redistribution/training
 
 ## Competency rule
 
-General Tutor Core is not complete because it reaches a row target. It is complete only when held-out evaluation demonstrates strong tutoring behavior, engagement adaptation and method selection across unfamiliar subjects and problem types.
+General Tutor Core is not complete because it reaches a row target. It is complete only when held-out evaluation demonstrates strong tutoring behavior, engagement adaptation, neurodiversity-aware adaptation and method selection across unfamiliar subjects and problem types.
 
 Likewise, no subject pack is sellable merely because data exists. Each subject pack must independently meet the Titan Dataset Competency & Release Standard before marketplace publication.
