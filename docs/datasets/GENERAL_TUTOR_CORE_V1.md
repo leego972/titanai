@@ -17,12 +17,106 @@ The product model is modular:
 
 A user can therefore buy only the knowledge they need.
 
-Example bundles:
-- Tutor Core + Chemistry
-- Tutor Core + Chemistry + Biology
-- Tutor Core + Mathematics + Physics + U.S. High School adapter
-- Tutor Core + Organic Chemistry + Biochemistry + Undergraduate adapter
-- Tutor Core + Economics + Statistics + Research Methods
+## Knowledge-depth principle
+
+Subject packs should be built to the highest reliable level practical for that discipline, including advanced undergraduate, postgraduate and research/PhD-level knowledge where suitable and sourceable.
+
+The presence of advanced knowledge does **not** mean the tutor should teach every learner at that depth.
+
+The Tutor Core owns instructional-depth control. It must select an explanation, notation, assumptions, examples and problem difficulty appropriate to the learner's current target level and demonstrated prerequisites.
+
+Example: a Physics subject pack may contain research-level material, but a learner studying VCE Physics should receive VCE-appropriate explanations, mathematics, terminology and assessment practice unless they explicitly ask to go beyond the curriculum and have the prerequisites to benefit from it.
+
+## Learner-level routing policy
+
+Before choosing instructional depth, the tutor should resolve or infer:
+
+- subject
+- target curriculum or qualification when known
+- target level/year/stage
+- current topic
+- demonstrated prerequisite mastery
+- assessment objective, if any
+- preferred explanation style
+- whether the learner wants curriculum-bounded help or deeper enrichment
+
+The tutor should use the **lowest sufficient depth that fully answers the learner's need**, then deepen only when useful.
+
+### Default depth hierarchy
+
+1. Foundational / primary
+2. Junior secondary / middle school
+3. Senior secondary / high school
+4. VCE / equivalent senior-secondary qualification
+5. Introductory undergraduate
+6. Intermediate undergraduate
+7. Advanced undergraduate / honours
+8. Postgraduate coursework
+9. Research / PhD-level
+
+A subject pack may support all or only some bands. Unsupported bands must not be claimed.
+
+### Depth-control rules
+
+- Never expose advanced detail merely because it exists in the subject pack.
+- Match notation and assumed mathematics to the learner's level.
+- Prefer curriculum-aligned terminology when a curriculum adapter is active.
+- Do not introduce advanced exceptions before the learner understands the core rule unless the exception is necessary to avoid a misconception.
+- Distinguish required curriculum knowledge from optional enrichment.
+- Use prerequisite checks before moving a learner upward in depth.
+- If the learner demonstrates rapid mastery, increase complexity gradually.
+- If the learner repeatedly fails, step down to the missing prerequisite rather than repeating the same explanation.
+- When a learner asks for an advanced explanation, provide it if appropriate but state which prerequisites it assumes.
+- Assessment practice should stay inside the learner's target assessment level unless explicitly requested otherwise.
+
+## Curriculum-bounded tutoring
+
+When an adapter is active, the adapter defines the expected instructional boundary.
+
+Examples:
+- VCE Physics -> teach and assess to the active VCE study design; deeper physics is optional enrichment.
+- U.S. High School Biology -> use the selected high-school standards/grade expectations.
+- GED Mathematics -> target GED competencies and question styles rather than calculus.
+- Undergraduate Organic Chemistry -> assume only prerequisites declared by the selected subject pack/course profile.
+
+The tutor may draw on deeper internal knowledge to create clearer explanations, better analogies and more accurate misconception handling, but it should not force that deeper content into the lesson.
+
+## Subject-pack depth metadata
+
+Every subject record should support level-aware routing metadata where applicable:
+
+- `minimum_level`
+- `maximum_level`
+- `prerequisites`
+- `curriculum_tags`
+- `concept_depth`
+- `difficulty`
+- `assessment_relevance`
+- `enrichment_only`
+- `notation_profile`
+
+Every subject pack manifest should define a prerequisite graph and concept-depth ladder so the Tutor Core can retrieve the correct slice of knowledge.
+
+## Training examples required for depth control
+
+The Tutor Core corpus must include contrastive training examples where the same underlying concept is taught at different levels, including:
+
+- primary vs secondary explanation
+- junior vs senior secondary
+- VCE/equivalent vs undergraduate
+- undergraduate vs postgraduate
+- undergraduate vs PhD/research explanation
+- curriculum answer vs optional enrichment
+- novice notation vs advanced formal notation
+- conceptual explanation vs mathematical derivation
+- learner with missing prerequisite vs learner ready for extension
+
+At least 20% of the adaptive-difficulty evaluation set should test whether the tutor correctly **withholds unnecessary advanced detail** while still remaining technically accurate.
+
+The tutor should be penalized both for:
+
+- under-teaching: omitting required material or oversimplifying until wrong; and
+- over-teaching: introducing unnecessary advanced material that is outside the learner's level and harms comprehension.
 
 ## Target release size
 
@@ -128,13 +222,12 @@ Minimum release expectations:
     - distinguish coaching from ghost-writing
     - preserve learning value while still being useful
 
-14. Adaptive difficulty
-    - beginner
-    - intermediate
-    - advanced
-    - secondary-school
-    - undergraduate
-    - postgraduate bridge where supported by subject pack
+14. Adaptive difficulty and depth control
+    - foundational through research/PhD level where subject packs support it
+    - curriculum-bounded depth selection
+    - prerequisite-aware escalation
+    - deliberate simplification without factual distortion
+    - optional enrichment routing
 
 15. Student communication
     - concise vs detailed modes
@@ -170,7 +263,10 @@ Minimum release expectations:
 - compare two explanations
 - transform a poor explanation into a better one
 - create a targeted practice sequence
-- explain at several depths
+- explain the same concept at several education levels
+- select the correct depth for a stated curriculum
+- detect when an explanation is technically correct but too advanced
+- distinguish required content from enrichment
 - grade against a supplied rubric
 - critique reasoning without doing the student's entire assessed task
 - identify unsupported claims
@@ -198,7 +294,8 @@ Every separately sold subject pack must expose a common schema:
 - core competencies
 - subcompetencies
 - canonical concepts/topics
-- notation/terminology
+- concept-depth ladder from foundational to highest supported level
+- notation/terminology profiles by level where needed
 - worked-example families
 - misconception catalogue
 - problem families
@@ -212,7 +309,7 @@ Every separately sold subject pack must expose a common schema:
 
 ## Level and curriculum adapters
 
-Level/curriculum adapters do not replace subject packs. They map the same subject competence to a particular educational context.
+Level/curriculum adapters do not replace subject packs. They map the same deep subject competence to a particular educational context.
 
 Examples:
 - Primary School adapter
@@ -239,106 +336,7 @@ Adapters may define:
 
 Each subject should be a separate marketplace product once competent.
 
-High-demand packs to prioritize:
-
-### Mathematics
-- Arithmetic & Numeracy
-- Algebra
-- Geometry
-- Trigonometry
-- Precalculus
-- Calculus
-- Linear Algebra
-- Statistics & Probability
-- Discrete Mathematics
-- Differential Equations
-
-### Sciences
-- General Science
-- Biology
-- Chemistry
-- Physics
-- Earth & Environmental Science
-- Astronomy
-- Organic Chemistry
-- Biochemistry
-- Genetics
-- Microbiology
-- Anatomy & Physiology
-
-### Computing and technology
-- Computer Literacy
-- Programming Fundamentals
-- Python
-- JavaScript/TypeScript
-- Data Structures & Algorithms
-- Databases
-- Networking
-- Cybersecurity
-- Software Engineering
-- AI & Machine Learning
-- Data Science
-
-### Humanities and social sciences
-- World History
-- Australian History
-- U.S. History
-- Geography
-- Economics
-- Psychology
-- Sociology
-- Philosophy
-- Logic
-- Politics & Civics
-- International Relations
-
-### Business and finance
-- Accounting
-- Business Management
-- Finance
-- Financial Literacy
-- Trading & Market Analysis
-- Cryptocurrency & Blockchain
-- Entrepreneurship
-- Marketing
-- Operations Management
-
-### Language and communication
-- English Language
-- English Literature
-- Academic Writing
-- Creative Writing
-- Technical Writing
-- Research Methods
-- Public Speaking
-- Professional Communication
-
-### Professional and university packs
-- Engineering foundations
-- Law foundations
-- Research methods
-- Epidemiology
-- Public Health
-- Pharmacology foundations
-- subject-specific advanced packs as demand warrants
-
-## Optional behavioral packs
-
-Behavior can also be modularized and sold separately when it materially changes tutoring style or capability:
-
-- Socratic Tutor
-- Study Coach & Metacognition
-- Academic Integrity
-- Neurodiversity-Friendly Tutor
-- English-Language Learner Support
-- Research & Citation Discipline
-- Exam Preparation Coach
-- Career Readiness
-- Professional Communication
-- Critical Thinking
-- Decision-Making & Consequence Reasoning
-- Respectful Communication & Conflict Resolution
-- Digital Literacy & Online Safety
+The subject pack should be built as deeply as practical once, then reused across levels through Tutor Core routing and curriculum adapters. We should not create a shallow VCE Chemistry knowledge pack and a separate deep University Chemistry knowledge pack unless licensing, architecture or evaluation evidence shows a genuine need; one deep Chemistry pack with level metadata is preferred.
 
 ## Free/open-source policy
 
@@ -352,6 +350,6 @@ Every source family must receive an explicit license and redistribution/training
 
 ## Competency rule
 
-General Tutor Core is not complete because it reaches a row target. It is complete only when held-out evaluation demonstrates strong tutoring behavior across unfamiliar subjects and problem types.
+General Tutor Core is not complete because it reaches a row target. It is complete only when held-out evaluation demonstrates strong tutoring behavior across unfamiliar subjects, education levels and problem types.
 
 Likewise, no subject pack is sellable merely because data exists. Each subject pack must independently meet the Titan Dataset Competency & Release Standard before marketplace publication.
