@@ -2,9 +2,11 @@
 """
 TitanAI sequential domain-upgrade pipeline.
 
-Despite the historical filename, this runner now supports any Titan architecture
-provided through --model-config. It preserves the ordered upgrade curriculum and
-chains each completed checkpoint into the next stage.
+Production-readiness changes:
+- fail fast on missing/empty datasets
+- prefer upgraded dataset variants in this order: *_v2, *_expanded, base
+- preserve ordered curriculum and resume semantics
+- write the exact selected dataset for each stage into status.json
 """
 
 import argparse
@@ -48,6 +50,27 @@ def max_steps_for(stage: str, scale: float) -> int:
     return max(1, int(base * scale))
 
 
+def select_dataset(data_dir: Path, stage: str) -> Path:
+    """Prefer the highest-quality available non-empty variant for a stage."""
+    candidates = [
+        data_dir / f"upgrade_{stage}_v2.jsonl",
+        data_dir / f"upgrade_{stage}_expanded.jsonl",
+        data_dir / f"upgrade_{stage}.jsonl",
+    ]
+    existing_empty = []
+    for candidate in candidates:
+        if candidate.exists():
+            if candidate.stat().st_size > 0:
+                return candidate
+            existing_empty.append(str(candidate))
+    detail = f" Empty candidates: {existing_empty}" if existing_empty else ""
+    raise FileNotFoundError(
+        f"No non-empty upgrade dataset found for stage '{stage}'. Checked: "
+        + ", ".join(str(p) for p in candidates)
+        + detail
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="TitanAI domain-upgrade pipeline")
     parser.add_argument("--base-checkpoint", required=True)
@@ -55,7 +78,7 @@ def main():
     parser.add_argument("--model-config", default="titan_1b.yaml")
     parser.add_argument("--resume-from", default=None)
     parser.add_argument("--step-scale", type=float, default=1.0)
-    parser.add_argument("--data-dir", default="/workspace/data_upgrades")
+    parser.add_argument("--data-dir", default="data/upgrades")
     args = parser.parse_args()
 
     base_checkpoint = resolve(args.base_checkpoint)
@@ -68,6 +91,15 @@ def main():
         raise FileNotFoundError(f"Base checkpoint not found: {base_checkpoint}")
     if not model_config_path.exists():
         raise FileNotFoundError(f"Model config not found: {model_config_path}")
+    if not data_dir.exists():
+        raise FileNotFoundError(f"Upgrade data directory not found: {data_dir}")
+
+    # Preflight every stage before spending GPU time.
+    selected = {stage: select_dataset(data_dir, stage) for stage in UPGRADE_ORDER}
+    print("[upgrade] Dataset preflight passed for all stages")
+    for stage in UPGRADE_ORDER:
+        p = selected[stage]
+        print(f"[upgrade] {stage:>6} -> {p.name} ({p.stat().st_size:,} bytes)")
 
     with model_config_path.open() as f:
         base_cfg = yaml.safe_load(f)
@@ -80,10 +112,12 @@ def main():
         status = json.loads(status_file.read_text())
     else:
         status = {"completed_stages": [], "current_stage": None}
+    status["selected_datasets"] = {k: str(v) for k, v in selected.items()}
 
     def save_status():
         status_file.write_text(json.dumps(status, indent=2))
 
+    save_status()
     start_stage = args.resume_from or status.get("current_stage") or UPGRADE_ORDER[0]
     if start_stage not in UPGRADE_ORDER:
         raise ValueError(f"Unknown upgrade stage: {start_stage}")
@@ -106,13 +140,10 @@ def main():
                 status["completed_stages"].append(stage)
             continue
 
-        data_file = data_dir / f"upgrade_{stage}.jsonl"
-        if not data_file.exists():
-            raise FileNotFoundError(f"Upgrade data missing for {stage}: {data_file}")
-
+        data_file = selected[stage]
         steps = max_steps_for(stage, args.step_scale)
         config = {
-            "project": {"name": f"{model_name}-upgrade-{stage}", "version": "1.0.0"},
+            "project": {"name": f"{model_name}-upgrade-{stage}", "version": "1.1.0"},
             "model": model_cfg,
             "tokenizer": {"path": tokenizer_path, "vocab_size": model_cfg["vocab_size"]},
             "data": {
@@ -160,6 +191,7 @@ def main():
             command += ["--resume", str(step_checkpoints[-1])]
 
         status["current_stage"] = stage
+        status["current_dataset"] = str(data_file)
         save_status()
         env = os.environ.copy()
         env.update({
@@ -168,7 +200,7 @@ def main():
         })
 
         for attempt in range(1, 4):
-            print(f"[upgrade] Starting {stage} (attempt {attempt}/3)")
+            print(f"[upgrade] Starting {stage} with {data_file.name} (attempt {attempt}/3)")
             result = subprocess.run(command, cwd=str(BASE), env=env)
             if result.returncode == 0 and final_checkpoint.exists():
                 previous_checkpoint = final_checkpoint
@@ -181,6 +213,7 @@ def main():
             time.sleep(30)
 
     status["current_stage"] = None
+    status["current_dataset"] = None
     status["final_checkpoint"] = str(previous_checkpoint)
     save_status()
     print(f"[upgrade] Complete. Final checkpoint: {previous_checkpoint}")
