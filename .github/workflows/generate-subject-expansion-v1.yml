@@ -1,0 +1,70 @@
+name: Generate Titan Subject Expansion v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [datasets/subject-expansion-v1]
+    paths:
+      - scripts/generate_subject_expansion_v1.py
+      - datasets/subject_expansion/**
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate 3,200-record expert foundation
+        run: python scripts/generate_subject_expansion_v1.py
+      - name: Validate corpus invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('data/sft/titan_subject_expansion_v1')
+          manifest = json.loads((root/'manifest.json').read_text())
+          assert manifest['total_examples'] == 3200
+          assert set(manifest['subjects']) == {
+            'advanced_data_analysis','quantitative_reasoning','business_decision_intelligence',
+            'software_diagnostics','research_evidence_synthesis','operations_optimisation',
+            'creative_production_intelligence','agent_tool_planning'
+          }
+          assert all(v == 400 for v in manifest['subjects'].values())
+          total = 0
+          ids = set()
+          families = {}
+          for split in ('train','validation','test'):
+            path = root/f'{split}.jsonl'
+            for line in path.read_text().splitlines():
+              row = json.loads(line)
+              md = row['metadata']
+              assert md['id'] not in ids
+              ids.add(md['id'])
+              fam = md['prompt_family']
+              old = families.setdefault(fam, split)
+              assert old == split, f'prompt-family leakage: {fam}'
+              assert md['difficulty'] in {'medium','hard','expert'}
+              assert len(row['messages'][1]['content']) >= 120
+              assert len(row['messages'][2]['content']) >= 180
+              total += 1
+          assert total == 3200
+          print('Titan Subject Expansion v1 validation passed')
+          PY
+      - name: Commit generated corpus
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/sft/titan_subject_expansion_v1
+          if git diff --cached --quiet; then
+            echo 'Corpus already current.'
+          else
+            git commit -m 'data: generate Titan Subject Expansion v1 corpus'
+            git push origin HEAD:datasets/subject-expansion-v1
+          fi
