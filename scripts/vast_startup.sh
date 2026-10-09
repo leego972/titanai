@@ -54,8 +54,8 @@ if [ "${TITAN_SKIP_FLASH:-false}" != "true" ]; then
 fi
 
 echo "[4/4] Repository..."
-REPO_URL="https://github.com/leego972/titanai.git"
-[ -n "${TITAN_GITHUB_TOKEN:-}" ] && REPO_URL="https://${TITAN_GITHUB_TOKEN}@github.com/leego972/titanai.git"
+REPO_URL="https://github.com/Knut-enterprises/titanai.git"
+[ -n "${TITAN_GITHUB_TOKEN:-}" ] && REPO_URL="https://${TITAN_GITHUB_TOKEN}@github.com/Knut-enterprises/titanai.git"
 if [ ! -d "${REPO}/.git" ]; then
     git clone "${REPO_URL}" "${REPO}"
 else

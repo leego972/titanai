@@ -21,7 +21,7 @@ NOTIFY_TO     = os.environ.get("NOTIFY_TO",    "leego972@gmail.com")
 SMTP_USER     = os.environ.get("SMTP_USER",    "")
 SMTP_PASS     = os.environ.get("SMTP_PASS",    "")
 GH_TOKEN      = os.environ.get("TITAN_GITHUB_TOKEN", os.environ.get("GITHUB_TOKEN", ""))
-REPO          = "leego972/titanai"
+REPO          = "Knut-enterprises/titanai"
 STATUS_FILE   = "TRAINING_STATUS.md"
 
 def send_email(subject: str, body: str) -> bool:

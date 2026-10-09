@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_URL: str = os.getenv(
     "MODEL_URL",
-    "https://github.com/leego972/titanai/releases/download/titan-1b-v1/final_q8_0.gguf",
+    "https://github.com/Knut-enterprises/titanai/releases/download/titan-1b-v1/final_q8_0.gguf",
 )
 MODEL_PATH: Path = Path(os.getenv("MODEL_PATH", "/app/models/final_q8_0.gguf"))
 TITAN_API_KEY: str = os.getenv("TITAN_API_KEY", "")

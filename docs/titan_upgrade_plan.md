@@ -626,4 +626,4 @@ python3 scripts/run_upgrade_pipeline.py --start-from cyber
 
 ---
 
-*Committed to `leego972/titanai`. All configs and scripts are pre-written and ready to execute on Crucible completion (~April 15, 2026).*
+*Committed to `Knut-enterprises/titanai`. All configs and scripts are pre-written and ready to execute on Crucible completion (~April 15, 2026).*

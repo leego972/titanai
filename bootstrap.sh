@@ -15,8 +15,8 @@ rm -rf /root/.cache/huggingface 2>/dev/null || true
 echo "[onstart] Disk: $(df -h / | awk 'NR==2{print $3"/"$2" ("$5" used)"}')"
 
 # Clone if not present
-GH_URL="https://github.com/leego972/titanai.git"
-[ -n "${TITAN_GITHUB_TOKEN:-}" ] && GH_URL="https://${TITAN_GITHUB_TOKEN}@github.com/leego972/titanai.git"
+GH_URL="https://github.com/Knut-enterprises/titanai.git"
+[ -n "${TITAN_GITHUB_TOKEN:-}" ] && GH_URL="https://${TITAN_GITHUB_TOKEN}@github.com/Knut-enterprises/titanai.git"
 if [ ! -d "$REPO/.git" ]; then
     git clone "$GH_URL" "$REPO" 2>&1 | tail -3
 fi

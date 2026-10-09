@@ -64,7 +64,7 @@ chmod 600 /root/.ssh/authorized_keys
 service ssh restart 2>/dev/null || true
 apt-get update -qq && apt-get install -y -qq git
 mkdir -p /workspace
-git clone https://{GITHUB_TOKEN}@github.com/leego972/titanai.git /workspace/titanai
+git clone https://{GITHUB_TOKEN}@github.com/Knut-enterprises/titanai.git /workspace/titanai
 cd /workspace/titanai
 export TITAN_REQUIRE_AUTH=true
 export TITAN_API_KEY={TITAN_API_KEY}

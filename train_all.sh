@@ -69,8 +69,8 @@ notify() {
 }
 
 # 1. Clone / update repo
-REPO_URL="https://github.com/leego972/titanai.git"
-[ -n "${GH_TOKEN}" ] && REPO_URL="https://${GH_TOKEN}@github.com/leego972/titanai.git"
+REPO_URL="https://github.com/Knut-enterprises/titanai.git"
+[ -n "${GH_TOKEN}" ] && REPO_URL="https://${GH_TOKEN}@github.com/Knut-enterprises/titanai.git"
 if [ ! -d "${REPO}/.git" ]; then
     git clone "${REPO_URL}" "${REPO}" || { echo "[ERROR] git clone failed"; mkdir -p "${REPO}"; cd "${REPO}"; git init; } 
 else

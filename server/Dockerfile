@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir fastapi==0.115.5 "uvicorn[standard]==0.32.1" http
 COPY server/main.py .
 
 ENV MODEL_PATH=/app/models/final_q8_0.gguf
-ENV MODEL_URL=https://github.com/leego972/titanai/releases/download/titan-1b-v1/final_q8_0.gguf
+ENV MODEL_URL=https://github.com/Knut-enterprises/titanai/releases/download/titan-1b-v1/final_q8_0.gguf
 ENV N_CTX=4096
 ENV N_THREADS=4
 

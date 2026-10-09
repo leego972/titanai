@@ -15,7 +15,7 @@ Usage:
         --checkpoint checkpoints/titan_1b_pretrain/init.pt
 
 Requirements:
-    - Full git clone of leego972/titanai (scripts/train.py must exist)
+    - Full git clone of Knut-enterprises/titanai (scripts/train.py must exist)
     - PyTorch, yaml, and the model/data/training packages from that clone
 """
 
@@ -101,9 +101,9 @@ def main() -> None:
     if not train_py.exists():
         print(
             f"[train_1b] ERROR: training entrypoint not found at {train_py}\n"
-            f"[train_1b]   This script requires a full git clone of leego972/titanai.\n"
+            f"[train_1b]   This script requires a full git clone of Knut-enterprises/titanai.\n"
             f"[train_1b]   On the Vast.ai server:\n"
-            f"[train_1b]     git clone https://github.com/leego972/titanai /workspace/titanai\n"
+            f"[train_1b]     git clone https://github.com/Knut-enterprises/titanai /workspace/titanai\n"
             f"[train_1b]     cd /workspace/titanai && bash scripts/titanai_phase2_1b.sh",
             file=sys.stderr,
         )

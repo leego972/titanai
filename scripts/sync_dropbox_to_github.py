@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 sync_dropbox_to_github.py — runs every 30 min via background loop
-1. Dropbox /workspace/titanai/scripts  -> GitHub leego972/titanai/scripts   (new/changed, post-cutoff only)
-2. Dropbox /workspace/titanai/configs  -> GitHub leego972/titanai/configs   (new/changed, post-cutoff only)
+1. Dropbox /workspace/titanai/scripts  -> GitHub Knut-enterprises/titanai/scripts   (new/changed, post-cutoff only)
+2. Dropbox /workspace/titanai/configs  -> GitHub Knut-enterprises/titanai/configs   (new/changed, post-cutoff only)
 3. Dropbox /workspace/titanai/data     -> GitHub data/dropbox_sync/         (small text files only)
 4. Instance live status + logs         -> Dropbox /workspace/titanai_status/ (backup)
 
@@ -28,7 +28,7 @@ DBX_REFRESH = cfg.get('DBX_REFRESH_TOKEN', '')
 APP_KEY     = cfg.get('DBX_APP_KEY', 'pqbzwk2xdjlp3wd')
 APP_SECRET  = cfg.get('DBX_APP_SECRET', 'vjsf0a5wiwlk39d')
 GH_TOKEN    = cfg.get('GH_TOKEN', '')
-REPO        = 'leego972/titanai'
+REPO        = 'Knut-enterprises/titanai'
 
 
 def log(msg):

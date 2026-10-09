@@ -309,4 +309,4 @@ titanai/
 
 ---
 
-*All scripts and configs referenced in this document are committed to the `leego972/titanai` repository and ready to execute on Crucible completion.*
+*All scripts and configs referenced in this document are committed to the `Knut-enterprises/titanai` repository and ready to execute on Crucible completion.*
